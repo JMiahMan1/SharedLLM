@@ -1,0 +1,31 @@
+services:
+  ragapi:
+    build: .
+    container_name: unified_rag_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DOCKER_ENV=1   # signals code to skip local dotenv load
+      - DEBUG_RAG_CONTEXT=false
+    volumes:
+      - ./app:/app:z
+      - ./data:/data:z
+      - rag_chroma:/data/chroma_db:z
+    working_dir: /app
+    command: >
+      uvicorn unified_rag_api:app
+      --host 0.0.0.0
+      --port 11435
+      --workers 1
+    ports:
+      - "11435:11435"
+    networks:
+      - ragnet
+
+volumes:
+  rag_chroma:
+
+networks:
+  ragnet:
+    driver: bridge

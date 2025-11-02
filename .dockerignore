@@ -1,0 +1,29 @@
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore environment files (can be mounted via docker-compose)
+.env
+.env.*
+
+# Ignore local virtual environments
+venv/
+.env.docker
+
+# Ignore editor files
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+*.vscode/
+.idea/
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore logs and temp
+*.log
+tmp/
