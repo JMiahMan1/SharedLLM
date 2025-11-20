@@ -28,7 +28,7 @@ def persist_ha_to_chroma():
     creds = get_user_creds()
     ha_token = creds["ha_token"]
     if not HA_URL or not ha_token:
-        print("❌ HA URL or token not configured, skipping HA ingest.")
+        print("HA URL or token not configured, skipping HA ingest.")
         return
 
     try:
@@ -52,7 +52,7 @@ def persist_ha_to_chroma():
             print("⚠ No sensor data found to store.")
             return
 
-        print(f"💾 Initializing Chroma store and embeddings for HA data...")
+        print(f"Initializing Chroma store and embeddings for HA data...")
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         vectordb = Chroma(
             collection_name="ha_sensors",
@@ -63,10 +63,10 @@ def persist_ha_to_chroma():
         doc = Document(page_content=ha_text, metadata={"source": "home_assistant", "user": creds["user"]})
         vectordb.add_documents([doc])
         vectordb.persist()
-        print(f"✅ HA data persisted with {len(states)} entities.")
+        print(f"HA data persisted with {len(states)} entities.")
 
     except Exception as e:
-        print("❌ Failed to persist HA data:", e)
+        print("Failed to persist HA data:", e)
 
 def start_ha_polling():
     """Start background thread to pull HA data every POLL_INTERVAL."""
@@ -76,7 +76,7 @@ def start_ha_polling():
             time.sleep(HA_POLL_INTERVAL)
     t = threading.Thread(target=loop, daemon=True)
     t.start()
-    print(f"⏱ Started HA polling every {HA_POLL_INTERVAL} seconds.")
+    print(f"Started HA polling every {HA_POLL_INTERVAL} seconds.")
 
 if __name__ == "__main__":
     persist_ha_to_chroma()

@@ -17,7 +17,7 @@ CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
 EMB_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 def inspect_chroma():
-    print(f"? Inspecting Chroma DB at: {CHROMA_DIR}\n")
+    print(f"Inspecting Chroma DB at: {CHROMA_DIR}\n")
     
     try:
         client = chromadb.PersistentClient(path=CHROMA_DIR)
