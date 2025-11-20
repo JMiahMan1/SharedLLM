@@ -16,6 +16,7 @@ torch
 sentence-transformers
 pypdf
 python-docx
+openpyxl
 EbookLib
 mobi
 html2text
