@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install dependencies
-RUN apt update && apt install -y curl iputils-ping && rm -rf /var/lib/apt/lists/*
+RUN apt update && apt install -y curl iputils-ping tesseract-ocr poppler-utils ffmpeg && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the app and data
