@@ -19,3 +19,6 @@ python-docx
 EbookLib
 mobi
 html2text
+pytesseract 
+pdf2image 
+mutagen

@@ -6,8 +6,9 @@ services:
     env_file:
       - .env
     environment:
-      - DOCKER_ENV=1   # signals code to skip local dotenv load
-      - DEBUG_RAG_CONTEXT=false
+      - DOCKER_ENV=1
+      - DEBUG_RAG_CONTEXT=true
+      - DEBUG=1
     volumes:
       - ./app:/app:z
       - ./data:/data:z
@@ -18,6 +19,7 @@ services:
       --host 0.0.0.0
       --port 11435
       --workers 1
+      --log-level debug
     ports:
       - "11435:11435"
     networks:

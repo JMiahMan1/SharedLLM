@@ -57,7 +57,7 @@ INGESTION_TEMP_DIR = os.getenv("INGESTION_TEMP_DIR", "/data/nextcloud_temp")
 # --- Ingestion Configuration ---
 PERSIST_FREQUENCY = 50 
 WHITELIST_EXT = [".txt", ".pdf", ".docx", ".epub", ".md", ".mobi"] 
-BLACKLIST_DIRS = ["Music", "Videos", "Photos", "Audio", "Books"] 
+BLACKLIST_DIRS = ["Music", "Videos", "Photos", "Audio"] 
 BLACKLIST_FULL_PATHS = ["Books/Audio"] 
 # -----------------------------
 
