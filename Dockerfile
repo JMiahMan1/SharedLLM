@@ -23,4 +23,4 @@ EXPOSE 11435
 ENV PYTHONUNBUFFERED=1
 
 # Default command to start FastAPI app
-CMD ["python", "app/unified_rag_api.py"]
+CMD ["python", "app/main.py"]

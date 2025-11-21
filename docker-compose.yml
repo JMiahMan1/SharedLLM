@@ -1,7 +1,7 @@
 services:
   ragapi:
     build: .
-    container_name: unified_rag_api
+    container_name: main
     restart: unless-stopped
     env_file:
       - .env
@@ -15,7 +15,7 @@ services:
       - rag_chroma:/data/chroma_db:z
     working_dir: /app
     command: >
-      uvicorn unified_rag_api:app
+      uvicorn main:app
       --host 0.0.0.0
       --port 11435
       --workers 1
