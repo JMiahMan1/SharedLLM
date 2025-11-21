@@ -1,4 +1,4 @@
-# unified_rag_api.py — Complete: History-Aware, Robust Debugging, Full Feature Set
+# unified_rag_api.py — Complete: History, Robust Debugging, Full Feature Set
 import os
 import time
 import json
@@ -389,8 +389,17 @@ async def execute_ha_service(
     payload = {"entity_id": entity_id}
 
     try:
-        await requests_post(url, json=payload, headers=headers, timeout=5.0)
+        resp = await requests_post(url, json=payload, headers=headers, timeout=5.0)
+
+        # Check for errors
+        if resp.status_code >= 400:
+            # Log the actual error message from Home Assistant
+            log.error(f"HA Error ({resp.status_code}): {resp.text}")
+            return f"Home Assistant failed to execute command. Error: {resp.text}"
+
+        resp.raise_for_status()
         return f"Successfully executed {domain}.{service} on {entity_id}."
+
     except Exception as e:
         log.error(f"Action failed: {e}")
         return f"Failed to execute command on {entity_id}: {e}"
@@ -447,7 +456,7 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
     q = query.lower().strip()
     service = None
 
-    # 1. Basic Switch/Light Logic
+    # Basic keyword matching
     if "turn on" in q or "switch on" in q:
         service = "turn_on"
     elif "turn off" in q or "switch off" in q:
@@ -463,7 +472,7 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
     elif "close" in q:
         service = "close_cover"
 
-    # 2. Media Logic (Music Assistant / Media Players)
+    # Media logic
     elif "play" in q or "resume" in q:
         service = "media_play"
     elif "pause" in q:
@@ -479,7 +488,7 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
         return None
 
     try:
-        # Find exact entity in Vector DB
+
         def search_sync():
             return GlobalResources.ha_collection.similarity_search(query, k=1)
 
@@ -492,8 +501,6 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
             return None
 
         domain = eid.split(".")[0]
-        target_service = service
-        target_domain = domain
 
         # Whitelist Allowed Controllable Domains
         if domain not in [
@@ -509,34 +516,30 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
         ]:
             return None
 
-        # Dynamic Service Mapping
+        target_domain = domain
+        target_service = service
 
-        # General On/Off
+        # Dynamic Service Mapping
         if service in ["turn_on", "turn_off", "toggle"]:
             target_domain = "homeassistant"
 
-        # Locks
         if domain == "lock" and service in ["turn_on", "turn_off"]:
             target_service = "lock" if service == "turn_on" else "unlock"
             target_domain = "lock"
 
-        # Covers (Blinds/Garage)
         if service in ["open_cover", "close_cover"]:
             if domain == "cover":
                 target_domain = "cover"
                 target_service = service
             else:
-                # "Open the light" -> turn_on
                 target_domain = "homeassistant"
                 target_service = "turn_on" if "open" in service else "turn_off"
 
-        # Media Players (Music Assistant)
         if domain == "media_player":
             if service == "turn_on":
                 target_service = "media_play"
             if service == "turn_off":
                 target_service = "media_stop"
-            # Other verbs like play/pause map directly
 
         return await execute_ha_service(target_domain, target_service, eid, user)
 
@@ -764,7 +767,7 @@ async def stream_rag_result(
         async def action_response_fmt():
             text = command_res
             if format_type == "openai":
-                # Initial Role Header (Crucial Fix)
+                # Initial Role Header
                 yield f"data: {json.dumps({'id': f'chatcmpl-{int(time.time())}', 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
                 # Content
                 yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'content': text}, 'finish_reason': None}]})}\n\n"
@@ -864,7 +867,6 @@ Answer:"""
                             yield "data: [DONE]\n\n"
 
                     elif format_type == "chat":
-                        # Ollama Chat Format
                         if "message" not in chunk:
                             yield (
                                 json.dumps(
@@ -883,7 +885,6 @@ Answer:"""
                             yield json.dumps(chunk) + "\n"
 
                     else:
-                        # Raw
                         yield json.dumps(chunk) + "\n"
 
                 else:
