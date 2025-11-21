@@ -5,111 +5,91 @@ import sys
 import os
 from dotenv import load_dotenv
 
-# --- Load .env from the Parent (Root) Directory ---
-# Get the directory where this script is located
 script_dir = os.path.dirname(os.path.abspath(__file__))
-# Go up one level to the root directory
 root_dir = os.path.dirname(script_dir)
-# Construct path to .env
 env_path = os.path.join(root_dir, '.env')
-
-print(f"Loading config from: {env_path}")
 load_dotenv(env_path)
 
-# --- Configuration ---
-# Defaults to localhost if not found in .env
 API_URL = os.getenv("API_URL", "http://localhost:11435")
-HEADERS = {
-    "Content-Type": "application/json",
-    "X-RAG-User": os.getenv("TEST_USER", "TestAdmin"),
-    "User-Agent": "Mozilla/5.0 (Test Script)" # Simulates Chat Mode
-}
+HEADERS = {"Content-Type": "application/json", "X-RAG-User": "TestAdmin", "User-Agent": "TestScript"}
+
+# Entities
+LAMP_ENTITY = "light.piano_lamp"
+MEDIA_ENTITY = "media_player.office_tv_chrome_2" 
 
 def print_header(title):
-    print(f"\n{'='*60}")
-    print(f"TEST: {title}")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}\nTEST: {title}\n{'='*60}")
 
-def send_chat(prompt):
-    print(f"Sending Prompt: '{prompt}'")
-    start = time.time()
+def check_device_state(entity_id, expected_states, retries=3):
+    if isinstance(expected_states, str): expected_states = [expected_states]
+    print(f"   [VERIFYING] {entity_id} -> {expected_states}...")
+    for i in range(retries):
+        try:
+            r = requests.get(f"{API_URL}/api/ha/state/{entity_id}", headers=HEADERS, timeout=5)
+            if r.status_code == 200:
+                state = r.json().get("state")
+                if state in expected_states:
+                    print(f"   [PASS] {entity_id} is '{state}'.")
+                    return True
+                else:
+                    print(f"   [WAIT] {entity_id} is '{state}'. Retry {i+1}...")
+        except: pass
+        time.sleep(2)
+    print(f"   [FAIL] {entity_id} state mismatch.")
+    return False
+
+def safe_post(url, payload, label):
     try:
-        # Using the non-streaming endpoint for easier testing
-        url = f"{API_URL}/api/chat"
-        payload = {
-            "model": "qwen3:latest", # Or your default model
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False 
-        }
-        
-        response = requests.post(url, headers=HEADERS, json=payload, timeout=60)
-        response.raise_for_status()
-        
-        data = response.json()
-        duration = time.time() - start
-        
-        # Extract content based on response format
-        content = ""
-        if "message" in data:
-            content = data["message"]["content"]
-        elif "choices" in data:
-            content = data["choices"][0]["message"]["content"]
-        else:
-            content = str(data)
-            
-        print(f"Response ({duration:.2f}s):")
-        print(f"  {content}")
-        return content
-
+        return requests.post(url, json=payload, headers=HEADERS, timeout=120)
     except Exception as e:
-        print(f"FAILED: {e}")
+        print(f"   [CRITICAL FAIL] {label} Timed out or Error: {e}")
         return None
 
-def main():
-    print(f"Starting Live Test on {API_URL}...\n")
+def test_protocol_compliance():
+    print_header("Protocol: OpenAI SSE Streaming (/v1/)")
+    try:
+        r = requests.post(f"{API_URL}/v1/chat/completions", json={"model":"qwen3:latest","messages":[{"role":"user","content":"Hi"}],"stream":True}, stream=True, timeout=120)
+        if any(line.decode().startswith("data: ") for line in r.iter_lines()): print("   [PASS] Received SSE.")
+        else: print("   [FAIL] No SSE data.")
+    except Exception as e: print(f"   [FAIL] {e}")
 
-    # 1. Information / Context Test
-    print_header("1. Context & RAG Info")
-    send_chat("What is the current status of the Piano Lamp and Office TV?")
-    time.sleep(2)
+    print_header("Protocol: Ollama NDJSON Streaming (/api/chat)")
+    try:
+        r = requests.post(f"{API_URL}/api/chat", json={"model":"qwen3:latest","messages":[{"role":"user","content":"Hi"}],"stream":True}, stream=True, timeout=120)
+        lines = [line for line in r.iter_lines() if line]
+        if lines and "message" in json.loads(lines[0]): print("   [PASS] Received Ollama NDJSON.")
+        else: print(f"   [FAIL] Invalid JSON stream.")
+    except Exception as e: print(f"   [FAIL] {e}")
 
-    # 2. Simple Control: Turn ON
-    print_header("2. Control: Turn ON Piano Lamp")
-    send_chat("Turn on the Piano Lamp")
-    time.sleep(2)
+def test_functionality():
+    print_header("Func: Context")
+    safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":"Status of Piano Lamp?"}], "stream":False}, "Context")
 
-    # 3. Simple Control: Turn OFF
-    print_header("3. Control: Turn OFF Piano Lamp")
-    send_chat("Turn off the Piano Lamp")
-    time.sleep(2)
+    print_header("Func: Control (Turn On)")
+    safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":"Turn on the Piano Lamp"}], "stream":False}, "Turn On")
+    check_device_state(LAMP_ENTITY, "on")
 
-    # 4. Media Control: Play Specific Music
-    print_header("4. Media: Play Artist (Music Assistant)")
-    send_chat("Play Brandon Lake on the Office TV")
-    time.sleep(5)
-
-    # 5. Media Control: Stop
-    print_header("5. Media: Stop Playback")
-    send_chat("Stop the Office TV")
-    time.sleep(2)
-
-    # 6. Complex Multi-Command
-    print_header("6. Multi-Command Decomposition")
-    send_chat("Turn on the Piano Lamp and play Brandon Lake on the Office TV")
+    print_header("Func: Multi-Command (Turn OFF Both)")
+    # Ensure ON first
+    safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":"Turn on the Piano Lamp"}], "stream":False}, "Setup Lamp")
+    time.sleep(1)
     
-    print("\n" + "="*60)
-    print("TEST SEQUENCE COMPLETE")
-    print("Please verify physically if devices responded.")
-    print("="*60)
+    # The big test
+    safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":"Turn off the Piano Lamp and the Office TV"}], "stream":False}, "Multi-Cmd")
+    
+    check_device_state(LAMP_ENTITY, "off")
+    check_device_state(MEDIA_ENTITY, ["off", "idle", "standby"])
+
+def main():
+    print(f"Starting Tests on {API_URL}...\n")
+    try:
+        if requests.get(f"{API_URL}/health", timeout=5).status_code != 200:
+            print("API Down"); return
+    except: print("API Unreachable"); return
+
+    test_protocol_compliance()
+    test_functionality()
+    print("\nTEST SEQUENCE COMPLETE")
 
 if __name__ == "__main__":
-    try:
-        # Quick health check
-        r = requests.get(f"{API_URL}/health", timeout=2)
-        if r.status_code == 200:
-            print("API is Online and Healthy. Starting tests...")
-            main()
-        else:
-            print(f"API returned status {r.status_code}. Aborting.")
-    except requests.exceptions.ConnectionError:
-        print(f"Could not connect to {API_URL}. Is the container running?")
+    main()

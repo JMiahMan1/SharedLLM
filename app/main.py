@@ -13,10 +13,10 @@ from pydantic import BaseModel
 # Fixed imports
 from settings import (
     lifespan, get_user_creds, run_blocking, GlobalResources, log,
-    DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY
+    DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL
 )
 from logic import (
-    stream_rag_result, contextualize_query, try_handle_compound_command, 
+    generate_rag_stream, contextualize_query, try_handle_compound_command, 
     is_system_task, call_ollama_generate, call_openai_chat, 
     get_ha_context, get_rag_context, update_history
 )
@@ -54,33 +54,76 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
     query = body.query or (body.messages[-1].content if body.messages else "")
     if not query: raise HTTPException(400, detail="No query")
     
-    format_type = "openai" if "v1" in request.url.path or "completions" in request.url.path else "chat"
+    # Robust Detection: "completions" in URL implies OpenAI format
+    format_type = "openai" if "completions" in request.url.path else "chat"
 
-    if body.stream or is_system_task(query):
-        return await stream_rag_result(query, user, body.model, body.use_openai, format_type)
+    # Initialize Generator
+    generator = generate_rag_stream(query, user, body.model, body.use_openai, format_type)
 
-    # Non-Stream Fallback
+    # CASE A: Streaming (Only if client requested it)
+    if body.stream:
+        media_type = "text/event-stream" if format_type == "openai" else "application/x-ndjson"
+        return StreamingResponse(generator, media_type=media_type)
+
+    # CASE B: Non-Streaming (Aggregation)
     full_text = ""
-    async for chunk in stream_rag_result(query, user, body.model, body.use_openai, "raw"):
-        try: 
-            d = json.loads(chunk)
-            full_text += d.get("response", "")
-        except: pass
+    try:
+        async for chunk in generator:
+            try:
+                if chunk.startswith("data: "): 
+                    if "[DONE]" in chunk: continue
+                    d = json.loads(chunk.replace("data: ", ""))
+                    if "choices" in d:
+                        full_text += d["choices"][0]["delta"].get("content", "")
+                else:
+                    # Handle NDJSON format
+                    d = json.loads(chunk)
+                    if "message" in d:
+                        full_text += d["message"].get("content", "")
+                    elif "response" in d:
+                        full_text += d.get("response", "")
+            except: pass
+    except Exception as e:
+        log.error(f"Error accumulating response: {e}")
     
+    # Final Response Construction
     if format_type == "openai":
-        return {"choices": [{"message": {"role": "assistant", "content": full_text}}]}
-    return {"model": body.model, "message": {"role": "assistant", "content": full_text}, "done": True}
+        return {
+            "id": f"chat-{int(time.time())}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": body.model,
+            "choices": [{"message": {"role": "assistant", "content": full_text}, "finish_reason": "stop", "index": 0}]
+        }
+    
+    # Ollama Native Format
+    return {
+        "model": body.model, 
+        "created_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        "message": {"role": "assistant", "content": full_text}, 
+        "done": True
+    }
+
+# --- Testing Helper Endpoint ---
+@app.get("/api/ha/state/{entity_id}")
+async def get_ha_state_proxy(entity_id: str, request: Request):
+    creds = get_user_creds(request.headers.get("X-RAG-User") or "admin")
+    if not HA_URL: return {"error": "No HA URL"}
+    try:
+        headers = {"Authorization": f"Bearer {creds['ha_token']}"}
+        r = requests.get(f"{HA_URL.rstrip('/')}/api/states/{entity_id}", headers=headers, timeout=5)
+        if r.status_code == 200: return r.json()
+        return {"error": r.status_code, "msg": r.text}
+    except Exception as e: return {"error": str(e)}
 
 @app.post("/rag/query")
 async def rag_query(body: CompletionRequest, request: Request):
     user = request.headers.get("X-RAG-User") or body.user or "admin"
     query = body.query or (body.messages[-1].content if body.messages else "")
-    
     refined = await contextualize_query(query, user, body.model)
     creds = get_user_creds(user)
     cmd = await try_handle_compound_command(refined, creds, body.model)
     if cmd: return {"response": cmd}
-    
     ha = await get_ha_context(user, query=refined)
     nc = await get_rag_context(refined)
     return {"response": f"Context:\n{ha}\n{nc}"}
@@ -100,10 +143,18 @@ async def ps():
 async def ver():
     try: return requests.get(f"{OLLAMA_URL.rstrip('/')}/api/version", timeout=3).json()
     except: return {}
+
 @app.post("/generate")
+@app.post("/api/generate")
 async def generate(req: GenerateRequest):
-    r = await call_ollama_generate(req.prompt, req.model)
-    return {"text": r.get("text")}
+    r = await call_ollama_generate(req.prompt, req.model, stream=False)
+    # Ollama expects 'response', not 'text'
+    return {
+        "model": req.model,
+        "created_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        "response": r.get("text", ""),
+        "done": True
+    }
 
 # --- Ingest ---
 def _run_sync(path):
