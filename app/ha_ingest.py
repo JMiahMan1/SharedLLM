@@ -1,4 +1,4 @@
-# app/ha_ingest.py — Semantic Home Assistant Ingestion
+# app/ha_ingest.py — Semantic Home Assistant Ingestion (Hybrid Granular)
 import os
 import time
 import json
@@ -21,7 +21,7 @@ CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
 # Domains that matter for RAG (Ignore internal system stuff)
 ALLOWED_DOMAINS = [
     "light", "switch", "sensor", "binary_sensor", "climate", 
-    "lock", "cover", "person", "weather", "calendar"
+    "lock", "cover", "person", "weather", "calendar", "input_boolean", "media_player"
 ]
 
 # Attributes to ignore to save context tokens
@@ -37,8 +37,8 @@ def get_user_creds(user=None):
 
 def format_entity_natural_language(entity):
     """
-    Converts raw JSON entity data into a natural language sentence.
-    Example: 'light.kitchen' (on) -> "The Kitchen Light is on."
+    Converts raw JSON entity data into a natural language description for indexing.
+    Returns tuple: (Description, Entity_ID)
     """
     eid = entity.get("entity_id", "")
     domain = eid.split(".")[0]
@@ -50,43 +50,24 @@ def format_entity_natural_language(entity):
     if state in ["unavailable", "unknown"]:
         return None
 
-    # 1. Switches / Lights / Locks
-    if domain in ["light", "switch", "input_boolean"]:
-        return f"The {name} is {state}."
-    
-    # 2. Binary Sensors (Motion, Door)
-    if domain == "binary_sensor":
-        if "occupancy" in eid or "motion" in eid:
-            status = "occupied" if state == "on" else "clear"
-            return f"The {name} status is {status}."
-        if "door" in eid or "window" in eid:
-            status = "open" if state == "on" else "closed"
-            return f"The {name} is {status}."
-    
-    # 3. Person (Zone tracking)
-    if domain == "person":
-        return f"{name} is currently at {state}."
+    # Descriptive string for Vector Search (Identity > State)
+    # We emphasize WHAT it is, so the RAG can find it.
+    desc = f"{name} ({eid})"
 
-    # 4. Climate
-    if domain == "climate":
-        temp = attrs.get("current_temperature", "unknown")
-        target = attrs.get("temperature", "n/a")
-        mode = state
-        return f"The {name} is set to {mode}. Current temp: {temp}. Target: {target}."
+    if domain == "light": desc += " is a light."
+    elif domain == "switch": desc += " is a switch or smart plug."
+    elif domain == "binary_sensor": 
+        if "motion" in eid: desc += " is a motion sensor."
+        elif "door" in eid or "window" in eid: desc += " is a door/window sensor."
+        else: desc += " is a binary sensor."
+    elif domain == "person": desc += " is a person tracker."
+    elif domain == "climate": desc += " is a thermostat/climate control."
+    elif domain == "lock": desc += " is a smart lock."
+    elif domain == "sensor":
+        unit = attrs.get("unit_of_measurement", "")
+        desc += f" is a sensor measuring {unit}."
 
-    # 5. Sensors (Battery, Temp, Humidity)
-    unit = attrs.get("unit_of_measurement", "")
-    
-    # Clean up attributes for context (only keep relevant ones)
-    extra_info = []
-    if "battery_level" in attrs:
-        extra_info.append(f"Battery: {attrs['battery_level']}%")
-    
-    base_sent = f"The {name} is {state}{unit}."
-    if extra_info:
-        base_sent += " (" + ", ".join(extra_info) + ")"
-        
-    return base_sent
+    return desc, eid
 
 def persist_ha_to_chroma():
     creds = get_user_creds()
@@ -101,27 +82,6 @@ def persist_ha_to_chroma():
         r.raise_for_status()
         states = r.json()
 
-        # --- Optimization: Filter & Format ---
-        docs = []
-        
-        # We group semantic sentences into one block, but cleaner
-        semantic_lines = []
-        
-        for s in states:
-            domain = s["entity_id"].split(".")[0]
-            if domain not in ALLOWED_DOMAINS:
-                continue
-            
-            sentence = format_entity_natural_language(s)
-            if sentence:
-                semantic_lines.append(sentence)
-
-        # Create one consolidated document for "Current Home State"
-        # This forces the LLM to see the whole picture in one retrieval chunk
-        full_text = "Current Status of Smart Home Devices:\n" + "\n".join(semantic_lines)
-        
-        print(f"Formatting complete. {len(states)} entities -> {len(semantic_lines)} semantic sentences.")
-
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         vectordb = Chroma(
             collection_name="ha_sensors",
@@ -129,22 +89,38 @@ def persist_ha_to_chroma():
             persist_directory=CHROMA_DIR
         )
 
-        # We define a unique ID so we don't duplicate state history indefinitely
-        # We overwrite the 'current_state' document
-        doc = Document(
-            page_content=full_text, 
-            metadata={"source": "home_assistant", "type": "live_state"}
-        )
-        
-        # Check if exists and update, or simple add
-        # Since Chroma is append-heavy, standard practice for "State" is just to add 
-        # But for RAG size, we might want to delete previous for this user/type if possible
-        # For simplicity in this script: Just Add. The API usually fetches the latest anyway via context lookups.
-        
-        vectordb.add_documents([doc]) 
-        # Note: In a perfect world, we would delete the old state doc first.
-        
-        print(f"Persisted HA state to Chroma.")
+        # --- Cleanup Old Data (Crucial for Hybrid) ---
+        # Since we are creating individual docs per device, we must wipe the old ones
+        # to prevent "ghost" devices from remaining in the index.
+        try:
+            existing_ids = vectordb.get()["ids"]
+            if existing_ids:
+                vectordb.delete(ids=existing_ids)
+        except Exception as e:
+            print(f"Warning during collection cleanup: {e}")
+
+        # --- Format & Index ---
+        docs = []
+        for s in states:
+            domain = s["entity_id"].split(".")[0]
+            if domain not in ALLOWED_DOMAINS:
+                continue
+            
+            result = format_entity_natural_language(s)
+            if result:
+                text, eid = result
+                # Create Document with Entity ID in metadata
+                doc = Document(
+                    page_content=text, 
+                    metadata={"source": "home_assistant", "entity_id": eid}
+                )
+                docs.append(doc)
+
+        if docs:
+            vectordb.add_documents(docs)
+            print(f"Persisted {len(docs)} HA entities to Chroma (Granular).")
+        else:
+            print("No valid HA entities found to persist.")
 
     except Exception as e:
         print("Failed to persist HA data:", e)

@@ -1,4 +1,4 @@
-# unified_rag_api.py — Complete: History, Robust Debugging, Full Feature Set
+# unified_rag_api.py — Complete: History, Robust Debugging, Smart Media Logic
 import os
 import time
 import json
@@ -6,6 +6,7 @@ import subprocess
 import logging
 import traceback
 import asyncio
+import re
 from typing import List, Optional, Dict, Any, Tuple
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -77,7 +78,6 @@ if openai and OPENAI_API_KEY:
 # ------------------
 # In-Memory Conversation History
 # ------------------
-# Format: {"user_id": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
 CHAT_HISTORY: Dict[str, List[Dict[str, str]]] = {}
 
 
@@ -87,7 +87,6 @@ def update_history(user: str, role: str, content: str):
     if user not in CHAT_HISTORY:
         CHAT_HISTORY[user] = []
     CHAT_HISTORY[user].append({"role": role, "content": content})
-    # Trim
     if len(CHAT_HISTORY[user]) > MAX_HISTORY_TURNS * 2:
         CHAT_HISTORY[user] = CHAT_HISTORY[user][-(MAX_HISTORY_TURNS * 2) :]
 
@@ -95,7 +94,6 @@ def update_history(user: str, role: str, content: str):
 def get_history_context(user: str) -> str:
     if user not in CHAT_HISTORY or not CHAT_HISTORY[user]:
         return ""
-
     formatted = []
     for msg in CHAT_HISTORY[user]:
         role = "USER" if msg["role"] == "user" else "ASSISTANT"
@@ -114,7 +112,7 @@ def get_user_creds(user: Optional[str] = None):
 
 
 # ------------------
-# Global Resources (The Performance Fix)
+# Global Resources
 # ------------------
 class GlobalResources:
     embedding_model = None
@@ -125,11 +123,9 @@ class GlobalResources:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize heavy resources (Embeddings, Vector DB) once on startup."""
     log.info("--- STARTUP: Loading Embedding Model & Vector DB ---")
     try:
         os.environ["ANONYMIZED_TELEMETRY"] = "False"
-
         from langchain_huggingface import HuggingFaceEmbeddings
         from langchain_chroma import Chroma
 
@@ -142,7 +138,6 @@ async def lifespan(app: FastAPI):
             embedding_function=GlobalResources.embedding_model,
         )
 
-        # Pre-load collections
         GlobalResources.nextcloud_collection = Chroma(
             collection_name="nextcloud_docs",
             embedding_function=GlobalResources.embedding_model,
@@ -154,15 +149,11 @@ async def lifespan(app: FastAPI):
             embedding_function=GlobalResources.embedding_model,
             persist_directory=CHROMA_DIR,
         )
-
         log.info("RAG Resources initialized successfully.")
-
     except Exception as e:
         log.critical(f"CRITICAL: Failed to initialize RAG resources: {e}")
         log.critical(traceback.format_exc())
-
     yield
-
     log.info("--- SHUTDOWN: Cleaning up resources ---")
     GlobalResources.embedding_model = None
     GlobalResources.chroma_client = None
@@ -170,21 +161,16 @@ async def lifespan(app: FastAPI):
     GlobalResources.nextcloud_collection = None
 
 
-# Document compatibility check
 try:
     from langchain_core.documents import Document
 except Exception:
-    try:
-        from langchain.schema import Document
-    except Exception:
-        Document = None
+    Document = None
 
 # ------------------
 # FastAPI app
 # ------------------
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
 
-# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -241,16 +227,13 @@ async def ha_cache_set(user: str, value: str):
 
 
 # ------------------
-# Utility: run blocking fn in threadpool
+# Utility
 # ------------------
 async def run_blocking(fn, *args, **kwargs):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(EXECUTOR, partial(fn, *args, **kwargs))
 
 
-# ------------------
-# Requests wrappers
-# ------------------
 def _requests_post(url, json=None, headers=None, timeout=None, stream=False):
     return requests.post(
         url, json=json, headers=headers, timeout=timeout, stream=stream
@@ -270,7 +253,7 @@ async def requests_get(url, headers=None, timeout=None, stream=False):
 
 
 # ------------------
-# Ollama helper (NDJSON streaming aware)
+# Ollama helper
 # ------------------
 async def call_ollama_generate(
     prompt: str,
@@ -293,16 +276,12 @@ async def call_ollama_generate(
             break
         except Exception as e:
             last_exc = e
-            log.warning("Ollama request attempt %d failed: %s", attempt + 1, e)
             await asyncio.sleep(0.2)
     else:
-        log.exception("Ollama request failed after retries: %s", last_exc)
-        raise HTTPException(
-            status_code=502, detail=f"Ollama request failed: {last_exc}"
-        )
+        log.error(f"Ollama failed: {last_exc}")
+        raise HTTPException(status_code=502, detail="Ollama unavailable")
 
-    content_type = r.headers.get("Content-Type", "")
-    if stream or "ndjson" in content_type or "application/x-ndjson" in content_type:
+    if stream:
 
         def generator_sync():
             try:
@@ -314,11 +293,10 @@ async def call_ollama_generate(
                         yield obj
                         if obj.get("done") is True:
                             break
-                    except Exception:
-                        yield raw_line + "\n"
-            except Exception as e:
-                log.warning("Error while streaming from Ollama: %s", e)
-                return
+                    except:
+                        yield raw_line
+            except:
+                pass
 
         async def async_iter():
             loop = asyncio.get_running_loop()
@@ -331,9 +309,8 @@ async def call_ollama_generate(
 
     try:
         data = r.json()
-        text = data.get("text") or data.get("response") or data.get("output") or ""
-        return {"text": text}
-    except Exception:
+        return {"text": data.get("text") or data.get("response") or ""}
+    except:
         return {"text": r.text}
 
 
@@ -344,8 +321,8 @@ async def call_openai_chat(
     messages: List[Dict[str, str]], model: Optional[str] = None, stream: bool = False
 ):
     model = model or OPENAI_MODEL
-    if openai is None:
-        raise HTTPException(status_code=501, detail="OpenAI library not installed")
+    if not openai:
+        raise HTTPException(status_code=501)
     try:
         if stream:
 
@@ -365,51 +342,50 @@ async def call_openai_chat(
 
             return {"iterable": async_iter}
         else:
-
-            def do_call():
-                return openai.ChatCompletion.create(model=model, messages=messages)
-
-            resp = await run_blocking(do_call)
-            text = resp.choices[0].message.content
-            return {"text": text}
+            resp = await run_blocking(
+                openai.ChatCompletion.create, model=model, messages=messages
+            )
+            return {"text": resp.choices[0].message.content}
     except Exception as e:
         log.exception("OpenAI call failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"OpenAI request failed: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 # ------------------
 # Action Handlers
 # ------------------
 async def execute_ha_service(
-    domain: str, service: str, entity_id: str, user: str = None
+    domain: str,
+    service: str,
+    entity_id: str,
+    user: str = None,
+    service_data: dict = None,
 ):
     creds = get_user_creds(user)
     url = f"{HA_URL.rstrip('/')}/api/services/{domain}/{service}"
     headers = {"Authorization": f"Bearer {creds['ha_token']}"}
+
     payload = {"entity_id": entity_id}
+    if service_data:
+        payload.update(service_data)
 
     try:
         resp = await requests_post(url, json=payload, headers=headers, timeout=5.0)
-
-        # Check for errors
         if resp.status_code >= 400:
-            # Log the actual error message from Home Assistant
-            log.error(f"HA Error ({resp.status_code}): {resp.text}")
-            return f"Home Assistant failed to execute command. Error: {resp.text}"
+            log.error(f"HA Service Error ({resp.status_code}): {resp.text}")
+            return f"Home Assistant failed (Code {resp.status_code}): {resp.text}"
 
         resp.raise_for_status()
         return f"Successfully executed {domain}.{service} on {entity_id}."
-
     except Exception as e:
         log.error(f"Action failed: {e}")
         return f"Failed to execute command on {entity_id}: {e}"
 
 
 # ------------------
-# Query Contextualizer (Memory Logic)
+# Query Contextualizer & Decomposer
 # ------------------
 def is_system_task(query: str) -> bool:
-    """Detects OpenWebUI background tasks to bypass RAG/History."""
     q = query.strip()
     if q.startswith("### Task:"):
         return True
@@ -423,17 +399,11 @@ def is_system_task(query: str) -> bool:
 
 
 async def contextualize_query(query: str, user: str, model: str = DEFAULT_MODEL) -> str:
-    """
-    If history exists, rewrite the query to be standalone.
-    Example: 'Turn it off' + History(Light is on) -> 'Turn off the light'
-    """
     history_str = get_history_context(user)
     if not history_str:
         return query
 
-    prompt = f"""Given the chat history and the new user input, rewrite the user input to be a standalone command or question.
-Do not answer the question, just rewrite it to include context (entities, names) from history if needed. If no context is needed, return the input as is.
-
+    prompt = f"""Rewrite the User Input to be a standalone command based on the Chat History.
 Chat History:
 {history_str}
 
@@ -442,21 +412,58 @@ User Input: {query}
 Standalone Input:"""
 
     try:
-        # We use a fast, non-streaming call for this internal thought process
         resp = await call_ollama_generate(prompt, model=model, stream=False)
-        new_query = resp["text"].strip().strip('"')
-        log.debug(f"Rewrote query: '{query}' -> '{new_query}'")
-        return new_query
-    except Exception as e:
-        log.warning(f"Contextualization failed: {e}")
+        new_q = resp["text"].strip().strip('"')
+
+        # Fix: Strip common LLM artifacts like /think or markdown
+        # "contextualized: '/think ...'" -> cleanup
+        if "/think" in new_q or "**" in new_q:
+            # Naive cleanup: remove lines starting with special chars
+            clean_lines = [
+                line
+                for line in new_q.split("\n")
+                if not line.strip().startswith(("/", "*", "`"))
+            ]
+            if clean_lines:
+                new_q = " ".join(clean_lines)
+
+        log.debug(f"Contextualized: '{query}' -> '{new_q}'")
+        return new_q
+    except:
         return query
 
 
-async def try_handle_command(query: str, user: str) -> Optional[str]:
+async def decompose_command_query(query: str, model: str = DEFAULT_MODEL) -> List[str]:
+    prompt = f"""Analyze the user request. If it contains multiple distinct commands, split them into a JSON list of strings. 
+If it is a single command, return a list with just that command.
+Do not include JSON markdown formatting.
+
+User Request: "{query}"
+
+Output (JSON Array Only):"""
+
+    try:
+        resp = await call_ollama_generate(prompt, model=model, stream=False)
+        text = resp["text"].strip()
+        if text.startswith("```json"):
+            text = text.split("```json")[1].split("```")[0]
+        if text.startswith("```"):
+            text = text.strip("`")
+        commands = json.loads(text)
+        if isinstance(commands, list):
+            return commands
+        return [query]
+    except Exception as e:
+        log.warning(f"Decomposition failed: {e}")
+        return [query]
+
+
+async def _handle_single_command(query: str, user: str) -> Optional[str]:
     q = query.lower().strip()
     service = None
+    service_data = None
 
-    # Basic keyword matching
+    # 1. Basic Switch/Light/Lock Logic
     if "turn on" in q or "switch on" in q:
         service = "turn_on"
     elif "turn off" in q or "switch off" in q:
@@ -472,8 +479,34 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
     elif "close" in q:
         service = "close_cover"
 
-    # Media logic
-    elif "play" in q or "resume" in q:
+    # 2. Media Logic (Play Content)
+    elif "play" in q:
+        service = "play_media"
+        try:
+            clean_q = (
+                q.replace("please", "")
+                .replace("can you", "")
+                .replace("music", "")
+                .replace("song", "")
+            )
+            if " on " in clean_q:
+                parts = clean_q.split("play ", 1)[1].split(" on ")
+                media_content = parts[0].strip()
+            else:
+                media_content = clean_q.split("play ", 1)[1].strip()
+
+            media_content = media_content.strip().strip('".')
+            if media_content:
+                service_data = {
+                    "media_id": media_content,
+                    "enqueue": "play",
+                    "radio_mode": True,
+                }
+        except:
+            pass
+
+    # 3. Simple Media Controls
+    elif "resume" in q:
         service = "media_play"
     elif "pause" in q:
         service = "media_pause"
@@ -495,14 +528,14 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
         docs = await run_blocking(search_sync)
         if not docs:
             return None
-
         eid = docs[0].metadata.get("entity_id")
         if not eid:
             return None
 
         domain = eid.split(".")[0]
+        target_service = service
+        target_domain = domain
 
-        # Whitelist Allowed Controllable Domains
         if domain not in [
             "light",
             "switch",
@@ -516,11 +549,8 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
         ]:
             return None
 
-        target_domain = domain
-        target_service = service
-
-        # Dynamic Service Mapping
-        if service in ["turn_on", "turn_off", "toggle"]:
+        # FIX: Default to homeassistant domain ONLY for generic domains
+        if service in ["turn_on", "turn_off", "toggle"] and domain != "media_player":
             target_domain = "homeassistant"
 
         if domain == "lock" and service in ["turn_on", "turn_off"]:
@@ -530,26 +560,46 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
         if service in ["open_cover", "close_cover"]:
             if domain == "cover":
                 target_domain = "cover"
-                target_service = service
             else:
                 target_domain = "homeassistant"
                 target_service = "turn_on" if "open" in service else "turn_off"
 
+        # FIX: Media Player Specific Logic
         if domain == "media_player":
+            target_domain = "media_player"  # Ensure we stay on media_player domain
             if service == "turn_on":
-                target_service = "media_play"
+                target_service = "turn_on"
             if service == "turn_off":
-                target_service = "media_stop"
+                target_service = "turn_off"
 
-        return await execute_ha_service(target_domain, target_service, eid, user)
+            # If using Music Assistant specific play
+            if service == "play_media" and service_data:
+                target_domain = "music_assistant"
+                target_service = "play_media"
 
+        return await execute_ha_service(
+            target_domain, target_service, eid, user, service_data
+        )
     except Exception as e:
-        log.warning(f"Intent check failed: {e}")
+        log.warning(f"Intent execution error: {e}")
         return None
 
 
+async def try_handle_command(query: str, user: str) -> Optional[str]:
+    commands = await decompose_command_query(query)
+    results = []
+    for cmd in commands:
+        res = await _handle_single_command(cmd, user)
+        if res:
+            results.append(res)
+
+    if not results:
+        return None
+    return "\n".join(results)
+
+
 # ------------------
-# Home Assistant Context (Enhanced Debugging)
+# Context Fetchers
 # ------------------
 async def get_ha_context(
     user: Optional[str] = None, limit: int = 1000, query: Optional[str] = None
@@ -627,7 +677,7 @@ async def get_ha_context(
 
 
 # ------------------
-# Nextcloud context (Enhanced Debugging)
+# Nextcloud context
 # ------------------
 async def get_nextcloud_context(
     query: str, user: Optional[str] = None, k: int = 4
@@ -767,11 +817,8 @@ async def stream_rag_result(
         async def action_response_fmt():
             text = command_res
             if format_type == "openai":
-                # Initial Role Header
                 yield f"data: {json.dumps({'id': f'chatcmpl-{int(time.time())}', 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
-                # Content
                 yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'content': text}, 'finish_reason': None}]})}\n\n"
-                # End
                 yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
                 yield "data: [DONE]\n\n"
             elif format_type == "chat":
@@ -850,14 +897,12 @@ Answer:"""
         async def ollama_translator():
             nonlocal full_reply
 
-            # OpenAI Initial Role Header
             if format_type == "openai":
                 yield f"data: {json.dumps({'id': f'chatcmpl-{int(time.time())}', 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
             async for chunk in r["iterable"]():
                 if isinstance(chunk, dict):
-                    # Parse response
-                    token = chunk.get("response", "")
+                    token = c.get("response", "")
                     full_reply += token
 
                     if format_type == "openai":
@@ -888,7 +933,6 @@ Answer:"""
                         yield json.dumps(chunk) + "\n"
 
                 else:
-                    # String chunk
                     yield str(chunk) + "\n"
 
             update_history(user, "assistant", full_reply)
