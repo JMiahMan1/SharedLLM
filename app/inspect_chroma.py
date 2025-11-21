@@ -1,8 +1,9 @@
 # inspect_chroma.py
 import os
 import chromadb
+
 # We still need the Embedding function defined, even if not used for listing
-from langchain_community.embeddings import HuggingFaceEmbeddings 
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 import warnings
 
@@ -16,9 +17,10 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
 EMB_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
+
 def inspect_chroma():
     print(f"Inspecting Chroma DB at: {CHROMA_DIR}\n")
-    
+
     try:
         client = chromadb.PersistentClient(path=CHROMA_DIR)
         collections_list = client.list_collections()
@@ -28,7 +30,9 @@ def inspect_chroma():
             print("No collections found in ChromaDB.")
             return
 
-        print(f"Successfully accessed ChromaDB. Found collections: {collection_names}\n")
+        print(
+            f"Successfully accessed ChromaDB. Found collections: {collection_names}\n"
+        )
 
         # Initialize Embeddings *once* (required for instantiating the Chroma wrapper later)
         embeddings = HuggingFaceEmbeddings(model_name=EMB_MODEL)
@@ -36,11 +40,11 @@ def inspect_chroma():
         for coll_name in collection_names:
             print(f"=== Collection: {coll_name} ===")
             vectordb = Chroma(
-                persist_directory=CHROMA_DIR, 
+                persist_directory=CHROMA_DIR,
                 collection_name=coll_name,
-                embedding_function=embeddings 
+                embedding_function=embeddings,
             )
-            
+
             # Access the underlying collection object for count and peek
             collection = vectordb._collection
             count = collection.count()
@@ -58,7 +62,7 @@ def inspect_chroma():
                 metadata = samples["metadatas"][i]
                 source = metadata.get("source", "unknown")
                 path = metadata.get("path", "N/A")
-                print(f"--- Document {i+1} ---")
+                print(f"--- Document {i + 1} ---")
                 print(f"Source: {source}")
                 print(f"Path: {path}")
                 # Ensure the document content is accessible and truncated
@@ -68,7 +72,10 @@ def inspect_chroma():
     except Exception as e:
         print(f"Critical Error inspecting ChromaDB: {e}")
         # Provide a more specific hint for direct client failure
-        print("   HINT: Ensure the `chromadb` library is installed and the directory path is correct.")
+        print(
+            "   HINT: Ensure the `chromadb` library is installed and the directory path is correct."
+        )
+
 
 if __name__ == "__main__":
     inspect_chroma()
