@@ -1,4 +1,4 @@
-# unified_rag_api.py — High-Performance, Protocol-Fixed, Full Feature Set
+# unified_rag_api.py — Complete: History-Aware, Robust Debugging, Full Feature Set
 import os
 import time
 import json
@@ -14,6 +14,7 @@ from functools import partial
 import requests
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Optional OpenAI support
@@ -56,6 +57,7 @@ OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "1"))
 # Tuning
 HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "30.0"))
 QUERY_CACHE_TTL = float(os.getenv("QUERY_CACHE_TTL", "60.0"))
+MAX_HISTORY_TURNS = 10  # Keep last 10 interactions
 
 # Thread pool for blocking IO (requests, chroma)
 EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("THREADPOOL_SIZE", "8")))
@@ -66,6 +68,31 @@ if openai and OPENAI_API_KEY:
         openai.api_key = OPENAI_API_KEY
     except Exception:
         log.warning("Failed to set OpenAI API key in client.")
+
+# ------------------
+# In-Memory Conversation History
+# ------------------
+# Format: {"user_id": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
+CHAT_HISTORY: Dict[str, List[Dict[str, str]]] = {}
+
+def update_history(user: str, role: str, content: str):
+    if not content: return
+    if user not in CHAT_HISTORY:
+        CHAT_HISTORY[user] = []
+    CHAT_HISTORY[user].append({"role": role, "content": content})
+    # Trim
+    if len(CHAT_HISTORY[user]) > MAX_HISTORY_TURNS * 2:
+        CHAT_HISTORY[user] = CHAT_HISTORY[user][-(MAX_HISTORY_TURNS * 2):]
+
+def get_history_context(user: str) -> str:
+    if user not in CHAT_HISTORY or not CHAT_HISTORY[user]:
+        return ""
+    
+    formatted = []
+    for msg in CHAT_HISTORY[user]:
+        role = "USER" if msg["role"] == "user" else "ASSISTANT"
+        formatted.append(f"{role}: {msg['content']}")
+    return "\n".join(formatted)
 
 # ------------------
 # Helper: user creds
@@ -87,9 +114,7 @@ class GlobalResources:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Initialize heavy resources (Embeddings, Vector DB) once on startup.
-    """
+    """Initialize heavy resources (Embeddings, Vector DB) once on startup."""
     log.info("--- STARTUP: Loading Embedding Model & Vector DB ---")
     try:
         os.environ["ANONYMIZED_TELEMETRY"] = "False"
@@ -113,7 +138,6 @@ async def lifespan(app: FastAPI):
             persist_directory=CHROMA_DIR
         )
         
-        # Initialize HA collection for Hybrid Search
         GlobalResources.ha_collection = Chroma(
             collection_name="ha_sensors",
             embedding_function=GlobalResources.embedding_model,
@@ -147,6 +171,15 @@ except Exception:
 # FastAPI app
 # ------------------
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
+
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ------------------
 # Caching
@@ -291,7 +324,7 @@ async def call_openai_chat(messages: List[Dict[str, str]], model: Optional[str] 
         raise HTTPException(status_code=502, detail=f"OpenAI request failed: {e}")
 
 # ------------------
-# Action Handlers (New)
+# Action Handlers
 # ------------------
 async def execute_ha_service(domain: str, service: str, entity_id: str, user: str = None):
     creds = get_user_creds(user)
@@ -306,14 +339,52 @@ async def execute_ha_service(domain: str, service: str, entity_id: str, user: st
         log.error(f"Action failed: {e}")
         return f"Failed to execute command on {entity_id}: {e}"
 
+# ------------------
+# Query Contextualizer (Memory Logic)
+# ------------------
+def is_system_task(query: str) -> bool:
+    """Detects OpenWebUI background tasks to bypass RAG/History."""
+    q = query.strip()
+    if q.startswith("### Task:"): return True
+    if "Generate a concise" in q and "title" in q: return True
+    if "Generate" in q and "tags" in q: return True
+    if "Suggest" in q and "follow-up questions" in q: return True
+    return False
+
+async def contextualize_query(query: str, user: str, model: str = DEFAULT_MODEL) -> str:
+    """
+    If history exists, rewrite the query to be standalone.
+    Example: 'Turn it off' + History(Light is on) -> 'Turn off the light'
+    """
+    history_str = get_history_context(user)
+    if not history_str:
+        return query
+
+    prompt = f"""Given the chat history and the new user input, rewrite the user input to be a standalone command or question.
+Do not answer the question, just rewrite it to include context (entities, names) from history if needed. If no context is needed, return the input as is.
+
+Chat History:
+{history_str}
+
+User Input: {query}
+
+Standalone Input:"""
+
+    try:
+        # We use a fast, non-streaming call for this internal thought process
+        resp = await call_ollama_generate(prompt, model=model, stream=False)
+        new_query = resp["text"].strip().strip('"')
+        log.debug(f"Rewrote query: '{query}' -> '{new_query}'")
+        return new_query
+    except Exception as e:
+        log.warning(f"Contextualization failed: {e}")
+        return query
+
 async def try_handle_command(query: str, user: str) -> Optional[str]:
-    """
-    Simple intent router. If query looks like a command, find the device in Chroma and execute.
-    """
     q = query.lower().strip()
     service = None
     
-    # Basic keyword matching for commands
+    # 1. Basic Switch/Light Logic
     if "turn on" in q or "switch on" in q: service = "turn_on"
     elif "turn off" in q or "switch off" in q: service = "turn_off"
     elif "toggle" in q: service = "toggle"
@@ -321,12 +392,19 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
     elif "unlock" in q: service = "unlock"
     elif "open" in q: service = "open_cover"
     elif "close" in q: service = "close_cover"
+
+    # 2. Media Logic (Music Assistant / Media Players)
+    elif "play" in q or "resume" in q: service = "media_play"
+    elif "pause" in q: service = "media_pause"
+    elif "stop" in q: service = "media_stop"
+    elif "next" in q or "skip" in q: service = "media_next_track"
+    elif "previous" in q or "back" in q: service = "media_previous_track"
     
     if not service or not GlobalResources.ha_collection:
         return None
 
     try:
-        # Use vector search to find the specific entity mentioned in the command
+        # Find exact entity in Vector DB
         def search_sync():
             return GlobalResources.ha_collection.similarity_search(query, k=1)
         
@@ -337,26 +415,48 @@ async def try_handle_command(query: str, user: str) -> Optional[str]:
         if not eid: return None
         
         domain = eid.split(".")[0]
-        # Whitelist controllable domains to prevent accidents
-        if domain not in ["light", "switch", "cover", "lock", "input_boolean", "script", "automation", "climate"]:
-            return None # Let RAG explain why if it's just a sensor
-            
-        # Adjust service for specific domains if needed
-        if domain == "lock" and service in ["turn_on", "turn_off"]:
-            service = "lock" if service == "turn_on" else "unlock"
-            
-        # Fallback for open/close on non-covers
-        if service in ["open_cover", "close_cover"] and domain != "cover":
-            service = "turn_on" if "open" in service else "turn_off"
+        target_service = service
+        target_domain = domain
+        
+        # Whitelist Allowed Controllable Domains
+        if domain not in ["light", "switch", "cover", "lock", "input_boolean", "script", "automation", "climate", "media_player"]:
+            return None 
 
-        return await execute_ha_service(domain, service, eid, user)
+        # Dynamic Service Mapping
+        
+        # General On/Off
+        if service in ["turn_on", "turn_off", "toggle"]:
+             target_domain = "homeassistant"
+        
+        # Locks
+        if domain == "lock" and service in ["turn_on", "turn_off"]:
+            target_service = "lock" if service == "turn_on" else "unlock"
+            target_domain = "lock"
+            
+        # Covers (Blinds/Garage)
+        if service in ["open_cover", "close_cover"]:
+             if domain == "cover":
+                 target_domain = "cover"
+                 target_service = service
+             else:
+                 # "Open the light" -> turn_on
+                 target_domain = "homeassistant"
+                 target_service = "turn_on" if "open" in service else "turn_off"
+
+        # Media Players (Music Assistant)
+        if domain == "media_player":
+            if service == "turn_on": target_service = "media_play"
+            if service == "turn_off": target_service = "media_stop"
+            # Other verbs like play/pause map directly
+
+        return await execute_ha_service(target_domain, target_service, eid, user)
         
     except Exception as e:
         log.warning(f"Intent check failed: {e}")
         return None
 
 # ------------------
-# Home Assistant Context (Hybrid Search)
+# Home Assistant Context (Enhanced Debugging)
 # ------------------
 async def get_ha_context(user: Optional[str] = None, limit: int = 1000, query: Optional[str] = None) -> str:
     creds = get_user_creds(user)
@@ -367,7 +467,10 @@ async def get_ha_context(user: Optional[str] = None, limit: int = 1000, query: O
         if cached is not None: return cached
 
     ha_token = creds["ha_token"]
-    if not HA_URL or not ha_token: return ""
+    if not HA_URL: 
+        return "[System Warning: HA_URL is not configured]"
+    if not ha_token:
+        return "[System Warning: HA_TOKEN is missing]"
 
     target_ids = {"sensor.time_date", "sun.sun"}
     GLOBAL_DOMAINS = ["person", "weather", "calendar", "sensor"]
@@ -412,12 +515,16 @@ async def get_ha_context(user: Optional[str] = None, limit: int = 1000, query: O
             await ha_cache_set(user_key, ctx)
             
         return ctx
+    except requests.exceptions.ConnectTimeout:
+        return f"[System Warning: Connection to Home Assistant at {HA_URL} timed out]"
+    except requests.exceptions.ConnectionError:
+        return f"[System Warning: Failed to connect to Home Assistant at {HA_URL}. Check if it is running.]"
     except Exception as e:
         log.exception("Failed to fetch HA context: %s", e)
-        return ""
+        return f"[System Warning: Error fetching Home Assistant data: {e}]"
 
 # ------------------
-# Nextcloud context
+# Nextcloud context (Enhanced Debugging)
 # ------------------
 async def get_nextcloud_context(query: str, user: Optional[str] = None, k: int = 4) -> str:
     cache_key = f"nc:{user or 'default'}:{query}"
@@ -425,16 +532,19 @@ async def get_nextcloud_context(query: str, user: Optional[str] = None, k: int =
     if cached is not None: return cached
 
     if not GlobalResources.nextcloud_collection:
-        return ""
+        return "[System Note: Nextcloud knowledge base is not initialized]"
 
     def search_sync():
         try:
             return GlobalResources.nextcloud_collection.similarity_search_with_score(query, k=k)
         except Exception as e:
             log.error("Chroma search failed: %s", e)
-            return []
+            return None
 
     docs_with_scores = await run_blocking(search_sync)
+
+    if docs_with_scores is None:
+        return "[System Warning: Database search failed]"
 
     if not docs_with_scores:
         await _query_cache.set(cache_key, "")
@@ -479,19 +589,57 @@ class GenerateRequest(BaseModel):
     use_openai: Optional[bool] = False
 
 # ------------------
-# Helper: RAG Streaming Logic (With Intent Router)
+# Helper: RAG Streaming Logic
 # ------------------
 async def stream_rag_result(query: str, user: str, model: str, use_openai: bool, format_type: str):
-    # 1. Intent Check (Device Control)
-    command_result = await try_handle_command(query, user)
-    if command_result:
-        # If command executed, skip RAG and just return the result formatted as a stream
-        # to satisfy the client waiting for tokens.
+    # 1. System Task Bypass
+    if is_system_task(query):
+        log.debug(f"System task detected, bypassing RAG: {query[:30]}...")
+        if use_openai and openai:
+            resp = await call_openai_chat([{"role":"user", "content": query}], model=OPENAI_MODEL, stream=True)
+            async def oa_task_gen():
+                yield f"data: {json.dumps({'id': f'chatcmpl-{int(time.time())}', 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
+                async for chunk in resp["iterable"]():
+                    content = chunk.choices[0].delta.get("content", "") if hasattr(chunk, "choices") else ""
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(oa_task_gen(), media_type="text/event-stream")
+        else:
+            r = await call_ollama_generate(query, model, stream=True)
+            if "iterable" in r:
+                async def ol_task_gen():
+                    if format_type == "openai":
+                        yield f"data: {json.dumps({'id': f'chatcmpl-{int(time.time())}', 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
+                    async for chunk in r["iterable"]():
+                        if format_type == "openai":
+                            txt = ""
+                            if isinstance(chunk, dict): txt = chunk.get("response", "")
+                            yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'content': txt}}]})}\n\n"
+                            if isinstance(chunk, dict) and chunk.get("done"): 
+                                yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
+                                yield "data: [DONE]\n\n"
+                        else:
+                            yield json.dumps(chunk) + "\n" if isinstance(chunk, dict) else str(chunk) + "\n"
+                return StreamingResponse(ol_task_gen(), media_type="application/x-ndjson")
+            return JSONResponse({"response": r.get("text")})
+
+    # 2. Contextualize
+    refined_query = await contextualize_query(query, user, model)
+    update_history(user, "user", query)
+    
+    # 3. Intent Check
+    command_res = await try_handle_command(refined_query, user)
+    if command_res:
+        update_history(user, "assistant", command_res)
         async def action_response_fmt():
-            text = command_result
-            # Mimic OpenAI/Ollama structure so UI doesn't break
+            text = command_res
             if format_type == "openai":
-                 yield f"data: {json.dumps({'choices': [{'delta': {'content': text}}]})}\n\n"
+                 # Initial Role Header (Crucial Fix)
+                 yield f"data: {json.dumps({'id': f'chatcmpl-{int(time.time())}', 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
+                 # Content
+                 yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'content': text}, 'finish_reason': None}]})}\n\n"
+                 # End
+                 yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
                  yield "data: [DONE]\n\n"
             elif format_type == "chat":
                  yield json.dumps({
@@ -500,25 +648,32 @@ async def stream_rag_result(query: str, user: str, model: str, use_openai: bool,
                     "message": {"role": "assistant", "content": text}, 
                     "done": True
                  }) + "\n"
-            else: # raw/generate
+            else:
                  yield json.dumps({"response": text, "done": True}) + "\n"
 
-        media_type = "text/event-stream" if format_type == "openai" else "application/x-ndjson"
-        return StreamingResponse(action_response_fmt(), media_type=media_type)
+        media = "text/event-stream" if format_type == "openai" else "application/x-ndjson"
+        return StreamingResponse(action_response_fmt(), media_type=media)
 
-    # 2. Standard RAG Flow
-    ha_ctx = await get_ha_context(user=user, query=query)
-    nc_ctx = await get_nextcloud_context(query, user=user)
+    # 4. Standard RAG Flow
+    ha_ctx = await get_ha_context(user=user, query=refined_query)
+    nc_ctx = await get_nextcloud_context(refined_query, user=user)
     combined_context = "\n\n".join([c for c in (ha_ctx, nc_ctx) if c])
     
+    history_context = get_history_context(user)
+    
     prompt = f"""You are a local AI assistant.
+Chat History:
+{history_context}
+
 Context:
 {combined_context}
 
 User question:
-{query}
+{refined_query}
 
 Answer:"""
+
+    full_reply = ""
 
     if use_openai and openai:
         resp = await call_openai_chat(
@@ -529,9 +684,13 @@ Answer:"""
         )
         
         async def openai_fmt():
+            nonlocal full_reply
             async for chunk in resp["iterable"]():
                 content = chunk.choices[0].delta.get("content", "") if hasattr(chunk, "choices") else ""
+                full_reply += content
                 yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
+            
+            update_history(user, "assistant", full_reply)
             yield "data: [DONE]\n\n"
             
         return StreamingResponse(openai_fmt(), media_type="text/event-stream")
@@ -539,27 +698,44 @@ Answer:"""
     r = await call_ollama_generate(prompt=prompt, model=model, stream=True)
     
     if "iterable" in r:
-        async def ollama_fmt():
-            async for chunk in r["iterable"]():
-                if not isinstance(chunk, dict):
-                    yield str(chunk) + "\n"
-                    continue
-                
-                if format_type == "chat" and "response" in chunk and "message" not in chunk:
-                    new_chunk = {
-                        "model": chunk.get("model", model),
-                        "created_at": chunk.get("created_at"),
-                        "message": {
-                            "role": "assistant",
-                            "content": chunk.get("response", "")
-                        },
-                        "done": chunk.get("done", False)
-                    }
-                    yield json.dumps(new_chunk) + "\n"
-                else:
-                    yield json.dumps(chunk) + "\n"
+        async def ollama_translator():
+            nonlocal full_reply
+            
+            # OpenAI Initial Role Header
+            if format_type == "openai":
+                yield f"data: {json.dumps({'id': f'chatcmpl-{int(time.time())}', 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
-        return StreamingResponse(ollama_fmt(), media_type="application/x-ndjson")
+            async for chunk in r["iterable"]():
+                if isinstance(chunk, dict):
+                    # Parse response
+                    token = chunk.get("response", "")
+                    full_reply += token
+                    
+                    if format_type == "openai":
+                        yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {'content': token}, 'finish_reason': None}]})}\n\n"
+                        if chunk.get("done"):
+                            yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
+                            yield "data: [DONE]\n\n"
+
+                    elif format_type == "chat":
+                        # Ollama Chat Format
+                        if "message" not in chunk:
+                             yield json.dumps({"model": model, "message": {"role": "assistant", "content": token}, "done": chunk.get("done", False)}) + "\n"
+                        else:
+                            yield json.dumps(chunk) + "\n"
+
+                    else:
+                        # Raw
+                        yield json.dumps(chunk) + "\n"
+
+                else:
+                    # String chunk
+                    yield str(chunk) + "\n"
+            
+            update_history(user, "assistant", full_reply)
+
+        media_type = "text/event-stream" if format_type == "openai" else "application/x-ndjson"
+        return StreamingResponse(ollama_translator(), media_type=media_type)
     
     return JSONResponse({"error": "Stream failed"})
 
@@ -575,32 +751,37 @@ async def rag_query(body: CompletionRequest, request: Request):
         query = body.messages[-1].content
     if not query: raise HTTPException(status_code=400, detail="No query provided")
 
-    # Direct Check for legacy endpoint too
-    cmd_res = await try_handle_command(query, user)
+    refined = await contextualize_query(query, user, body.model or DEFAULT_MODEL)
+    update_history(user, "user", query)
+
+    cmd_res = await try_handle_command(refined, user)
     if cmd_res:
+        update_history(user, "assistant", cmd_res)
         return {"id": f"cmd-{int(time.time())}", "user": user, "response": cmd_res}
 
-    ha_ctx = await get_ha_context(user=user, query=query)
-    nc_ctx = await get_nextcloud_context(query, user=user)
+    ha_ctx = await get_ha_context(user=user, query=refined)
+    nc_ctx = await get_nextcloud_context(refined, user=user)
     combined_context = "\n\n".join([c for c in (ha_ctx, nc_ctx) if c])
 
     if DEBUG_RAG_CONTEXT:
-        return {"debug": True, "query": query, "context": combined_context}
+        return {"debug": True, "query": refined, "context": combined_context}
 
     prompt = f"""You are a local AI assistant.
 Context:
 {combined_context}
 User question:
-{query}
+{refined}
 Answer:"""
 
     model = body.model or DEFAULT_MODEL
     
     if body.use_openai and openai:
         resp = await call_openai_chat(messages=[{"role":"user", "content": prompt}], model=OPENAI_MODEL)
+        update_history(user, "assistant", resp["text"])
         return {"id": f"rag-{int(time.time())}", "user": user, "response": resp["text"]}
     
     resp = await call_ollama_generate(prompt=prompt, model=model)
+    update_history(user, "assistant", resp["text"])
     return {"id": f"rag-{int(time.time())}", "user": user, "response": resp["text"]}
 
 @app.post("/api/chat")
@@ -612,9 +793,16 @@ async def api_chat(body: CompletionRequest, request: Request):
     if body.stream:
         return await stream_rag_result(query, user, body.model or DEFAULT_MODEL, body.use_openai, format_type="chat")
 
-    # Non-stream Intent Check
-    cmd_res = await try_handle_command(query, user)
+    if is_system_task(query):
+        r = await call_ollama_generate(query, body.model)
+        return {"model": body.model, "message": {"role": "assistant", "content": r["text"]}, "done": True}
+
+    refined = await contextualize_query(query, user, body.model or DEFAULT_MODEL)
+    update_history(user, "user", query)
+
+    cmd_res = await try_handle_command(refined, user)
     if cmd_res:
+        update_history(user, "assistant", cmd_res)
         return {
             "model": body.model or DEFAULT_MODEL,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -622,9 +810,9 @@ async def api_chat(body: CompletionRequest, request: Request):
             "done": True
         }
 
-    ha_ctx = await get_ha_context(user=user, query=query)
-    nc_ctx = await get_nextcloud_context(query, user=user)
-    prompt = f"Context:\n{ha_ctx}\n{nc_ctx}\n\nUser: {query}\nAnswer:"
+    ha_ctx = await get_ha_context(user=user, query=refined)
+    nc_ctx = await get_nextcloud_context(refined, user=user)
+    prompt = f"Context:\n{ha_ctx}\n{nc_ctx}\n\nUser: {refined}\nAnswer:"
 
     if body.use_openai and openai:
         resp = await call_openai_chat(messages=[{"role":"user", "content": prompt}], model=OPENAI_MODEL)
@@ -632,6 +820,8 @@ async def api_chat(body: CompletionRequest, request: Request):
     else:
         resp = await call_ollama_generate(prompt=prompt, model=body.model or DEFAULT_MODEL)
         text = resp["text"]
+    
+    update_history(user, "assistant", text)
 
     return {
         "model": body.model or DEFAULT_MODEL,
@@ -642,22 +832,35 @@ async def api_chat(body: CompletionRequest, request: Request):
 
 @app.post("/v1/chat/completions")
 @app.post("/api/chat/completions")
+@app.post("/chat/completions")
 async def v1_chat(body: CompletionRequest, request: Request):
     header_user = request.headers.get("X-RAG-User")
     user = header_user or body.user or HA_DEFAULT_USER
     query = body.query or (body.messages[-1].content if body.messages else "")
 
     if body.stream:
-        return await stream_rag_result(query, user, body.model or DEFAULT_MODEL, body.use_openai, format_type="chat")
+        return await stream_rag_result(query, user, body.model or DEFAULT_MODEL, body.use_openai, format_type="openai")
 
-    # Non-stream Intent Check
-    cmd_res = await try_handle_command(query, user)
+    if is_system_task(query):
+        r = await call_ollama_generate(query, body.model)
+        return {
+            "id": f"sys-{int(time.time())}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": body.model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": r["text"]}, "finish_reason": "stop"}]
+        }
+
+    refined = await contextualize_query(query, user, body.model or DEFAULT_MODEL)
+    update_history(user, "user", query)
+
+    cmd_res = await try_handle_command(refined, user)
     text = cmd_res if cmd_res else ""
 
     if not text:
-        ha_ctx = await get_ha_context(user=user, query=query)
-        nc_ctx = await get_nextcloud_context(query, user=user)
-        prompt = f"Context:\n{ha_ctx}\n{nc_ctx}\n\nUser: {query}\nAnswer:"
+        ha_ctx = await get_ha_context(user=user, query=refined)
+        nc_ctx = await get_nextcloud_context(refined, user=user)
+        prompt = f"Context:\n{ha_ctx}\n{nc_ctx}\n\nUser: {refined}\nAnswer:"
 
         if body.use_openai and openai:
             resp = await call_openai_chat(messages=[{"role":"user", "content": prompt}], model=OPENAI_MODEL)
@@ -665,6 +868,8 @@ async def v1_chat(body: CompletionRequest, request: Request):
         else:
             resp = await call_ollama_generate(prompt=prompt, model=body.model or DEFAULT_MODEL)
             text = resp["text"]
+    
+    update_history(user, "assistant", text)
 
     return {
         "id": f"chatcmpl-{int(time.time())}",
@@ -846,6 +1051,7 @@ async def ingest_all():
 # Ollama passthrough endpoints
 # ------------------
 @app.get("/v1/models")
+@app.get("/models")
 async def v1_models():
     try:
         resp = await requests_get(f"{OLLAMA_URL.rstrip('/')}/v1/models", timeout=30)
