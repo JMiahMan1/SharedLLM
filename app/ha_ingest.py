@@ -93,7 +93,10 @@ def format_entity_natural_language(entity):
     elif domain == "sensor":
         unit = attrs.get("unit_of_measurement", "")
         desc += f" is a sensor measuring {unit}."
-
+    elif domain == "media_player":
+        desc += " is a media player or smart speaker." # Added media_player context
+        
+    # CRITICAL ENSURE: Return a non-empty string.
     return desc, eid
 
 
@@ -120,14 +123,21 @@ def persist_ha_to_chroma():
         )
 
         # --- Cleanup Old Data (Crucial for Hybrid) ---
-        # Since we are creating individual docs per device, we must wipe the old ones
-        # to prevent "ghost" devices from remaining in the index.
+        # The simplest way to clear potential bad data is to delete and re-add.
         try:
-            existing_ids = vectordb.get()["ids"]
-            if existing_ids:
-                vectordb.delete(ids=existing_ids)
+            # We attempt to delete the collection entirely, as the failure logs suggest data corruption.
+            vectordb.delete_collection()
+            # Re-create the collection
+            vectordb = Chroma(
+                collection_name="ha_sensors",
+                embedding_function=embeddings,
+                persist_directory=CHROMA_DIR,
+            )
+            print("Cleared and reset 'ha_sensors' collection to fix indexing errors.")
         except Exception as e:
-            print(f"Warning during collection cleanup: {e}")
+             # If deletion itself fails (e.g., initial run), just log and continue
+            print(f"Warning during collection reset: {e}")
+
 
         # --- Format & Index ---
         docs = []
@@ -139,16 +149,20 @@ def persist_ha_to_chroma():
             result = format_entity_natural_language(s)
             if result:
                 text, eid = result
-                # Create Document with Entity ID in metadata
-                doc = Document(
-                    page_content=text,
-                    metadata={"source": "home_assistant", "entity_id": eid},
-                )
-                docs.append(doc)
+                # Final guard: ensure text is not empty before creating Document
+                if text.strip():
+                    # Create Document with Entity ID in metadata
+                    doc = Document(
+                        page_content=text,
+                        metadata={"source": "home_assistant", "entity_id": eid},
+                    )
+                    docs.append(doc)
 
         if docs:
             vectordb.add_documents(docs)
             print(f"Persisted {len(docs)} HA entities to Chroma (Granular).")
+            # CRITICAL: Persist after successful update
+            vectordb.persist() 
         else:
             print("No valid HA entities found to persist.")
 
@@ -159,6 +173,8 @@ def persist_ha_to_chroma():
 def start_ha_polling():
     def loop():
         while True:
+            # Added a print statement for polling
+            print(f"HA Polling: Running incremental update...")
             persist_ha_to_chroma()
             time.sleep(HA_POLL_INTERVAL)
 

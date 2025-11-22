@@ -39,19 +39,21 @@ NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
 SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "/app/data/system_prompt.txt")
 
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:latest")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:latest")
 EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "120"))
-OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "1"))
+# Timeouts & Retries
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300")) 
+OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "2"))
 HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "30.0"))
 QUERY_CACHE_TTL = float(os.getenv("QUERY_CACHE_TTL", "60.0"))
-MAX_HISTORY_TURNS = 10
-# NEW: Redis Configuration
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 3600)) # 1 hour TTL for chat history
+MAX_HISTORY_TURNS = 15
+
+# Redis Configuration
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
+CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400)) 
 
 # --- Thread Pool ---
 EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("THREADPOOL_SIZE", "8")))
@@ -71,7 +73,7 @@ class GlobalResources:
     chroma_client = None
     nextcloud_collection = None
     ha_collection = None
-    redis_client = None # NEW: Redis Client
+    redis_client = None
 
 # --- LIFESPAN (Startup Logic) ---
 @asynccontextmanager
@@ -107,16 +109,16 @@ async def lifespan(app: FastAPI):
         log.critical(f"CRITICAL: Failed to initialize RAG resources: {e}")
         log.critical(traceback.format_exc())
 
-    # NEW: Initialize Redis
+    # Initialize Redis
     if redis:
         try:
             log.info(f"Connecting to Redis at {REDIS_URL} ...")
-            # Use decode_responses=True to get strings back
             GlobalResources.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
             GlobalResources.redis_client.ping()
             log.info("Redis connection successful.")
         except Exception as e:
             log.warning(f"Failed to connect to Redis. Falling back to in-memory cache. Error: {e}")
+            GlobalResources.redis_client = None
     else:
         log.warning("Redis library not installed. Falling back to in-memory cache.")
     
@@ -127,11 +129,14 @@ async def lifespan(app: FastAPI):
     GlobalResources.chroma_client = None
     GlobalResources.ha_collection = None
     GlobalResources.nextcloud_collection = None
-    GlobalResources.redis_client = None # NEW: Clean up Redis client
+    if GlobalResources.redis_client:
+        try:
+            GlobalResources.redis_client.close()
+        except: pass
+    GlobalResources.redis_client = None
 
 # --- Caching ---
 class TTLCache:
-    # Existing TTLCache implementation remains, used for HA state/Query cache only
     def __init__(self):
         self._store: Dict[str, Tuple[float, Any]] = {}
         self._lock = asyncio.Lock()
@@ -152,7 +157,6 @@ class TTLCache:
             self._store[key] = (time.time(), value)
 
 _ha_cache = TTLCache()
-_query_cache = TTLCache()
 
 async def ha_cache_get(user: str) -> Optional[str]:
     return await _ha_cache.get(user)

@@ -87,7 +87,6 @@ def ensure_device_state(friendly_name, entity_id, target_state="off"):
     print(f"   [ACTION] Sending command: '{nl_cmd}'...")
     requests.post(f"{API_URL}/api/chat", json={"messages":[{"role":"user","content":nl_cmd}], "stream":False}, headers=HEADERS)
     
-    # Increased patience for slow devices (Chromecasts)
     for i in range(20):
         time.sleep(2)
         current = get_state(entity_id)
@@ -131,6 +130,24 @@ def safe_post(url, payload, label):
         return None
 
 # --- Tests ---
+
+def test_history_context():
+    print_header("Func: Shared Memory (Multi-Turn Context)")
+    # Turn 1
+    q1 = "Who is the president of France?"
+    print(f"   [TURN 1] User: '{q1}'")
+    safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":q1}], "user": "TestUser", "stream":False}, "Turn 1")
+    
+    # Turn 2 (Ambiguous query that relies on history)
+    q2 = "What is his wife's name?"
+    print(f"   [TURN 2] User: '{q2}'")
+    r2 = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":q2}], "user": "TestUser", "stream":False}, "Turn 2")
+    
+    if r2 and ("macron" in r2.lower() or "brigitte" in r2.lower()):
+        print("   [PASS] Context maintained across turns.")
+    else:
+        print("   [FAIL] Context lost. Response didn't seem to reference previous subject.")
+
 def test_web_search_explicit():
     print_header("Func: Explicit Web Search")
     query = "Search the web for current Linux kernel version"
@@ -188,24 +205,20 @@ def test_calendar_integration():
     except Exception as e:
         print(f"   [FAIL] Calendar Test Error: {e}")
 
-# --- NEW: Music Assistant Test ---
 def test_music_playback(entity_id, friendly_name):
     print_header(f"Func: Music Assistant (Play -> Stop on {friendly_name})")
     
-    # 1. Ensure TV is ON first
     if not ensure_device_state(friendly_name, entity_id, "on"):
         print("   [SKIP] Device not ready for music test.")
         return
 
-    # 2. Play Command
     cmd = f"Play Brandon Lake on the {friendly_name}"
     print(f"   [SENDING] '{cmd}'")
     safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":cmd}], "stream":False}, "Music Play")
     
-    # 3. Verify Playing (Music Assistant takes time to load/buffer)
     print(f"   [VERIFYING] {entity_id} -> 'playing'...")
     playing = False
-    for i in range(10): # 20 seconds wait
+    for i in range(10): 
         state = get_state(entity_id)
         if state in ["playing", "buffering"]:
             print(f"   [PASS] {entity_id} is '{state}'.")
@@ -215,16 +228,11 @@ def test_music_playback(entity_id, friendly_name):
     
     if not playing:
         print(f"   [FAIL] Music failed to start. Current State: {get_state(entity_id)}")
-        # Continue anyway to try and clean up
     else:
-        # Let it play for a second
         time.sleep(3)
 
-    # 4. Stop Command
     print(f"   [ACTION] Stopping music...")
     safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":f"Stop the {friendly_name}"}], "stream":False}, "Music Stop")
-    
-    # 5. Verify Stop
     check_device_state(entity_id, ["paused", "idle", "off"])
 
 def test_functionality():
@@ -241,14 +249,14 @@ def test_functionality():
 
     ensure_device_state(LAMP_NAME, lamp_id, "off")
 
-    test_web_search_explicit()
+    test_history_context() # Restored History Test
+    test_web_search_explicit() # Restored Web Search Test
     test_calendar_integration()
 
     print_header(f"Func: Control (Turn On {LAMP_NAME})")
     safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":f"Turn on the {LAMP_NAME}"}], "stream":False}, "Turn On")
     check_device_state(lamp_id, "on")
 
-    # --- Added Music Test Here ---
     test_music_playback(tv_id, MEDIA_NAME)
 
     print_header("Func: Multi-Command (Turn OFF Both)")
