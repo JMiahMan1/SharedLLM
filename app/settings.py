@@ -9,6 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from fastapi import FastAPI 
 
+# Import Redis
+try:
+    import redis
+except ImportError:
+    redis = None
+    
 # Load .env
 if os.getenv("DOCKER_ENV") != "1" and os.path.exists(".env"):
     from dotenv import load_dotenv
@@ -43,6 +49,9 @@ OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "1"))
 HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "30.0"))
 QUERY_CACHE_TTL = float(os.getenv("QUERY_CACHE_TTL", "60.0"))
 MAX_HISTORY_TURNS = 10
+# NEW: Redis Configuration
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 3600)) # 1 hour TTL for chat history
 
 # --- Thread Pool ---
 EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("THREADPOOL_SIZE", "8")))
@@ -62,6 +71,7 @@ class GlobalResources:
     chroma_client = None
     nextcloud_collection = None
     ha_collection = None
+    redis_client = None # NEW: Redis Client
 
 # --- LIFESPAN (Startup Logic) ---
 @asynccontextmanager
@@ -96,6 +106,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.critical(f"CRITICAL: Failed to initialize RAG resources: {e}")
         log.critical(traceback.format_exc())
+
+    # NEW: Initialize Redis
+    if redis:
+        try:
+            log.info(f"Connecting to Redis at {REDIS_URL} ...")
+            # Use decode_responses=True to get strings back
+            GlobalResources.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+            GlobalResources.redis_client.ping()
+            log.info("Redis connection successful.")
+        except Exception as e:
+            log.warning(f"Failed to connect to Redis. Falling back to in-memory cache. Error: {e}")
+    else:
+        log.warning("Redis library not installed. Falling back to in-memory cache.")
     
     yield
     
@@ -104,9 +127,11 @@ async def lifespan(app: FastAPI):
     GlobalResources.chroma_client = None
     GlobalResources.ha_collection = None
     GlobalResources.nextcloud_collection = None
+    GlobalResources.redis_client = None # NEW: Clean up Redis client
 
 # --- Caching ---
 class TTLCache:
+    # Existing TTLCache implementation remains, used for HA state/Query cache only
     def __init__(self):
         self._store: Dict[str, Tuple[float, Any]] = {}
         self._lock = asyncio.Lock()

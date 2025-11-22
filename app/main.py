@@ -190,11 +190,39 @@ async def rag_list(limit: int = 100):
         s = c.peek(min(limit, cnt)) if cnt else {}
         return {"count": cnt, "docs": [{"id": id, "preview": s["documents"][i][:200]} for i, id in enumerate(s.get("ids", []))]}
     return await run_blocking(sync)
+
+# --- FIXED SEARCH ENDPOINT ---
 @app.get("/api/rag/search")
 async def rag_search(q: str, k: int = 4):
-    if not GlobalResources.chroma_client: raise HTTPException(503)
-    docs = await run_blocking(lambda: GlobalResources.chroma_client.similarity_search(q, k=k))
-    return {"results": [{"text": d.page_content, "metadata": d.metadata} for d in docs]}
+    """
+    Aggregates search results from both Home Assistant and Nextcloud collections.
+    """
+    results = []
+    
+    # 1. Search HA Collection
+    if GlobalResources.ha_collection:
+        try:
+            ha_docs = await run_blocking(lambda: GlobalResources.ha_collection.similarity_search(q, k=k))
+            results.extend([
+                {"text": d.page_content, "metadata": d.metadata, "source": "home_assistant"} 
+                for d in ha_docs
+            ])
+        except Exception as e:
+            log.error(f"Error searching HA collection: {e}")
+
+    # 2. Search Nextcloud Collection
+    if GlobalResources.nextcloud_collection:
+        try:
+            nc_docs = await run_blocking(lambda: GlobalResources.nextcloud_collection.similarity_search(q, k=k))
+            results.extend([
+                {"text": d.page_content, "metadata": d.metadata, "source": "nextcloud"} 
+                for d in nc_docs
+            ])
+        except Exception as e:
+            log.error(f"Error searching Nextcloud collection: {e}")
+
+    return {"results": results}
+
 @app.post("/context/update")
 async def update_context(r: Request):
     d = await r.json()
