@@ -17,7 +17,7 @@ from settings import (
 )
 from logic import (
     generate_rag_stream, contextualize_query, try_handle_compound_command, 
-    is_system_task, call_ollama_generate, call_openai_chat, 
+    call_ollama_generate, call_openai_chat, 
     get_ha_context, get_rag_context, update_history
 )
 
@@ -54,18 +54,14 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
     query = body.query or (body.messages[-1].content if body.messages else "")
     if not query: raise HTTPException(400, detail="No query")
     
-    # Robust Detection: "completions" in URL implies OpenAI format
     format_type = "openai" if "completions" in request.url.path else "chat"
 
-    # Initialize Generator
     generator = generate_rag_stream(query, user, body.model, body.use_openai, format_type)
 
-    # CASE A: Streaming (Only if client requested it)
     if body.stream:
         media_type = "text/event-stream" if format_type == "openai" else "application/x-ndjson"
         return StreamingResponse(generator, media_type=media_type)
 
-    # CASE B: Non-Streaming (Aggregation)
     full_text = ""
     try:
         async for chunk in generator:
@@ -76,7 +72,6 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
                     if "choices" in d:
                         full_text += d["choices"][0]["delta"].get("content", "")
                 else:
-                    # Handle NDJSON format
                     d = json.loads(chunk)
                     if "message" in d:
                         full_text += d["message"].get("content", "")
@@ -86,7 +81,6 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
     except Exception as e:
         log.error(f"Error accumulating response: {e}")
     
-    # Final Response Construction
     if format_type == "openai":
         return {
             "id": f"chat-{int(time.time())}",
@@ -96,7 +90,6 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
             "choices": [{"message": {"role": "assistant", "content": full_text}, "finish_reason": "stop", "index": 0}]
         }
     
-    # Ollama Native Format
     return {
         "model": body.model, 
         "created_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -104,7 +97,6 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
         "done": True
     }
 
-# --- Testing Helper Endpoint ---
 @app.get("/api/ha/state/{entity_id}")
 async def get_ha_state_proxy(entity_id: str, request: Request):
     creds = get_user_creds(request.headers.get("X-RAG-User") or "admin")
@@ -128,7 +120,6 @@ async def rag_query(body: CompletionRequest, request: Request):
     nc = await get_rag_context(refined)
     return {"response": f"Context:\n{ha}\n{nc}"}
 
-# --- Passthroughs ---
 @app.get("/v1/models")
 @app.get("/models")
 @app.get("/api/tags")
@@ -148,7 +139,6 @@ async def ver():
 @app.post("/api/generate")
 async def generate(req: GenerateRequest):
     r = await call_ollama_generate(req.prompt, req.model, stream=False)
-    # Ollama expects 'response', not 'text'
     return {
         "model": req.model,
         "created_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -156,7 +146,6 @@ async def generate(req: GenerateRequest):
         "done": True
     }
 
-# --- Ingest ---
 def _run_sync(path):
     try: return subprocess.run(["python", path], capture_output=True, text=True).stdout
     except: return "Error"
@@ -168,7 +157,6 @@ async def ing_nc(): return await run_blocking(_run_sync, "/app/ingest_nextcloud.
 async def ing_all(): return {"ha": await _run_script("ha_ingest.py"), "nextcloud": await _run_script("ingest_nextcloud.py")}
 async def _run_script(path): return await run_blocking(_run_sync, f"/app/{path}")
 
-# --- System ---
 @app.post("/api/rag/upsert")
 async def rag_upsert(i: UpsertRagRequest):
     if not GlobalResources.chroma_client: raise HTTPException(503)
@@ -191,36 +179,19 @@ async def rag_list(limit: int = 100):
         return {"count": cnt, "docs": [{"id": id, "preview": s["documents"][i][:200]} for i, id in enumerate(s.get("ids", []))]}
     return await run_blocking(sync)
 
-# --- FIXED SEARCH ENDPOINT ---
 @app.get("/api/rag/search")
 async def rag_search(q: str, k: int = 4):
-    """
-    Aggregates search results from both Home Assistant and Nextcloud collections.
-    """
     results = []
-    
-    # 1. Search HA Collection
     if GlobalResources.ha_collection:
         try:
             ha_docs = await run_blocking(lambda: GlobalResources.ha_collection.similarity_search(q, k=k))
-            results.extend([
-                {"text": d.page_content, "metadata": d.metadata, "source": "home_assistant"} 
-                for d in ha_docs
-            ])
-        except Exception as e:
-            log.error(f"Error searching HA collection: {e}")
-
-    # 2. Search Nextcloud Collection
+            results.extend([{"text": d.page_content, "metadata": d.metadata, "source": "home_assistant"} for d in ha_docs])
+        except Exception as e: log.error(f"Error searching HA collection: {e}")
     if GlobalResources.nextcloud_collection:
         try:
             nc_docs = await run_blocking(lambda: GlobalResources.nextcloud_collection.similarity_search(q, k=k))
-            results.extend([
-                {"text": d.page_content, "metadata": d.metadata, "source": "nextcloud"} 
-                for d in nc_docs
-            ])
-        except Exception as e:
-            log.error(f"Error searching Nextcloud collection: {e}")
-
+            results.extend([{"text": d.page_content, "metadata": d.metadata, "source": "nextcloud"} for d in nc_docs])
+        except Exception as e: log.error(f"Error searching Nextcloud collection: {e}")
     return {"results": results}
 
 @app.post("/context/update")
