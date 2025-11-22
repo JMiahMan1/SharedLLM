@@ -24,3 +24,5 @@ pytesseract
 pdf2image 
 mutagen
 caldav
+playwright
+redis
