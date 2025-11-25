@@ -165,7 +165,9 @@ def test_web_search_explicit():
  
 def test_calendar_lifecycle():
     print_header("Func: Calendar (Full Lifecycle with Explicit Routing)")
-    if not (NC_URL and NC_USER and NC_PASS): return
+    if not (NC_URL and NC_USER and NC_PASS):
+        print("   [SKIP] Nextcloud credentials not set in .env")
+        return
 
     # 1. Create
     test_title = f"CycleTest_{int(time.time())}"
@@ -180,65 +182,68 @@ def test_calendar_lifecycle():
 
     # 2. Verify via CalDAV (Server Check)
     print("   [STEP 2: VERIFY SERVER]")
-    client = caldav.DAVClient(url=f"{NC_URL.rstrip('/')}/remote.php/dav", username=NC_USER, password=NC_PASS)
-    calendars = client.principal().calendars()
-    target_event = None
-    
-    if calendars:
-        for cal in calendars:
-            if "personal" not in (cal.name or "").lower(): continue
-            
-            print(f"      [DEBUG] Scanning target calendar: {cal.name}...")
-            try:
-                # FIXED: Use the same signature that worked in debug_caldev.py
-                events = cal.search(
-                    start=datetime.now(), 
-                    end=datetime.now()+timedelta(days=7),
-                    event=True,
-                    expand=True
-                )
-                for ev in events:
-                    if hasattr(ev.vobject_instance, 'vevent'):
-                        if test_title in ev.vobject_instance.vevent.summary.value:
-                            target_event = ev
-                            print(f"   [PASS] Found '{test_title}' on correct calendar '{cal.name}'.")
-                            break
-            except Exception as e:
-                print(f"      [ERROR] Error reading {cal.name}: {e}")
-            if target_event: break
-    
-    if not target_event:
-        print("   [FAIL] Event not found on 'Personal' calendar.")
-        return
+    try:
+        client = caldav.DAVClient(url=f"{NC_URL.rstrip('/')}/remote.php/dav", username=NC_USER, password=NC_PASS)
+        calendars = client.principal().calendars()
+        target_event = None
+        
+        if calendars:
+            for cal in calendars:
+                # Target 'Personal' specifically
+                if "personal" not in (cal.name or "").lower(): continue
+                
+                print(f"     [DEBUG] Scanning target calendar: {cal.name}...")
+                try:
+                    # Fix: Widen window (yesterday to +7 days) and use search with event=True, expand=True
+                    events = cal.search(
+                        start=datetime.now() - timedelta(days=1),  
+                        end=datetime.now() + timedelta(days=7),
+                        event=True,
+                        expand=True
+                    )
+                    for ev in events:
+                        if hasattr(ev.vobject_instance, 'vevent'):
+                            summary = getattr(ev.vobject_instance.vevent.summary, 'value', '')
+                            if test_title in summary:
+                                target_event = ev
+                                print(f"   [PASS] Found '{test_title}' on correct calendar '{cal.name}'.")
+                                break
+                except Exception as e:
+                    print(f"     [ERROR] Error reading {cal.name}: {e}")
+                if target_event: break
+        
+        if not target_event:
+            print("   [FAIL] Event not found on 'Personal' calendar.")
+            return
 
-    # 3. Verify via RAG Read
-    print("   [STEP 3: READ VIA API]")
-    time.sleep(2) 
-    read_query = "What is on my calendar tomorrow?"
-    read_resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":read_query}], "stream":False}, "Read Event")
-    
-    if read_resp and test_title in read_resp:
-        print(f"   [PASS] API correctly listed '{test_title}'.")
-    else:
-        if read_resp and ("tomorrow" in read_resp.lower() or "10am" in read_resp.lower()):
-             print(f"   [WARN] API response relevant but exact title match failed. Resp: {read_resp[:50]}...")
+        # 3. Verify via RAG Read
+        print("   [STEP 3: READ VIA API]")
+        time.sleep(2)  
+        read_query = "What is on my calendar tomorrow?"
+        read_resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":read_query}], "stream":False}, "Read Event")
+        
+        if read_resp and test_title in read_resp:
+            print(f"   [PASS] API correctly listed '{test_title}'.")
         else:
-             print(f"   [FAIL] API did NOT list '{test_title}'. Response: {read_resp[:50]}...")
+            print(f"   [FAIL] API did NOT list '{test_title}'. Response: {str(read_resp)[:50]}...")
 
-    # 4. Delete (Cleanup)
-    print("   [STEP 4: DELETE]")
-    target_event.delete()
-    print("   [PASS] Event deleted from server.")
+        # 4. Delete (Cleanup)
+        print("   [STEP 4: DELETE]")
+        target_event.delete()
+        print("   [PASS] Event deleted from server.")
 
-    # 5. Verify Gone
-    print("   [STEP 5: VERIFY GONE]")
-    time.sleep(2)
-    gone_resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":read_query}], "stream":False}, "Read Event")
-    
-    if gone_resp and test_title not in gone_resp:
-        print("   [PASS] API no longer lists the event.")
-    else:
-        print("   [WARN] API still lists the event (Possible Cache delay).")
+        # 5. Verify Gone
+        print("   [STEP 5: VERIFY GONE]")
+        time.sleep(2)
+        gone_resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":read_query}], "stream":False}, "Read Event")
+        
+        if gone_resp and test_title not in gone_resp:
+            print("   [PASS] API no longer lists the event.")
+        else:
+            print("   [WARN] API still lists the event (Possible Cache delay).")
+
+    except Exception as e:
+        print(f"   [FAIL] Calendar Test Error: {e}")
 
 def test_music_playback(entity_id, friendly_name):
     print_header(f"Func: Music Assistant (Play -> Stop on {friendly_name})")
