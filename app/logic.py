@@ -213,9 +213,12 @@ async def tool_web_search(query: str) -> str:
     
     # Construct Target URL (FIX: Robust path detection)
     parsed = urlparse(WHOOGLE_URL)
+    # Check if path specifically contains 'search', otherwise append it
     if "search" in parsed.path:
+        # User explicitly provided a full path (e.g. /my-search-instance/search)
         search_endpoint = WHOOGLE_URL
     else:
+        # Append /search to root
         search_endpoint = f"{WHOOGLE_URL.rstrip('/')}/search"
 
     # --- Tier 1: JSON API ---
@@ -266,6 +269,7 @@ async def tool_web_search(query: str) -> str:
     # --- Tier 3: Playwright ---
     if PLAYWRIGHT_AVAILABLE:
         log.info("Engaging Tier 3 (Playwright) for web search...")
+        # Fallback to direct URL construction for browser
         browser_url = f"{WHOOGLE_URL.rstrip('/')}/search?q={query}"
         results = await _scrape_with_playwright(browser_url)
         if results:
@@ -276,47 +280,52 @@ async def tool_web_search(query: str) -> str:
 # --- Calendar Tools ---
 def _get_cal_client(creds):
     url = f"{NEXTCLOUD_URL.rstrip('/')}/remote.php/dav"
-    return caldav.DAVClient(url=url, username=creds.get('user', NEXTCLOUD_USER), password=creds.get('nc_pass', NEXTCLOUD_PASS))
+    # FIX: Enforce timeout to prevent thread pool starvation on bad connections
+    return caldav.DAVClient(url=url, username=creds.get('user', NEXTCLOUD_USER), password=creds.get('nc_pass', NEXTCLOUD_PASS), timeout=20)
+
+def _get_default_cal_key(user: str) -> str:
+    return f"rag:cal_default:{user}"
 
 def _get_writable_cache_key(url: str) -> str:
     return f"rag:cal_writable:{url}"
 
-def _is_cal_writable(cal) -> bool:
-    """
-    Checks if a calendar is writable by checking name blacklist OR attempting a write.
-    Results are cached in Redis for 1 hour to prevent timeouts on future calls.
-    """
-    # 1. Fast Name Check (Blacklist)
-    name = (cal.name or "").lower()
+def _is_cal_writable(cal, user: str) -> bool:
+    """Checks if a calendar is writable using a test write operation. Caches result."""
     url = str(cal.url).lower()
-    if any(x in name for x in ["contact", "birthday", "holiday", "read-only", "anniversary"]):
-        return False
-        
-    # 2. Check Redis Cache
+
+    # 1. Redis Cache Check
     if GlobalResources.redis_client:
         cache_key = _get_writable_cache_key(url)
         cached = GlobalResources.redis_client.get(cache_key)
-        if cached is not None:
-            return cached == "1"
+        if cached is not None: return cached == "1"
 
-    # 3. Active Write Check (Fallback)
+    # 2. Active Write Check
     try:
-        test_uid = f"RAG_TEST_{int(time.time())}"
-        # Try creating a dummy event in the past
-        ev = cal.save_event(
-            dtstart=datetime.now() - timedelta(hours=1),
-            summary="RAG_Write_Test",
-            uid=test_uid
-        )
-        ev.delete() # Cleanup immediately
+        test_uid = f"RAG_WRITE_{int(time.time())}"
+        ev = cal.save_event(dtstart=datetime.now() - timedelta(hours=1), summary=test_uid)
+        ev.delete() # Clean up immediately
         
-        if GlobalResources.redis_client:
-            GlobalResources.redis_client.setex(cache_key, 3600, "1")
+        if GlobalResources.redis_client: 
+            GlobalResources.redis_client.setex(cache_key, 3600, "1") # Cache success for 1h
         return True
-    except:
-        if GlobalResources.redis_client:
+    except requests.exceptions.ReadTimeout:
+        log.warning(f"Calendar write check timed out for {cal.name}")
+        if GlobalResources.redis_client: 
+            GlobalResources.redis_client.setex(cache_key, 3600, "0") # Cache failure
+        return False
+    except Exception:
+        if GlobalResources.redis_client: 
             GlobalResources.redis_client.setex(cache_key, 3600, "0")
         return False
+
+def _set_user_default_cal(user: str, cal_name: str):
+    if GlobalResources.redis_client:
+        GlobalResources.redis_client.set(_get_default_cal_key(user), cal_name)
+
+def _get_user_default_cal(user: str) -> Optional[str]:
+    if GlobalResources.redis_client:
+        return GlobalResources.redis_client.get(_get_default_cal_key(user))
+    return None
 
 async def tool_calendar_list(user_creds: Dict[str, str]) -> str:
     if not NEXTCLOUD_URL: return ""
@@ -324,12 +333,11 @@ async def tool_calendar_list(user_creds: Dict[str, str]) -> str:
         def _fetch():
             client = _get_cal_client(user_creds)
             calendars = client.principal().calendars()
-            # Only list calendars that look valid (not contact birthdays)
-            valid = [f"- {c.name}" for c in calendars if "contact" not in (c.name or "").lower() and "birthday" not in (c.name or "").lower()]
-            return "Available Calendars:\n" + "\n".join(valid)
+            # Filter output to avoid showing system calendars by default (reduces confusion)
+            valid = [f"- {c.name}" for c in calendars if "birthday" not in (c.name or "").lower() and "contact" not in (c.name or "").lower()]
+            return "Available Calendars:\n" + "\n".join(valid) if valid else "No writable calendars."
         return await run_blocking(_fetch)
-    except Exception as e:
-        return f"Error listing calendars: {e}"
+    except Exception as e: return f"Error listing calendars: {e}"
 
 async def tool_calendar_read(user_creds: Dict[str, str]) -> str:
     if not NEXTCLOUD_URL: return ""
@@ -338,17 +346,16 @@ async def tool_calendar_read(user_creds: Dict[str, str]) -> str:
             client = _get_cal_client(user_creds)
             found_events = []
             calendars = client.principal().calendars()
-            if not calendars: return []
-            
             now = datetime.now()
-            end_date = now + timedelta(days=7)
-            
+            end = now + timedelta(days=7)
             for cal in calendars:
-                # Skip known read-only/noise calendars
-                if not _is_cal_writable(cal): continue
-                
+                # Optimization: Check writability cache if available to skip known read-only
+                if GlobalResources.redis_client:
+                    ck = _get_writable_cache_key(str(cal.url).lower())
+                    if GlobalResources.redis_client.get(ck) == "0": continue
+
                 try:
-                    events = cal.search(start=now, end=end_date, event=True, expand=True)
+                    events = cal.search(start=now, end=end, event=True, expand=True)
                     for ev in events:
                         if hasattr(ev.vobject_instance, 'vevent'):
                             ve = ev.vobject_instance.vevent
@@ -358,21 +365,18 @@ async def tool_calendar_read(user_creds: Dict[str, str]) -> str:
             return found_events
         
         results = await run_blocking(_fetch)
-        return "Upcoming Events:\n" + "\n".join(results) if results else "No upcoming events found."
+        return "Upcoming Events:\n" + "\n".join(results) if results else "No events found."
     except: return ""
 
 async def extract_event_data(query: str, model: str) -> Dict[str, str]:
     prompt = (
-        f"Extract event details from: \"{query}\".\n"
-        "Return strictly JSON with keys:\n"
-        "- 'summary' (string)\n"
-        "- 'start_time' (natural language, e.g. 'tomorrow 5pm', or 'today' if missing)\n"
-        "- 'calendar_target' (string, e.g. 'Work', or null)\n"
-        "- 'intent' (string: 'add', 'delete', 'update')\n"
+        f"Extract details from: \"{query}\".\n"
+        "Return JSON with keys: 'summary' (string), 'start_time' (natural language or 'today'), 'calendar_target' (string or null), 'intent' ('add', 'delete', 'update').\n"
+        "IMPORTANT: 'summary' MUST be the event title. If input is 'RAG_Test_123', summary is 'RAG_Test_123'.\n"
         "JSON:"
     )
-    resp = await call_ollama_generate(prompt, model=model)
-    text = clean_llm_output(resp.get("text", "{}"))
+    r = await call_ollama_generate(prompt, model=model)
+    text = clean_llm_output(r.get("text", "{}"))
     try:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         return json.loads(match.group(0)) if match else json.loads(text)
@@ -380,52 +384,67 @@ async def extract_event_data(query: str, model: str) -> Dict[str, str]:
 
 async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str) -> str:
     if not NEXTCLOUD_URL: return "Error: Nextcloud not configured."
-    
     data = await extract_event_data(query, model)
     summary = data.get("summary")
-    start_str = data.get("start_time")
-    target_cal = data.get("calendar_target")
+    start = data.get("start_time")
+    target = data.get("calendar_target")
     
-    if not summary or not start_str: return "Could not determine event details."
+    if not summary or not start: return "Missing event details."
+    if "missing" in summary.lower() and "detail" in summary.lower(): return "Error: Could not extract valid event summary."
 
-    dt = dateparser.parse(start_str, languages=['en'], settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now()})
-    if not dt: return f"Could not understand date '{start_str}'."
-    
+    dt = dateparser.parse(start, languages=['en'], settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now()})
+    if not dt: return f"Invalid date: {start}"
+
     try:
         def _add():
             client = _get_cal_client(user_creds)
             calendars = client.principal().calendars()
             if not calendars: raise Exception("No calendars found.")
             
-            selected_cal = None
-            
-            # 1. Filter Candidates (Exclude Read-Only by Name first)
-            candidates = [c for c in calendars if "contact" not in (c.name or "").lower() and "birthday" not in (c.name or "").lower()]
-            
-            # 2. Explicit Target Match
-            if target_cal:
-                for c in candidates:
-                    if target_cal.lower() in c.name.lower():
-                        selected_cal = c
-                        break
-            
-            # 3. Default Logic (Personal/Private or User Name)
-            if not selected_cal:
-                for c in candidates:
-                    n = c.name.lower()
-                    if "personal" in n or "private" in n or user_creds.get('user','').lower() in n:
-                        selected_cal = c
-                        break
-            
-            # 4. Fallback to first candidate
-            if not selected_cal and candidates:
-                selected_cal = candidates[0]
-                
-            if not selected_cal: raise Exception("No suitable calendar found.")
+            # Sort candidates loosely to try 'best' names first
+            # Personal/Private -> Username -> Rest
+            calendars.sort(key=lambda c: 0 if "personal" in (c.name or "").lower() else (1 if user_creds['user'].lower() in (c.name or "").lower() else 10))
 
-            end_dt = dt + timedelta(hours=1)
-            selected_cal.save_event(dtstart=dt, dtend=end_dt, summary=summary)
-            return selected_cal.name
+            selected = None
+            
+            # 1. Explicit Target (Check name)
+            if target:
+                for c in calendars:
+                    if target.lower() in (c.name or "").lower():
+                        if _is_cal_writable(c, user_creds['user']):
+                            selected = c
+                            break
+            
+            # 2. Stored Default
+            if not selected:
+                def_name = _get_user_default_cal(user_creds['user'])
+                if def_name:
+                    for c in calendars:
+                        if c.name == def_name: 
+                            if _is_cal_writable(c, user_creds['user']):
+                                selected = c
+                                break
+            
+            # 3. Lazy Search (Stop at first writable)
+            if not selected:
+                for c in calendars:
+                    if _is_cal_writable(c, user_creds['user']):
+                        selected = c
+                        break
+
+            # 4. Fallback (Use first writable found, even if not ideal)
+            if not selected:
+                 for c in calendars:
+                     if _is_cal_writable(c, user_creds['user']):
+                         selected = c
+                         break
+
+            if not selected: raise Exception("No suitable writable calendar found.")
+
+            end = dt + timedelta(hours=1)
+            selected.save_event(dtstart=dt, dtend=end, summary=summary)
+            _set_user_default_cal(user_creds['user'], selected.name)
+            return selected.name
 
         cal_name = await run_blocking(_add)
         return f"Scheduled '{summary}' for {dt.strftime('%Y-%m-%d %H:%M')} on '{cal_name}'."
@@ -435,102 +454,90 @@ async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str) 
 
 async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: str) -> str:
     if not NEXTCLOUD_URL: return "Error: Nextcloud not configured."
-    
     data = await extract_event_data(query, model)
-    summary_keyword = data.get("summary")
-    target_cal = data.get("calendar_target")
-    
-    if not summary_keyword: return "Could not determine which event to delete."
+    keyword = data.get("summary")
+    target = data.get("calendar_target")
+    if not keyword: return "Missing event name."
 
     try:
         def _delete():
             client = _get_cal_client(user_creds)
             calendars = client.principal().calendars()
             
-            # Filtering
-            if target_cal:
-                calendars = [c for c in calendars if target_cal.lower() in c.name.lower()]
-            else:
-                # Only check writable calendars to save time
-                calendars = [c for c in calendars if _is_cal_writable(c)]
+            candidates = []
+            for c in calendars:
+                if target and target.lower() not in (c.name or "").lower(): continue
+                if _is_cal_writable(c, user_creds['user']):
+                    candidates.append(c)
 
+            count = 0
             start = datetime.now() - timedelta(days=1)
             end = start + timedelta(days=30)
             
-            count = 0
-            for cal in calendars:
+            for c in candidates:
                 try:
-                    # Use limited search
-                    events = cal.search(start=start, end=end, event=True, expand=True)
+                    events = c.search(start=start, end=end, event=True, expand=True)
                     for ev in events:
-                        if hasattr(ev.vobject_instance, 'vevent'):
-                            if summary_keyword.lower() in ev.vobject_instance.vevent.summary.value.lower():
-                                ev.delete()
-                                count += 1
-                                break 
+                        if keyword.lower() in ev.vobject_instance.vevent.summary.value.lower():
+                            ev.delete()
+                            count += 1
+                            break
                     if count > 0: break
                 except: pass
             return count
 
-        count = await run_blocking(_delete)
-        return f"Deleted event matching '{summary_keyword}'." if count > 0 else "No matching event found."
-    except Exception as e:
-        return f"Failed to delete event: {e}"
+        cnt = await run_blocking(_delete)
+        return f"Deleted event matching '{keyword}'." if cnt else "No matching event found."
+    except Exception as e: return f"Delete error: {e}"
 
 async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: str) -> str:
     if not NEXTCLOUD_URL: return "Error: Nextcloud not configured."
-    
     data = await extract_event_data(query, model)
     keyword = data.get("summary")
     new_start = data.get("start_time")
-    target_cal = data.get("calendar_target")
+    target = data.get("calendar_target")
     
     if not keyword or not new_start: return "Missing details."
-    
     dt = dateparser.parse(new_start, languages=['en'], settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now()})
-    if not dt: return f"Could not understand date '{new_start}'."
+    if not dt: return f"Invalid date: {new_start}"
 
     try:
         def _update():
             client = _get_cal_client(user_creds)
             calendars = client.principal().calendars()
             
-            if target_cal:
-                calendars = [c for c in calendars if target_cal.lower() in c.name.lower()]
-            else:
-                calendars = [c for c in calendars if _is_cal_writable(c)]
-
+            candidates = []
+            for c in calendars:
+                if target and target.lower() not in (c.name or "").lower(): continue
+                if _is_cal_writable(c, user_creds['user']):
+                    candidates.append(c)
+            
+            count = 0
             start = datetime.now() - timedelta(days=1)
             end = start + timedelta(days=30)
             
-            count = 0
-            for cal in calendars:
+            for c in candidates:
                 try:
-                    events = cal.search(start=start, end=end, event=True, expand=True)
+                    events = c.search(start=start, end=end, event=True, expand=True)
                     for ev in events:
-                        if hasattr(ev.vobject_instance, 'vevent'):
-                            ve = ev.vobject_instance.vevent
-                            if keyword.lower() in ve.summary.value.lower():
-                                # Update
-                                duration = timedelta(hours=1)
-                                try:
-                                    if hasattr(ve, 'dtend'):
-                                        duration = ve.dtend.value - ve.dtstart.value
-                                except: pass
-                                
-                                ve.dtstart.value = dt
-                                ve.dtend.value = dt + duration
-                                ev.save()
-                                count += 1
-                                break
+                        ve = ev.vobject_instance.vevent
+                        if keyword.lower() in ve.summary.value.lower():
+                            duration = timedelta(hours=1)
+                            try:
+                                if hasattr(ve, 'dtend'): duration = ve.dtend.value - ve.dtstart.value
+                            except: pass
+                            ve.dtstart.value = dt
+                            ve.dtend.value = dt + duration
+                            ev.save()
+                            count += 1
+                            break
                     if count > 0: break
                 except: pass
             return count
 
-        count = await run_blocking(_update)
-        return f"Rescheduled event to {dt.strftime('%Y-%m-%d %H:%M')}." if count > 0 else "Event not found."
-    except Exception as e:
-        return f"Failed to update event: {e}"
+        cnt = await run_blocking(_update)
+        return f"Rescheduled event to {dt.strftime('%Y-%m-%d %H:%M')}." if cnt else "Event not found."
+    except Exception as e: return f"Update error: {e}"
 
 # --- HA Logic ---
 async def get_entity_state(entity_id: str, user_creds: Dict[str, str]) -> Optional[str]:
@@ -568,98 +575,86 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
 async def _handle_single_command(query, user_creds, model=None):
     q_low = query.lower().strip()
     
-    # --- Calendar Routing ---
+    # Calendar
     if any(x in q_low for x in ["schedule", "remind", "calendar", "event", "appointment", "meeting"]):
         if any(x in q_low for x in ["list", "what calendars"]): return await tool_calendar_list(user_creds)
         if any(x in q_low for x in ["cancel", "delete", "remove"]): return await tool_calendar_delete(query, user_creds, model or DEFAULT_MODEL)
         if any(x in q_low for x in ["move", "change", "reschedule", "update"]): return await tool_calendar_update(query, user_creds, model or DEFAULT_MODEL)
-        if not any(x in q_low for x in ["what is on", "what's on", "show me"]): return await tool_calendar_add(query, user_creds, model or DEFAULT_MODEL)
+        
+        # Strict Add Trigger: Must have an action verb to avoid accidental 'add' on read queries
+        if any(x in q_low for x in ["add", "new", "create", "schedule", "remind", "put"]):
+             return await tool_calendar_add(query, user_creds, model or DEFAULT_MODEL)
 
-    # --- HA Routing ---
-    service, service_data = None, None
+    # HA
+    service = None
     if "turn on" in q_low: service = "turn_on"
     elif "turn off" in q_low: service = "turn_off"
     elif "toggle" in q_low: service = "toggle"
     elif "stop" in q_low: service = "media_stop"
-    elif re.search(r"\bplay\b", q_low):
-        service = "play_media"
-        parts = q_low.split("play ", 1)
-        if len(parts) > 1:
-            content_part = parts[1].split(" on ")[0].strip().strip('"').strip("'")
-            if content_part:
-                service_data = {"media_content_id": content_part, "media_content_type": "music", "enqueue": "play"}
+    elif re.search(r"\bplay\b", q_low): service = "play_media"
     
-    if not service: return None
+    if not service or not GlobalResources.ha_collection: return None
 
     clean_q = q_low
     for phrase in ["turn on", "turn off", "toggle", "play", "stop", "the", "please", " on "]:
         clean_q = clean_q.replace(phrase, " ")
     clean_q = clean_q.strip()
     
-    if not clean_q or not GlobalResources.ha_collection: return None
-
     try:
         docs = await run_blocking(lambda: GlobalResources.ha_collection.similarity_search(clean_q, k=1))
-        if not docs: 
-            return None
+        if not docs: return None
         
         eid = docs[0].metadata.get("entity_id")
         domain = eid.split(".")[0]
-        target_dom, target_svc = domain, service
         
-        if service in ["turn_on", "turn_off", "toggle"]: 
-            target_dom = "homeassistant"
-        
-        if domain == "media_player":
-            target_dom = "media_player"
-            if service == "play_media":
-                state = await get_entity_state(eid, user_creds)
-                if state in ["off", "unavailable"]:
-                    await execute_ha_service("media_player", "turn_on", eid, user_creds)
-                    await asyncio.sleep(3.0)
+        service_data = None
+        if service == "play_media" and domain == "media_player":
+            parts = q_low.split("play ", 1)
+            if len(parts) > 1:
+                content = parts[1].split(" on ")[0].strip()
+                service_data = {"media_content_id": content, "media_content_type": "music", "enqueue": "play"}
+            if await get_entity_state(eid, user_creds) in ["off", "unavailable"]:
+                await execute_ha_service("media_player", "turn_on", eid, user_creds)
+                await asyncio.sleep(3.0)
 
-        return await execute_ha_service(target_dom, target_svc, eid, user_creds, service_data)
-        
+        target_dom = "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
+        return await execute_ha_service(target_dom, service, eid, user_creds, service_data)
     except Exception as e:
         log.error(f"Error in command execution: {e}")
         return None
 
 async def decompose_command_query(query: str, model: str) -> List[str]:
+    # Intelligent splitting for "Turn off X and Y" to ensure both turn off
     if " and " in query.lower():
-        return query.split(" and ")
+        if "turn " in query.lower() or "play " in query.lower():
+            prompt = (
+                f"Split this compound command into standalone commands. Distribute verbs to objects.\n"
+                f"Input: '{query}'\nOutput JSON List of strings:"
+            )
+            try:
+                r = await call_ollama_generate(prompt, model=model)
+                lst = json.loads(clean_llm_output(r.get("text", "[]")))
+                if isinstance(lst, list) and lst: return lst
+            except: pass
+            return query.split(" and ")
     return [query]
 
 async def try_handle_compound_command(query, user_creds, model):
     cmds = await decompose_command_query(query, model)
     tasks = []
-    
     for c in cmds:
         if isinstance(c, str) and len(c.strip()) > 3:
-            # Pass model to handle_single for sub-tools like Calendar
             tasks.append(_handle_single_command(c, user_creds, model))
-            
     if not tasks: return None
-    
     results = await asyncio.gather(*tasks)
-    valid_results = [r for r in results if r is not None]
-    
-    if valid_results:
-        return "\n".join(valid_results)
-    
-    return None
+    valid = [r for r in results if r]
+    return "\n".join(valid) if valid else None
 
 async def contextualize_query(query, user, model):
     hist = get_history_context(user)
     if not hist: return query
-    
-    if len(query.split()) > 4 and any(x in query.lower() for x in ["search", "turn", "play"]):
-        return query
-
-    prompt = (
-        "Rewrite the last user input based on the history to be a standalone command or question.\n"
-        "Output ONLY the refined text.\n"
-        f"History:\n{hist}\nInput: {query}\nRefined:"
-    )
+    if len(query.split()) > 4 and any(x in query.lower() for x in ["search", "turn", "play"]): return query
+    prompt = f"Rewrite based on history:\n{hist}\nInput: {query}\nRefined:"
     r = await call_ollama_generate(prompt, model)
     return clean_llm_output(r.get("text", query))
 
@@ -703,6 +698,7 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     update_history(user, "user", query)
     
     creds = get_user_creds(user)
+    # This now handles Calendar Adds/Delete/List/Update
     action_result = await try_handle_compound_command(refined, creds, model)
     
     if action_result:
@@ -721,7 +717,6 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     ha_ctx, nc_ctx, search_ctx = await asyncio.gather(ha_future, nc_future, search_future)
 
     cal_ctx = ""
-    # Only read calendar context if keyword present and NOT a write command
     if any(x in refined.lower() for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]):
         if not any(x in refined.lower() for x in ["schedule a", "add", "remind", "cancel", "delete", "move", "reschedule"]):
             cal_ctx = await tool_calendar_read(creds)
