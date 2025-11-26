@@ -1,28 +1,38 @@
+# Core
 fastapi
 uvicorn[standard]
 requests
 python-dotenv
+pydantic
+python-multipart
+
+# AI / RAG
 chromadb
 langchain
 langchain-huggingface
 langchain-chroma
 langchain-community
-pydantic
-python-multipart
-beautifulsoup4
-lxml
 transformers
 torch
 sentence-transformers
 pypdf
 python-docx
-openpyxl
-EbookLib
+ebooklib
 mobi
 html2text
-pytesseract 
-pdf2image 
-mutagen
-caldav
+beautifulsoup4
 playwright
+
+# Integrations
+caldav
+vobject
+icalendar
 redis
+dateparser
+
+# Utilities
+lxml
+openpyxl
+pytesseract
+pdf2image
+mutagen

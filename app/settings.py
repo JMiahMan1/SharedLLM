@@ -37,7 +37,7 @@ NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
 NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
-SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "/app/data/system_prompt.txt")
+SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "/app/system_prompt.txt")
 
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:latest")
 EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
