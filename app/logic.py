@@ -710,17 +710,15 @@ async def try_handle_compound_command(query, user_creds, model):
 
 async def contextualize_query(query, user, model):
     # STRICT CONTEXT BYPASS for Explicit Commands
-    # If the user gives a direct command, do NOT rewrite it with LLM history.
-    # This prevents hallucinated context from breaking the command parser.
-    verbs = ["turn", "play", "stop", "toggle", "schedule", "add", "delete", "remove", "cancel", "remind"]
+    # Only bypass MUTATING commands. Allow "What", "Who", "Where" to use history.
+    verbs = ["turn", "play", "stop", "toggle", "schedule", "add", "delete", "remove", "cancel", "remind", "list"]
     if any(query.lower().lstrip().startswith(v) for v in verbs):
         return query
 
     hist = get_history_context(user)
     if not hist: return query
     
-    # Also skip if it looks like a search query
-    if len(query.split()) > 4 and any(x in query.lower() for x in ["search", "find", "who", "what"]): 
+    if len(query.split()) > 4 and any(x in query.lower() for x in ["search", "find"]): 
         return query
 
     prompt = f"Rewrite based on history:\n{hist}\nInput: {query}\nRefined:"
