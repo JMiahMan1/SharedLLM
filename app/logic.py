@@ -12,6 +12,12 @@ from typing import AsyncGenerator, Optional, Dict, Any, List
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 
+# Import Pydantic for validation error handling
+try:
+    from pydantic import ValidationError
+except ImportError:
+    ValidationError = Exception
+
 # Try importing Playwright
 try:
     from playwright.async_api import async_playwright
@@ -32,6 +38,11 @@ from settings import (
 SEARCH_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
+
+# Caching Constants
+CAL_LIST_TTL = 300  # 5 minutes for calendar lists
+CAL_WRITE_TTL = 3600  # 1 hour for writability check
+LAST_ENTITY_TTL = 86400 # 24 hours memory for "turn it off"
 
 # In-memory fallback if Redis is missing
 _LOCAL_HISTORY = {}
@@ -114,6 +125,21 @@ def clean_llm_output(text: str) -> str:
     text = re.sub(r'^(Standalone Command|Command|Output|Result):', '', text.strip(), flags=re.IGNORECASE)
     text = text.replace("```json", "").replace("```", "")
     return text.strip().strip('"').strip("'")
+
+# --- Helper: Safe Similarity Search ---
+def safe_similarity_search(collection, query: str, k: int = 4):
+    """
+    Safely executes similarity search, catching Pydantic ValidationErrors
+    that occur when the Vector DB contains corrupted/null documents.
+    """
+    if not collection: 
+        return []
+    try:
+        return collection.similarity_search(query, k=k)
+    except (ValidationError, Exception) as e:
+        log.error(f"RAG Search Error (Potentially corrupted doc in DB): {e}")
+        # Return empty list to prevent application crash
+        return []
 
 # --- LLM & Tools ---
 async def call_ollama_generate(prompt: str, model: str = DEFAULT_MODEL, stream: bool = False):
@@ -211,14 +237,11 @@ async def tool_web_search(query: str) -> str:
 
     log.info(f"Executing Web Search for: {query}")
     
-    # Construct Target URL (FIX: Robust path detection)
+    # Construct Target URL
     parsed = urlparse(WHOOGLE_URL)
-    # Check if path specifically contains 'search', otherwise append it
     if "search" in parsed.path:
-        # User explicitly provided a full path (e.g. /my-search-instance/search)
         search_endpoint = WHOOGLE_URL
     else:
-        # Append /search to root
         search_endpoint = f"{WHOOGLE_URL.rstrip('/')}/search"
 
     # --- Tier 1: JSON API ---
@@ -269,7 +292,6 @@ async def tool_web_search(query: str) -> str:
     # --- Tier 3: Playwright ---
     if PLAYWRIGHT_AVAILABLE:
         log.info("Engaging Tier 3 (Playwright) for web search...")
-        # Fallback to direct URL construction for browser
         browser_url = f"{WHOOGLE_URL.rstrip('/')}/search?q={query}"
         results = await _scrape_with_playwright(browser_url)
         if results:
@@ -280,18 +302,20 @@ async def tool_web_search(query: str) -> str:
 # --- Calendar Tools ---
 def _get_cal_client(creds):
     url = f"{NEXTCLOUD_URL.rstrip('/')}/remote.php/dav"
-    # FIX: Enforce timeout to prevent thread pool starvation on bad connections
     return caldav.DAVClient(url=url, username=creds.get('user', NEXTCLOUD_USER), password=creds.get('nc_pass', NEXTCLOUD_PASS), timeout=20)
 
 def _get_default_cal_key(user: str) -> str:
     return f"rag:cal_default:{user}"
 
 def _get_writable_cache_key(url: str) -> str:
-    return f"rag:cal_writable:{url}"
+    return f"rag:cal_writable:{url.lower().rstrip('/')}"
+
+def _get_cal_list_cache_key(user: str) -> str:
+    return f"rag:cal_list:{user}"
 
 def _is_cal_writable(cal, user: str) -> bool:
     """Checks if a calendar is writable using a test write operation. Caches result."""
-    url = str(cal.url).lower()
+    url = str(cal.url)
 
     # 1. Redis Cache Check
     if GlobalResources.redis_client:
@@ -306,16 +330,16 @@ def _is_cal_writable(cal, user: str) -> bool:
         ev.delete() # Clean up immediately
         
         if GlobalResources.redis_client: 
-            GlobalResources.redis_client.setex(cache_key, 3600, "1") # Cache success for 1h
+            GlobalResources.redis_client.setex(cache_key, CAL_WRITE_TTL, "1") 
         return True
     except requests.exceptions.ReadTimeout:
         log.warning(f"Calendar write check timed out for {cal.name}")
         if GlobalResources.redis_client: 
-            GlobalResources.redis_client.setex(cache_key, 3600, "0") # Cache failure
+            GlobalResources.redis_client.setex(cache_key, CAL_WRITE_TTL, "0") 
         return False
     except Exception:
         if GlobalResources.redis_client: 
-            GlobalResources.redis_client.setex(cache_key, 3600, "0")
+            GlobalResources.redis_client.setex(cache_key, CAL_WRITE_TTL, "0")
         return False
 
 def _set_user_default_cal(user: str, cal_name: str):
@@ -328,15 +352,32 @@ def _get_user_default_cal(user: str) -> Optional[str]:
     return None
 
 async def tool_calendar_list(user_creds: Dict[str, str]) -> str:
-    if not NEXTCLOUD_URL: return ""
+    if not NEXTCLOUD_URL: 
+        return "Nextcloud configuration missing."
+
+    user = user_creds.get("user")
+    
+    # Check Cache
+    if GlobalResources.redis_client and user:
+        ck = _get_cal_list_cache_key(user)
+        cached = GlobalResources.redis_client.get(ck)
+        if cached: return cached
+
     try:
         def _fetch():
             client = _get_cal_client(user_creds)
             calendars = client.principal().calendars()
-            # Filter output to avoid showing system calendars by default (reduces confusion)
             valid = [f"- {c.name}" for c in calendars if "birthday" not in (c.name or "").lower() and "contact" not in (c.name or "").lower()]
-            return "Available Calendars:\n" + "\n".join(valid) if valid else "No writable calendars."
-        return await run_blocking(_fetch)
+            result = "Available Calendars:\n" + "\n".join(valid) if valid else "No writable calendars."
+            return result
+        
+        final_res = await run_blocking(_fetch)
+        
+        # Cache Result
+        if GlobalResources.redis_client and user:
+            GlobalResources.redis_client.setex(_get_cal_list_cache_key(user), CAL_LIST_TTL, final_res)
+            
+        return final_res
     except Exception as e: return f"Error listing calendars: {e}"
 
 async def tool_calendar_read(user_creds: Dict[str, str]) -> str:
@@ -349,9 +390,8 @@ async def tool_calendar_read(user_creds: Dict[str, str]) -> str:
             now = datetime.now()
             end = now + timedelta(days=7)
             for cal in calendars:
-                # Optimization: Check writability cache if available to skip known read-only
                 if GlobalResources.redis_client:
-                    ck = _get_writable_cache_key(str(cal.url).lower())
+                    ck = _get_writable_cache_key(str(cal.url))
                     if GlobalResources.redis_client.get(ck) == "0": continue
 
                 try:
@@ -401,43 +441,29 @@ async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str) 
             calendars = client.principal().calendars()
             if not calendars: raise Exception("No calendars found.")
             
-            # Sort candidates loosely to try 'best' names first
-            # Personal/Private -> Username -> Rest
+            # Smart sort
             calendars.sort(key=lambda c: 0 if "personal" in (c.name or "").lower() else (1 if user_creds['user'].lower() in (c.name or "").lower() else 10))
-
             selected = None
             
-            # 1. Explicit Target (Check name)
+            # Selection Logic
             if target:
                 for c in calendars:
                     if target.lower() in (c.name or "").lower():
                         if _is_cal_writable(c, user_creds['user']):
                             selected = c
                             break
-            
-            # 2. Stored Default
             if not selected:
                 def_name = _get_user_default_cal(user_creds['user'])
                 if def_name:
                     for c in calendars:
-                        if c.name == def_name: 
-                            if _is_cal_writable(c, user_creds['user']):
-                                selected = c
-                                break
-            
-            # 3. Lazy Search (Stop at first writable)
+                        if c.name == def_name and _is_cal_writable(c, user_creds['user']):
+                            selected = c
+                            break
             if not selected:
                 for c in calendars:
                     if _is_cal_writable(c, user_creds['user']):
                         selected = c
                         break
-
-            # 4. Fallback (Use first writable found, even if not ideal)
-            if not selected:
-                 for c in calendars:
-                     if _is_cal_writable(c, user_creds['user']):
-                         selected = c
-                         break
 
             if not selected: raise Exception("No suitable writable calendar found.")
 
@@ -505,12 +531,7 @@ async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: st
         def _update():
             client = _get_cal_client(user_creds)
             calendars = client.principal().calendars()
-            
-            candidates = []
-            for c in calendars:
-                if target and target.lower() not in (c.name or "").lower(): continue
-                if _is_cal_writable(c, user_creds['user']):
-                    candidates.append(c)
+            candidates = [c for c in calendars if _is_cal_writable(c, user_creds['user'])]
             
             count = 0
             start = datetime.now() - timedelta(days=1)
@@ -540,6 +561,19 @@ async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: st
     except Exception as e: return f"Update error: {e}"
 
 # --- HA Logic ---
+# Redis Context for Partial Commands
+def _get_last_entity_key(user: str) -> str:
+    return f"rag:last_entity:{user}"
+
+def _set_last_entity(user: str, entity_id: str):
+    if GlobalResources.redis_client and entity_id:
+        GlobalResources.redis_client.setex(_get_last_entity_key(user), LAST_ENTITY_TTL, entity_id)
+
+def _get_last_entity(user: str) -> Optional[str]:
+    if GlobalResources.redis_client:
+        return GlobalResources.redis_client.get(_get_last_entity_key(user))
+    return None
+
 async def get_entity_state(entity_id: str, user_creds: Dict[str, str]) -> Optional[str]:
     url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
@@ -564,6 +598,8 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
             def _post(): return requests.post(url, json=payload, headers=headers, timeout=5.0)
             r = await run_blocking(_post)
             if r.status_code < 400: 
+                # SUCCESS: Cache this entity as the last active one
+                _set_last_entity(user_creds.get("user"), entity_id)
                 return f"Successfully executed {domain}.{service} on {entity_id}."
             last_err = f"HTTP {r.status_code}: {r.text}"
         except Exception as e: last_err = str(e)
@@ -575,17 +611,22 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
 async def _handle_single_command(query, user_creds, model=None):
     q_low = query.lower().strip()
     
-    # Calendar
+    # Calendar Routing
     if any(x in q_low for x in ["schedule", "remind", "calendar", "event", "appointment", "meeting"]):
-        if any(x in q_low for x in ["list", "what calendars"]): return await tool_calendar_list(user_creds)
-        if any(x in q_low for x in ["cancel", "delete", "remove"]): return await tool_calendar_delete(query, user_creds, model or DEFAULT_MODEL)
-        if any(x in q_low for x in ["move", "change", "reschedule", "update"]): return await tool_calendar_update(query, user_creds, model or DEFAULT_MODEL)
+        # Strict List Check (Regex)
+        if re.search(r"\blist\b", q_low) or "what calendars" in q_low or "show calendars" in q_low:
+             return await tool_calendar_list(user_creds)
         
-        # Strict Add Trigger: Must have an action verb to avoid accidental 'add' on read queries
+        if any(x in q_low for x in ["cancel", "delete", "remove"]): 
+            return await tool_calendar_delete(query, user_creds, model or DEFAULT_MODEL)
+        
+        if any(x in q_low for x in ["move", "change", "reschedule", "update"]): 
+            return await tool_calendar_update(query, user_creds, model or DEFAULT_MODEL)
+        
         if any(x in q_low for x in ["add", "new", "create", "schedule", "remind", "put"]):
              return await tool_calendar_add(query, user_creds, model or DEFAULT_MODEL)
 
-    # HA
+    # HA Routing & Partial Command Logic
     service = None
     if "turn on" in q_low: service = "turn_on"
     elif "turn off" in q_low: service = "turn_off"
@@ -595,36 +636,53 @@ async def _handle_single_command(query, user_creds, model=None):
     
     if not service or not GlobalResources.ha_collection: return None
 
+    # Strip action phrase to get the "Object" (Entity Name)
     clean_q = q_low
     for phrase in ["turn on", "turn off", "toggle", "play", "stop", "the", "please", " on "]:
         clean_q = clean_q.replace(phrase, " ")
     clean_q = clean_q.strip()
-    
-    try:
-        docs = await run_blocking(lambda: GlobalResources.ha_collection.similarity_search(clean_q, k=1))
-        if not docs: return None
-        
-        eid = docs[0].metadata.get("entity_id")
-        domain = eid.split(".")[0]
-        
-        service_data = None
-        if service == "play_media" and domain == "media_player":
-            parts = q_low.split("play ", 1)
-            if len(parts) > 1:
-                content = parts[1].split(" on ")[0].strip()
-                service_data = {"media_content_id": content, "media_content_type": "music", "enqueue": "play"}
-            if await get_entity_state(eid, user_creds) in ["off", "unavailable"]:
-                await execute_ha_service("media_player", "turn_on", eid, user_creds)
-                await asyncio.sleep(3.0)
 
-        target_dom = "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
-        return await execute_ha_service(target_dom, service, eid, user_creds, service_data)
-    except Exception as e:
-        log.error(f"Error in command execution: {e}")
-        return None
+    eid = None
+    
+    # CASE 1: Partial Command (No object specified) -> Check Redis
+    if not clean_q: 
+        eid = _get_last_entity(user_creds.get("user"))
+        if not eid:
+            return "Could not determine which device you mean. Please specify."
+        log.info(f"Using Cached Last Entity: {eid} for command: {q_low}")
+
+    # CASE 2: Explicit Command -> Vector Search
+    else:
+        try:
+            docs = await run_blocking(lambda: safe_similarity_search(GlobalResources.ha_collection, clean_q, k=1))
+            if docs:
+                eid = docs[0].metadata.get("entity_id")
+        except Exception as e:
+            log.error(f"Error in command execution: {e}")
+            return None
+
+    if not eid: return None
+
+    domain = eid.split(".")[0]
+    service_data = None
+    if service == "play_media" and domain == "media_player":
+        parts = q_low.split("play ", 1)
+        if len(parts) > 1:
+            content = parts[1].split(" on ")[0].strip()
+            # If content is empty (e.g. "Play on TV"), ignore
+            if content:
+                service_data = {"media_content_id": content, "media_content_type": "music", "enqueue": "play"}
+        
+        # Ensure TV is ON before playing
+        if await get_entity_state(eid, user_creds) in ["off", "unavailable"]:
+            await execute_ha_service("media_player", "turn_on", eid, user_creds)
+            await asyncio.sleep(3.0)
+
+    target_dom = "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
+    return await execute_ha_service(target_dom, service, eid, user_creds, service_data)
 
 async def decompose_command_query(query: str, model: str) -> List[str]:
-    # Intelligent splitting for "Turn off X and Y" to ensure both turn off
+    # Intelligent splitting for "Turn off X and Y"
     if " and " in query.lower():
         if "turn " in query.lower() or "play " in query.lower():
             prompt = (
@@ -651,9 +709,20 @@ async def try_handle_compound_command(query, user_creds, model):
     return "\n".join(valid) if valid else None
 
 async def contextualize_query(query, user, model):
+    # STRICT CONTEXT BYPASS for Explicit Commands
+    # If the user gives a direct command, do NOT rewrite it with LLM history.
+    # This prevents hallucinated context from breaking the command parser.
+    verbs = ["turn", "play", "stop", "toggle", "schedule", "add", "delete", "remove", "cancel", "remind"]
+    if any(query.lower().lstrip().startswith(v) for v in verbs):
+        return query
+
     hist = get_history_context(user)
     if not hist: return query
-    if len(query.split()) > 4 and any(x in query.lower() for x in ["search", "turn", "play"]): return query
+    
+    # Also skip if it looks like a search query
+    if len(query.split()) > 4 and any(x in query.lower() for x in ["search", "find", "who", "what"]): 
+        return query
+
     prompt = f"Rewrite based on history:\n{hist}\nInput: {query}\nRefined:"
     r = await call_ollama_generate(prompt, model)
     return clean_llm_output(r.get("text", query))
@@ -661,7 +730,7 @@ async def contextualize_query(query, user, model):
 async def get_ha_context(user, query=None):
     if not GlobalResources.ha_collection or not HA_URL: return ""
     try:
-        docs = await run_blocking(lambda: GlobalResources.ha_collection.similarity_search(query, k=5))
+        docs = await run_blocking(lambda: safe_similarity_search(GlobalResources.ha_collection, query, k=5))
         if not docs: return ""
         
         creds = get_user_creds(user)
@@ -687,8 +756,9 @@ async def get_ha_context(user, query=None):
 async def get_rag_context(query):
     if not GlobalResources.nextcloud_collection: return ""
     try:
-        docs = await run_blocking(lambda: GlobalResources.nextcloud_collection.similarity_search(query, k=3))
-        return "Nextcloud Documents:\n" + "\n".join([f"...{d.page_content[:400]}..." for d in docs])
+        docs = await run_blocking(lambda: safe_similarity_search(GlobalResources.nextcloud_collection, query, k=3))
+        valid_docs = [d for d in docs if d.page_content]
+        return "Nextcloud Documents:\n" + "\n".join([f"...{d.page_content[:400]}..." for d in valid_docs])
     except: return ""
 
 async def generate_rag_stream(query, user, model, use_openai, format_type) -> AsyncGenerator[str, None]:
@@ -698,7 +768,7 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     update_history(user, "user", query)
     
     creds = get_user_creds(user)
-    # This now handles Calendar Adds/Delete/List/Update
+    # This now handles Calendar Adds/Delete/List/Update + HA Control
     action_result = await try_handle_compound_command(refined, creds, model)
     
     if action_result:
@@ -717,6 +787,7 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     ha_ctx, nc_ctx, search_ctx = await asyncio.gather(ha_future, nc_future, search_future)
 
     cal_ctx = ""
+    # Only fetch calendar context if not already handled by a command
     if any(x in refined.lower() for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]):
         if not any(x in refined.lower() for x in ["schedule a", "add", "remind", "cancel", "delete", "move", "reschedule"]):
             cal_ctx = await tool_calendar_read(creds)
