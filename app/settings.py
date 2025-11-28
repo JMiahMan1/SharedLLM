@@ -75,19 +75,22 @@ class GlobalResources:
     ha_collection = None
     redis_client = None
 
-# --- LIFESPAN (Startup Logic) ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    log.info("--- STARTUP: Loading Embedding Model & Vector DB ---")
+# --- Resource Loading (Hot Reloadable) ---
+async def initialize_rag_resources():
+    """Initializes or re-initializes the RAG components (Embedding Model & ChromaDB)."""
+    log.info("--- Loading RAG Resources (Hot Reload) ---")
     try:
         os.environ["ANONYMIZED_TELEMETRY"] = "False"
         from langchain_huggingface import HuggingFaceEmbeddings
         from langchain_chroma import Chroma
         
-        log.info(f"Loading embedding model: {EMB_MODEL} ...")
-        GlobalResources.embedding_model = HuggingFaceEmbeddings(model_name=EMB_MODEL)
+        # Load Model (Cached by library usually, but safe to re-init)
+        if not GlobalResources.embedding_model:
+            log.info(f"Loading embedding model: {EMB_MODEL} ...")
+            GlobalResources.embedding_model = HuggingFaceEmbeddings(model_name=EMB_MODEL)
         
         log.info(f"Connecting to ChromaDB at {CHROMA_DIR} ...")
+        # Re-creating the client forces it to re-read the directory on disk
         GlobalResources.chroma_client = Chroma(
             persist_directory=CHROMA_DIR,
             embedding_function=GlobalResources.embedding_model
@@ -104,12 +107,18 @@ async def lifespan(app: FastAPI):
             embedding_function=GlobalResources.embedding_model,
             persist_directory=CHROMA_DIR
         )
-        log.info("RAG Resources initialized successfully.")
+        log.info("RAG Resources loaded successfully.")
     except Exception as e:
-        log.critical(f"CRITICAL: Failed to initialize RAG resources: {e}")
+        log.critical(f"CRITICAL: Failed to load RAG resources: {e}")
         log.critical(traceback.format_exc())
 
-    # Initialize Redis
+# --- LIFESPAN (Startup Logic) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Load RAG (Vector DB)
+    await initialize_rag_resources()
+
+    # 2. Initialize Redis
     if redis:
         try:
             log.info(f"Connecting to Redis at {REDIS_URL} ...")

@@ -13,7 +13,8 @@ from pydantic import BaseModel
 # Fixed imports
 from settings import (
     lifespan, get_user_creds, run_blocking, GlobalResources, log,
-    DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL
+    DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
+    initialize_rag_resources # IMPORTED HOT RELOAD FUNCTION
 )
 from logic import (
     generate_rag_stream, contextualize_query, try_handle_compound_command, 
@@ -149,12 +150,26 @@ async def generate(req: GenerateRequest):
 def _run_sync(path):
     try: return subprocess.run(["python", path], capture_output=True, text=True).stdout
     except: return "Error"
+
+# --- Ingestion Endpoints with Hot Reload ---
 @app.post("/ingest/ha")
-async def ing_ha(): return await run_blocking(_run_sync, "/app/ha_ingest.py")
+async def ing_ha(): 
+    res = await run_blocking(_run_sync, "/app/ha_ingest.py")
+    await initialize_rag_resources() # RELOAD DB
+    return res
+
 @app.post("/ingest/nextcloud")
-async def ing_nc(): return await run_blocking(_run_sync, "/app/ingest_nextcloud.py")
+async def ing_nc(): 
+    res = await run_blocking(_run_sync, "/app/ingest_nextcloud.py")
+    await initialize_rag_resources() # RELOAD DB
+    return res
+
 @app.post("/ingest/all")
-async def ing_all(): return {"ha": await _run_script("ha_ingest.py"), "nextcloud": await _run_script("ingest_nextcloud.py")}
+async def ing_all(): 
+    res = {"ha": await _run_script("ha_ingest.py"), "nextcloud": await _run_script("ingest_nextcloud.py")}
+    await initialize_rag_resources() # RELOAD DB
+    return res
+
 async def _run_script(path): return await run_blocking(_run_sync, f"/app/{path}")
 
 @app.post("/api/rag/upsert")
