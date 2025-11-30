@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y \
     libasound2 \
     libpango-1.0-0 \
     libcairo2 \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir -r requirements.txt

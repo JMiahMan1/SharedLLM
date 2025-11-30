@@ -37,7 +37,8 @@ NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
 NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
-SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "/app/system_prompt.txt")
+# UPDATED: Points to the Docker volume location
+SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "/app/data/system_prompt.txt")
 
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:latest")
 EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
@@ -54,6 +55,40 @@ MAX_HISTORY_TURNS = 15
 # Redis Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
 CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400)) 
+
+# --- Prompts (Externalized) ---
+# Contextualization / Query Rewriting
+DEFAULT_CONTEXT_PROMPT = "Rewrite the following query to be self-contained, resolving any pronouns (he, she, it, they, him, her) using the chat history.\nHistory:\n{history}\nInput: {query}\nRefined (Return ONLY the refined query string, NO JSON, NO MARKDOWN):"
+CONTEXT_REWRITE_PROMPT = os.getenv("CONTEXT_REWRITE_PROMPT", DEFAULT_CONTEXT_PROMPT)
+
+# Calendar Extraction
+DEFAULT_CALENDAR_PROMPT = """Extract details from: "{query}".
+Return JSON with keys: 'summary' (string), 'start_time' (natural language), 'calendar_target' (string or null), 'intent' ('add', 'delete', 'update').
+IMPORTANT: 'summary' MUST be the event title. If input is 'RAG_Test_123', summary is 'RAG_Test_123'.
+JSON:"""
+CALENDAR_EXTRACT_PROMPT = os.getenv("CALENDAR_EXTRACT_PROMPT", DEFAULT_CALENDAR_PROMPT)
+
+# Final RAG Assembly
+DEFAULT_RAG_TEMPLATE = """### SYSTEM
+{system_prompt}
+{sys_info}
+
+### CONTEXT
+{ha_ctx}
+{nc_ctx}
+{search_ctx}
+{cal_ctx}
+
+### QUERY
+{query}
+"""
+RAG_TEMPLATE = os.getenv("RAG_TEMPLATE", DEFAULT_RAG_TEMPLATE)
+
+# --- Constants ---
+# THIS WAS MISSING IN YOUR VERSION
+SEARCH_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
 
 # --- Thread Pool ---
 EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("THREADPOOL_SIZE", "8")))
@@ -77,20 +112,20 @@ class GlobalResources:
 
 # --- Resource Loading (Hot Reloadable) ---
 async def initialize_rag_resources():
-    """Initializes or re-initializes the RAG components (Embedding Model & ChromaDB)."""
+    """Initializes or re-initializes RAG and Intent Engine."""
     log.info("--- Loading RAG Resources (Hot Reload) ---")
     try:
         os.environ["ANONYMIZED_TELEMETRY"] = "False"
         from langchain_huggingface import HuggingFaceEmbeddings
         from langchain_chroma import Chroma
         
-        # Load Model (Cached by library usually, but safe to re-init)
+        # 1. Load Model
         if not GlobalResources.embedding_model:
             log.info(f"Loading embedding model: {EMB_MODEL} ...")
             GlobalResources.embedding_model = HuggingFaceEmbeddings(model_name=EMB_MODEL)
         
+        # 2. Load ChromaDB
         log.info(f"Connecting to ChromaDB at {CHROMA_DIR} ...")
-        # Re-creating the client forces it to re-read the directory on disk
         GlobalResources.chroma_client = Chroma(
             persist_directory=CHROMA_DIR,
             embedding_function=GlobalResources.embedding_model
@@ -107,7 +142,12 @@ async def initialize_rag_resources():
             embedding_function=GlobalResources.embedding_model,
             persist_directory=CHROMA_DIR
         )
-        log.info("RAG Resources loaded successfully.")
+        
+        # 3. Load Intent Engine
+        from intent_engine import engine
+        await engine.load()
+        
+        log.info("RAG Resources & Intent Engine loaded successfully.")
     except Exception as e:
         log.critical(f"CRITICAL: Failed to load RAG resources: {e}")
         log.critical(traceback.format_exc())
@@ -115,7 +155,7 @@ async def initialize_rag_resources():
 # --- LIFESPAN (Startup Logic) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Load RAG (Vector DB)
+    # 1. Load RAG & Intents
     await initialize_rag_resources()
 
     # 2. Initialize Redis
@@ -186,9 +226,12 @@ def get_user_creds(user: Optional[str] = None, token: Optional[str] = None):
     return {"user": user, "ha_token": ha_token, "nc_pass": nc_pass}
 
 def load_system_prompt():
-    default = "You are a helpful AI assistant."
+    default = "You are a helpful AI assistant. No emojis."
     if os.path.exists(SYSTEM_PROMPT_FILE):
         try:
             with open(SYSTEM_PROMPT_FILE, "r") as f: return f.read().strip()
-        except: pass
+        except Exception as e:
+            log.error(f"Error loading system prompt from {SYSTEM_PROMPT_FILE}: {e}")
+    else:
+        log.warning(f"System prompt file not found at {SYSTEM_PROMPT_FILE}")
     return default

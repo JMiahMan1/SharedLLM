@@ -1,3 +1,4 @@
+# app/ingest_nextcloud.py
 import os
 import time
 import json
@@ -9,7 +10,7 @@ import io
 import tempfile
 import shutil
 from urllib.parse import urljoin, urlparse
-from typing import Optional
+from typing import Optional, List, Tuple, Dict, Set
 import hashlib
 import urllib3
 
@@ -20,75 +21,90 @@ try:
     from ebooklib import epub
     import mobi
     import html2text
+    import openpyxl # Added for XLSX support
 except ImportError as e:
-    print(
-        f"ERROR: Missing required ingestion library: {e}. Please update requirements.txt and rebuild."
-    )
+    print(f"ERROR: Missing required ingestion library: {e}. Please update requirements.txt and rebuild.")
     sys.exit(1)
-# ---------------------------------
 
-# Suppress the InsecureRequestWarning from 'requests' when using verify=False
+# Suppress SSL Warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # LangChain and Chroma Imports
-from langchain_core.documents import Document
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+try:
+    from langchain_core.documents import Document
+    from langchain_huggingface import HuggingFaceEmbeddings
+    from langchain_chroma import Chroma
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError as e:
+    print(f"CRITICAL: Missing AI dependencies: {e}")
+    sys.exit(1)
 
-# --- Configuration for Logging ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    stream=sys.stdout,
-)
-logger = logging.getLogger("NextcloudIngest")
-# ---------------------------------
-
-# Load .env for local runs
+# --- Configuration ---
 if os.getenv("DOCKER_ENV") != "1" and os.path.exists(".env"):
     from dotenv import load_dotenv
-
     load_dotenv(".env")
 
-# --- Environment Variables ---
 NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
 NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
 INGESTION_TEMP_DIR = os.getenv("INGESTION_TEMP_DIR", "/data/nextcloud_temp")
+LOG_FILE_PATH = "/data/nextcloud_ingest.log"
 
-# --- Ingestion Configuration ---
-PERSIST_FREQUENCY = 50
-WHITELIST_EXT = [".txt", ".pdf", ".docx", ".epub", ".md", ".mobi"]
-BLACKLIST_DIRS = ["Music", "Videos", "Photos", "Audio"]
+# Logic Configuration
+PERSIST_FREQUENCY = 20  # Save more frequently for rsync-style safety
+
+# File Categorization
+# Full Text Ingestion: These will be downloaded, read, chunked, and embedded.
+TEXT_EXTS = [".txt", ".pdf", ".docx", ".epub", ".md", ".mobi", ".csv", ".json", ".xlsx"]
+
+# Metadata Only Ingestion: These will NOT be downloaded. We only index their filename and path.
+MEDIA_EXTS = [".mp3", ".m4b", ".mp4", ".mkv", ".avi", ".flac", ".wav", ".mov", ".webm", ".ogg"]
+
+BLACKLIST_DIRS = ["Music", "Videos", "Photos", "Audio", "Thumbnails", "Preview", "Cache", "AppData", "Templates"]
 BLACKLIST_FULL_PATHS = ["Books/Audio"]
-# -----------------------------
+
+# --- Logging Setup ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(LOG_FILE_PATH)
+    ],
+    force=True
+)
+logger = logging.getLogger("NextcloudSync")
 
 if not NEXTCLOUD_URL or not NEXTCLOUD_USER or not NEXTCLOUD_PASS:
     logger.error("Nextcloud settings missing (NEXTCLOUD_URL, USER, or PASS)")
     sys.exit(1)
 
 NAMESPACES = {"d": "DAV:"}
-INGESTED_COUNT = 0
-
 
 # ----------------------
-# Text Extraction Helper Functions
+# Helper Functions
 # ----------------------
+
+def get_file_category(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in TEXT_EXTS: return "text"
+    if ext in MEDIA_EXTS: return "media"
+    return "unknown"
+
 def extract_text_from_epub(file_path: str) -> Optional[str]:
     try:
         book = epub.read_epub(file_path)
         all_text = []
         for item in book.get_items():
-            if item.get_type() == epub.ITEM_DOCUMENT:
+            if item.get_type() == ebooklib.ITEM_DOCUMENT:
                 html_content = item.get_content()
                 plain_text = html2text.html2text(html_content.decode("utf-8"))
                 all_text.append(plain_text)
         return "\n\n".join(all_text)
     except Exception as e:
-        logger.error("Failed to extract text from EPUB at %s: %s", file_path, e)
+        logger.error(f"Failed to extract text from EPUB at {file_path}: {e}")
         return None
-
 
 def extract_text_from_mobi(file_path: str) -> Optional[str]:
     tempdir = None
@@ -100,336 +116,314 @@ def extract_text_from_mobi(file_path: str) -> Optional[str]:
             return html2text.html2text(content)
         return None
     except Exception as e:
-        logger.error("Failed to extract text from MOBI at %s: %s", file_path, e)
+        logger.error(f"Failed to extract text from MOBI at {file_path}: {e}")
         return None
     finally:
         if tempdir and os.path.exists(tempdir):
             shutil.rmtree(tempdir)
 
+def extract_text_from_xlsx(file_path: str) -> Optional[str]:
+    try:
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        all_text = []
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            all_text.append(f"--- Sheet: {sheet_name} ---")
+            for row in sheet.iter_rows(values_only=True):
+                # Join non-None cells with spaces
+                row_text = " ".join([str(cell) for cell in row if cell is not None])
+                if row_text.strip():
+                    all_text.append(row_text)
+        return "\n".join(all_text)
+    except Exception as e:
+        logger.error(f"Failed to extract text from XLSX at {file_path}: {e}")
+        return None
 
 def extract_text_content(file_path: str) -> Optional[str]:
-    # Robustly strip, lower, and clean the extension from the file path
     ext = os.path.splitext(file_path)[1].lower().strip()
+    if not ext: return None
 
-    # Check for empty extension and assume failure for now
-    if not ext:
-        # This should no longer be hit with the new temp file naming logic
-        logger.warning(
-            "File extension is empty or non-existent for extraction at %s.", file_path
-        )
-        return None
-
-    if ext in [".txt", ".md"]:
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return f.read()
-        except:
-            with open(file_path, "r", encoding="latin-1", errors="ignore") as f:
-                return f.read()
-
-    elif ext == ".pdf":
-        try:
+    try:
+        if ext in [".txt", ".md", ".csv", ".json"]:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f: return f.read()
+            except UnicodeDecodeError:
+                with open(file_path, "r", encoding="latin-1", errors="ignore") as f: return f.read()
+        elif ext == ".pdf":
             reader = PdfReader(file_path)
-            text = ""
-            for page in reader.pages:
-                text += page.extract_text() or ""
-            return text
-        except Exception as e:
-            logger.error("Failed to extract text from PDF %s: %s", file_path, e)
-            return None
-
-    elif ext == ".docx":
-        try:
+            return "\n".join([page.extract_text() or "" for page in reader.pages])
+        elif ext == ".docx":
             document = DocxDocument(file_path)
             return "\n".join([paragraph.text for paragraph in document.paragraphs])
-        except Exception as e:
-            logger.error("Failed to extract text from DOCX %s: %s", file_path, e)
-            return None
-
-    elif ext == ".epub":
-        return extract_text_from_epub(file_path)
-
-    elif ext == ".mobi":
-        return extract_text_from_mobi(file_path)
-
-    else:
-        logger.warning("Unknown or unhandled extension %s for extraction.", ext)
-        return None
-
-
-# ----------------------
-# File Listing (WebDAV)
-# ----------------------
-
-
-def list_files_webdav(base_url: str, all_found_files, seen=None):
-    if seen is None:
-        seen = set()
-
-    try:
-        # Use verify=False for metadata check
-        resp = requests.request(
-            "PROPFIND",
-            base_url,
-            auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS),
-            headers={"Depth": "1"},
-            verify=False,
-            timeout=(10, 20),
-        )
-        resp.raise_for_status()
-
-        root = ET.fromstring(resp.content)
-        current_level_files = []
-
-        for r in root.findall("d:response", NAMESPACES):
-            href = r.find("d:href", NAMESPACES)
-            propstat = r.find("d:propstat", NAMESPACES)
-            if href is None or propstat is None:
-                continue
-
-            full_path = href.text.strip("/")
-            user_prefix = f"remote.php/dav/files/{NEXTCLOUD_USER}/"
-
-            if full_path.startswith(user_prefix):
-                relative_path = full_path[len(user_prefix) :].strip("/")
-            else:
-                relative_path = full_path.strip("/")
-
-            current_relative_dir = (
-                urlparse(base_url)
-                .path.strip("/")
-                .replace(user_prefix.strip("/"), "", 1)
-                .strip("/")
-            )
-
-            if relative_path == "" or relative_path == current_relative_dir:
-                continue
-
-            is_collection = (
-                propstat.find("d:prop/d:resourcetype/d:collection", NAMESPACES)
-                is not None
-            )
-
-            if is_collection:
-                dir_name = relative_path.split("/")[-1]
-
-                if relative_path in BLACKLIST_FULL_PATHS:
-                    logger.info("Skipping specific blacklisted path: %s", relative_path)
-                    continue
-
-                if dir_name in BLACKLIST_DIRS:
-                    logger.info("Skipping globally blacklisted directory: %s", dir_name)
-                    continue
-
-                subdir_url = urljoin(
-                    NEXTCLOUD_URL,
-                    f"/remote.php/dav/files/{NEXTCLOUD_USER}/{relative_path}/",
-                )
-                logger.info(
-                    "Entering directory: %s (WebDAV URL: %s)", relative_path, subdir_url
-                )
-
-                list_files_webdav(subdir_url, all_found_files, seen=seen)
-
-            else:
-                file_name = relative_path.split("/")[-1]
-                if any(file_name.lower().endswith(ext) for ext in WHITELIST_EXT):
-                    logger.info("Found file: %s", relative_path)
-                    current_level_files.append(relative_path)
-
-        all_found_files.extend(current_level_files)
-        return all_found_files
-
+        elif ext == ".xlsx":
+            return extract_text_from_xlsx(file_path)
+        elif ext == ".epub":
+            return extract_text_from_epub(file_path)
+        elif ext == ".mobi":
+            return extract_text_from_mobi(file_path)
+            
     except Exception as e:
-        logger.error("Error during PROPFIND/list_files_webdav at %s: %s", base_url, e)
-        return all_found_files
+        logger.error(f"Extraction error on {file_path}: {e}")
+    
+    return None
 
-
-# ----------------------
-# Main ingestion function
-# ----------------------
-def ingest_nextcloud_files():
+def list_files_webdav_iterative(start_url: str, found_files: Dict[str, Dict]):
     """
-    Fetches files, converts them via disk-streaming, and ingests them into Chroma one-by-one.
-    Includes idempotence check, memory safety, and proper cleanup.
+    Iteratively scans Nextcloud and populates found_files dict.
+    Format: { "relative/path": { "etag": "...", "category": "text/media" } }
     """
-    global INGESTED_COUNT
-    base_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/")
+    # Stack stores URLs to visit
+    stack = [start_url]
+    visited = set()
 
-    logger.info(
-        "Starting Nextcloud ingestion process (PRODUCTION MODE: SSL VERIFICATION DISABLED)."
-    )
+    logger.info(f"Starting Iterative WebDAV scan from: {start_url}")
 
-    # --- CRITICAL: Ensure temp directory exists and is writable ---
-    try:
-        if not os.path.exists(INGESTION_TEMP_DIR):
-            os.makedirs(INGESTION_TEMP_DIR)
-            logger.info("Created temporary ingestion directory: %s", INGESTION_TEMP_DIR)
-    except Exception as e:
-        logger.error(
-            "CRITICAL ERROR: Failed to create temporary directory %s. Check Docker volume permissions: %s",
-            INGESTION_TEMP_DIR,
-            e,
-        )
-        sys.exit(1)
-
-    # 1. Initialize ChromaDB
-    logger.info("Initializing Chroma store and embeddings...")
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-    vectordb = Chroma(
-        collection_name="nextcloud_docs",
-        embedding_function=embeddings,
-        persist_directory=CHROMA_DIR,
-    )
-
-    # 2. File Discovery
-    logger.info("Starting file discovery...")
-    all_files_to_ingest = []
-    list_files_webdav(base_url, all_files_to_ingest)
-    files = all_files_to_ingest
-
-    if not files:
-        logger.warning("No files found for ingestion.")
-        return
-
-    logger.info(
-        "Finished file discovery. Found a total of %d files to check/ingest.",
-        len(files),
-    )
-
-    # 3. Process Files One-by-One
-    for i, relative_path in enumerate(files, start=1):
-        file_url = urljoin(
-            NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/{relative_path}"
-        )
-        ext = os.path.splitext(relative_path)[1].lower()
-        temp_file_path = None
+    while stack:
+        current_url = stack.pop()
+        if current_url in visited: continue
+        visited.add(current_url)
 
         try:
-            # --- Idempotence Check ---
-            doc_id = hashlib.sha256(relative_path.encode()).hexdigest()
-
-            existing_docs = vectordb._collection.get(ids=[doc_id], include=[])
-            if existing_docs["ids"]:
-                logger.info(
-                    "[%d/%d] Skipping: %s - Already ingested.",
-                    i,
-                    len(files),
-                    relative_path,
-                )
+            resp = requests.request(
+                "PROPFIND", current_url, 
+                auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), 
+                headers={"Depth": "1"}, 
+                verify=False, timeout=30
+            )
+            
+            if resp.status_code == 404:
+                logger.warning(f"Path not found: {current_url}")
+                continue
+            if resp.status_code != 207:
+                logger.warning(f"WebDAV error {resp.status_code} at {current_url}")
                 continue
 
-            logger.info(
-                "[%d/%d] Ingesting: %s (Type: %s)",
-                i,
-                len(files),
-                relative_path,
-                ext.upper().strip("."),
-            )
+            root = ET.fromstring(resp.content)
+            
+            for r in root.findall("d:response", NAMESPACES):
+                href = r.find("d:href", NAMESPACES).text
+                prop = r.find("d:propstat/d:prop", NAMESPACES)
+                if not href or not prop: continue
+                
+                # Get ETag for Rsync-like comparison
+                etag_node = prop.find("d:getetag", NAMESPACES)
+                etag = etag_node.text.strip('"') if etag_node is not None else "unknown"
+                
+                # Decode and normalize path
+                href_decoded = requests.utils.unquote(href)
+                prefix = f"/remote.php/dav/files/{NEXTCLOUD_USER}/"
+                if prefix not in href_decoded: continue
+                
+                rel_path = href_decoded.split(prefix, 1)[1]
+                
+                # Determine absolute URL for this item
+                item_url = urljoin(NEXTCLOUD_URL, href)
+                
+                # Skip self
+                if item_url.rstrip('/') == current_url.rstrip('/'): continue
 
-            # --- Stream Download to Disk (Memory Safety) ---
-
-            # CRITICAL FIX: Generate a temp file name that includes the unique ID and the file's original extension.
-            # This ensures extraction libraries can identify the file type correctly.
-            unique_id_prefix = hashlib.sha256(os.urandom(16)).hexdigest()[:8]
-            file_name_with_ext = os.path.basename(relative_path)
-            temp_file_path = os.path.join(
-                INGESTION_TEMP_DIR, f"{unique_id_prefix}_{file_name_with_ext}"
-            )
-
-            # Stream the download directly to the path with the extension
-            # SSL FIX: Added verify=False
-            with requests.get(
-                file_url,
-                auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS),
-                stream=True,
-                verify=False,
-                timeout=(30, 180),
-            ) as r:
-                r.raise_for_status()
-                with open(temp_file_path, "wb") as f:
-                    # Chunk the file to disk, avoiding memory load
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-
-            # Re-check file size after download: If it's still 0, raise an error immediately
-            file_size = os.path.getsize(temp_file_path)
-            if file_size == 0:
-                raise IOError(
-                    f"Downloaded file {relative_path} is 0 bytes. Check Nextcloud permissions/WebDAV status."
-                )
-
-            logger.info("DEBUG: Download successful. File size: %s bytes.", file_size)
-
-            # --- Conversion/Extraction from Disk ---
-            # This now works because temp_file_path has the correct extension!
-            text_content = extract_text_content(temp_file_path)
-
-            if not text_content or not text_content.strip():
-                logger.warning(
-                    "Extracted content empty or failed for file: %s", relative_path
-                )
-                continue
-
-            # --- Ingestion to ChromaDB ---
-            doc = Document(
-                page_content=text_content,
-                metadata={
-                    "source": "nextcloud",
-                    "path": relative_path,
-                    "type": ext.strip("."),
-                },
-            )
-
-            logger.info(
-                "DEBUG: Prepared document with ID %s. Content length: %d. Attempting add to Chroma...",
-                doc_id,
-                len(doc.page_content),
-            )
-
-            vectordb.add_documents(documents=[doc], ids=[doc_id])
-            INGESTED_COUNT += 1
-            logger.info(
-                "SUCCESS: Document for %s added and indexed. Total added in this run: %d",
-                relative_path,
-                INGESTED_COUNT,
-            )
-
-            # --- Persistence/Cleanup Frequency ---
-            if INGESTED_COUNT % PERSIST_FREQUENCY == 0:
-                vectordb.persist()
-                logger.info("Persistence checkpoint reached. Saved data to disk.")
-
-        except requests.exceptions.Timeout:
-            logger.error("Timeout fetching %s", relative_path)
-        except requests.exceptions.HTTPError as e:
-            logger.error("HTTP %s fetching %s", e.response.status_code, relative_path)
-        except IOError as e:
-            # Handle the specific 0-byte file check error
-            logger.error("IO Error: %s", e)
+                is_collection = prop.find("d:resourcetype/d:collection", NAMESPACES) is not None
+                
+                if is_collection:
+                    dir_name = rel_path.strip("/").split("/")[-1]
+                    if rel_path.strip("/") in BLACKLIST_FULL_PATHS: continue
+                    if dir_name in BLACKLIST_DIRS: continue
+                    
+                    if not item_url.endswith("/"): item_url += "/"
+                    stack.append(item_url)
+                else:
+                    cat = get_file_category(rel_path)
+                    if cat != "unknown":
+                        found_files[rel_path] = {"etag": etag, "category": cat}
+                        
         except Exception as e:
-            # Log the full traceback for any other unexpected error
-            logger.error(
-                "Unexpected error processing %s: %s", relative_path, e, exc_info=True
-            )
-        finally:
-            # --- CRITICAL CLEANUP ---
-            if temp_file_path and os.path.exists(temp_file_path):
-                os.remove(temp_file_path)  # Delete the downloaded file immediately
+            logger.error(f"WebDAV Error at {current_url}: {e}")
 
-    # --- Final Persistence ---
-    vectordb.persist()
-    logger.info(
-        "Nextcloud ingestion complete. Total Documents added in this run: %d. Final document count: %d",
-        INGESTED_COUNT,
-        vectordb._collection.count(),
+# ----------------------
+# Synchronization Logic
+# ----------------------
+def get_db_state(vectordb) -> Dict[str, str]:
+    """
+    Fetches all documents from Chroma to build a current state map.
+    Returns: { "relative/path": "etag" }
+    """
+    logger.info("Fetching current database state (this may take a moment)...")
+    try:
+        # We fetch only metadata to be fast
+        results = vectordb.get(include=["metadatas"])
+        state = {}
+        for meta in results["metadatas"]:
+            if meta and "source" in meta:
+                # We prioritize the ETag stored in metadata if available
+                etag = meta.get("etag", "unknown")
+                state[meta["source"]] = etag
+        return state
+    except Exception as e:
+        logger.error(f"Failed to fetch DB state: {e}")
+        return {}
+
+def sync_nextcloud_files():
+    if not os.path.exists(INGESTION_TEMP_DIR): os.makedirs(INGESTION_TEMP_DIR)
+
+    logger.info(f"--- Starting Rsync-Style Nextcloud Ingestion ---")
+    logger.info(f"Logs: {LOG_FILE_PATH}")
+
+    # 1. Initialize DB
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    vectordb = Chroma(
+        collection_name="nextcloud_docs", 
+        embedding_function=embeddings, 
+        persist_directory=CHROMA_DIR
     )
 
+    # 2. Build State Maps
+    db_state = get_db_state(vectordb)
+    logger.info(f"Database currently holds chunks for {len(set(db_state.keys()))} unique files.")
 
-# ----------------------
-# CLI execution
-# ----------------------
+    nc_state = {}
+    root_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/")
+    logger.info("Scanning Nextcloud file tree (Iterative)...")
+    
+    list_files_webdav_iterative(root_url, nc_state)
+    
+    logger.info(f"Nextcloud scan complete. Found {len(nc_state)} candidate files.")
+
+    # 3. Calculate Diff
+    to_delete = []
+    to_ingest = [] # Tuple: (path, category, etag)
+
+    # Detect Deletions (In DB but not in NC)
+    for path in db_state:
+        if path not in nc_state:
+            to_delete.append(path)
+
+    # Detect Adds and Updates
+    for path, info in nc_state.items():
+        nc_etag = info["etag"]
+        db_etag = db_state.get(path)
+
+        if db_etag is None:
+            # New File
+            to_ingest.append((path, info["category"], nc_etag))
+        elif db_etag != nc_etag:
+            # Modified File
+            logger.info(f"File changed: {path} (DB: {db_etag} -> NC: {nc_etag})")
+            to_delete.append(path) # Delete old chunks first
+            to_ingest.append((path, info["category"], nc_etag)) # Then re-ingest
+        else:
+            # Unchanged - Skip
+            pass
+    
+    # Deduplicate deletes
+    to_delete = list(set(to_delete))
+
+    logger.info(f"Sync Plan: {len(to_delete)} to delete, {len(to_ingest)} to ingest/update.")
+
+    # 4. Execute Deletions
+    if to_delete:
+        logger.info(f"Processing {len(to_delete)} deletions...")
+        for path in to_delete:
+            try:
+                vectordb._collection.delete(where={"source": path})
+                logger.info(f"Deleted data for: {path}")
+            except Exception as e:
+                logger.error(f"Failed to delete {path}: {e}")
+
+    # 5. Execute Ingestion
+    if not to_ingest:
+        logger.info("No new or modified files to ingest. Sync complete.")
+        return
+
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200, length_function=len)
+    
+    processed_count = 0
+    
+    for i, (rel_path, category, etag) in enumerate(to_ingest, start=1):
+        doc_id_base = hashlib.sha256(rel_path.encode()).hexdigest()
+        
+        # --- MEDIA PATH (Metadata Only) ---
+        if category == "media":
+            try:
+                fname = os.path.basename(rel_path)
+                logger.info(f"[{i}/{len(to_ingest)}] Indexing Media: {fname}")
+                
+                meta_doc = Document(
+                    page_content=f"Media File: {fname}\nPath: {rel_path}\nType: {category}\nSource: Nextcloud",
+                    metadata={
+                        "source": rel_path, 
+                        "filename": fname,
+                        "type": "media",
+                        "category": "audio_video",
+                        "etag": etag, # Critical for Sync
+                        "chunk": 0
+                    }
+                )
+                vectordb.add_documents([meta_doc])
+                processed_count += 1
+            except Exception as e:
+                logger.error(f"Failed media index {rel_path}: {e}")
+
+        # --- TEXT PATH (Download & Chunk) ---
+        elif category == "text":
+            logger.info(f"[{i}/{len(to_ingest)}] Processing Text: {rel_path}")
+            
+            encoded_path = requests.utils.quote(rel_path)
+            file_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/{encoded_path}")
+            temp_filename = f"{doc_id_base}_{os.path.basename(rel_path)}"
+            temp_path = os.path.join(INGESTION_TEMP_DIR, temp_filename)
+            
+            try:
+                with requests.get(file_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), stream=True, verify=False, timeout=120) as r:
+                    r.raise_for_status()
+                    with open(temp_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                
+                content = extract_text_content(temp_path)
+                
+                if content and len(content.strip()) > 50:
+                    chunks = text_splitter.split_text(content)
+                    docs_to_add = []
+                    for idx, chunk_text in enumerate(chunks):
+                        docs_to_add.append(Document(
+                            page_content=chunk_text,
+                            metadata={
+                                "source": rel_path,
+                                "filename": os.path.basename(rel_path),
+                                "type": "document",
+                                "chunk_index": idx,
+                                "total_chunks": len(chunks),
+                                "etag": etag # Critical for Sync
+                            }
+                        ))
+                    
+                    if docs_to_add:
+                        vectordb.add_documents(docs_to_add)
+                        processed_count += 1
+                        logger.info(f"-> Ingested {len(chunks)} chunks.")
+                else:
+                    logger.warning(f"Skipping empty/unreadable text: {rel_path}")
+
+            except Exception as e:
+                logger.error(f"Error processing {rel_path}: {e}")
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        # --- Periodic Persist ---
+        if processed_count % PERSIST_FREQUENCY == 0:
+            try:
+                if hasattr(vectordb, 'persist'): 
+                    vectordb.persist()
+                    logger.info(f"Checkpoint saved. ({processed_count} items processed)")
+            except: pass
+
+    # Final Save
+    try:
+        if hasattr(vectordb, 'persist'): vectordb.persist()
+    except: pass
+    
+    logger.info(f"Sync Run Complete. Updated/Added: {processed_count}. Deleted: {len(to_delete)}.")
+
 if __name__ == "__main__":
-    ingest_nextcloud_files()
+    sync_nextcloud_files()

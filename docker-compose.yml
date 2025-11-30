@@ -22,14 +22,18 @@ services:
       - NEXTCLOUD_PASS=${NEXTCLOUD_PASS}
       - WHOOGLE_URL=${WHOOGLE_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - TZ=America/Phoenix
     
     # --- Corrected Volumes Block (Merged) ---
     volumes:
+      - /etc/localtime:/etc/localtime:ro
       - ./app:/app:z
       - ./data:/data:z
       - rag_chroma:/data/chroma_db:z
       # Mounting the system prompt file separately for clarity
-      - ./system_prompt.txt:/app/data/system_prompt.txt 
+      - ./app/data/system_prompt.txt:/app/data/system_prompt.txt 
       # Adding the necessary temp dir for Nextcloud ingestion
       - ./data/nextcloud_temp:/data/nextcloud_temp:z
       
