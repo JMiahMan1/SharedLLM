@@ -147,12 +147,19 @@ async def _handle_single_command(query: Union[str, Dict], user_creds: Dict[str, 
     q_low = query.lower().strip()
     
     # --- CRITICAL: REGEX INTENT OVERRIDES ---
-    # Bypass vector engine for obvious app/nav commands to ensure smart routing triggers
+    # Bypass vector engine for obvious app/nav/media commands to ensure smart routing triggers
     regex_intent = None
     if re.search(r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)", q_low):
         regex_intent = "open_app"
     elif re.search(r"\b(play)\b", q_low):
         regex_intent = "play_media"
+    elif re.search(r"\b(stop|pause)\b", q_low):
+        regex_intent = "stop_media"
+    elif re.search(r"\b(skip|next)\b", q_low):
+        regex_intent = "media_next"
+    elif re.search(r"\b(previous|back|prev)\b", q_low):
+        if "go back" in q_low or "back" == q_low: regex_intent = "nav_back"
+        else: regex_intent = "media_previous"
     elif re.search(r"\b(scroll|move|go)\s+(up|down|left|right|back|home)", q_low):
         if "up" in q_low: regex_intent = "nav_up"
         elif "down" in q_low: regex_intent = "nav_down"
@@ -221,13 +228,15 @@ async def _handle_single_command(query: Union[str, Dict], user_creds: Dict[str, 
         "nav_enter", "nav_back", "nav_home"
     ]
     
-    # Power Regex Fallback
+    # Power/Media Regex Fallback
     if not intent:
         if "turn on" in q_low: intent = "turn_on"
         elif "turn off" in q_low: intent = "turn_off"
         elif "play" in q_low: intent = "play_media"
-        elif "stop" in q_low: intent = "stop_media"
+        elif any(x in q_low for x in ["stop", "pause"]): intent = "stop_media"
         elif "open" in q_low: intent = "open_app"
+        elif any(x in q_low for x in ["skip", "next"]): intent = "media_next"
+        elif any(x in q_low for x in ["previous", "back"]): intent = "media_previous"
 
     if intent in media_intents:
         # Delegate to media_ops for Smart Routing (TV vs Music)
