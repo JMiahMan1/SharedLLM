@@ -1,290 +1,216 @@
-# app/logic/media_ops.py
-import re
-import asyncio
+# ha_ingest.py
+import os
 import requests
-from settings import log, run_blocking, HA_URL
-from .utils import safe_similarity_search
+import json
+import logging
+import sys
+import asyncio
+from typing import Dict, Any, List, Tuple
 
-# App Package IDs for Android TV Smart Routing
-APP_PACKAGES = {
-    "youtube": "com.google.android.youtube.tv",
-    "netflix": "com.netflix.ninja",
-    "disney": "com.disney.disneyplus",
-    "disney+": "com.disney.disneyplus",
-    "spotify": "com.spotify.tv.android",
-    "prime video": "com.amazon.amazonvideo.livingroom",
-    "amazon prime": "com.amazon.amazonvideo.livingroom",
-    "plex": "com.plexapp.android",
-    "twitch": "tv.twitch.android.app",
-    "kodi": "org.xbmc.kodi",
-    "hulu": "com.hulu.livingroomplus",
-    "hbo": "com.hbo.hbonow",
-    "max": "com.wbd.stream"
-}
+# LangChain and Chroma Imports
+try:
+    from langchain_core.documents import Document
+    from langchain_huggingface import HuggingFaceEmbeddings
+    from langchain_chroma import Chroma
+except ImportError as e:
+    print(f"CRITICAL: Missing AI dependencies: {e}")
+    sys.exit(1)
 
-def _get_last_entity_key(user: str) -> str:
-    return f"rag:last_entity:{user}"
-
-def _set_last_entity(redis_client, user: str, entity_id: str):
-    """Caches the last used entity ID for context awareness (24h TTL)."""
-    if redis_client and entity_id:
-        redis_client.setex(_get_last_entity_key(user), 86400, entity_id)
-
-def get_last_entity(redis_client, user: str) -> str:
-    """Retrieves the last used entity ID from cache."""
-    if redis_client:
-        val = redis_client.get(_get_last_entity_key(user))
-        return val.decode('utf-8') if isinstance(val, bytes) else val
-    return None
-
-async def get_entity_state(entity_id: str, user_creds: dict) -> str:
-    """Fetches the current state of an entity from Home Assistant."""
-    if not HA_URL: return "unknown"
+# --- Configuration (using settings module conventions) ---
+try:
+    # Assuming these are available via settings.py in the running environment
+    from settings import (
+        HA_URL, HA_ENV_TOKEN, CHROMA_DIR, EMB_MODEL, get_user_creds, run_blocking
+    )
+except ImportError:
+    # Fallback/Placeholder definitions for non-integrated testing
+    HA_URL = os.getenv("HA_URL")
+    HA_ENV_TOKEN = os.getenv("HA_TOKEN")
+    CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
+    EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
     
-    url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
-    headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
+    def get_user_creds(user=None, token=None):
+        return {"user": user or "Admin", "ha_token": token or HA_ENV_TOKEN}
     
+    # Simple synchronous run_blocking for non-integrated execution
+    def run_blocking(fn, *args, **kwargs):
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(fn, *args, **kwargs).result()
+
+# --- Logging Setup ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True
+)
+logger = logging.getLogger("HA_Ingest")
+
+# ----------------------
+# Core HA Data Fetching
+# ----------------------
+
+def fetch_ha_data() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Fetches all states, device registry, and entity registry info from Home Assistant."""
+    creds = get_user_creds()
+    token = creds.get("ha_token")
+
+    if not HA_URL or not token:
+        logger.error("HA_URL or HA_TOKEN not configured.")
+        return {}, {}, {}
+    
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    
+    def fetch_endpoint(endpoint):
+        url = f"{HA_URL.rstrip('/')}/api/{endpoint}"
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+        logger.warning(f"Failed to fetch {endpoint}: HTTP {resp.status_code}")
+        return None
+
+    states = fetch_endpoint("states") or []
+    device_registry_list = fetch_endpoint("config/device_registry/list") or []
+    entity_registry_list = fetch_endpoint("config/entity_registry/list") or []
+
+    device_registry = {dev["id"]: dev for dev in device_registry_list if "id" in dev}
+    entity_registry = {ent["entity_id"]: ent for ent in entity_registry_list if "entity_id" in ent}
+
+    return states, device_registry, entity_registry
+
+def get_device_info(entity_id: str, device_registry: Dict[str, Any], entity_registry: Dict[str, Any]) -> Tuple[str, str]:
+    """Retrieves device name and integration from registry data."""
+    
+    registry_entry = entity_registry.get(entity_id, {})
+    device_id = registry_entry.get("device_id")
+    platform = registry_entry.get("platform", "unknown")
+
+    integration = platform
+    device_name = ""
+    
+    if device_id and device_id in device_registry:
+        device = device_registry[device_id]
+        # Use a combination of identifiers for robust integration name
+        integration = device.get("manufacturer", "") + " " + device.get("model", "")
+        device_name = device.get("name_by_user") or device.get("name") or ""
+        
+        # Override integration if the platform name is more specific (like music_assistant)
+        if platform and "integration" not in integration.lower():
+             integration = platform
+
+    # If integration is still a simple platform (e.g., 'template'), keep it.
+    if not integration.strip():
+        integration = platform
+        
+    return device_name, integration.strip()
+
+# ----------------------
+# Ingestion Main
+# ----------------------
+
+def ingest_ha_metadata():
+    logger.info("--- Starting Home Assistant Metadata Ingestion ---")
+
+    # 1. Initialize DB and Embeddings
+    embeddings = HuggingFaceEmbeddings(model_name=EMB_MODEL)
+    
+    # TARGET COLLECTION: ha_sensors (Explicitly separate)
+    vectordb = Chroma(
+        collection_name="ha_sensors", 
+        embedding_function=embeddings, 
+        persist_directory=CHROMA_DIR
+    )
+    
+    # 2. Fetch HA Data
+    states, device_registry, entity_registry = fetch_ha_data()
+    
+    if not states:
+        logger.error("Skipping ingestion due to missing HA state data.")
+        return
+
+    # 3. Process and Chunk Documents
+    docs_to_add = []
+    
+    # Clear existing data
     try:
-        def _fetch():
-            return requests.get(url, headers=headers, timeout=2.0)
-        
-        r = await run_blocking(_fetch)
-        if r.status_code == 200:
-            return r.json().get("state", "unknown")
+        vectordb._collection.delete(where={})
+        logger.info(f"Cleared existing data from ha_sensors collection.")
     except Exception as e:
-        log.error(f"State fetch error for {entity_id}: {e}")
-    
-    return "unknown"
+        logger.warning(f"Failed to clear collection: {e}")
 
-async def execute_ha_service(domain, service, entity_id, user_creds, service_data=None, redis_client=None):
-    """
-    Executes a Home Assistant Service Call (e.g., turn_on, play_media).
-    Retries up to 3 times on failure.
-    """
-    if not HA_URL: return "Error: Home Assistant URL not configured."
+    # Counter for entities processed
+    skipped_count = 0
+    ingested_count = 0
 
-    url = f"{HA_URL.rstrip('/')}/api/services/{domain}/{service}"
-    headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
-    payload = {"entity_id": entity_id, **(service_data or {})}
-    
-    log.info(f"EXEC HA: {domain}.{service} on {entity_id} | Data: {service_data}")
-    
-    last_err = None
-    for i in range(3):
-        try:
-            def _post():
-                return requests.post(url, json=payload, headers=headers, timeout=5.0)
+    for state_obj in states:
+        entity_id = state_obj["entity_id"]
+        attributes = state_obj.get("attributes", {})
+        current_state = state_obj.get("state", "unknown")
+        
+        # Filter 1: Skip based on unwanted entity types (like groups/zones)
+        if entity_id.startswith(("group.", "zone.", "person.", "sun.")):
+            skipped_count += 1
+            continue
+        
+        # Filter 2: Skip inactive/unhelpful states
+        if current_state in ["unavailable", "unknown", "none", "uninitialized"]:
+            skipped_count += 1
+            continue
             
-            r = await run_blocking(_post)
-            
-            if r.status_code < 400:
-                # Success! Cache this entity as the "Active Context"
-                _set_last_entity(redis_client, user_creds.get("user"), entity_id)
-                
-                # Get friendly name for the response to make it natural
-                friendly_name = entity_id
-                try:
-                     state_url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
-                     def _get_name():
-                         return requests.get(state_url, headers=headers, timeout=1.0)
-                     
-                     r_state = await run_blocking(_get_name)
-                     if r_state.status_code == 200:
-                         friendly_name = r_state.json().get("attributes", {}).get("friendly_name", entity_id)
-                except: pass
-                
-                verb = service.replace("_", " ")
-                return f"Sent command to {verb} the {friendly_name}."
-            
-            last_err = f"HTTP {r.status_code}: {r.text}"
-            
-        except Exception as e:
-            last_err = str(e)
+        # Get enriched metadata
+        device_name, integration = get_device_info(entity_id, device_registry, entity_registry)
         
-        # Wait briefly before retry
-        await asyncio.sleep(0.5)
-    
-    log.error(f"Failed to execute HA command: {last_err}")
-    return f"Failed: {last_err}"
+        # --- MUSIC ASSISTANT SELF-CORRECTION (CRITICAL FIX) ---
+        # If the integration is unknown but the entity has MA attributes, force the integration name.
+        if "music_assistant" not in integration.lower() and (
+            "mass_player_type" in attributes or "active_queue" in attributes
+        ):
+            logger.info(f"Self-Correcting: {entity_id} detected as Music Assistant player via attributes.")
+            integration = "music_assistant"
 
-async def smart_resolve_entity(query_name: str, intent: str, ha_collection) -> tuple:
-    """
-    Finds the BEST entity ID for a given name and intent.
-    Returns (entity_id, integration_platform)
-    """
-    if not ha_collection: return (None, None)
-
-    # 1. Find all candidates via Vector Search
-    docs = await run_blocking(lambda: safe_similarity_search(ha_collection, query_name, k=5))
-    if not docs: return (None, None)
-
-    candidates = []
-    for d in docs:
-        eid = d.metadata.get("entity_id")
-        integration = d.metadata.get("integration", "unknown")
-        if eid:
-            candidates.append((eid, integration))
-    
-    if not candidates: return (None, None)
-    
-    # 2. Determine Preference based on Intent
-    preferred_type = "generic"
-    
-    if intent == "play_media":
-        # If request contains an App Name -> Prefer Android TV (non-mass)
-        is_app_request = any(app in query_name.lower() for app in APP_PACKAGES)
-        if is_app_request:
-             preferred_type = "android"
-        else:
-             # If generic Play -> Prefer Music Assistant for better queuing
-             preferred_type = "mass"
-             
-    elif intent in ["turn_on", "turn_off", "toggle", "nav_up", "nav_down", "nav_enter", "nav_home", "nav_back"]:
-        # Power/Nav -> Prefer Remote or Android TV
-        preferred_type = "remote"
-
-    log.info(f"Smart Resolving '{query_name}' for intent '{intent}'. Preference: {preferred_type}. Candidates: {candidates}")
-
-    # 3. Select Best Match from Candidates
-    best_match = candidates[0] # Default to first result if no specific preference met
-    
-    for eid, integration in candidates:
-        # Music Assistant Preference
-        if preferred_type == "mass":
-            if "music_assistant" in integration or "mass" in integration:
-                return (eid, integration) # Found specific match
+        # Build document content for similarity search
+        friendly_name = attributes.get("friendly_name", device_name or entity_id.split('.')[1])
         
-        # Android/Remote Preference
-        elif preferred_type == "remote" or preferred_type == "android":
-            if "androidtv" in integration or "remote" in eid.split('.')[0]:
-                return (eid, integration)
-                
-    return best_match
+        # Content = all terms a user might use to reference the entity.
+        content = f"{friendly_name} ({entity_id}) is a {integration} device."
+        if device_name and device_name not in friendly_name:
+             content += f" Associated with device: {device_name}."
 
-async def handle_media_command(intent: str, query: str, entity_id: str, user_creds: dict, ha_collection, redis_client):
-    """
-    Main entry point for routing media/power commands.
-    """
-    q_low = query.lower()
-    
-    # 1. Resolve Target Entity
-    # If entity_id is passed (from direct match), use it. Otherwise resolve from query text.
-    integration = "unknown"
+        # Filter out MA-specific attributes from the general searchable list to keep content clean
+        searchable_attrs = [
+            f"{k}: {v}" for k, v in attributes.items() 
+            if k not in ["friendly_name", "icon", "supported_features", "unit_of_measurement", "mass_player_type", "active_queue"] and v is not None and len(str(v)) < 50
+        ]
+        if searchable_attrs:
+            content += " Key attributes: " + ", ".join(searchable_attrs)
 
-    if not entity_id:
-        target_name = q_low
-        # Strip action phrases to isolate the device name
-        for phrase in ["turn on", "turn off", "toggle", "play", "stop", "the", "please", " on ", "open", "launch"]:
-            target_name = target_name.replace(phrase, " ")
-        target_name = target_name.strip()
-
-        if not target_name:
-             # Try Context (Last used entity)
-             entity_id = get_last_entity(redis_client, user_creds.get("user"))
-             if not entity_id: return "Could not determine which device you mean. Please specify."
-        else:
-            # Use Smart Resolution
-            entity_id, integration = await smart_resolve_entity(target_name, intent, ha_collection)
-            if not entity_id: return f"I couldn't find a device named '{target_name}'."
-
-    # --- EXECUTION ROUTING ---
-    domain = entity_id.split('.')[0]
-    service = intent
-    service_data = {}
-
-    # A. Power & Navigation (Remote / Switch / Light)
-    if intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
-        
-        # Handle Navigation (Remote specific)
-        if intent.startswith("nav_"):
-            cmd_map = {
-                "nav_up": "DPAD_UP", "nav_down": "DPAD_DOWN", 
-                "nav_left": "DPAD_LEFT", "nav_right": "DPAD_RIGHT",
-                "nav_enter": "DPAD_CENTER", "nav_back": "BACK", 
-                "nav_home": "HOME"
-            }
-            
-            cmd = cmd_map.get(intent)
-            if cmd:
-                service = "send_command"
-                domain = "remote"
-                service_data = {"command": cmd}
-                
-                # If we resolved a media_player, try to guess the remote entity
-                if "media_player" in entity_id:
-                    # Heuristic: Replace domain and try
-                    possible_remote = entity_id.replace("media_player", "remote")
-                    entity_id = possible_remote
-        
-        # Handle Power (Generic)
-        elif domain == "remote":
-             # Map turn_on -> remote.turn_on
-             service = "turn_" + intent.split("_")[1] 
-        elif domain not in ["light", "switch", "media_player"]:
-             # Fallback for other domains
-             domain = "homeassistant"
-
-        return await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)
-
-    # B. App Launching / Media Playback
-    if intent == "play_media" or intent == "open_app":
-        domain = "media_player"
-        
-        # Check for App Launch Request
-        target_pkg = None
-        for app, pkg in APP_PACKAGES.items():
-            if app in q_low:
-                target_pkg = pkg
-                break
-        
-        if target_pkg:
-            # Android TV App Launch
-            # Ensure we don't send App commands to Music Assistant entities
-            if "music_assistant" in integration or "mass" in entity_id:
-                 # Try to strip mass prefix to find the real player
-                 entity_id = entity_id.replace("mass_", "").replace("_ma", "")
-            
-            service_data = {
-                "media_content_id": target_pkg,
-                "media_content_type": "app"
-            }
-            return await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
-
-        # Generic Media / Music
-        clean_title = q_low.replace("play", "").replace(" on ", "").strip()
-        
-        # Determine Content Type
-        # If it's a TV/Chromecast, treat as Video unless specified
-        ctype = "video" if any(x in entity_id.lower() for x in ["tv", "chromecast", "shield"]) else "music"
-        
-        # URL Detection
-        if "http" in clean_title:
-            ctype = "url"
-            
-        service_data = {
-            "media_content_id": clean_title,
-            "media_content_type": ctype,
-            "enqueue": "play"
+        # Build Metadata payload
+        metadata = {
+            "entity_id": entity_id,
+            "domain": entity_id.split('.')[0],
+            "friendly_name": friendly_name,
+            "integration": integration, # CRITICAL for Music Assistant logic
+            "device_name": device_name,
+            "state": current_state
         }
-        
-        # Auto-Wake: If device is off, try to turn it on first
-        state = await get_entity_state(entity_id, user_creds)
-        if state in ["off", "unavailable"]:
-             await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
-             # Wait for boot (TVs are slow)
-             await asyncio.sleep(4.0)
-             
-        return await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
 
-    # C. Transport Controls
-    if intent == "stop_media":
-         # Maps to media_stop
-         return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
-         
-    if intent == "media_next":
-         return await execute_ha_service("media_player", "media_next_track", entity_id, user_creds, {}, redis_client)
+        docs_to_add.append(Document(page_content=content, metadata=metadata))
+        ingested_count += 1
 
-    if intent == "media_previous":
-         return await execute_ha_service("media_player", "media_previous_track", entity_id, user_creds, {}, redis_client)
+    # 4. Add Documents to Chroma
+    if docs_to_add:
+        try:
+            vectordb.add_documents(docs_to_add)
+            logger.info(f"Successfully ingested {ingested_count} ACTIVE Home Assistant entities.")
+            logger.info(f"Skipped {skipped_count} inactive entities.")
+            
+            # 5. Persist
+            if hasattr(vectordb, 'persist'):
+                vectordb.persist()
+                logger.info("Chroma database persisted.")
+        except Exception as e:
+            logger.critical(f"CRITICAL: Failed to add documents to Chroma: {e}")
 
-    return None
+if __name__ == "__main__":
+    ingest_ha_metadata()
