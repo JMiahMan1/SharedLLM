@@ -5,7 +5,7 @@ import subprocess
 import requests
 from typing import List, Optional, Dict, Any
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -21,14 +21,16 @@ from logic import (
     call_ollama_generate, call_openai_chat, 
     get_ha_context, get_rag_context, update_history
 )
+from intent_engine import engine as intent_engine
 
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# Models
+# --- Models ---
 class ChatMessage(BaseModel):
     role: str
     content: str
+
 class CompletionRequest(BaseModel):
     model: Optional[str] = DEFAULT_MODEL
     messages: Optional[List[ChatMessage]] = None
@@ -36,17 +38,24 @@ class CompletionRequest(BaseModel):
     user: Optional[str] = None
     stream: Optional[bool] = False
     use_openai: Optional[bool] = False
+
 class GenerateRequest(BaseModel):
     prompt: str
     model: Optional[str] = DEFAULT_MODEL
     stream: Optional[bool] = False
     use_openai: Optional[bool] = False
+
 class UpsertRagRequest(BaseModel):
     id: Optional[str] = None
     text: str
     metadata: Optional[Dict[str, Any]] = None
 
+class LearnRequest(BaseModel):
+    phrase: str
+    intent: str
+
 # --- Endpoints ---
+
 @app.post("/v1/chat/completions")
 @app.post("/api/chat")
 @app.post("/chat/completions")
@@ -98,6 +107,28 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
         "done": True
     }
 
+# --- Intent Engine Endpoints ---
+@app.post("/api/intent/learn")
+async def intent_learn(req: LearnRequest):
+    """Teach the AI a new phrase -> intent mapping."""
+    success = await intent_engine.learn(req.phrase, req.intent)
+    if success:
+        return {"status": "learned", "msg": f"Mapped '{req.phrase}' to '{req.intent}'"}
+    return {"status": "exists", "msg": "Phrase already mapped or invalid intent."}
+
+@app.get("/api/intent/export")
+async def intent_export():
+    """Force save the phrasebook to disk."""
+    if await intent_engine.export():
+        return {"status": "ok", "msg": "Phrasebook saved to disk."}
+    raise HTTPException(500, "Export failed")
+
+@app.get("/api/intent/list")
+async def intent_list():
+    """List all available intents."""
+    return {"intents": intent_engine.get_valid_intents()}
+
+# --- HA Proxy ---
 @app.get("/api/ha/state/{entity_id}")
 async def get_ha_state_proxy(entity_id: str, request: Request):
     creds = get_user_creds(request.headers.get("X-RAG-User") or "admin")
@@ -121,6 +152,7 @@ async def rag_query(body: CompletionRequest, request: Request):
     nc = await get_rag_context(refined)
     return {"response": f"Context:\n{ha}\n{nc}"}
 
+# --- System & Models ---
 @app.get("/v1/models")
 @app.get("/models")
 @app.get("/api/tags")
@@ -147,31 +179,58 @@ async def generate(req: GenerateRequest):
         "done": True
     }
 
+# --- Ingestion Endpoints with Background Tasks ---
 def _run_sync(path):
-    try: return subprocess.run(["python", path], capture_output=True, text=True).stdout
-    except: return "Error"
+    """Runs a python script and captures both stdout and stderr."""
+    try: 
+        result = subprocess.run(
+            ["python", path], 
+            capture_output=True, 
+            text=True
+        )
+        output = result.stdout
+        if result.stderr:
+            output += f"\n[STDERR]\n{result.stderr}"
+        return output
+    except Exception as e: 
+        return f"Error executing subprocess: {e}"
 
-# --- Ingestion Endpoints with Hot Reload ---
+async def _run_background_ingest(script_name: str):
+    """Helper to run ingestion script in thread pool then reload RAG."""
+    log.info(f"--- Started Background Ingestion: {script_name} ---")
+    output = await run_blocking(_run_sync, f"/app/{script_name}")
+    
+    # Log output for debugging
+    log.info(f"--- {script_name} Finished ---")
+    if len(output) > 1000:
+        log.info(f"Output snippet: {output[:500]} ... {output[-500:]}")
+    else:
+        log.info(f"Output: {output}")
+
+    if "[STDERR]" in output or "CRITICAL" in output:
+        log.error(f"Ingestion {script_name} reported errors. Check logs above.")
+    
+    log.info("Reloading RAG Resources...")
+    await initialize_rag_resources()
+    log.info("RAG Resources Reloaded.")
+
 @app.post("/ingest/ha")
-async def ing_ha(): 
-    res = await run_blocking(_run_sync, "/app/ha_ingest.py")
-    await initialize_rag_resources() # RELOAD DB
-    return res
+async def ing_ha(bg_tasks: BackgroundTasks):
+    bg_tasks.add_task(_run_background_ingest, "ha_ingest.py")
+    return {"status": "accepted", "msg": "Home Assistant ingestion started in background."}
 
 @app.post("/ingest/nextcloud")
-async def ing_nc(): 
-    res = await run_blocking(_run_sync, "/app/ingest_nextcloud.py")
-    await initialize_rag_resources() # RELOAD DB
-    return res
+async def ing_nc(bg_tasks: BackgroundTasks):
+    bg_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py")
+    return {"status": "accepted", "msg": "Nextcloud ingestion started in background."}
 
 @app.post("/ingest/all")
-async def ing_all(): 
-    res = {"ha": await _run_script("ha_ingest.py"), "nextcloud": await _run_script("ingest_nextcloud.py")}
-    await initialize_rag_resources() # RELOAD DB
-    return res
+async def ing_all(bg_tasks: BackgroundTasks):
+    bg_tasks.add_task(_run_background_ingest, "ha_ingest.py")
+    bg_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py")
+    return {"status": "accepted", "msg": "Full ingestion started in background."}
 
-async def _run_script(path): return await run_blocking(_run_sync, f"/app/{path}")
-
+# --- RAG Management ---
 @app.post("/api/rag/upsert")
 async def rag_upsert(i: UpsertRagRequest):
     if not GlobalResources.chroma_client: raise HTTPException(503)
@@ -179,11 +238,13 @@ async def rag_upsert(i: UpsertRagRequest):
     doc = Document(page_content=i.text, metadata=i.metadata or {})
     await run_blocking(lambda: (GlobalResources.chroma_client.add_documents([doc]), GlobalResources.chroma_client.persist()))
     return {"status": "ok"}
+
 @app.post("/api/rag/delete")
 async def rag_delete(id: str):
     if not GlobalResources.chroma_client: raise HTTPException(503)
     await run_blocking(lambda: GlobalResources.chroma_client.delete(ids=[id]))
     return {"status": "ok"}
+
 @app.get("/api/rag/list")
 async def rag_list(limit: int = 100):
     if not GlobalResources.chroma_client: raise HTTPException(503)
@@ -216,6 +277,8 @@ async def update_context(r: Request):
     from langchain_core.documents import Document
     await run_blocking(lambda: (GlobalResources.chroma_client.add_documents([Document(page_content=d.get("text",""), metadata={"source":"manual"})]), GlobalResources.chroma_client.persist()))
     return {"status": "ok"}
+
+# --- Diagnostics ---
 @app.get("/health")
 async def health(): return {"status": "ok", "db": GlobalResources.chroma_client is not None}
 @app.get("/")
