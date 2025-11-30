@@ -1,0 +1,112 @@
+{
+  "turn_on": [
+    "turn on",
+    "switch on",
+    "enable",
+    "activate",
+    "power up",
+    "illuminate",
+    "start",
+    "lights on",
+    "turn the lights on"
+  ],
+  "media_next": [
+    "next track",
+    "skip",
+    "next song",
+    "skip song",
+    "next video",
+    "skip forward"
+  ],
+  "media_previous": [
+    "previous track",
+    "previous song",
+    "go back",
+    "rewind",
+    "go back a song"
+  ],
+  "turn_off": [
+    "turn off",
+    "switch off",
+    "disable",
+    "deactivate",
+    "kill",
+    "shut down",
+    "stop",
+    "lights off",
+    "cut the power"
+  ],
+  "toggle": [
+    "toggle",
+    "flip",
+    "change state",
+    "switch state"
+  ],
+  "play_media": [
+    "play",
+    "resume",
+    "start music",
+    "play music",
+    "play song",
+    "play album",
+    "put on some music",
+    "start the tv"
+  ],
+  "stop_media": [
+    "stop music",
+    "pause",
+    "quiet",
+    "silence",
+    "stop playback",
+    "pause music",
+    "hush"
+  ],
+  "calendar_add": [
+    "schedule",
+    "add event",
+    "new appointment",
+    "remind me",
+    "create event",
+    "set a reminder",
+    "book a meeting"
+  ],
+  "calendar_list": [
+    "list calendar",
+    "show schedule",
+    "what is on my calendar",
+    "check agenda",
+    "list events",
+    "what do i have today"
+  ],
+  "calendar_delete": [
+    "delete event",
+    "cancel meeting",
+    "remove appointment",
+    "clear schedule",
+    "cancel event"
+  ],
+  "calendar_update": [
+    "reschedule",
+    "move event",
+    "change time",
+    "postpone",
+    "move meeting",
+    "update event"
+  ],
+  "time_query": [
+    "what time is it",
+    "current time",
+    "clock",
+    "tell me the time",
+    "what is the date",
+    "what day is it"
+  ],
+  "intent_learn": [
+    "learn that",
+    "teach you",
+    "remember that",
+    "map phrase",
+    "training mode",
+    "i want to teach you"
+  ]
+}
