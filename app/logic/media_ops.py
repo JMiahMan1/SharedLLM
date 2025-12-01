@@ -18,7 +18,7 @@ APP_PACKAGES = {
     "twitch": "tv.twitch.android.app",
     "kodi": "org.xbmc.kodi",
     "hulu": "com.hulu.livingroomplus",
-    "hbo": "com.hbo.hbonow",
+    "hbo": "com.wbd.stream", # Updated HBO NOW/MAX package
     "max": "com.wbd.stream"
 }
 
@@ -118,9 +118,17 @@ async def get_active_media_players(user_creds: dict) -> list:
 # SERVICE EXECUTION
 # ------------------------------------
 async def execute_ha_service(domain, service, entity_id, user_creds, service_data=None, redis_client=None):
+    """
+    Executes a Home Assistant service and returns a structured dictionary result.
+    """
+    user = user_creds.get("user")
+    
     if not HA_URL:
-        return "Error: Home Assistant URL not configured."
+        return {"status": "FAILURE", "message": "Error: Home Assistant URL not configured.", "entity_id": entity_id, "service": f"{domain}.{service}"}
 
+    # Fetch initial state for pre/post comparison
+    initial_state = await get_entity_state(entity_id, user_creds)
+    
     url = f"{HA_URL.rstrip('/')}/api/services/{domain}/{service}"
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
     payload = {"entity_id": entity_id, **(service_data or {})}
@@ -137,23 +145,61 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
             r = await run_blocking(_post)
 
             if r.status_code < 400:
-                _set_last_entity(redis_client, user_creds.get("user"), entity_id)
+                _set_last_entity(redis_client, user, entity_id)
 
-                # Friendly Name Fetch
+                # --- FIX: Wait and retry state fetch for confirmation ---
+                await asyncio.sleep(0.5) # Initial wait
+                new_state = "N/A"
                 friendly_name = entity_id
-                try:
-                    state_url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
-                    def _get_name():
-                        return requests.get(state_url, headers=headers, timeout=1.0)
+                
+                # Retry state check up to 4 times
+                for state_attempt in range(4):
+                    try:
+                        state_url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
+                        def _get_name():
+                            return requests.get(state_url, headers=headers, timeout=1.0)
 
-                    r_state = await run_blocking(_get_name)
-                    if r_state.status_code == 200:
-                        friendly_name = r_state.json().get("attributes", {}).get("friendly_name", entity_id)
-                except:
-                    pass
+                        r_state = await run_blocking(_get_name)
+                        if r_state.status_code == 200:
+                            state_data = r_state.json()
+                            
+                            # Update variables
+                            friendly_name = state_data.get("attributes", {}).get("friendly_name", entity_id)
+                            current_state = state_data.get("state", "unknown")
+                            
+                            # Check if state has changed significantly (e.g., if we turn off, expect 'off')
+                            # Simple logic for power/toggle commands:
+                            expected_change = False
+                            if service.startswith("turn_off") and current_state in ["off", "unavailable"]:
+                                expected_change = True
+                            elif service.startswith("turn_on") and current_state not in ["off", "unavailable"]:
+                                expected_change = True
 
+                            # Or for media commands:
+                            elif service.startswith("media_play") and current_state in ["playing", "paused"]:
+                                expected_change = True
+                                
+                            if expected_change or state_attempt == 3:
+                                new_state = current_state
+                                break
+                            
+                            # Wait a bit longer if state is still the same, up to 3 seconds total
+                            await asyncio.sleep(0.5 * (state_attempt + 1)) 
+                    except:
+                        # Continue trying if state fetch fails
+                        await asyncio.sleep(0.2)
+                        
+                # --- END FIX ---
+                
                 verb = service.replace("_", " ")
-                return f"Sent command to {verb} the {friendly_name}."
+                return {
+                    "status": "SUCCESS", 
+                    "message": f"Sent command to {verb} the {friendly_name}.", 
+                    "entity_id": entity_id,
+                    "friendly_name": friendly_name,
+                    "service": f"{domain}.{service}",
+                    "new_state": new_state
+                }
             
             # Error Capture
             try:
@@ -174,7 +220,13 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
         await asyncio.sleep(0.5)
 
     log.error(f"Failed to execute HA command: {last_err}")
-    return f"Failed: {last_err}"
+    return {
+        "status": "FAILURE", 
+        "message": f"Failed: {last_err}", 
+        "entity_id": entity_id,
+        "friendly_name": entity_id.split(".")[-1].replace("_", " ").title(),
+        "service": f"{domain}.{service}"
+    }
 
 
 # ------------------------------------
@@ -211,27 +263,30 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
     q_low = query_name.lower()
     
-    # --- RESTRUCTURED LOGIC: STRICT FILTERING FIRST (CRITICAL FIX) ---
+    # --- CRITICAL FIX 1: Enforce Music Assistant Priority ---
     if is_music:
-        # STRICT MUSIC FILTER: If is_music is True, we only accept music_assistant entities.
+        ma_candidate = None
         for eid, integration in candidates:
             if "music_assistant" in integration:
-                # Return the highest-ranking MA player immediately if found
-                return eid, integration
+                # Found the most relevant MA entity based on search rank. Use it immediately.
+                ma_candidate = (eid, integration)
+                break 
         
-        # FIX: If it's a 'play' intent and the device is a TV/Generic Media Player, allow it to fallback 
-        # to a generic media_player if no MA entity was found.
+        if ma_candidate:
+            return ma_candidate
+
+        # Fallback 1: If no MA entity, check if it's a generic TV/Chromecast request (which MA can often stream to anyway)
         if intent == "play_media":
              for eid, integration in candidates:
                  if eid.startswith("media_player.") and any(x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                       log.info(f"Strict Music Fallback: Allowing generic TV media player: {eid}")
                       return eid, integration
                       
-        # If we reached here, no music_assistant entity was found in the top 15 results.
+        # If we reached here, no suitable music player was found in the candidates.
         log.warning(f"Strict Music Mode: No Music Assistant entity found for '{query_name}'. Returning None.")
         return (None, None)
     
-    # --- NON-STRICT / GENERIC LOGIC ---
+    # --- NON-STRICT / GENERIC LOGIC (For power, nav, non-music play) ---
     
     preferred_type = "generic"
     
@@ -260,6 +315,9 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 # MEDIA COMMAND ROUTING
 # ------------------------------------
 async def handle_media_command(intent: str, query: str, entity_id: str, user_creds: dict, ha_collection, redis_client):
+    """
+    Handles media command and ensures a structured dictionary is returned.
+    """
     q_low = query.lower()
     integration = "unknown"
 
@@ -292,6 +350,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
              if state in ["playing", "paused", "buffering"]:
                  log.info(f"Transport Short Circuit: Device {entity_id} is active, proceeding directly.")
                  domain = entity_id.split('.')[0]
+                 # Returns structured dict
                  return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client)
 
     # ------------------------------------------------------------------
@@ -314,7 +373,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 if strict_resolution and "music_assistant" not in resolved_int and not any(x in resolved_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                     # This means the resolution failed to honor strict mode (MA entity not found in top candidates).
                     log.error(f"Strict Resolution failure: Resolved {resolved_id} ({resolved_int}) which is not MA/TV.")
-                    return f"I couldn't find a Music Assistant device named '{potential_device}'."
+                    return {"status": "FAILURE", "message": f"I couldn't find a Music Assistant device named '{potential_device}'.", "entity_id": potential_device, "service": "media_command"} # FIX: Return dict
                     
                 entity_id = resolved_id
                 integration = resolved_int
@@ -322,7 +381,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 log.info(f"'On' Split Success: Device='{potential_device}' ({entity_id}), Content='{clean_title}'")
             else:
                  # If resolved_id is None, it means strict mode failed to find a target.
-                 return f"I couldn't find a device named '{potential_device}' to play media."
+                 return {"status": "FAILURE", "message": f"I couldn't find a device named '{potential_device}' to play media.", "entity_id": potential_device, "service": "media_command"} # FIX: Return dict
     
     # Standard Resolution
     if not entity_id:
@@ -341,7 +400,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         domain = entity_id.split('.')[0]
     
     if not entity_id and intent not in ["turn_on", "turn_off", "toggle"]: # Safety check
-         return "Could not determine which device you mean."
+         return {"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"} # FIX: Return dict
 
     # 3. TRANSPORT COMMAND REDIRECTION (For Unresolved/Idle Transport)
     if is_transport:
@@ -350,7 +409,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             should_scan = True
         else:
             state = await get_entity_state(entity_id, user_creds)
-            if state not in ["playing", "paused", "buffering"]:
+            if state in ["off", "unavailable"]: # FIX: Only check if it's explicitly off/unavailable
                 log.info(f"Targeted entity {entity_id} is {state}. Scanning for active players...")
                 should_scan = True
 
@@ -365,14 +424,15 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                     entity_id = new_entity
             else:
                 if not entity_id:
-                     return "No active media players found to control."
+                     return {"status": "FAILURE", "message": "No active media players found to control.", "entity_id": "N/A", "service": "media_command"} # FIX: Return dict
                 
         domain = entity_id.split('.')[0]
+        # Returns structured dict
         return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client)
 
 
     if not entity_id and intent not in ["turn_on", "turn_off", "toggle"]: # Safety check
-         return "Could not determine which device you mean."
+         return {"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"} # FIX: Return dict
 
     domain = entity_id.split('.')[0]
     service = intent
@@ -398,6 +458,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             service = "turn_" + intent.split("_")[1]
         if domain not in ["light", "switch", "remote", "media_player"]:
             domain = "homeassistant"
+        # Returns structured dict
         return await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)
 
     # -------------------------------------------------
@@ -408,6 +469,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         # APP LAUNCH
         for app, pkg in APP_PACKAGES.items():
             if app in q_low:
+                # Returns structured dict
                 return await execute_ha_service(
                     "media_player", "play_media", entity_id, user_creds,
                     {"media_content_id": pkg, "media_content_type": "app"},
@@ -415,10 +477,17 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 )
 
         # CONTENT CLEANING
-        clean_title = re.sub(r"\b(play|please|music|song|from|on|open|launch|playback|listen to)\b", " ", clean_title)
-        clean_title = re.sub(r"\b(album|track|playlist|artist)\b", " ", clean_title)
-        clean_title = re.sub(r"\b(by)\b", " ", clean_title)
-        clean_title = re.sub(r"\bthe\b", " ", clean_title)
+        # Store original query to use for title/artist extraction
+        original_title = clean_title
+        
+        # FIX: Less aggressive cleaning to preserve content title
+        clean_title = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean_title)
+        
+        # Only remove content TYPE keywords IF the request is for MUSIC
+        if is_music_request:
+            clean_title = re.sub(r"\b(music|song|album|track|playlist|artist|radio)\b", " ", clean_title)
+
+        clean_title = re.sub(r"\b(by|the)\b", " ", clean_title)
 
         raw_dev = entity_id.split(".")[-1] if entity_id else ""
         dev_tokens = [t for t in raw_dev.split("_") if t]
@@ -428,12 +497,17 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 variants.add(" ".join(dev_tokens[i:j]))
         if raw_dev: variants.add(raw_dev.replace("_", " "))
 
-        for v in sorted(variants, key=lambda s: -len(s)):
-            if not v: continue
-            clean_title = re.sub(r"\b" + re.escape(v) + r"\b", " ", clean_title)
-
+        # FIX: Do NOT remove device name variants from content string here, as that was the bug.
+        # The content cleaning should only remove control/type words. Device tokens are handled by the split.
+        
         clean_title = re.sub(r"[^\w\s]", " ", clean_title) 
         clean_title = re.sub(r"\s+", " ", clean_title).strip()
+
+        # Check if the final cleaned title is too short after cleaning
+        if len(clean_title) < 3:
+             # If cleaning made the title disappear, use the original split content
+             clean_title = original_title
+             log.warning(f"Content cleaning resulted in empty string. Using original content: {clean_title}")
 
         # CONTENT TYPE
         ctype = "music"
@@ -442,7 +516,8 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         if is_music_request and not is_tv:
             ctype = "music"
         elif is_tv:
-            ctype = "video"
+            # If target is a TV, prioritize streaming video unless explicitly requested music on MA player
+            ctype = "video" if not is_music_request else "music"
             
         if "music_assistant" in integration:
             ctype = "music"
@@ -450,7 +525,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             ctype = "url"
         
         if not clean_title:
-             return "I understood the device, but not what to play. Please specify content."
+             return {"status": "FAILURE", "message": "I understood the device, but not what to play. Please specify content.", "entity_id": entity_id, "service": "media_command"} # FIX: Return dict
 
         service_data = {
             "media_content_id": clean_title,
@@ -463,10 +538,11 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
             await asyncio.sleep(4.0)
 
+        # Returns structured dict
         result = await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
         
         # Self-Healing
-        if "Failed" in result and "500" in result:
+        if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
             new_type = "video" if ctype == "music" else "music"
             log.info(f"Self-Healing: Retrying '{clean_title}' as '{new_type}' on {entity_id}")
             service_data["media_content_type"] = new_type
@@ -477,14 +553,15 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     # -------------------------------------------------
     # FALLBACK FOR UNRESOLVED COMMANDS
     # -------------------------------------------------
-    return None
+    # Should be unreachable with the previous checks, but as a final safety:
+    return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
 
 async def _execute_transport_command(intent: str, entity_id: str, domain: str, user_creds: dict, integration: str, redis_client):
-    """Executes media transport command with self-healing fallback prioritizing remote control."""
+    """Executes media transport command with self-healing fallback prioritizing remote control. Returns structured dict."""
     
     if intent == "stop_media":
-        result = await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
-        return result
+        # Returns structured dict
+        return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
         
     # --- CONSISTENCY FIX: Prioritize Remote if not Music Assistant or if Integration is Unknown ---
     is_mass = "music_assistant" in integration
@@ -501,11 +578,9 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
             result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "DPAD_RIGHT"}, redis_client)
 
         # 2. If Mass failed, attempt remote as a final resort
-        if "Failed" in result and is_mass:
+        if result.get("status") == "FAILURE" and is_mass:
             log.info(f"Mass media_next_track failed. Final fallback to remote: DPAD_RIGHT on {remote_id}")
             result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "DPAD_RIGHT"}, redis_client)
-        
-        # 3. If remote failed on a non-Mass entity, no further easy fallback
         
         return result
             
@@ -521,12 +596,11 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
             result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "DPAD_LEFT"}, redis_client)
 
         # 2. If Mass failed, attempt remote as a final resort
-        if "Failed" in result and is_mass:
+        if result.get("status") == "FAILURE" and is_mass:
             log.info(f"Mass media_previous_track failed. Final fallback to remote: DPAD_LEFT on {remote_id}")
             result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "DPAD_LEFT"}, redis_client)
             
-        # 3. If remote failed on a non-Mass entity, no further easy fallback
-
         return result
 
-    return None
+    # Should be unreachable
+    return {"status": "FAILURE", "message": f"Transport command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}

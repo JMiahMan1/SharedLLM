@@ -130,7 +130,8 @@ async def tool_calendar_list(user_creds: Dict[str, str], redis_client) -> Dict[s
         ck = _get_cal_list_cache_key(user)
         cached = redis_client.get(ck)
         if cached: 
-            return {"status": "SUCCESS", "message": cached}
+            # FIX: Ensure cached result is returned in the standard format
+            return {"status": "SUCCESS", "message": cached, "service": "calendar_list"}
 
     try:
         def _fetch():
@@ -147,9 +148,9 @@ async def tool_calendar_list(user_creds: Dict[str, str], redis_client) -> Dict[s
         if redis_client and user:
             redis_client.setex(_get_cal_list_cache_key(user), CAL_LIST_TTL, final_res)
             
-        return {"status": "SUCCESS", "message": final_res}
+        return {"status": "SUCCESS", "message": final_res, "service": "calendar_list"}
     except Exception as e: 
-        return {"status": "FAILURE", "message": f"Error listing calendars: {e}"}
+        return {"status": "FAILURE", "message": f"Error listing calendars: {e}", "service": "calendar_list"}
 
 async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
     """Reads upcoming events for context injection (RAG). Returns raw string context."""
@@ -188,9 +189,9 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
     except: return ""
 
 async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str, redis_client) -> Dict[str, Union[str, bool]]:
-    """Adds an event to a calendar."""
+    """Adds an event to a calendar. Returns structured dict."""
     if not NEXTCLOUD_URL: 
-        return {"status": "FAILURE", "message": "Error: Nextcloud not configured."}
+        return {"status": "FAILURE", "message": "Error: Nextcloud not configured.", "service": "calendar_add"}
     
     data = await extract_event_data(query, model)
     summary = data.get("summary")
@@ -198,12 +199,12 @@ async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str, 
     target = data.get("calendar_target")
     
     if not summary or not start: 
-        return {"status": "FAILURE", "message": "Missing event details."}
+        return {"status": "FAILURE", "message": "Missing event details.", "service": "calendar_add"}
     
     # Parse Date
     dt = dateparser.parse(start, languages=['en'], settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now()})
     if not dt: 
-        return {"status": "FAILURE", "message": f"Invalid date format for: {start}"}
+        return {"status": "FAILURE", "message": f"Invalid date format for: {start}", "service": "calendar_add"}
 
     try:
         def _add():
@@ -251,21 +252,21 @@ async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str, 
 
         cal_name = await run_blocking(_add)
         msg = f"Scheduled '{summary}' for {dt.strftime('%Y-%m-%d %H:%M')} on '{cal_name}'."
-        return {"status": "SUCCESS", "message": msg}
+        return {"status": "SUCCESS", "message": msg, "service": "calendar_add", "summary": summary, "calendar": cal_name}
     except Exception as e:
         log.error(f"Calendar Add Error: {e}")
-        return {"status": "FAILURE", "message": f"Failed to add event: {str(e)}"}
+        return {"status": "FAILURE", "message": f"Failed to add event: {str(e)}", "service": "calendar_add"}
 
 async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: str, redis_client) -> Dict[str, Union[str, bool]]:
-    """Deletes an event by fuzzy matching name."""
+    """Deletes an event by fuzzy matching name. Returns structured dict."""
     if not NEXTCLOUD_URL: 
-        return {"status": "FAILURE", "message": "Error: Nextcloud not configured."}
+        return {"status": "FAILURE", "message": "Error: Nextcloud not configured.", "service": "calendar_delete"}
     
     data = await extract_event_data(query, model)
     keyword = data.get("summary")
     target = data.get("calendar_target")
     if not keyword: 
-        return {"status": "FAILURE", "message": "Missing event name."}
+        return {"status": "FAILURE", "message": "Missing event name.", "service": "calendar_delete"}
 
     try:
         def _delete():
@@ -297,15 +298,16 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
             return count
 
         cnt = await run_blocking(_delete)
-        msg = f"Deleted event matching '{keyword}'." if cnt else f"No matching event found for '{keyword}'."
-        return {"status": "SUCCESS", "message": msg}
+        msg = f"Deleted {cnt} event(s) matching '{keyword}'." if cnt else f"No matching event found for '{keyword}'."
+        status = "SUCCESS" if cnt > 0 else "FAILURE"
+        return {"status": status, "message": msg, "service": "calendar_delete", "keyword": keyword, "count": cnt}
     except Exception as e: 
-        return {"status": "FAILURE", "message": f"Delete error: {e}"}
+        return {"status": "FAILURE", "message": f"Delete error: {e}", "service": "calendar_delete"}
 
 async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: str, redis_client) -> Dict[str, Union[str, bool]]:
-    """Updates/Reschedules an event."""
+    """Updates/Reschedules an event. Returns structured dict."""
     if not NEXTCLOUD_URL: 
-        return {"status": "FAILURE", "message": "Error: Nextcloud not configured."}
+        return {"status": "FAILURE", "message": "Error: Nextcloud not configured.", "service": "calendar_update"}
     
     data = await extract_event_data(query, model)
     keyword = data.get("summary")
@@ -313,11 +315,11 @@ async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: st
     target = data.get("calendar_target")
     
     if not keyword or not new_start: 
-        return {"status": "FAILURE", "message": "Missing details (need Event Name and New Time)."}
+        return {"status": "FAILURE", "message": "Missing details (need Event Name and New Time).", "service": "calendar_update"}
     
     dt = dateparser.parse(new_start, languages=['en'], settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now()})
     if not dt: 
-        return {"status": "FAILURE", "message": f"Invalid date: {new_start}"}
+        return {"status": "FAILURE", "message": f"Invalid date: {new_start}", "service": "calendar_update"}
 
     try:
         def _update():
@@ -358,7 +360,8 @@ async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: st
             return count
 
         cnt = await run_blocking(_update)
+        status = "SUCCESS" if cnt > 0 else "FAILURE"
         msg = f"Rescheduled '{keyword}' to {dt.strftime('%Y-%m-%d %H:%M')}." if cnt else "Event not found."
-        return {"status": "SUCCESS", "message": msg}
+        return {"status": status, "message": msg, "service": "calendar_update", "keyword": keyword, "new_time": dt.strftime('%Y-%m-%d %H:%M')}
     except Exception as e: 
-        return {"status": "FAILURE", "message": f"Update error: {e}"}
+        return {"status": "FAILURE", "message": f"Update error: {e}", "service": "calendar_update"}
