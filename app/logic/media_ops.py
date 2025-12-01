@@ -22,6 +22,34 @@ APP_PACKAGES = {
     "max": "com.wbd.stream"
 }
 
+# --- CENTRALIZED INTENT DEFINITIONS ---
+# Used by pipeline.py for routing
+MEDIA_INTENTS = [
+    "turn_on", "turn_off", "toggle", 
+    "stop_media", "play_media", "open_app",
+    "media_next", "media_previous",
+    "nav_up", "nav_down", "nav_left", "nav_right", 
+    "nav_enter", "nav_back", "nav_home"
+]
+
+# Used by pipeline.py for Regex Overrides
+REGEX_INTENT_MAP = {
+    r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)": "open_app",
+    r"\b(play)\b": "play_media",
+    r"\b(stop|pause)\b": "stop_media",
+    r"\b(skip|next)\b": "media_next",
+    r"\b(previous|back|prev)\b": "media_previous",
+    r"\b(scroll|move|go)\s+up\b": "nav_up",
+    r"\b(scroll|move|go)\s+down\b": "nav_down",
+    r"\b(scroll|move|go)\s+left\b": "nav_left",
+    r"\b(scroll|move|go)\s+right\b": "nav_right",
+    r"\bgo back\b|\bback\b": "nav_back",
+    r"\bgo home\b|\bhome\b": "nav_home",
+    r"\bselect\b|\benter\b|\bok\b": "nav_enter",
+}
+# --------------------------------------
+
+
 def _get_last_entity_key(user: str) -> str:
     return f"rag:last_entity:{user}"
 
@@ -191,6 +219,14 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 # Return the highest-ranking MA player immediately if found
                 return eid, integration
         
+        # FIX: If it's a 'play' intent and the device is a TV/Generic Media Player, allow it to fallback 
+        # to a generic media_player if no MA entity was found.
+        if intent == "play_media":
+             for eid, integration in candidates:
+                 if eid.startswith("media_player.") and any(x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
+                      log.info(f"Strict Music Fallback: Allowing generic TV media player: {eid}")
+                      return eid, integration
+                      
         # If we reached here, no music_assistant entity was found in the top 15 results.
         log.warning(f"Strict Music Mode: No Music Assistant entity found for '{query_name}'. Returning None.")
         return (None, None)
@@ -275,9 +311,9 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                         
             if resolved_id:
                 # INTEGRITY CHECK: If strict_resolution was true, we enforce that the returned entity is MA.
-                if strict_resolution and "music_assistant" not in resolved_int:
+                if strict_resolution and "music_assistant" not in resolved_int and not any(x in resolved_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                     # This means the resolution failed to honor strict mode (MA entity not found in top candidates).
-                    log.error(f"Strict Resolution failure: Resolved {resolved_id} ({resolved_int}) which is not MA.")
+                    log.error(f"Strict Resolution failure: Resolved {resolved_id} ({resolved_int}) which is not MA/TV.")
                     return f"I couldn't find a Music Assistant device named '{potential_device}'."
                     
                 entity_id = resolved_id
@@ -286,7 +322,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 log.info(f"'On' Split Success: Device='{potential_device}' ({entity_id}), Content='{clean_title}'")
             else:
                  # If resolved_id is None, it means strict mode failed to find a target.
-                 return f"I couldn't find a Music Assistant device named '{potential_device}'."
+                 return f"I couldn't find a device named '{potential_device}' to play media."
     
     # Standard Resolution
     if not entity_id:
@@ -401,9 +437,9 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
 
         # CONTENT TYPE
         ctype = "music"
-        is_tv = any(x in entity_id.lower() for x in ["tv", "chromecast", "shield"])
+        is_tv = any(x in entity_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"])
 
-        if is_music_request:
+        if is_music_request and not is_tv:
             ctype = "music"
         elif is_tv:
             ctype = "video"

@@ -4,13 +4,15 @@ import time
 import re
 import asyncio
 from datetime import datetime
-from typing import AsyncGenerator, List, Union, Dict
+# FIX: Explicitly import necessary type hints for the execution layer
+from typing import AsyncGenerator, List, Union, Dict, Optional, Any 
 
 # Import Settings
 from settings import (
     log, run_blocking, get_user_creds, GlobalResources, 
     DEFAULT_MODEL, load_system_prompt,
-    CONTEXT_REWRITE_PROMPT, RAG_TEMPLATE
+    CONTEXT_REWRITE_PROMPT, RAG_TEMPLATE, ORCHESTRATOR_PROMPT, 
+    ACTION_TOOL_CONFIDENCE_THRESHOLD, INFORMATIONAL_INTENTS 
 )
 from intent_engine import engine as intent_engine
 
@@ -31,6 +33,7 @@ from .calendar_ops import (
     tool_calendar_delete, tool_calendar_update, tool_calendar_read
 )
 from .web_search import tool_web_search
+
 
 class StreamResponseBuilder:
     def __init__(self, model: str, format_type: str):
@@ -103,7 +106,8 @@ async def contextualize_query(query, user, model):
     Rewrites query based on history using externalized prompt.
     """
     # Optimization: If intent engine is confident, skip contextualization
-    intent, score = await intent_engine.classify(query)
+    # NOTE: Updated to match new intent_engine.classify return signature
+    intent, score, is_high_confidence = await intent_engine.classify(query)
     
     stateless_intents = [
         "turn_on", "turn_off", "toggle", "play_media", "stop_media",
@@ -111,7 +115,8 @@ async def contextualize_query(query, user, model):
         "time_query", "intent_learn", "open_app", "media_next", "media_previous"
     ]
     
-    if score > 0.85 and intent in stateless_intents:
+    # Use the new is_high_confidence flag
+    if is_high_confidence and intent in stateless_intents:
         return query
 
     verbs = ["turn", "play", "stop", "toggle", "schedule", "add", "delete", "remove", "cancel", "remind", "list", "learn", "teach", "map"]
@@ -132,9 +137,203 @@ async def contextualize_query(query, user, model):
     if len(refined) > len(query) * 3: return query
     return refined
 
-async def _handle_single_command(query: Union[str, Dict], user_creds: Dict[str, str], model: str = None):
+async def _attempt_fast_ha_command(query: str, user_creds: Dict[str, str], ha_collection) -> Optional[Dict[str, Union[str, bool]]]:
     """
-    Routes a single, atomic command to the correct module (Calendar vs Media vs Generic).
+    Attempts to execute a Home Assistant command directly by string matching
+    a verb and performing a vector search for the device name.
+    Returns the structured result if successful, or None.
+    """
+    q_low = query.lower().strip()
+
+    # 1. Simple verb check (Only proceed if it looks like a command)
+    if not any(x in q_low for x in ["turn on", "turn off", "toggle", "open", "close"]):
+        return None
+    
+    # CRITICAL: Prevent "Search the web" from falling into HA Control
+    if any(x in q_low for x in ["search", "find", "who", "what", "when", "where", "how", "explain"]):
+        return None
+
+    # 2. Clean query to isolate entity name
+    clean_q = q_low
+    for phrase in ["turn on", "turn off", "toggle", "play", "stop", "the", "please", " on ", "open", "close"]:
+        clean_q = clean_q.replace(phrase, " ")
+    clean_q = clean_q.strip()
+
+    if not clean_q:
+        return None
+    
+    eid = None
+    # 3. Vector Search for entity match (Enhanced Domain Prioritization)
+    if ha_collection:
+        # Search top 5 results to find a controllable entity
+        docs = await run_blocking(lambda: safe_similarity_search(ha_collection, clean_q, k=5))
+        
+        # New Domain Priority Scoring: Higher score = more likely to be the control entity
+        domain_priority = {
+            "cover": 5,   # Garage doors/blinds
+            "switch": 4, 
+            "light": 3, 
+            "media_player": 3,
+            "remote": 2,
+            "automation": 1,
+            "script": 1,
+            "camera": 0 # Explicitly zero out low-priority/non-controllable domains
+        }
+        
+        best_eid = None
+        best_score = 0
+        
+        # Filter: Find the highest scoring, relevant entity
+        for d in docs:
+            potential_eid = d.metadata.get("entity_id")
+            if potential_eid:
+                domain = potential_eid.split(".")[0]
+                priority = domain_priority.get(domain, 0)
+                
+                # Check for explicit automation/script command
+                is_explicit_secondary = domain in ["automation", "script"] and domain in q_low
+                
+                # Logic 1: Immediate execution if Automation/Script is explicitly named (e.g., "disable garage automation")
+                if is_explicit_secondary:
+                    eid = potential_eid
+                    log.info(f"FAST HA PATH: Executing explicit secondary control: {eid}")
+                    break
+                        
+                # Logic 2: For general actions (turn_on/open), prioritize functional devices.
+                # Only check for core control domains (score > 2)
+                if priority > best_score:
+                    best_score = priority
+                    best_eid = potential_eid
+        
+        # If we broke the loop due to explicit secondary action, use that eid. Otherwise, use the best scored one.
+        if eid:
+            pass # Use the explicitly selected eid
+        else:
+            eid = best_eid # Use the best device found by priority scoring
+        
+        if not eid:
+            return None # No suitable controllable entity found
+
+    if not eid: return None
+
+    # 4. Determine service based on original query
+    service = None
+    if "turn off" in q_low or "close" in q_low: service = "turn_off"
+    elif "turn on" in q_low or "open" in q_low: service = "turn_on"
+    elif "toggle" in q_low: service = "toggle"
+    
+    if not service:
+        log.warning(f"FAST HA PATH: Entity {eid} found, but could not determine service from query: {q_low}")
+        return None
+
+    domain = eid.split(".")[0]
+    target_dom = "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
+    
+    log.info(f"FAST HA PATH: Executing service {service} on {eid} due to string match bypass.")
+    # Return structured result from the execution layer
+    return await execute_ha_service(target_dom, service, eid, user_creds, {}, GlobalResources.redis_client)
+
+
+async def _llm_orchestrator(query: str, intent: str, score: float, model: str) -> Dict[str, Any]:
+    """
+    Forces the LLM to generate a structured JSON action plan (tool_call or CONVERSE).
+    Includes a self-correction loop for invalid JSON (Hallucination Mitigation).
+    """
+    orchestrator_prompt = ORCHESTRATOR_PROMPT.format(
+        query=query,
+        intent_name=intent,
+        intent_score=score
+    )
+    
+    last_error = ""
+    for attempt in range(2):
+        if attempt > 0:
+            # Self-Correction Loop
+            log.warning("LLM Orchestrator failed JSON validation. Attempting self-correction.")
+            # Inject error message into the prompt to guide correction
+            correction_prompt = f"CRITICAL ERROR: Your previous JSON output failed validation: '{last_error}'. You must output ONLY a single, valid JSON object (DO NOT use markdown backticks). Review your plan and try again. User Query: {query} Best Vector Intent: {intent}."
+            
+            # Send the base prompt with the correction instruction
+            r = await call_ollama_generate(correction_prompt + "\n" + ORCHESTRATOR_PROMPT.format(query=query, intent_name=intent, intent_score=score), model)
+        else:
+            r = await call_ollama_generate(orchestrator_prompt, model)
+            
+        # Use is_voice=False to preserve JSON structure for parsing
+        text = clean_llm_output(r.get("text", ""), is_voice=False).strip()
+        
+        try:
+            # Clean up potential markdown wrapping
+            text = text.strip().strip('`').strip()
+            if text.startswith('json\n'):
+                text = text[5:].strip()
+            
+            # Find and parse the JSON block
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                parsed_json = json.loads(match.group(0))
+                
+                # Validation: Ensure core keys are present
+                if "action" not in parsed_json:
+                     raise ValueError("Missing 'action' key in JSON.")
+                
+                return parsed_json
+            else:
+                raise json.JSONDecodeError("No JSON object found in output.", text, 0)
+            
+        except (json.JSONDecodeError, ValueError) as e:
+            last_error = str(e)
+            log.error(f"Orchestrator JSON Error: {last_error}")
+            continue # Retry loop
+
+    # Final Failure: Default to conversation to prevent pipeline crash
+    log.critical("LLM Orchestrator failed self-correction. Defaulting to CONVERSE.")
+    return {"action": "CONVERSE", "error": "Orchestrator failed to generate valid plan."}
+
+
+async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_creds: Dict[str, str], model: str) -> Optional[Dict[str, Union[str, bool]]]:
+    """
+    Executes a structured action plan generated by the LLM Orchestrator.
+    Returns structured result or None.
+    """
+    tool_name = action_plan.get("tool_name")
+    params = action_plan.get("parameters", {})
+    
+    # --- CALENDAR TOOLS ---
+    if tool_name == "calendar_add":
+        # Calendar tools return simple strings on success/failure, wrap them.
+        res = await tool_calendar_add(query, user_creds, model, GlobalResources.redis_client)
+        return {"status": "SUCCESS" if "Scheduled" in res else "FAILURE", "message": res, "service": "calendar_add"}
+    
+    elif tool_name == "calendar_list":
+        res = await tool_calendar_list(user_creds, GlobalResources.redis_client)
+        return {"status": "SUCCESS", "message": res, "service": "calendar_list"}
+
+    # --- MEDIA/HA COMMANDS ---
+    elif tool_name == "media_command":
+        # NOTE: We rely on handle_media_command for smart resolution (entity_id=None)
+        # and it already returns the structured Dict for verification.
+        intent = params.get("intent", "turn_on")
+        return await handle_media_command(
+            intent, 
+            query, 
+            None, # Let handle_media_command resolve entity
+            user_creds, 
+            GlobalResources.ha_collection, 
+            GlobalResources.redis_client
+        )
+    
+    # --- Other Tools (e.g., learn) ---
+    elif tool_name == "intent_learn":
+        res = f"Cannot learn '{params.get('phrase')}' with current prompt context." # Logic handled better by external endpoint
+        return {"status": "FAILURE", "message": res, "service": "intent_learn"}
+    
+    # --- Fallback for unhandled/internal tools ---
+    return {"status": "FAILURE", "message": f"Action requested unhandled tool: {tool_name}", "service": tool_name}
+
+
+async def _handle_single_command(query: Union[str, Dict], user_creds: Dict[str, str], model: str = None) -> Optional[List[Dict[str, Any]]]:
+    """
+    Routes a single command. Returns a list of structured action results or None to trigger RAG.
     """
     if isinstance(query, dict):
         query = str(query.get("response", query.get("text", str(query))))
@@ -146,152 +345,48 @@ async def _handle_single_command(query: Union[str, Dict], user_creds: Dict[str, 
 
     q_low = query.lower().strip()
     
-    # --- CRITICAL: REGEX INTENT OVERRIDES ---
-    # Bypass vector engine for obvious app/nav/media commands to ensure smart routing triggers
-    regex_intent = None
-    if re.search(r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)", q_low):
-        regex_intent = "open_app"
-    elif re.search(r"\b(play)\b", q_low):
-        regex_intent = "play_media"
-    elif re.search(r"\b(stop|pause)\b", q_low):
-        regex_intent = "stop_media"
-    elif re.search(r"\b(skip|next)\b", q_low):
-        regex_intent = "media_next"
-    elif re.search(r"\b(previous|back|prev)\b", q_low):
-        if "go back" in q_low or "back" == q_low: regex_intent = "nav_back"
-        else: regex_intent = "media_previous"
-    elif re.search(r"\b(scroll|move|go)\s+(up|down|left|right|back|home)", q_low):
-        if "up" in q_low: regex_intent = "nav_up"
-        elif "down" in q_low: regex_intent = "nav_down"
-        elif "left" in q_low: regex_intent = "nav_left"
-        elif "right" in q_low: regex_intent = "nav_right"
-        elif "back" in q_low: regex_intent = "nav_back"
-        elif "home" in q_low: regex_intent = "nav_home"
-    elif "select" in q_low or "enter" in q_low or "ok" in q_low:
-        regex_intent = "nav_enter"
+    # --- STAGE 2A: FAST PATH CHECK (The Speed Lane) ---
+    action_result = await _attempt_fast_ha_command(
+        query, 
+        user_creds, 
+        GlobalResources.ha_collection
+    )
+    if action_result:
+        log.debug("FAST PATH executed, returning action result.")
+        # Wrap single result in a list for compatibility with compound handler
+        return [action_result] 
 
-    if regex_intent:
-        intent = regex_intent
-    else:
-        intent, score = await intent_engine.classify(query)
-
-    # --- INTENT ROUTING ---
-    if intent == "intent_learn":
-        # Basic Regex for learning phrases
-        match = re.search(r"(?:learn|teach|map).+(?:that|phrase)\s+[\"']?(.+?)[\"']?\s+(?:means|to|is)\s+[\"']?([a-z_]+)[\"']?", q_low)
-        if match:
-            phrase, target_intent = match.groups()
-            valid_intents = intent_engine.get_valid_intents()
-            if target_intent not in valid_intents:
-                clean_target = target_intent.replace(" ", "_")
-                if clean_target in valid_intents: target_intent = clean_target
-                else: return f"I can't learn that. '{target_intent}' is not a valid capability."
-            await intent_engine.learn(phrase, target_intent)
-            return f"Understood. I have learned that '{phrase}' means '{target_intent}'."
-        return "I didn't catch the phrase and intent."
-
-    if intent == "time_query":
-        now = datetime.now()
-        return f"It is currently {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d')}."
-
-    # --- CALENDAR ROUTING ---
-    elif intent == "calendar_list":
-        return await tool_calendar_list(user_creds, GlobalResources.redis_client)
-    elif intent == "calendar_add":
-        return await tool_calendar_add(query, user_creds, model or DEFAULT_MODEL, GlobalResources.redis_client)
-    elif intent == "calendar_delete":
-        return await tool_calendar_delete(query, user_creds, model or DEFAULT_MODEL, GlobalResources.redis_client)
-    elif intent == "calendar_update":
-        return await tool_calendar_update(query, user_creds, model or DEFAULT_MODEL, GlobalResources.redis_client)
-    elif intent == "content_query":
-         return None 
-    elif intent == "general_query":
-         return None
-
-    # CALENDAR REGEX FALLBACK (If vectors fail)
-    if not intent:
-        if any(x in q_low for x in ["schedule", "add event", "new appointment", "remind me"]):
-             return await tool_calendar_add(query, user_creds, model or DEFAULT_MODEL, GlobalResources.redis_client)
-        elif any(x in q_low for x in ["delete event", "cancel meeting", "remove appointment"]):
-             return await tool_calendar_delete(query, user_creds, model or DEFAULT_MODEL, GlobalResources.redis_client)
-        elif any(x in q_low for x in ["list calendar", "show schedule", "check agenda"]):
-             return await tool_calendar_list(user_creds, GlobalResources.redis_client)
-        elif any(x in q_low for x in ["reschedule", "move event", "change time", "update event"]):
-             return await tool_calendar_update(query, user_creds, model or DEFAULT_MODEL, GlobalResources.redis_client)
+    # --- STAGE 2B: LLM ORCHESTRATION ---
     
-    # --- MEDIA / HA ROUTING ---
-    media_intents = [
-        "turn_on", "turn_off", "toggle", 
-        "stop_media", "play_media", "open_app",
-        "media_next", "media_previous",
-        "nav_up", "nav_down", "nav_left", "nav_right", 
-        "nav_enter", "nav_back", "nav_home"
-    ]
+    # 1. Vector Classification
+    intent, score, is_high_confidence = await intent_engine.classify(query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD)
     
-    # Power/Media Regex Fallback
-    if not intent:
-        if "turn on" in q_low: intent = "turn_on"
-        elif "turn off" in q_low: intent = "turn_off"
-        elif "play" in q_low: intent = "play_media"
-        elif any(x in q_low for x in ["stop", "pause"]): intent = "stop_media"
-        elif "open" in q_low: intent = "open_app"
-        elif any(x in q_low for x in ["skip", "next"]): intent = "media_next"
-        elif any(x in q_low for x in ["previous", "back"]): intent = "media_previous"
-
-    if intent in media_intents:
-        # Delegate to media_ops for Smart Routing (TV vs Music)
-        # Passing None for entity_id lets the handler invoke smart_resolve_entity
-        return await handle_media_command(
-            intent, 
-            query, 
-            None, 
-            user_creds, 
-            GlobalResources.ha_collection, 
-            GlobalResources.redis_client
-        )
+    # 2. LLM Planning (Structured JSON output)
+    orchestration_plan = await _llm_orchestrator(query, intent or "unknown", score, model)
     
-    # --- GENERIC HA FALLBACK ---
-    # CRITICAL FIX: Prevent "Search the web" from falling into HA Control
-    if any(x in q_low for x in ["search", "find", "who", "what", "when", "where", "how", "explain"]):
-        return None
-
-    clean_q = q_low
-    for phrase in ["turn on", "turn off", "toggle", "play", "stop", "the", "please", " on ", "open"]:
-        clean_q = clean_q.replace(phrase, " ")
-    clean_q = clean_q.strip()
-
-    eid = None
-    # CASE 1: Partial Command (No object specified) -> Check Redis
-    if not clean_q: 
-        eid = get_last_entity(GlobalResources.redis_client, user_creds.get("user"))
-        if not eid:
-            # If it's a question like "Who is he?", don't fail, just return None to let RAG handle it
-            return None 
-        log.info(f"Using Cached Last Entity: {eid} for command: {q_low}")
-
-    # CASE 2: Explicit Command -> Vector Search
-    else:
-        if GlobalResources.ha_collection:
-            # Uses safe_similarity_search from utils
-            docs = await run_blocking(lambda: safe_similarity_search(GlobalResources.ha_collection, clean_q, k=1))
-            if docs:
-                eid = docs[0].metadata.get("entity_id")
-
-    if not eid: return None
-
-    service = "turn_on"
-    if "turn off" in q_low: service = "turn_off"
-    elif "toggle" in q_low: service = "toggle"
+    action_type = orchestration_plan.get("action")
     
-    domain = eid.split(".")[0]
-    target_dom = "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
+    # 3. CONVERSE Decision (Balance Point)
+    if action_type == "CONVERSE":
+        log.info("LLM Orchestrator chose CONVERSE. Proceeding to RAG.")
+        # Return None to trigger Stage 3 (RAG)
+        return None 
     
-    # Uses execute_ha_service from media_ops (shared)
-    return await execute_ha_service(target_dom, service, eid, user_creds, {}, GlobalResources.redis_client)
+    # 4. TOOL_CALL Decision (Execution)
+    if action_type == "tool_call":
+        log.info(f"LLM Orchestrator chose tool_call: {orchestration_plan.get('tool_name')}")
+        # Execute tool and wrap result in a list
+        result = await _execute_tool_action(orchestration_plan, query, user_creds, model)
+        return [result] if result else None
 
-async def try_handle_compound_command(query, user_creds, model):
+    # 5. Fallback - Should not be reached if orchestration is robust
+    return None 
+    
+
+async def try_handle_compound_command(query, user_creds, model) -> Optional[List[Dict[str, Any]]]:
     """
     Manages decomposition and execution of (potentially multiple) commands.
+    Returns a list of structured results or None.
     """
     # META-PROMPT BYPASS (OpenWebUI)
     if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
@@ -302,35 +397,45 @@ async def try_handle_compound_command(query, user_creds, model):
         if " and " not in query.lower():
              if "what time" in query.lower() or "current time" in query.lower():
                  now = datetime.now()
-                 return f"It is currently {now.strftime('%I:%M %p')}."
-             return None
+                 # Simple time query is handled and returned as a SUCCESS context for synthesis
+                 return [{"status": "SUCCESS", "message": f"It is currently {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d')}."}]
+             return None # Trigger RAG for informational question
     
-    # FIRST PASS: Check if main query is a single strong intent
-    primary_intent, score = await intent_engine.classify(query)
-    if primary_intent in ["time_query", "calendar_list", "intent_learn", "general_query"]:
-        if " and " not in query.lower():
-             return await _handle_single_command(query, user_creds, model)
-
     # DECOMPOSITION: Split "Turn on X and Y"
     cmds = await decompose_command_query(query, model)
     tasks = []
-    for c in cmds:
-        if isinstance(c, str) and len(c.strip()) > 2:
-            tasks.append(_handle_single_command(c, user_creds, model))
+    
+    # If decomposition resulted in multiple commands, we handle them as actions
+    if len(cmds) > 1:
+        for c in cmds:
+            if isinstance(c, str) and len(c.strip()) > 2:
+                # Run single command handler for each part (can return results or None)
+                tasks.append(_handle_single_command(c, user_creds, model))
+    else:
+        # If single command, run the main handler
+        tasks.append(_handle_single_command(query, user_creds, model))
             
     if not tasks: return None
     
-    # Run parallel
+    # Run parallel/sequential commands
     results = await asyncio.gather(*tasks)
-    valid = [r for r in results if r]
     
-    if valid:
-        return "\n".join(valid)
-    return None
+    # Aggregate results for LLM Synthesis
+    # Flatten the list of lists/results and filter out the None values (conversational path)
+    valid_results = []
+    for r_list in results:
+        if isinstance(r_list, list):
+            valid_results.extend(r_list)
+    
+    if not valid_results:
+        # If we failed to handle any action, return None to trigger RAG
+        return None
+    
+    return valid_results
 
 async def generate_rag_stream(query, user, model, use_openai, format_type) -> AsyncGenerator[str, None]:
     """
-    Main Pipeline Entry Point.
+    Main Pipeline Entry Point (Modified to handle structured results).
     """
     # Start Timer
     t0 = time.time()
@@ -359,34 +464,54 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     
     # 2. Action Layer (Tools)
     t_action = time.time()
-    action_result = await try_handle_compound_command(refined, creds, model)
+    # Now returns a list of structured results or None
+    action_results = await try_handle_compound_command(refined, creds, model)
     log.debug(f"Action Layer took: {time.time() - t_action:.4f}s")
     
-    if action_result:
-        update_history(user, "assistant", action_result)
-        log.info(f"FINAL RESPONSE TO CLIENT: {action_result}")
-        log.info(f"Total Request Time: {time.time() - t0:.4f}s")
-        yield builder.chunk(role="assistant")
-        yield builder.chunk(content=action_result)
-        yield builder.chunk(finish_reason="stop")
-        yield builder.done()
-        return
-
+    action_context = ""
+    run_knowledge_retrieval = True
+    
+    # Check if any action was performed (even if it failed)
+    if action_results:
+        # If any action was executed, we can skip the slower search and Nextcloud RAG
+        run_knowledge_retrieval = False
+        
+        # Inject structured action result for LLM synthesis (Verification/Error Handoff)
+        action_context = "### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):\n"
+        for res in action_results:
+            status = res.get("status", "FAILURE")
+            msg = res.get("message", "Unknown action.")
+            
+            if status == "SUCCESS":
+                # Use verified state for honest confirmation
+                new_state = res.get('new_state', 'N/A')
+                friendly_name = res.get('friendly_name', 'N/A') # NEW
+                service = res.get('service', 'N/A')             # NEW
+                action_context += f"- SUCCESS: Command '{service}' sent to {friendly_name}. Verified New State: {new_state}\n"
+            else:
+                # Error Handoff: Force the LLM to acknowledge the failure
+                entity = res.get("entity_id", "N/A")
+                service = res.get("service", "N/A")
+                action_context += f"- FAILURE: Command '{service}' on '{entity}' failed. Reason: {msg}\n"
+        log.info(f"Action Context injected for synthesis: {action_context.strip()}")
+        
     # 3. Knowledge Layer (RAG)
     t_rag = time.time()
     
-    # Launch retrievers in parallel
-    ha_future = get_ha_context(user, refined)
-    nc_future = get_rag_context(refined)
-    search_future = tool_web_search(refined)
+    ha_ctx, nc_ctx, search_ctx, cal_ctx = "", "", "", ""
     
-    ha_ctx, nc_ctx, search_ctx = await asyncio.gather(ha_future, nc_future, search_future)
-    
-    # Calendar Context Injection
-    cal_ctx = ""
-    if any(x in refined.lower() for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]):
-        if not any(x in refined.lower() for x in ["schedule a", "add", "remind", "cancel", "delete", "move", "reschedule"]):
-            cal_ctx = await tool_calendar_read(creds, GlobalResources.redis_client)
+    if run_knowledge_retrieval:
+        # Launch retrievers in parallel ONLY if no action was executed (CONVERSE path)
+        ha_future = get_ha_context(user, refined)
+        nc_future = get_rag_context(refined)
+        search_future = tool_web_search(refined)
+        
+        ha_ctx, nc_ctx, search_ctx = await asyncio.gather(ha_future, nc_future, search_future)
+        
+        # Calendar Context Injection
+        if any(x in refined.lower() for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]):
+            if not any(x in refined.lower() for x in ["schedule a", "add", "remind", "cancel", "delete", "move", "reschedule"]):
+                cal_ctx = await tool_calendar_read(creds, GlobalResources.redis_client)
             
     log.debug(f"Context Retrieval took: {time.time() - t_rag:.4f}s")
 
@@ -406,6 +531,10 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
         cal_ctx=cal_ctx,
         query=refined
     )
+    
+    # Append Action Context to the prompt (CRITICAL for hallucination mitigation)
+    if action_context:
+        prompt += f"\n{action_context}"
     
     yield builder.chunk(role="assistant")
     

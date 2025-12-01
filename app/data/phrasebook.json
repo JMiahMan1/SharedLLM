@@ -8,22 +8,9 @@
     "illuminate",
     "start",
     "lights on",
-    "turn the lights on"
-  ],
-  "media_next": [
-    "next track",
-    "skip",
-    "next song",
-    "skip song",
-    "next video",
-    "skip forward"
-  ],
-  "media_previous": [
-    "previous track",
-    "previous song",
-    "go back",
-    "rewind",
-    "go back a song"
+    "turn the lights on",
+    "wake up",
+    "open the"
   ],
   "turn_off": [
     "turn off",
@@ -34,7 +21,9 @@
     "shut down",
     "stop",
     "lights off",
-    "cut the power"
+    "cut the power",
+    "go to sleep",
+    "close the"
   ],
   "toggle": [
     "toggle",
@@ -50,7 +39,18 @@
     "play song",
     "play album",
     "put on some music",
-    "start the tv"
+    "start the tv",
+    "play track",
+    "play artist",
+    "queue up"
+  ],
+  "open_app": [
+    "open",
+    "launch",
+    "start app",
+    "go to app",
+    "switch to",
+    "watch"
   ],
   "stop_media": [
     "stop music",
@@ -59,7 +59,67 @@
     "silence",
     "stop playback",
     "pause music",
-    "hush"
+    "hush",
+    "stop video",
+    "pause video"
+  ],
+  "media_next": [
+    "next track",
+    "skip song",
+    "next song",
+    "skip",
+    "next video",
+    "skip forward"
+  ],
+  "media_previous": [
+    "previous track",
+    "previous song",
+    "go back",
+    "rewind",
+    "go back a song"
+  ],
+  "nav_up": [
+    "up",
+    "go up",
+    "move up",
+    "scroll up"
+  ],
+  "nav_down": [
+    "down",
+    "go down",
+    "move down",
+    "scroll down"
+  ],
+  "nav_left": [
+    "left",
+    "go left",
+    "move left"
+  ],
+  "nav_right": [
+    "right",
+    "go right",
+    "move right"
+  ],
+  "nav_enter": [
+    "select",
+    "enter",
+    "click",
+    "ok",
+    "choose",
+    "go"
+  ],
+  "nav_back": [
+    "back",
+    "go back",
+    "return",
+    "exit",
+    "escape"
+  ],
+  "nav_home": [
+    "home",
+    "go home",
+    "menu",
+    "main menu"
   ],
   "calendar_add": [
     "schedule",
@@ -108,5 +168,30 @@
     "map phrase",
     "training mode",
     "i want to teach you"
+  ],
+  "general_query": [
+    "read a verse",
+    "read the bible",
+    "tell me a joke",
+    "who is",
+    "what is",
+    "explain",
+    "tell me about",
+    "give me a quote",
+    "recite",
+    "where is",
+    "do we have",
+    "search for",
+    "find out about"
+  ],
+  "content_query": [
+    "read chapter",
+    "summarize document",
+    "find in my files",
+    "search my notes",
+    "read from the book",
+    "look up in nextcloud",
+    "check my files for",
+    "read the source"
   ]
 }
