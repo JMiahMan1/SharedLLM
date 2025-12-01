@@ -317,13 +317,18 @@ async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_cre
     
     # --- CALENDAR TOOLS ---
     if tool_name == "calendar_add":
-        # Calendar tools return simple strings on success/failure, wrap them.
-        res = await tool_calendar_add(query, user_creds, model, GlobalResources.redis_client)
-        return {"status": "SUCCESS" if "Scheduled" in res.get("message", "") else "FAILURE", "message": res.get("message", "Calendar operation failed."), "service": "calendar_add"}
+        # Calendar tools now return structured dicts (via calendar_ops.py)
+        return await tool_calendar_add(query, user_creds, model, GlobalResources.redis_client)
     
     elif tool_name == "calendar_list":
-        res = await tool_calendar_list(user_creds, GlobalResources.redis_client)
-        return {"status": "SUCCESS", "message": res.get("message", "Calendar list failed."), "service": "calendar_list"}
+        return await tool_calendar_list(user_creds, GlobalResources.redis_client)
+
+    # --- FIX: ADD MISSING CALENDAR HANDLERS ---
+    elif tool_name == "calendar_delete":
+        return await tool_calendar_delete(query, user_creds, model, GlobalResources.redis_client)
+        
+    elif tool_name == "calendar_update":
+        return await tool_calendar_update(query, user_creds, model, GlobalResources.redis_client)
 
     # --- MEDIA/HA COMMANDS ---
     elif tool_name == "media_command":
