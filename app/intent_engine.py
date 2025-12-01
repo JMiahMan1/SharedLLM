@@ -130,9 +130,11 @@ class IntentEngine:
         except Exception as e:
             log.error(f"Error vectorizing phrasebook: {e}")
 
-    async def classify(self, query: str, threshold: float = 0.60) -> Tuple[Optional[str], float]:
+    # NOTE: Modified signature to include high_confidence_threshold and return is_high_confidence
+    async def classify(self, query: str, threshold: float = 0.60, high_confidence_threshold: float = 0.80) -> Tuple[Optional[str], float, bool]:
         if not self.is_ready or not GlobalResources.embedding_model:
-            return (self._keyword_fallback(query), 1.0)
+            # Assume keyword match is high confidence for simplicity if vectors fail
+            return (self._keyword_fallback(query), 1.0, True)
 
         try:
             query_vec = await run_blocking(lambda: GlobalResources.embedding_model.embed_query(query))
@@ -142,16 +144,18 @@ class IntentEngine:
             best_score = float(scores[best_idx])
             intent, matched_phrase = self.vector_index[best_idx]
             
+            is_high_confidence = best_score >= high_confidence_threshold
+
             if best_score >= threshold:
                 log.debug(f"Intent Match: '{query}' -> '{intent}' ({best_score:.2f}) via '{matched_phrase}'")
-                return intent, best_score
+                return intent, best_score, is_high_confidence
             
             log.debug(f"Intent Low Confidence: '{query}' -> Best: '{intent}' ({best_score:.2f})")
-            return None, best_score
+            return None, best_score, is_high_confidence
 
         except Exception as e:
             log.error(f"Intent Classification Error: {e}")
-            return None, 0.0
+            return None, 0.0, False
 
     def _keyword_fallback(self, query: str) -> Optional[str]:
         q = query.lower()
