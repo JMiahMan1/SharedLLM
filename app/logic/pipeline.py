@@ -107,7 +107,7 @@ async def contextualize_query(query, user, model):
     """
     # Optimization: If intent engine is confident, skip contextualization
     # NOTE: Updated to match new intent_engine.classify return signature
-    intent, score, is_high_confidence = await intent_engine.classify(query)
+    intent, score, is_high_confidence = await intent_engine.classify(query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD)
     
     stateless_intents = [
         "turn_on", "turn_off", "toggle", "play_media", "stop_media",
@@ -230,8 +230,25 @@ async def _attempt_fast_ha_command(query: str, user_creds: Dict[str, str], ha_co
     target_dom = "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
     
     log.info(f"FAST HA PATH: Executing service {service} on {eid} due to string match bypass.")
-    # Return structured result from the execution layer
-    return await execute_ha_service(target_dom, service, eid, user_creds, {}, GlobalResources.redis_client)
+    
+    # CRITICAL FIX: execute_ha_service now returns a dictionary, so this function should just return it.
+    ha_result_dict = await execute_ha_service(target_dom, service, eid, user_creds, {}, GlobalResources.redis_client)
+    
+    # Since execute_ha_service is updated to return a dict, we ensure all necessary keys are present
+    # in case of an unexpected return type (though this is primarily for safety).
+    if isinstance(ha_result_dict, dict):
+        return ha_result_dict
+    
+    # Fallback for unexpected non-dict return (should not happen with updated media_ops.py)
+    log.error(f"FAST HA PATH: execute_ha_service returned unexpected type: {type(ha_result_dict)}")
+    return {
+        "status": "FAILURE", 
+        "message": f"Execution failed internally or returned non-dict type: {ha_result_dict}",
+        "service": f"{target_dom}.{service}",
+        "entity_id": eid,
+        "friendly_name": eid.split(".")[-1].replace("_", " ").title(),
+        "new_state": "N/A"
+    }
 
 
 async def _llm_orchestrator(query: str, intent: str, score: float, model: str) -> Dict[str, Any]:
@@ -302,25 +319,24 @@ async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_cre
     if tool_name == "calendar_add":
         # Calendar tools return simple strings on success/failure, wrap them.
         res = await tool_calendar_add(query, user_creds, model, GlobalResources.redis_client)
-        return {"status": "SUCCESS" if "Scheduled" in res else "FAILURE", "message": res, "service": "calendar_add"}
+        return {"status": "SUCCESS" if "Scheduled" in res.get("message", "") else "FAILURE", "message": res.get("message", "Calendar operation failed."), "service": "calendar_add"}
     
     elif tool_name == "calendar_list":
         res = await tool_calendar_list(user_creds, GlobalResources.redis_client)
-        return {"status": "SUCCESS", "message": res, "service": "calendar_list"}
+        return {"status": "SUCCESS", "message": res.get("message", "Calendar list failed."), "service": "calendar_list"}
 
     # --- MEDIA/HA COMMANDS ---
     elif tool_name == "media_command":
-        # NOTE: We rely on handle_media_command for smart resolution (entity_id=None)
-        # and it already returns the structured Dict for verification.
-        intent = params.get("intent", "turn_on")
-        return await handle_media_command(
-            intent, 
+        # FIX: Now that handle_media_command returns a structured dict, we return it directly.
+        result_dict = await handle_media_command(
+            params.get("intent", "turn_on"), 
             query, 
-            None, # Let handle_media_command resolve entity
+            None, 
             user_creds, 
             GlobalResources.ha_collection, 
             GlobalResources.redis_client
         )
+        return result_dict
     
     # --- Other Tools (e.g., learn) ---
     elif tool_name == "intent_learn":
@@ -424,9 +440,17 @@ async def try_handle_compound_command(query, user_creds, model) -> Optional[List
     # Flatten the list of lists/results and filter out the None values (conversational path)
     valid_results = []
     for r_list in results:
+        # Check if the result is a list (from compound commands) or a single dictionary (from single command)
         if isinstance(r_list, list):
-            valid_results.extend(r_list)
-    
+            # FIX: Ensure we only extend with dictionaries (valid action results)
+            valid_results.extend([r for r in r_list if isinstance(r, dict)])
+        elif isinstance(r_list, dict): 
+            valid_results.append(r_list)
+        elif r_list is not None:
+             # Should not happen with the fixes, but catch any non-None, non-list, non-dict
+            log.error(f"try_handle_compound_command: Found unexpected type in results: {type(r_list)}")
+
+
     if not valid_results:
         # If we failed to handle any action, return None to trigger RAG
         return None
@@ -479,6 +503,7 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
         # Inject structured action result for LLM synthesis (Verification/Error Handoff)
         action_context = "### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):\n"
         for res in action_results:
+            # FIX: res is now guaranteed to be a dictionary or filtered out.
             status = res.get("status", "FAILURE")
             msg = res.get("message", "Unknown action.")
             
