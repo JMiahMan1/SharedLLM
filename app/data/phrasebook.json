@@ -143,7 +143,10 @@
     "cancel meeting",
     "remove appointment",
     "clear schedule",
-    "cancel event"
+    "cancel event",
+    "delete my",
+    "remove the",
+    "cancel the"
   ],
   "calendar_update": [
     "reschedule",
@@ -151,7 +154,8 @@
     "change time",
     "postpone",
     "move meeting",
-    "update event"
+    "update event",
+    "change the time"
   ],
   "time_query": [
     "what time is it",
