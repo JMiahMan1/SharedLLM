@@ -323,7 +323,6 @@ async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_cre
     elif tool_name == "calendar_list":
         return await tool_calendar_list(user_creds, GlobalResources.redis_client)
 
-    # --- FIX: ADD MISSING CALENDAR HANDLERS ---
     elif tool_name == "calendar_delete":
         return await tool_calendar_delete(query, user_creds, model, GlobalResources.redis_client)
         
@@ -413,14 +412,13 @@ async def try_handle_compound_command(query, user_creds, model) -> Optional[List
     if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
         return None
 
-    # Questions bypass tools
+    # Time/Date Check
     if re.match(r"^(what|who|when|how|why)\b", query.lower().strip()): 
         if " and " not in query.lower():
              if "what time" in query.lower() or "current time" in query.lower():
                  now = datetime.now()
-                 # Simple time query is handled and returned as a SUCCESS context for synthesis
                  return [{"status": "SUCCESS", "message": f"It is currently {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d')}."}]
-             return None # Trigger RAG for informational question
+             return None 
     
     # DECOMPOSITION: Split "Turn on X and Y"
     cmds = await decompose_command_query(query, model)
@@ -491,7 +489,11 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     update_history(user, "user", query)
     creds = get_user_creds(user)
     
-    # 2. Action Layer (Tools)
+    # 2. Get Intent for Routing (Needed even if action fails)
+    # We call classify here to help decide which RAG context to fetch later
+    intent, score, _ = await intent_engine.classify(refined)
+    
+    # 3. Action Layer (Tools)
     t_action = time.time()
     # Now returns a list of structured results or None
     action_results = await try_handle_compound_command(refined, creds, model)
@@ -525,22 +527,50 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
                 action_context += f"- FAILURE: Command '{service}' on '{entity}' failed. Reason: {msg}\n"
         log.info(f"Action Context injected for synthesis: {action_context.strip()}")
         
-    # 3. Knowledge Layer (RAG)
+    # 4. Smart Context Routing (The Fix)
     t_rag = time.time()
-    
     ha_ctx, nc_ctx, search_ctx, cal_ctx = "", "", "", ""
     
     if run_knowledge_retrieval:
-        # Launch retrievers in parallel ONLY if no action was executed (CONVERSE path)
-        ha_future = get_ha_context(user, refined)
-        nc_future = get_rag_context(refined)
-        search_future = tool_web_search(refined)
+        # Defaults
+        fetch_ha = True
+        fetch_nc = True
         
-        ha_ctx, nc_ctx, search_ctx = await asyncio.gather(ha_future, nc_future, search_future)
+        # --- ROUTING LOGIC ---
+        # If intent suggests Documents/Knowledge, ignore Home Assistant Devices
+        if intent == "content_query":
+            fetch_ha = False
+            log.info(f"Context Routing: Skipping HA search for content intent '{intent}'")
+            
+        # If intent suggests Controls/Media, ignore Nextcloud Invoices/Notes
+        elif intent in ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "open_app"]:
+            fetch_nc = False
+            log.info(f"Context Routing: Skipping Nextcloud search for control intent '{intent}'")
+            
+        # If intent is Calendar, we likely don't need generic RAG either
+        elif intent and intent.startswith("calendar"): # FIX: Check if intent is not None
+            fetch_ha = False
+            fetch_nc = False
+            
+        # Execute Fetches in Parallel based on flags
+        tasks = []
+        if fetch_ha: tasks.append(get_ha_context(user, refined))
+        else: tasks.append(asyncio.sleep(0)) # No-op
+            
+        if fetch_nc: tasks.append(get_rag_context(refined))
+        else: tasks.append(asyncio.sleep(0)) # No-op
+            
+        tasks.append(tool_web_search(refined))
+        
+        results = await asyncio.gather(*tasks)
+        ha_ctx = results[0] if fetch_ha else ""
+        nc_ctx = results[1] if fetch_nc else ""
+        search_ctx = results[2]
         
         # Calendar Context Injection
         if any(x in refined.lower() for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]):
-            if not any(x in refined.lower() for x in ["schedule a", "add", "remind", "cancel", "delete", "move", "reschedule"]):
+            # Only read calendar if we aren't actively modifying it right now
+            if not action_results:
                 cal_ctx = await tool_calendar_read(creds, GlobalResources.redis_client)
             
     log.debug(f"Context Retrieval took: {time.time() - t_rag:.4f}s")
