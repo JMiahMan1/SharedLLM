@@ -256,18 +256,28 @@ async def rag_list(limit: int = 100):
     return await run_blocking(sync)
 
 @app.get("/api/rag/search")
-async def rag_search(q: str, k: int = 4):
+async def rag_search(q: str, k: int = 4, source: Optional[str] = None):
+    """
+    Search the vector DB. 
+    Optional 'source' param: 'ha' (Home Assistant) or 'nextcloud' (Documents).
+    If omitted, searches both.
+    """
     results = []
-    if GlobalResources.ha_collection:
+    
+    # 1. Search Home Assistant (if source is None or 'ha')
+    if (source is None or source == 'ha') and GlobalResources.ha_collection:
         try:
             ha_docs = await run_blocking(lambda: GlobalResources.ha_collection.similarity_search(q, k=k))
             results.extend([{"text": d.page_content, "metadata": d.metadata, "source": "home_assistant"} for d in ha_docs])
         except Exception as e: log.error(f"Error searching HA collection: {e}")
-    if GlobalResources.nextcloud_collection:
+        
+    # 2. Search Nextcloud (if source is None or 'nextcloud')
+    if (source is None or source == 'nextcloud') and GlobalResources.nextcloud_collection:
         try:
             nc_docs = await run_blocking(lambda: GlobalResources.nextcloud_collection.similarity_search(q, k=k))
             results.extend([{"text": d.page_content, "metadata": d.metadata, "source": "nextcloud"} for d in nc_docs])
         except Exception as e: log.error(f"Error searching Nextcloud collection: {e}")
+        
     return {"results": results}
 
 @app.post("/context/update")

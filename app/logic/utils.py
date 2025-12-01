@@ -18,7 +18,6 @@ from settings import (
 # Import The New Intent Engine
 from intent_engine import engine as intent_engine
 
-# Import Pydantic for validation error handling
 try:
     from pydantic import ValidationError
 except ImportError:
@@ -68,10 +67,6 @@ def get_history_context(user: str) -> str:
     return history_text
 
 def clean_llm_output(text: str, is_voice: bool = True) -> str:
-    """
-    Cleans text for Text-to-Speech (TTS) if is_voice=True.
-    If is_voice=False (OpenWebUI), returns text RAW (preserves Markdown/JSON).
-    """
     if not text: return ""
     if not is_voice: return text 
     
@@ -79,7 +74,6 @@ def clean_llm_output(text: str, is_voice: bool = True) -> str:
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     
     # 2. Aggressive Symbol Stripping for TTS
-    # Remove *, #, _, `
     text = re.sub(r'[\*#_`]', '', text)
     
     # 3. Remove Prefixes
@@ -100,27 +94,25 @@ def clean_llm_output(text: str, is_voice: bool = True) -> str:
     for char, rep in replacements.items():
         text = text.replace(char, rep)
 
-    # 6. FORCE STRIP NON-ASCII (Emoji Killer)
+    # 6. FORCE STRIP NON-ASCII
     text = re.sub(r'[^\x00-\x7F]+', '', text)
     
     # 7. Collapse multiple spaces
     text = re.sub(r'[ \t]+', ' ', text)
     
-    # CRITICAL FIX: DO NOT STRIP.
-    # Streaming tokens often start with a space (e.g., " world") which must be preserved.
     return text
 
 # --- Helper: Safe Similarity Search ---
 def safe_similarity_search(collection, query: str, k: int = 4):
     """
-    Safely executes similarity search, catching Pydantic ValidationErrors.
+    Safely executes similarity search on a SPECIFIC collection.
     """
     if not collection: 
         return []
     try:
         return collection.similarity_search(query, k=k)
     except (ValidationError, Exception) as e:
-        log.error(f"RAG Search Error (Potentially corrupted doc in DB): {e}")
+        log.error(f"RAG Search Error: {e}")
         return []
 
 # --- LLM Functions ---
@@ -177,9 +169,15 @@ async def call_openai_chat(messages, model=OPENAI_MODEL, stream=False):
         return {"error": str(e)}
 
 # --- Context Retrieval Utils ---
+
 async def get_ha_context(user, query=None):
+    """
+    Retrieves context ONLY from Home Assistant collection.
+    Does NOT search Nextcloud.
+    """
     if not GlobalResources.ha_collection or not HA_URL: return ""
     try:
+        # STRICT SEPARATION: Only query the 'ha_collection'
         docs = await run_blocking(lambda: safe_similarity_search(GlobalResources.ha_collection, query, k=5))
         if not docs: return ""
         
@@ -187,9 +185,16 @@ async def get_ha_context(user, query=None):
         check_ids = [d.metadata.get("entity_id") for d in docs if d.metadata.get("entity_id")]
         
         headers = {"Authorization": f"Bearer {creds['ha_token']}"}
-        r = await run_blocking(lambda: requests.get(f"{HA_URL.rstrip('/')}/api/states", headers=headers, timeout=3.0))
         
-        if r.status_code == 200:
+        # Verify current state of found entities
+        def _fetch_states():
+            try:
+                return requests.get(f"{HA_URL.rstrip('/')}/api/states", headers=headers, timeout=3.0)
+            except: return None
+
+        r = await run_blocking(_fetch_states)
+        
+        if r and r.status_code == 200:
             all_states = {s["entity_id"]: s for s in r.json()}
             lines = []
             for eid in check_ids:
@@ -197,23 +202,45 @@ async def get_ha_context(user, query=None):
                     s = all_states[eid]
                     friendly = s.get("attributes", {}).get("friendly_name", eid)
                     state = s.get("state")
-                    lines.append(f"- {friendly} ({eid}) is {state}")
-            return "Home Assistant Devices:\n" + "\n".join(lines)
+                    # Enrich with attributes if useful (e.g. brightness, volume)
+                    attrs = []
+                    if "brightness" in s.get("attributes", {}): 
+                        attrs.append(f"brightness: {s['attributes']['brightness']}")
+                    if "volume_level" in s.get("attributes", {}):
+                        attrs.append(f"volume: {s['attributes']['volume_level']}")
+                    
+                    attr_str = f" ({', '.join(attrs)})" if attrs else ""
+                    lines.append(f"- {friendly} ({eid}) is {state}{attr_str}")
+            
+            return "Home Assistant Devices (Verified States):\n" + "\n".join(lines)
     except Exception as e:
         log.error(f"HA Context Error: {e}")
     return ""
 
 async def get_rag_context(query):
+    """
+    Retrieves context ONLY from Nextcloud/Documents collection.
+    Does NOT search HA Devices.
+    """
     if not GlobalResources.nextcloud_collection: return ""
     try:
+        # STRICT SEPARATION: Only query 'nextcloud_collection'
         docs = await run_blocking(lambda: safe_similarity_search(GlobalResources.nextcloud_collection, query, k=3))
-        valid_docs = [d for d in docs if d.page_content]
-        return "Nextcloud Documents:\n" + "\n".join([f"...{d.page_content[:400]}..." for d in valid_docs])
+        
+        # Add source metadata to context so LLM knows where it came from
+        context_lines = []
+        for d in docs:
+            if d.page_content:
+                source = d.metadata.get("source", "Unknown File")
+                context_lines.append(f"[Source: {source}]\n...{d.page_content[:600]}...")
+                
+        if not context_lines: return ""
+        return "Nextcloud Documents:\n" + "\n".join(context_lines)
     except: return ""
 
 async def contextualize_query(query, user, model):
     # Optimization: If intent engine is confident, skip contextualization
-    intent, score = await intent_engine.classify(query)
+    intent, score, is_high_confidence = await intent_engine.classify(query)
     
     stateless_intents = [
         "turn_on", "turn_off", "toggle", "play_media", "stop_media",
@@ -234,7 +261,6 @@ async def contextualize_query(query, user, model):
 
     prompt = f"Rewrite based on history:\n{hist}\nInput: {query}\nRefined (Return ONLY the query):"
     r = await call_ollama_generate(prompt, model)
-    # Use is_voice=False to preserve content during rewrite
     refined = clean_llm_output(r.get("text", query), is_voice=False) 
     
     if len(refined) > len(query) * 3: return query

@@ -19,11 +19,12 @@ try:
     from pypdf import PdfReader
     from docx import Document as DocxDocument
     from ebooklib import epub
+    import ebooklib
     import mobi
     import html2text
-    import openpyxl # Added for XLSX support
+    import openpyxl
 except ImportError as e:
-    print(f"ERROR: Missing required ingestion library: {e}. Please update requirements.txt and rebuild.")
+    print(f"ERROR: Missing required ingestion library: {e}")
     sys.exit(1)
 
 # Suppress SSL Warnings
@@ -52,16 +53,17 @@ INGESTION_TEMP_DIR = os.getenv("INGESTION_TEMP_DIR", "/data/nextcloud_temp")
 LOG_FILE_PATH = "/data/nextcloud_ingest.log"
 
 # Logic Configuration
-PERSIST_FREQUENCY = 20  # Save more frequently for rsync-style safety
+PERSIST_FREQUENCY = 20  
 
 # File Categorization
-# Full Text Ingestion: These will be downloaded, read, chunked, and embedded.
-TEXT_EXTS = [".txt", ".pdf", ".docx", ".epub", ".md", ".mobi", ".csv", ".json", ".xlsx"]
+TEXT_EXTS = [".txt", ".pdf", ".docx", ".epub", ".md", ".mobi", ".csv", ".xlsx", ".json"]
 
-# Metadata Only Ingestion: These will NOT be downloaded. We only index their filename and path.
 MEDIA_EXTS = [".mp3", ".m4b", ".mp4", ".mkv", ".avi", ".flac", ".wav", ".mov", ".webm", ".ogg"]
 
-BLACKLIST_DIRS = ["Music", "Videos", "Photos", "Audio", "Thumbnails", "Preview", "Cache", "AppData", "Templates"]
+# RESTORED Access to Backup Folders
+BLACKLIST_DIRS = [
+    "Music", "Videos", "Photos", "Audio", "Thumbnails", "Preview", "Cache", "AppData", "Templates"
+]
 BLACKLIST_FULL_PATHS = ["Books/Audio"]
 
 # --- Logging Setup ---
@@ -170,9 +172,8 @@ def extract_text_content(file_path: str) -> Optional[str]:
 def list_files_webdav_iterative(start_url: str, found_files: Dict[str, Dict]):
     """
     Iteratively scans Nextcloud and populates found_files dict.
-    Format: { "relative/path": { "etag": "...", "category": "text/media" } }
+    Includes RETRY logic for timeouts on large folders.
     """
-    # Stack stores URLs to visit
     stack = [start_url]
     visited = set()
 
@@ -183,29 +184,53 @@ def list_files_webdav_iterative(start_url: str, found_files: Dict[str, Dict]):
         if current_url in visited: continue
         visited.add(current_url)
 
-        try:
-            resp = requests.request(
-                "PROPFIND", current_url, 
-                auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), 
-                headers={"Depth": "1"}, 
-                verify=False, timeout=30
-            )
-            
-            if resp.status_code == 404:
-                logger.warning(f"Path not found: {current_url}")
-                continue
-            if resp.status_code != 207:
-                logger.warning(f"WebDAV error {resp.status_code} at {current_url}")
-                continue
+        # --- RETRY LOOP FOR TIMEOUTS ---
+        success = False
+        content = None
+        
+        for attempt in range(3):
+            try:
+                # Increased timeout to 600s (10 minutes) for massive directories
+                resp = requests.request(
+                    "PROPFIND", current_url, 
+                    auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), 
+                    headers={"Depth": "1"}, 
+                    verify=False, timeout=3600
+                )
+                
+                if resp.status_code == 404:
+                    logger.warning(f"Path not found: {current_url}")
+                    success = True # Handled, stop retrying
+                    break
+                
+                if resp.status_code == 207:
+                    content = resp.content
+                    success = True
+                    break
+                
+                logger.warning(f"WebDAV error {resp.status_code} at {current_url} (Attempt {attempt+1}/3)")
+                time.sleep(5)
 
-            root = ET.fromstring(resp.content)
+            except requests.exceptions.ReadTimeout:
+                logger.warning(f"Read Timeout at {current_url} (Attempt {attempt+1}/3). Retrying...")
+                time.sleep(10)
+            except Exception as e:
+                logger.error(f"WebDAV Connection Error at {current_url}: {e}")
+                time.sleep(5)
+
+        if not success or not content:
+            logger.error(f"Skipping {current_url} after repeated failures.")
+            continue
+        # -------------------------------
+
+        try:
+            root = ET.fromstring(content)
             
             for r in root.findall("d:response", NAMESPACES):
                 href = r.find("d:href", NAMESPACES).text
                 prop = r.find("d:propstat/d:prop", NAMESPACES)
                 if not href or not prop: continue
                 
-                # Get ETag for Rsync-like comparison
                 etag_node = prop.find("d:getetag", NAMESPACES)
                 etag = etag_node.text.strip('"') if etag_node is not None else "unknown"
                 
@@ -215,8 +240,6 @@ def list_files_webdav_iterative(start_url: str, found_files: Dict[str, Dict]):
                 if prefix not in href_decoded: continue
                 
                 rel_path = href_decoded.split(prefix, 1)[1]
-                
-                # Determine absolute URL for this item
                 item_url = urljoin(NEXTCLOUD_URL, href)
                 
                 # Skip self
@@ -237,7 +260,7 @@ def list_files_webdav_iterative(start_url: str, found_files: Dict[str, Dict]):
                         found_files[rel_path] = {"etag": etag, "category": cat}
                         
         except Exception as e:
-            logger.error(f"WebDAV Error at {current_url}: {e}")
+            logger.error(f"XML Parsing Error at {current_url}: {e}")
 
 # ----------------------
 # Synchronization Logic
@@ -245,16 +268,13 @@ def list_files_webdav_iterative(start_url: str, found_files: Dict[str, Dict]):
 def get_db_state(vectordb) -> Dict[str, str]:
     """
     Fetches all documents from Chroma to build a current state map.
-    Returns: { "relative/path": "etag" }
     """
     logger.info("Fetching current database state (this may take a moment)...")
     try:
-        # We fetch only metadata to be fast
         results = vectordb.get(include=["metadatas"])
         state = {}
         for meta in results["metadatas"]:
             if meta and "source" in meta:
-                # We prioritize the ETag stored in metadata if available
                 etag = meta.get("etag", "unknown")
                 state[meta["source"]] = etag
         return state
@@ -290,9 +310,9 @@ def sync_nextcloud_files():
 
     # 3. Calculate Diff
     to_delete = []
-    to_ingest = [] # Tuple: (path, category, etag)
+    to_ingest = [] 
 
-    # Detect Deletions (In DB but not in NC)
+    # Detect Deletions
     for path in db_state:
         if path not in nc_state:
             to_delete.append(path)
@@ -303,18 +323,12 @@ def sync_nextcloud_files():
         db_etag = db_state.get(path)
 
         if db_etag is None:
-            # New File
             to_ingest.append((path, info["category"], nc_etag))
         elif db_etag != nc_etag:
-            # Modified File
-            logger.info(f"File changed: {path} (DB: {db_etag} -> NC: {nc_etag})")
-            to_delete.append(path) # Delete old chunks first
-            to_ingest.append((path, info["category"], nc_etag)) # Then re-ingest
-        else:
-            # Unchanged - Skip
-            pass
+            logger.info(f"File changed: {path}")
+            to_delete.append(path)
+            to_ingest.append((path, info["category"], nc_etag))
     
-    # Deduplicate deletes
     to_delete = list(set(to_delete))
 
     logger.info(f"Sync Plan: {len(to_delete)} to delete, {len(to_ingest)} to ingest/update.")
@@ -354,7 +368,7 @@ def sync_nextcloud_files():
                         "filename": fname,
                         "type": "media",
                         "category": "audio_video",
-                        "etag": etag, # Critical for Sync
+                        "etag": etag,
                         "chunk": 0
                     }
                 )
@@ -373,7 +387,8 @@ def sync_nextcloud_files():
             temp_path = os.path.join(INGESTION_TEMP_DIR, temp_filename)
             
             try:
-                with requests.get(file_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), stream=True, verify=False, timeout=120) as r:
+                # 120s timeout -> Increased to 600s for large downloads
+                with requests.get(file_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), stream=True, verify=False, timeout=3600) as r:
                     r.raise_for_status()
                     with open(temp_path, 'wb') as f:
                         for chunk in r.iter_content(chunk_size=8192):
@@ -393,7 +408,7 @@ def sync_nextcloud_files():
                                 "type": "document",
                                 "chunk_index": idx,
                                 "total_chunks": len(chunks),
-                                "etag": etag # Critical for Sync
+                                "etag": etag
                             }
                         ))
                     
