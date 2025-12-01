@@ -56,6 +56,11 @@ MAX_HISTORY_TURNS = 15
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
 CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400)) 
 
+# --- Intent Thresholds & Groups (NEW) ---
+ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.80
+INFORMATIONAL_INTENTS = ["general_query", "content_query", "time_query"]
+
+
 # --- Prompts (Externalized) ---
 # Contextualization / Query Rewriting
 DEFAULT_CONTEXT_PROMPT = "Rewrite the following query to be self-contained, resolving any pronouns (he, she, it, they, him, her) using the chat history.\nHistory:\n{history}\nInput: {query}\nRefined (Return ONLY the refined query string, NO JSON, NO MARKDOWN):"
@@ -67,6 +72,32 @@ Return JSON with keys: 'summary' (string), 'start_time' (natural language), 'cal
 IMPORTANT: 'summary' MUST be the event title. If input is 'RAG_Test_123', summary is 'RAG_Test_123'.
 JSON:"""
 CALENDAR_EXTRACT_PROMPT = os.getenv("CALENDAR_EXTRACT_PROMPT", DEFAULT_CALENDAR_PROMPT)
+
+# LLM Orchestration (NEW: JSON Planning for Hallucination Mitigation)
+DEFAULT_ORCHESTRATOR_PROMPT = """You are an action planning agent. Your task is to analyze the user's intent and decide the next action based on the available tools.
+User Query: {query}
+Best Vector Intent Match: {intent_name} (Confidence: {intent_score:.2f})
+
+Available Tools:
+1. 'calendar_add' (Schedule/create an event)
+2. 'calendar_delete' (Cancel an event by fuzzy name match)
+3. 'calendar_list' (List available calendars)
+4. 'calendar_update' (Reschedule an existing event)
+5. 'media_command' (Handle media/HA control, requires 'intent' and 'device_name')
+6. 'intent_learn' (Teach the AI a new phrase mapping)
+7. 'web_search' (Use for factual/external queries, if no other tool applies)
+
+If the intent is a clear, confident action, generate the JSON for a tool call.
+If the query is conversational, informational, ambiguous, or requires the user's personal context/RAG, output 'CONVERSE'.
+
+Output ONLY a single JSON object (DO NOT use markdown backticks). Example:
+{{"action": "tool_call", "tool_name": "calendar_add", "parameters": {{"summary": "Dinner with Dad", "start_time": "tonight at 7pm"}}}}
+OR
+{{"action": "CONVERSE"}}
+
+JSON:"""
+ORCHESTRATOR_PROMPT = os.getenv("ORCHESTRATOR_PROMPT", DEFAULT_ORCHESTRATOR_PROMPT)
+
 
 # Final RAG Assembly
 DEFAULT_RAG_TEMPLATE = """### SYSTEM
