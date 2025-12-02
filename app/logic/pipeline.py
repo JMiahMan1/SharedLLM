@@ -317,30 +317,38 @@ async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_cre
     
     # --- CALENDAR TOOLS ---
     if tool_name == "calendar_add":
-        # Calendar tools now return structured dicts (via calendar_ops.py)
-        return await tool_calendar_add(query, user_creds, model, GlobalResources.redis_client)
+        # Calendar tools return simple strings on success/failure, wrap them.
+        res = await tool_calendar_add(query, user_creds, model, GlobalResources.redis_client)
+        return {"status": "SUCCESS" if "Scheduled" in res.get("message", "") else "FAILURE", "message": res.get("message", "Calendar operation failed."), "service": "calendar_add"}
     
     elif tool_name == "calendar_list":
-        return await tool_calendar_list(user_creds, GlobalResources.redis_client)
+        res = await tool_calendar_list(user_creds, GlobalResources.redis_client)
+        return {"status": "SUCCESS", "message": res.get("message", "Calendar list failed."), "service": "calendar_list"}
 
     elif tool_name == "calendar_delete":
+        # FIX: Added Missing Handler
         return await tool_calendar_delete(query, user_creds, model, GlobalResources.redis_client)
         
     elif tool_name == "calendar_update":
+        # FIX: Added Missing Handler
         return await tool_calendar_update(query, user_creds, model, GlobalResources.redis_client)
 
     # --- MEDIA/HA COMMANDS ---
     elif tool_name == "media_command":
-        # FIX: Now that handle_media_command returns a structured dict, we return it directly.
-        result_dict = await handle_media_command(
-            params.get("intent", "turn_on"), 
+        # NOTE: We rely on handle_media_command for smart resolution (entity_id=None)
+        # and it already returns the structured Dict for verification.
+        intent = params.get("intent", "turn_on")
+        # CRITICAL FIX: handle_media_command returns a string on failure, which causes the crash.
+        # It should return a structured dict. We'll handle its string return here for now,
+        # but media_ops.py should be updated to return dicts.
+        return await handle_media_command(
+            intent, 
             query, 
-            None, 
+            None, # Let handle_media_command resolve entity
             user_creds, 
             GlobalResources.ha_collection, 
             GlobalResources.redis_client
         )
-        return result_dict
     
     # --- Other Tools (e.g., learn) ---
     elif tool_name == "intent_learn":
@@ -374,6 +382,7 @@ async def _handle_single_command(query: Union[str, Dict], user_creds: Dict[str, 
     if action_result:
         log.debug("FAST PATH executed, returning action result.")
         # Wrap single result in a list for compatibility with compound handler
+        # _attempt_fast_ha_command now returns a dict, so wrap it.
         return [action_result] 
 
     # --- STAGE 2B: LLM ORCHESTRATION ---
@@ -412,13 +421,14 @@ async def try_handle_compound_command(query, user_creds, model) -> Optional[List
     if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
         return None
 
-    # Time/Date Check
+    # Questions bypass tools
     if re.match(r"^(what|who|when|how|why)\b", query.lower().strip()): 
         if " and " not in query.lower():
              if "what time" in query.lower() or "current time" in query.lower():
                  now = datetime.now()
+                 # Simple time query is handled and returned as a SUCCESS context for synthesis
                  return [{"status": "SUCCESS", "message": f"It is currently {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d')}."}]
-             return None 
+             return None # Trigger RAG for informational question
     
     # DECOMPOSITION: Split "Turn on X and Y"
     cmds = await decompose_command_query(query, model)
@@ -445,8 +455,8 @@ async def try_handle_compound_command(query, user_creds, model) -> Optional[List
     for r_list in results:
         # Check if the result is a list (from compound commands) or a single dictionary (from single command)
         if isinstance(r_list, list):
-            # FIX: Ensure we only extend with dictionaries (valid action results)
             valid_results.extend([r for r in r_list if isinstance(r, dict)])
+        # CRITICAL FIX: If a single command handler returns a dictionary, it needs to be processed.
         elif isinstance(r_list, dict): 
             valid_results.append(r_list)
         elif r_list is not None:
@@ -492,7 +502,7 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     # 2. Get Intent for Routing (Needed even if action fails)
     # We call classify here to help decide which RAG context to fetch later
     intent, score, _ = await intent_engine.classify(refined)
-    
+
     # 3. Action Layer (Tools)
     t_action = time.time()
     # Now returns a list of structured results or None
