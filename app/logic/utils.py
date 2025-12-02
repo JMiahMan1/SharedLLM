@@ -67,38 +67,50 @@ def get_history_context(user: str) -> str:
     return history_text
 
 def clean_llm_output(text: str, is_voice: bool = True) -> str:
+    """
+    Cleans text for Text-to-Speech (TTS) optimization if is_voice=True.
+    Preserves formatting for Web UI if is_voice=False.
+    """
     if not text: return ""
     if not is_voice: return text 
     
     # 1. Remove Thinking Blocks
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     
-    # 2. Aggressive Symbol Stripping for TTS
+    # 2. Remove Speaker Prefixes (e.g., "Jarvis:", "Assistant:")
+    text = re.sub(r'^(Jarvis|Assistant|Unified Home AI|Result|Output|Command):\s*', '', text, flags=re.IGNORECASE).strip()
+    
+    # 3. Fix Phone Numbers for TTS (480-555-1234 -> 480 555 1234)
+    # This prevents Piper from saying "minus"
+    text = re.sub(r'\b(\d{3})-(\d{3})-(\d{4})\b', r'\1 \2 \3', text)
+
+    # 4. Remove Markdown & Action Emotes (*winks*)
+    text = re.sub(r'\*.*?\*', '', text)
     text = re.sub(r'[\*#_`]', '', text)
-    
-    # 3. Remove Prefixes
-    text = re.sub(r'^(Standalone Command|Command|Output|Result|Unified Home AI):', '', text, flags=re.IGNORECASE)
-    
-    # 4. Remove Code Blocks remnants
-    text = text.replace("json", "") 
-    
-    # 5. Normalize Smart Quotes and Punctuation
+
+    # 5. Normalize Punctuation for Flow
     replacements = {
-        '\u201c': '"', '\u201d': '"', 
-        '\u2018': "'", '\u2019': "'", 
-        '\u2013': '-', '\u2014': '-', 
+        '\u201c': '', '\u201d': '', # Remove smart quotes (pauses)
+        '"': '',                    # Remove standard quotes
+        '\u2018': '', '\u2019': '', 
+        '\u2013': ', ', '\u2014': ', ', # Em-dashes to pauses
         '&': ' and ',
         '%': ' percent',
-        '@': ' at '
+        '@': ' at ',
+        '+': ' plus ',
+        '=': ' equals '
     }
     for char, rep in replacements.items():
         text = text.replace(char, rep)
 
-    # 6. FORCE STRIP NON-ASCII
+    # 6. Fix "Sticky" Hyphens between words (branchesmesa.org-perfect -> perfect)
+    text = re.sub(r'(?<=[a-zA-Z])-(?=[a-zA-Z])', ' ', text)
+
+    # 7. Force Strip Non-ASCII (Emoji Killer)
     text = re.sub(r'[^\x00-\x7F]+', '', text)
     
-    # 7. Collapse multiple spaces
-    text = re.sub(r'[ \t]+', ' ', text)
+    # 8. Collapse multiple spaces
+    text = re.sub(r'\s+', ' ', text).strip()
     
     return text
 

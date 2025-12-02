@@ -37,7 +37,6 @@ NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
 NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
-# UPDATED: Points to the Docker volume location
 SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "/app/data/system_prompt.txt")
 
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:latest")
@@ -56,24 +55,21 @@ MAX_HISTORY_TURNS = 15
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
 CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400)) 
 
-# --- Intent Thresholds & Groups (NEW) ---
+# --- Intent Thresholds & Groups ---
 ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.80
 INFORMATIONAL_INTENTS = ["general_query", "content_query", "time_query"]
 
 
 # --- Prompts (Externalized) ---
-# Contextualization / Query Rewriting
 DEFAULT_CONTEXT_PROMPT = "Rewrite the following query to be self-contained, resolving any pronouns (he, she, it, they, him, her) using the chat history.\nHistory:\n{history}\nInput: {query}\nRefined (Return ONLY the refined query string, NO JSON, NO MARKDOWN):"
 CONTEXT_REWRITE_PROMPT = os.getenv("CONTEXT_REWRITE_PROMPT", DEFAULT_CONTEXT_PROMPT)
 
-# Calendar Extraction
 DEFAULT_CALENDAR_PROMPT = """Extract details from: "{query}".
 Return JSON with keys: 'summary' (string), 'start_time' (natural language), 'calendar_target' (string or null), 'intent' ('add', 'delete', 'update').
 IMPORTANT: 'summary' MUST be the event title. If input is 'RAG_Test_123', summary is 'RAG_Test_123'.
 JSON:"""
 CALENDAR_EXTRACT_PROMPT = os.getenv("CALENDAR_EXTRACT_PROMPT", DEFAULT_CALENDAR_PROMPT)
 
-# LLM Orchestration (NEW: JSON Planning for Hallucination Mitigation)
 DEFAULT_ORCHESTRATOR_PROMPT = """You are an action planning agent. Your task is to analyze the user's intent and decide the next action based on the available tools.
 User Query: {query}
 Best Vector Intent Match: {intent_name} (Confidence: {intent_score:.2f})
@@ -98,8 +94,6 @@ OR
 JSON:"""
 ORCHESTRATOR_PROMPT = os.getenv("ORCHESTRATOR_PROMPT", DEFAULT_ORCHESTRATOR_PROMPT)
 
-
-# Final RAG Assembly
 DEFAULT_RAG_TEMPLATE = """### SYSTEM
 {system_prompt}
 {sys_info}
@@ -115,8 +109,6 @@ DEFAULT_RAG_TEMPLATE = """### SYSTEM
 """
 RAG_TEMPLATE = os.getenv("RAG_TEMPLATE", DEFAULT_RAG_TEMPLATE)
 
-# --- Constants ---
-# THIS WAS MISSING IN YOUR VERSION
 SEARCH_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
@@ -141,12 +133,35 @@ class GlobalResources:
     ha_collection = None
     redis_client = None
 
+def configure_hf_offline():
+    """
+    Checks if the embedding model is already cached. 
+    If so, forces offline mode to prevent hanging on lock files or network checks.
+    """
+    try:
+        # Standard HF cache location
+        cache_home = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
+        model_dir_name = f"models--{EMB_MODEL.replace('/', '--')}"
+        model_path = os.path.join(cache_home, model_dir_name)
+        
+        # Check if it looks like a valid cached model (has snapshots)
+        if os.path.exists(model_path) and os.path.isdir(model_path):
+            snapshots = os.path.join(model_path, "snapshots")
+            if os.path.exists(snapshots) and os.listdir(snapshots):
+                log.info(f"Embedding model found in cache at {model_path}. Forcing offline mode.")
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    except Exception as e:
+        log.warning(f"Failed to check HF cache: {e}")
+
 # --- Resource Loading (Hot Reloadable) ---
 async def initialize_rag_resources():
     """Initializes or re-initializes RAG and Intent Engine."""
     log.info("--- Loading RAG Resources (Hot Reload) ---")
     try:
         os.environ["ANONYMIZED_TELEMETRY"] = "False"
+        configure_hf_offline() # Prevent hang on startup
+        
         from langchain_huggingface import HuggingFaceEmbeddings
         from langchain_chroma import Chroma
         
