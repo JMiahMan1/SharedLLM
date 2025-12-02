@@ -94,6 +94,7 @@ OR
 JSON:"""
 ORCHESTRATOR_PROMPT = os.getenv("ORCHESTRATOR_PROMPT", DEFAULT_ORCHESTRATOR_PROMPT)
 
+# --- TEMPLATE 1: FULL PERSONALITY (For Chat/Search) ---
 DEFAULT_RAG_TEMPLATE = """### SYSTEM
 {system_prompt}
 {sys_info}
@@ -108,6 +109,20 @@ DEFAULT_RAG_TEMPLATE = """### SYSTEM
 {query}
 """
 RAG_TEMPLATE = os.getenv("RAG_TEMPLATE", DEFAULT_RAG_TEMPLATE)
+
+# --- TEMPLATE 2: CONCISE ACTION (For Controls) ---
+# This template omits the custom {system_prompt} and contextual RAG blocks for brevity.
+DEFAULT_SIMPLE_RAG_TEMPLATE = """### SYSTEM
+You are a helpful home assistant. Be brief.
+{sys_info}
+
+Confirm the action results briefly and concisely. Do not be verbose. Do not give any jokes. Stick to short cordual repsonses. 
+
+### QUERY
+{query}
+"""
+SIMPLE_RAG_TEMPLATE = os.getenv("SIMPLE_RAG_TEMPLATE", DEFAULT_SIMPLE_RAG_TEMPLATE)
+
 
 SEARCH_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"

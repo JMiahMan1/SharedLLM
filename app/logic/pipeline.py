@@ -12,6 +12,7 @@ from settings import (
     log, run_blocking, get_user_creds, GlobalResources, 
     DEFAULT_MODEL, load_system_prompt,
     CONTEXT_REWRITE_PROMPT, RAG_TEMPLATE, ORCHESTRATOR_PROMPT, 
+    SIMPLE_RAG_TEMPLATE, # Imported New Template
     ACTION_TOOL_CONFIDENCE_THRESHOLD, INFORMATIONAL_INTENTS 
 )
 from intent_engine import engine as intent_engine
@@ -231,24 +232,8 @@ async def _attempt_fast_ha_command(query: str, user_creds: Dict[str, str], ha_co
     
     log.info(f"FAST HA PATH: Executing service {service} on {eid} due to string match bypass.")
     
-    # CRITICAL FIX: execute_ha_service now returns a dictionary, so this function should just return it.
-    ha_result_dict = await execute_ha_service(target_dom, service, eid, user_creds, {}, GlobalResources.redis_client)
-    
-    # Since execute_ha_service is updated to return a dict, we ensure all necessary keys are present
-    # in case of an unexpected return type (though this is primarily for safety).
-    if isinstance(ha_result_dict, dict):
-        return ha_result_dict
-    
-    # Fallback for unexpected non-dict return (should not happen with updated media_ops.py)
-    log.error(f"FAST HA PATH: execute_ha_service returned unexpected type: {type(ha_result_dict)}")
-    return {
-        "status": "FAILURE", 
-        "message": f"Execution failed internally or returned non-dict type: {ha_result_dict}",
-        "service": f"{target_dom}.{service}",
-        "entity_id": eid,
-        "friendly_name": eid.split(".")[-1].replace("_", " ").title(),
-        "new_state": "N/A"
-    }
+    # Return structured result from the execution layer
+    return await execute_ha_service(target_dom, service, eid, user_creds, {}, GlobalResources.redis_client)
 
 
 async def _llm_orchestrator(query: str, intent: str, score: float, model: str) -> Dict[str, Any]:
@@ -326,11 +311,9 @@ async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_cre
         return {"status": "SUCCESS", "message": res.get("message", "Calendar list failed."), "service": "calendar_list"}
 
     elif tool_name == "calendar_delete":
-        # FIX: Added Missing Handler
         return await tool_calendar_delete(query, user_creds, model, GlobalResources.redis_client)
         
     elif tool_name == "calendar_update":
-        # FIX: Added Missing Handler
         return await tool_calendar_update(query, user_creds, model, GlobalResources.redis_client)
 
     # --- MEDIA/HA COMMANDS ---
@@ -338,9 +321,6 @@ async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_cre
         # NOTE: We rely on handle_media_command for smart resolution (entity_id=None)
         # and it already returns the structured Dict for verification.
         intent = params.get("intent", "turn_on")
-        # CRITICAL FIX: handle_media_command returns a string on failure, which causes the crash.
-        # It should return a structured dict. We'll handle its string return here for now,
-        # but media_ops.py should be updated to return dicts.
         return await handle_media_command(
             intent, 
             query, 
@@ -382,7 +362,6 @@ async def _handle_single_command(query: Union[str, Dict], user_creds: Dict[str, 
     if action_result:
         log.debug("FAST PATH executed, returning action result.")
         # Wrap single result in a list for compatibility with compound handler
-        # _attempt_fast_ha_command now returns a dict, so wrap it.
         return [action_result] 
 
     # --- STAGE 2B: LLM ORCHESTRATION ---
@@ -455,8 +434,8 @@ async def try_handle_compound_command(query, user_creds, model) -> Optional[List
     for r_list in results:
         # Check if the result is a list (from compound commands) or a single dictionary (from single command)
         if isinstance(r_list, list):
+            # FIX: Ensure we only extend with dictionaries (valid action results)
             valid_results.extend([r for r in r_list if isinstance(r, dict)])
-        # CRITICAL FIX: If a single command handler returns a dictionary, it needs to be processed.
         elif isinstance(r_list, dict): 
             valid_results.append(r_list)
         elif r_list is not None:
@@ -502,7 +481,7 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     # 2. Get Intent for Routing (Needed even if action fails)
     # We call classify here to help decide which RAG context to fetch later
     intent, score, _ = await intent_engine.classify(refined)
-
+    
     # 3. Action Layer (Tools)
     t_action = time.time()
     # Now returns a list of structured results or None
@@ -591,8 +570,24 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     now = datetime.now()
     sys_info = f"Current Date: {now.strftime('%A, %B %d, %Y')}\nCurrent Time: {now.strftime('%I:%M %p')}"
     
+    # --- LOGIC BRANCH: CHOOSE TEMPLATE ---
+    # If an action was successful and it's a simple command, use the SIMPLE template
+    # to reduce token usage and response time.
+    simple_intents = ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "media_next", "media_previous", "open_app"]
+    
+    use_simple = False
+    if action_results and intent in simple_intents:
+        # Check if all actions succeeded
+        if all(r.get("status") == "SUCCESS" for r in action_results):
+            use_simple = True
+
+    if use_simple:
+        template_to_use = SIMPLE_RAG_TEMPLATE
+    else:
+        template_to_use = RAG_TEMPLATE
+
     # Use Externalized Prompt Template from Settings
-    prompt = RAG_TEMPLATE.format(
+    prompt = template_to_use.format(
         system_prompt=base_sys_prompt,
         sys_info=sys_info,
         ha_ctx=ha_ctx,

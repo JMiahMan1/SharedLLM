@@ -77,20 +77,19 @@ def clean_llm_output(text: str, is_voice: bool = True) -> str:
     # 1. Remove Thinking Blocks
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     
-    # 2. Remove Speaker Prefixes (e.g., "Jarvis:", "Assistant:")
-    text = re.sub(r'^(Jarvis|Assistant|Unified Home AI|Result|Output|Command):\s*', '', text, flags=re.IGNORECASE).strip()
+    # 2. Remove Speaker Prefixes
+    text = re.sub(r'^(Jarvis|Assistant|Unified Home AI|Result|Output|Command):\s*', '', text, flags=re.IGNORECASE)
     
-    # 3. Fix Phone Numbers for TTS (480-555-1234 -> 480 555 1234)
-    # This prevents Piper from saying "minus"
+    # 3. Fix Phone Numbers for TTS
     text = re.sub(r'\b(\d{3})-(\d{3})-(\d{4})\b', r'\1 \2 \3', text)
 
-    # 4. Remove Markdown & Action Emotes (*winks*)
+    # 4. Remove Markdown & Action Emotes
     text = re.sub(r'\*.*?\*', '', text)
     text = re.sub(r'[\*#_`]', '', text)
 
     # 5. Normalize Punctuation for Flow
     replacements = {
-        '\u201c': '', '\u201d': '', # Remove smart quotes (pauses)
+        '\u201c': '', '\u201d': '', # Remove smart quotes
         '"': '',                    # Remove standard quotes
         '\u2018': '', '\u2019': '', 
         '\u2013': ', ', '\u2014': ', ', # Em-dashes to pauses
@@ -103,28 +102,29 @@ def clean_llm_output(text: str, is_voice: bool = True) -> str:
     for char, rep in replacements.items():
         text = text.replace(char, rep)
 
-    # 6. Fix "Sticky" Hyphens between words (branchesmesa.org-perfect -> perfect)
+    # 6. Fix "Sticky" Hyphens between words
     text = re.sub(r'(?<=[a-zA-Z])-(?=[a-zA-Z])', ' ', text)
 
     # 7. Force Strip Non-ASCII (Emoji Killer)
     text = re.sub(r'[^\x00-\x7F]+', '', text)
     
-    # 8. Collapse multiple spaces
-    text = re.sub(r'\s+', ' ', text).strip()
+    # 8. Collapse multiple spaces BUT DO NOT STRIP
+    # CRITICAL FIX: Removed .strip() to preserve token spacing in stream
+    text = re.sub(r'\s+', ' ', text)
     
     return text
 
 # --- Helper: Safe Similarity Search ---
 def safe_similarity_search(collection, query: str, k: int = 4):
     """
-    Safely executes similarity search on a SPECIFIC collection.
+    Safely executes similarity search, catching Pydantic ValidationErrors.
     """
     if not collection: 
         return []
     try:
         return collection.similarity_search(query, k=k)
     except (ValidationError, Exception) as e:
-        log.error(f"RAG Search Error: {e}")
+        log.error(f"RAG Search Error (Potentially corrupted doc in DB): {e}")
         return []
 
 # --- LLM Functions ---
@@ -273,6 +273,7 @@ async def contextualize_query(query, user, model):
 
     prompt = f"Rewrite based on history:\n{hist}\nInput: {query}\nRefined (Return ONLY the query):"
     r = await call_ollama_generate(prompt, model)
+    # Use is_voice=False to preserve content during rewrite
     refined = clean_llm_output(r.get("text", query), is_voice=False) 
     
     if len(refined) > len(query) * 3: return query

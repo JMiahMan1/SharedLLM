@@ -261,7 +261,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
     q_low = query_name.lower()
     
-    # --- ENFORCED PRIORITY FOR MUSIC ---
+    # --- CRITICAL FIX: ENFORCED PRIORITY FOR MUSIC ---
     # Only runs if strict resolution (play_media + music keywords) is active.
     if is_music:
         ma_candidate = None
@@ -330,7 +330,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     q_low = query.lower()
     integration = "unknown"
 
-    # --- Sanitize Intent if LLM hallucinated a full sentence ---
+    # --- CRITICAL FIX: Sanitize Intent if LLM hallucinated a full sentence ---
     if intent not in MEDIA_INTENTS:
         original_intent = intent
         intent_lower = intent.lower()
@@ -508,24 +508,35 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
 
         # --- SMART CONTENT TYPE DETECTION ---
         ctype = "music" # Default
+        detected_specific_type = False
         
         if is_music_request:
             if re.search(r"\b(album|record)\b", q_low):
                 ctype = "album"
+                detected_specific_type = True
             elif re.search(r"\b(artist|band)\b", q_low):
                 ctype = "artist"
+                detected_specific_type = True
             elif re.search(r"\b(playlist)\b", q_low):
                 ctype = "playlist"
+                detected_specific_type = True
             elif re.search(r"\b(track|song)\b", q_low):
                 ctype = "track"
+                detected_specific_type = True
             elif re.search(r"\b(radio|station)\b", q_low):
                 ctype = "radio"
+                detected_specific_type = True
 
         # TV Logic: TVs play video unless music is explicitly requested
         is_tv = any(x in entity_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"])
         if is_tv and not is_music_request:
             ctype = "video"
             
+        # Fallback Logic for Non-MA Devices:
+        if detected_specific_type and "music_assistant" not in integration:
+            log.info(f"Target {entity_id} is not Music Assistant. Downgrading type '{ctype}' to 'music'.")
+            ctype = "music"
+
         # --- CONTENT CLEANING ---
         original_title = clean_title
         
@@ -553,27 +564,42 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         if state in ["off", "unavailable"]:
             await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
 
-        # --- REVERT TO STANDARD MEDIA_PLAYER SERVICE FOR MA COMPATIBILITY ---
-        # We use standard service because MA intercepts it perfectly for names/titles.
-        # This avoids 500 errors from strict API payloads.
-        log.info(f"Executing Play on {entity_id} Type: {ctype} Content: {clean_title}")
-        
-        std_service_data = {
-            "media_content_id": clean_title,
-            "media_content_type": ctype
-        }
-        # Note: 'enqueue' is not supported by standard play_media, so we omit it to avoid 500 error.
-        
-        result = await execute_ha_service(domain, "play_media", entity_id, user_creds, std_service_data, redis_client)
-        
-        # Self-Healing
-        if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
-            new_type = "video" if ctype == "music" else "music"
-            log.info(f"Self-Healing: Retrying '{clean_title}' as '{new_type}' on {entity_id}")
-            service_data = {"media_content_id": clean_title, "media_content_type": new_type}
-            result = await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
+        # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices ---
+        if "music_assistant" in integration:
+            log.info(f"Executing Music Assistant specific Play on {entity_id} Type: {ctype}")
+            # MA Service requires: media_id, media_type, enqueue
+            ma_service_data = {
+                "media_id": clean_title,
+                "media_type": ctype,
+                "enqueue": "play" 
+            }
+            # Attempt MA service first
+            result = await execute_ha_service("music_assistant", "play_media", entity_id, user_creds, ma_service_data, redis_client)
+            
+            # Fallback to 'search' if specific type fails (fuzzy search)
+            if result.get("status") == "FAILURE":
+                 log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
+                 ma_service_data["media_type"] = "search"
+                 result = await execute_ha_service("music_assistant", "play_media", entity_id, user_creds, ma_service_data, redis_client)
+            
+            return result
+        else:
+            # Standard Media Player Service
+            log.info(f"Executing Standard Play on {entity_id} Type: {ctype}")
+            std_service_data = {
+                "media_content_id": clean_title,
+                "media_content_type": ctype
+            }
+            result = await execute_ha_service(domain, "play_media", entity_id, user_creds, std_service_data, redis_client)
+            
+            # Self-Healing for generic players
+            if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
+                new_type = "video" if ctype == "music" else "music"
+                log.info(f"Self-Healing: Retrying '{clean_title}' as '{new_type}' on {entity_id}")
+                service_data = {"media_content_id": clean_title, "media_content_type": new_type}
+                result = await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
 
-        return result
+            return result
 
     return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
 
