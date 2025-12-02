@@ -210,6 +210,7 @@ async def _run_background_ingest(script_name: str):
     if "[STDERR]" in output or "CRITICAL" in output:
         log.error(f"Ingestion {script_name} reported errors. Check logs above.")
     
+    # Auto-reload after completion
     log.info("Reloading RAG Resources...")
     await initialize_rag_resources()
     log.info("RAG Resources Reloaded.")
@@ -229,6 +230,13 @@ async def ing_all(bg_tasks: BackgroundTasks):
     bg_tasks.add_task(_run_background_ingest, "ha_ingest.py")
     bg_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py")
     return {"status": "accepted", "msg": "Full ingestion started in background."}
+
+# --- NEW: Hot Reload Endpoint ---
+@app.post("/api/system/reload")
+async def system_reload():
+    """Forces a reload of RAG resources (Vector DB, Intent Engine) without restarting the process."""
+    await initialize_rag_resources()
+    return {"status": "ok", "msg": "RAG resources reloaded from disk."}
 
 # --- RAG Management ---
 @app.post("/api/rag/upsert")

@@ -15,13 +15,14 @@ langchain-community
 transformers
 torch
 sentence-transformers
-pypdf
+pymupdf             # REPLACES: pypdf, ebooklib (Much faster)
 python-docx
-ebooklib
 mobi
 html2text
 beautifulsoup4
 playwright
+numpy
+openai
 
 # Integrations
 caldav
@@ -29,10 +30,9 @@ vobject
 icalendar
 redis
 dateparser
+python-dateutil
 
 # Utilities
 lxml
 openpyxl
-pytesseract
-pdf2image
-mutagen
+cryptography
