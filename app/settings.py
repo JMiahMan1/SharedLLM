@@ -59,6 +59,10 @@ CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400))
 ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.80
 INFORMATIONAL_INTENTS = ["general_query", "content_query", "time_query"]
 
+# --- Alarm & Timer Config ---
+ALARM_KEYWORDS_PATH = os.getenv("ALARM_KEYWORDS_PATH", "/app/config/alarm_keywords.json")
+ALARM_SOUNDS_DIR = os.getenv("ALARM_SOUNDS_DIR", "/local/alarm_sounds")
+
 
 # --- Prompts (Externalized) ---
 DEFAULT_CONTEXT_PROMPT = "Rewrite the following query to be self-contained, resolving any pronouns (he, she, it, they, him, her) using the chat history.\nHistory:\n{history}\nInput: {query}\nRefined (Return ONLY the refined query string, NO JSON, NO MARKDOWN):"
@@ -75,19 +79,31 @@ User Query: {query}
 Best Vector Intent Match: {intent_name} (Confidence: {intent_score:.2f})
 
 Available Tools:
-1. 'calendar_add' (Schedule/create an event)
+1. 'calendar_add' (Schedule/create an event. Keywords: schedule, meeting, appointment, calendar)
 2. 'calendar_delete' (Cancel an event by fuzzy name match)
 3. 'calendar_list' (List available calendars)
 4. 'calendar_update' (Reschedule an existing event)
-5. 'media_command' (Handle media/HA control, requires 'intent' and 'device_name')
-6. 'intent_learn' (Teach the AI a new phrase mapping)
-7. 'web_search' (Use for factual/external queries, if no other tool applies)
+5. 'timer_add' (Set a timer or alarm. Keywords: timer, alarm, wake me, remind me in X minutes)
+6. 'timer_delete' (Cancel a timer/alarm)
+7. 'timer_list' (List active timers/alarms)
+8. 'timer_pause' (Pause a timer)
+9. 'timer_resume' (Resume a timer)
+10. 'media_command' (Handle media/HA control, requires 'intent' and 'device_name')
+11. 'intent_learn' (Teach the AI a new phrase mapping)
+12. 'web_search' (Use for factual/external queries, if no other tool applies)
+
+CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
+- "Set an alarm for 8am" -> timer_add
+- "Remind me in 10 minutes" -> timer_add
+- "Wake me up at 7" -> timer_add
+- "Schedule a meeting at 8am" -> calendar_add
+- "Add to my calendar" -> calendar_add
 
 If the intent is a clear, confident action, generate the JSON for a tool call.
 If the query is conversational, informational, ambiguous, or requires the user's personal context/RAG, output 'CONVERSE'.
 
 Output ONLY a single JSON object (DO NOT use markdown backticks). Example:
-{{"action": "tool_call", "tool_name": "calendar_add", "parameters": {{"summary": "Dinner with Dad", "start_time": "tonight at 7pm"}}}}
+{{"action": "tool_call", "tool_name": "timer_add", "parameters": {{"summary": "Dinner", "time_expression": "20 minutes", "is_alarm": false}}}}
 OR
 {{"action": "CONVERSE"}}
 
@@ -232,9 +248,21 @@ async def lifespan(app: FastAPI):
     else:
         log.warning("Redis library not installed. Falling back to in-memory cache.")
     
+    # 3. Start Timer Scheduler
+    # FIX: Move the import inside the function to prevent circular import at startup.
+    from logic.timer_scheduler import scheduler_loop, stop_scheduler 
+    log.info("Starting Timer/Alarm Scheduler...")
+    scheduler_task = asyncio.create_task(scheduler_loop()) 
+    
     yield
     
+    # Shutdown
     log.info("--- SHUTDOWN: Cleaning up resources ---")
+    await stop_scheduler()
+    try:
+        scheduler_task.cancel()
+    except: pass
+    
     GlobalResources.embedding_model = None
     GlobalResources.chroma_client = None
     GlobalResources.ha_collection = None

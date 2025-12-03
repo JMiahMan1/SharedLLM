@@ -33,6 +33,11 @@ from .calendar_ops import (
     tool_calendar_list, tool_calendar_add, 
     tool_calendar_delete, tool_calendar_update, tool_calendar_read
 )
+# --- Import Timer Ops ---
+from .timer_ops import (
+    tool_timer_add, tool_timer_list, tool_timer_delete,
+    tool_timer_pause, tool_timer_resume
+)
 from .web_search import tool_web_search
 
 
@@ -89,7 +94,7 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
             if not p: continue
             
             # Identify Verb using Regex
-            verb_match = re.match(r"^(turn on|turn off|toggle|play|stop|schedule|list|open|launch|scroll|move)\b", p.lower())
+            verb_match = re.match(r"^(turn on|turn off|toggle|play|stop|schedule|list|open|launch|scroll|move|set|start)\b", p.lower())
             if verb_match:
                 first_verb = verb_match.group(1)
             elif first_verb and i > 0:
@@ -113,6 +118,7 @@ async def contextualize_query(query, user, model):
     stateless_intents = [
         "turn_on", "turn_off", "toggle", "play_media", "stop_media",
         "calendar_add", "calendar_delete", "calendar_list", "calendar_update",
+        "timer_add", "timer_delete", "timer_list", "timer_pause", "timer_resume",
         "time_query", "intent_learn", "open_app", "media_next", "media_previous"
     ]
     
@@ -120,7 +126,7 @@ async def contextualize_query(query, user, model):
     if is_high_confidence and intent in stateless_intents:
         return query
 
-    verbs = ["turn", "play", "stop", "toggle", "schedule", "add", "delete", "remove", "cancel", "remind", "list", "learn", "teach", "map"]
+    verbs = ["turn", "play", "stop", "toggle", "schedule", "add", "delete", "remove", "cancel", "remind", "list", "learn", "teach", "map", "set", "start"]
     if any(query.lower().lstrip().startswith(v) for v in verbs): return query
     
     hist = get_history_context(user)
@@ -315,6 +321,22 @@ async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_cre
         
     elif tool_name == "calendar_update":
         return await tool_calendar_update(query, user_creds, model, GlobalResources.redis_client)
+
+    # --- TIMER / ALARM TOOLS ---
+    elif tool_name == "timer_add":
+        return await tool_timer_add(query, user_creds, model, GlobalResources.redis_client)
+    
+    elif tool_name == "timer_list":
+        return await tool_timer_list(user_creds)
+
+    elif tool_name == "timer_delete":
+        return await tool_timer_delete(query, user_creds)
+    
+    elif tool_name == "timer_pause":
+        return await tool_timer_pause(query)
+
+    elif tool_name == "timer_resume":
+        return await tool_timer_resume(query)
 
     # --- MEDIA/HA COMMANDS ---
     elif tool_name == "media_command":
@@ -536,8 +558,8 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
             fetch_nc = False
             log.info(f"Context Routing: Skipping Nextcloud search for control intent '{intent}'")
             
-        # If intent is Calendar, we likely don't need generic RAG either
-        elif intent and intent.startswith("calendar"): # FIX: Check if intent is not None
+        # If intent is Calendar/Timer, we likely don't need generic RAG either
+        elif intent and (intent.startswith("calendar") or intent.startswith("timer")):
             fetch_ha = False
             fetch_nc = False
             
@@ -573,7 +595,7 @@ async def generate_rag_stream(query, user, model, use_openai, format_type) -> As
     # --- LOGIC BRANCH: CHOOSE TEMPLATE ---
     # If an action was successful and it's a simple command, use the SIMPLE template
     # to reduce token usage and response time.
-    simple_intents = ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "media_next", "media_previous", "open_app"]
+    simple_intents = ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "media_next", "media_previous", "open_app", "timer_add", "timer_delete", "timer_list"]
     
     use_simple = False
     if action_results and intent in simple_intents:

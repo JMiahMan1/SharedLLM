@@ -36,3 +36,4 @@ python-dateutil
 lxml
 openpyxl
 cryptography
+parsedatetime
