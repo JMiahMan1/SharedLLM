@@ -49,7 +49,7 @@ DEFAULT_PHRASES = {
     
     "calendar_add": [
         "schedule", "add event", "new appointment", "remind me", 
-        "create event", "set a reminder", "book a meeting"
+        "create event", "set a reminder", "book a meeting", "add to calendar"
     ],
     "calendar_list": [
         "list calendar", "show schedule", "what is on my calendar", 
@@ -67,6 +67,22 @@ DEFAULT_PHRASES = {
         "what time is it", "current time", "clock", "tell me the time", 
         "what is the date", "what day is it"
     ],
+    # --- New Timer Intents ---
+    "timer_add": [
+        "set a timer", "start a timer", "set an alarm", "wake me up",
+        "remind me in", "countdown", "timer for"
+    ],
+    "timer_delete": [
+        "cancel timer", "stop timer", "delete alarm", "remove alarm",
+        "cancel the alarm", "stop the timer"
+    ],
+    "timer_list": [
+        "list timers", "show alarms", "what timers are running", 
+        "check alarms", "my timers"
+    ],
+    "timer_pause": ["pause timer", "pause alarm"],
+    "timer_resume": ["resume timer", "restart timer"],
+    # -------------------------
     "intent_learn": [
         "learn that", "teach you", "remember that", "map phrase", 
         "training mode", "i want to teach you"
