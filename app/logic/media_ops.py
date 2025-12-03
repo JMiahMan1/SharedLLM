@@ -113,6 +113,33 @@ async def get_active_media_players(user_creds: dict) -> list:
         return []
     return []
 
+async def get_available_media_players(user_creds: dict) -> list:
+    """Returns a list of ALL valid media players (excluding unavailable)."""
+    if not HA_URL: return []
+    
+    url = f"{HA_URL.rstrip('/')}/api/states"
+    headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
+    
+    try:
+        def _fetch_all():
+            return requests.get(url, headers=headers, timeout=3.0)
+        
+        r = await run_blocking(_fetch_all)
+        if r.status_code == 200:
+            all_states = r.json()
+            available = []
+            for s in all_states:
+                eid = s.get("entity_id", "")
+                if eid.startswith("media_player."):
+                    state = s.get("state", "unknown")
+                    if state not in ["unavailable", "unknown"]:
+                        available.append(eid)
+            return available
+    except Exception as e:
+        log.error(f"Error fetching available players: {e}")
+        return []
+    return []
+
 
 # ------------------------------------
 # SERVICE EXECUTION
