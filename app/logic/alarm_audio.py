@@ -13,7 +13,6 @@ class AlarmAudioManager:
         self.last_load = 0
 
     def _load_config(self):
-        """Load alarm keywords config from JSON, with error handling."""
         if os.path.exists(ALARM_KEYWORDS_PATH):
             try:
                 with open(ALARM_KEYWORDS_PATH, "r") as f:
@@ -25,8 +24,6 @@ class AlarmAudioManager:
             self.config_cache = {}
 
     def get_sound_settings(self, title: str) -> Dict:
-        """Determine sound file and repeat count based on title keywords."""
-        # Reload config if older than 60s
         if time.time() - self.last_load > 60:
             self._load_config()
             self.last_load = time.time()
@@ -42,66 +39,51 @@ class AlarmAudioManager:
         return default
 
     async def play_alarm_sequence(self, timer: Dict, user_creds: Dict, redis_client):
-        """
-        Orchestrates the alarm playback:
-        1. TTS Announcement
-        2. Sound File Loop (with error handling)
-        """
         title = timer.get("title", "Alarm")
         origin = timer.get("origin_device")
 
-        # 1. Determine Target Devices
+        # 1. Determine Target Devices (Strict Media Player Logic)
         targets = []
 
+        # Only trust the origin if it is explicitly a media player
         if origin and origin.startswith("media_player."):
             targets.append(origin)
-        elif origin and origin.split('.')[0] in ['light', 'switch', 'sensor']:
-            log.warning(f"Alarm Origin Device '{origin}' is non-media. Falling back to active media players.")
+        elif origin:
+            log.warning(f"Alarm Origin Device '{origin}' is NOT a media_player. Ignoring it.")
 
-        # Fallback: Get active media players if none from origin
+        # Fallback: If no valid origin, find ANY active media player
         if not targets:
             active = await get_active_media_players(user_creds)
             if active:
                 targets.extend(active)
 
-        # If still no targets, log and abort
         if not targets:
             log.error(f"Alarm FAILURE: No suitable media player found for alarm '{title}'. Origin: {origin}")
             return
 
-        # Remove duplicates
         targets = list(set(targets))
 
-        # Get audio settings
         settings = self.get_sound_settings(title)
         sound_file = settings.get("sound")
         repeat = settings.get("repeat", 3)
 
-        # TTS message
         tts_msg = f"Attention. Alarm for {title}."
         if "timer" in title.lower():
             tts_msg = f"Your {title} has finished."
 
         log.info(f"Triggering Alarm '{title}' on {targets}. Sound: {sound_file} x{repeat}")
 
-        # Play TTS and sound loop on each target
         for target in targets:
-            domain = target.split('.')[0]
-
             # Step A: TTS
             try:
                 await execute_ha_service(
                     "media_player", "play_media", target, user_creds,
-                    {
-                        "media_content_id": tts_msg,
-                        "media_content_type": "text"
-                    },
+                    {"media_content_id": tts_msg, "media_content_type": "text"},
                     redis_client
                 )
             except Exception as e:
                 log.error(f"TTS Failed for alarm '{title}' on {target}: {e}")
 
-            # Wait briefly for TTS to finish
             await asyncio.sleep(4)
 
             # Step B: Sound Loop
@@ -110,32 +92,17 @@ class AlarmAudioManager:
                 for i in range(repeat):
                     result = await execute_ha_service(
                         "media_player", "play_media", target, user_creds,
-                        {
-                            "media_content_id": full_path,
-                            "media_content_type": "music"
-                        },
+                        {"media_content_id": full_path, "media_content_type": "music"},
                         redis_client
                     )
-
-                    # Handle explicit failure
+                    
                     if result.get("status") == "FAILURE":
-                        log.warning(f"Alarm Sound Playback Failed for '{sound_file}' on {target}: {result.get('message')}")
-                        log.info("Aborting sound loop, relying on TTS.")
-                        break
+                        log.warning(f"Alarm Playback Failed on {target}: {result.get('message')}")
+                        break 
 
-                    # Wait between loops (~2-3s)
                     await asyncio.sleep(3)
 
             except Exception as e:
-                log.error(f"Critical error during alarm sound loop on {target}: {e}")
+                log.error(f"Error during alarm loop on {target}: {e}")
 
-    def cancel_playback(self, timer_id: str):
-        """
-        Optional: Placeholder for future cancellation logic.
-        Currently, HA playback cannot always be interrupted programmatically.
-        """
-        log.info(f"Cancel playback requested for timer {timer_id}, no-op for now.")
-
-# Singleton instance
 audio_manager = AlarmAudioManager()
-
