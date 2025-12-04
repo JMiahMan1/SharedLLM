@@ -4,8 +4,8 @@ import json
 import asyncio
 import time
 from typing import Dict, List, Optional
-from settings import ALARM_KEYWORDS_PATH, ALARM_SOUNDS_DIR, log, run_blocking
-from .media_ops import execute_ha_service, get_active_media_players
+from settings import ALARM_KEYWORDS_PATH, ALARM_SOUNDS_DIR, log, run_blocking, HA_URL
+from .media_ops import execute_ha_service, get_active_media_players, get_available_media_players
 
 class AlarmAudioManager:
     def __init__(self):
@@ -41,24 +41,42 @@ class AlarmAudioManager:
     async def play_alarm_sequence(self, timer: Dict, user_creds: Dict, redis_client):
         title = timer.get("title", "Alarm")
         origin = timer.get("origin_device")
+        target_explicit = timer.get("target_device")
 
-        # 1. Determine Target Devices (Strict Media Player Logic)
+        # 1. Determine Target Devices
         targets = []
+        
+        # Priority 1: Explicit Target (e.g. "on Office TV")
+        if target_explicit:
+            if target_explicit.startswith("media_player."):
+                targets.append(target_explicit)
+            else:
+                log.warning(f"Alarm target '{target_explicit}' is not a media_player. Ignoring.")
 
-        # Only trust the origin if it is explicitly a media player
-        if origin and origin.startswith("media_player."):
-            targets.append(origin)
-        elif origin:
-            log.warning(f"Alarm Origin Device '{origin}' is NOT a media_player. Ignoring it.")
+        # Priority 2: Origin Device (If valid media player)
+        if not targets and origin:
+            if origin.startswith("media_player."):
+                targets.append(origin)
+            else:
+                log.warning(f"Alarm Origin Device '{origin}' is NOT a media_player. Falling back.")
 
-        # Fallback: If no valid origin, find ANY active media player
+        # Priority 3: Fallback to Active Players (Currently Playing/Paused)
         if not targets:
             active = await get_active_media_players(user_creds)
             if active:
                 targets.extend(active)
+                log.info(f"Alarm Fallback: Playing on active media players: {active}")
+        
+        # Priority 4: Fallback to ALL Available Players (Last Resort)
+        if not targets:
+            available = await get_available_media_players(user_creds)
+            if available:
+                 # Optional: Filter out groups/apps if desired
+                 targets.extend(available)
+                 log.info("Alarm Fallback: Broadcasting to all available media players.")
 
         if not targets:
-            log.error(f"Alarm FAILURE: No suitable media player found for alarm '{title}'. Origin: {origin}")
+            log.error(f"Alarm FAILURE: No suitable media player found for alarm '{title}'. Origin was: {origin}")
             return
 
         targets = list(set(targets))
@@ -74,20 +92,30 @@ class AlarmAudioManager:
         log.info(f"Triggering Alarm '{title}' on {targets}. Sound: {sound_file} x{repeat}")
 
         for target in targets:
-            # Step A: TTS
+            # Step A: TTS (Wrapped in Try/Except to prevent crashes)
             try:
-                await execute_ha_service(
+                result = await execute_ha_service(
                     "media_player", "play_media", target, user_creds,
                     {"media_content_id": tts_msg, "media_content_type": "text"},
                     redis_client
                 )
+                if result.get("status") == "FAILURE":
+                     log.warning(f"TTS Failed on {target}. Continuing to sound...")
             except Exception as e:
-                log.error(f"TTS Failed for alarm '{title}' on {target}: {e}")
+                log.error(f"TTS Exception for alarm '{title}' on {target}: {e}")
 
             await asyncio.sleep(4)
 
-            # Step B: Sound Loop
-            full_path = os.path.join(ALARM_SOUNDS_DIR, sound_file)
+            # Step B: Sound Loop (Fixed for Google Cast 500 Error)
+            base_url = HA_URL.rstrip('/') if HA_URL else ""
+            
+            # Construct Absolute URL if path is relative/local
+            if base_url and ALARM_SOUNDS_DIR.startswith("/local"):
+                 full_path = f"{base_url}{ALARM_SOUNDS_DIR}/{sound_file}"
+            else:
+                 # Fallback to raw path if no base URL or not a local path
+                 full_path = os.path.join(ALARM_SOUNDS_DIR, sound_file)
+
             try:
                 for i in range(repeat):
                     result = await execute_ha_service(
