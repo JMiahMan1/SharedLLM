@@ -288,7 +288,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
     q_low = query_name.lower()
     
-    # --- CRITICAL FIX: ENFORCED PRIORITY FOR MUSIC ---
+    # --- ENFORCED PRIORITY FOR MUSIC ---
     # Only runs if strict resolution (play_media + music keywords) is active.
     if is_music:
         ma_candidate = None
@@ -357,7 +357,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     q_low = query.lower()
     integration = "unknown"
 
-    # --- CRITICAL FIX: Sanitize Intent if LLM hallucinated a full sentence ---
+    # --- Sanitize Intent if LLM hallucinated a full sentence ---
     if intent not in MEDIA_INTENTS:
         original_intent = intent
         intent_lower = intent.lower()

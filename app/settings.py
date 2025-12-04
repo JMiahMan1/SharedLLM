@@ -47,7 +47,8 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 # Timeouts & Retries
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300")) 
 OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "2"))
-HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "30.0"))
+# Lowered cache TTL for faster test feedback
+HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "5.0")) 
 QUERY_CACHE_TTL = float(os.getenv("QUERY_CACHE_TTL", "60.0"))
 MAX_HISTORY_TURNS = 15
 
@@ -56,7 +57,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400)) 
 
 # --- Intent Thresholds & Groups ---
-ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.80
+# CRITICAL FIX: Lowered from 0.80 to 0.45 to catch "Turn on X" commands (scoring ~0.5-0.6)
+ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.45
 INFORMATIONAL_INTENTS = ["general_query", "content_query", "time_query"]
 
 # --- Alarm & Timer Config ---
@@ -249,7 +251,6 @@ async def lifespan(app: FastAPI):
         log.warning("Redis library not installed. Falling back to in-memory cache.")
     
     # 3. Start Timer Scheduler
-    # FIX: Move the import inside the function to prevent circular import at startup.
     from logic.timer_scheduler import scheduler_loop, stop_scheduler 
     log.info("Starting Timer/Alarm Scheduler...")
     scheduler_task = asyncio.create_task(scheduler_loop()) 
