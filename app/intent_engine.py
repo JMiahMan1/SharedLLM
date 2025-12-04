@@ -63,6 +63,15 @@ DEFAULT_PHRASES = {
         "reschedule", "move event", "change time", "postpone", 
         "move meeting", "update event"
     ],
+    "alarm_set": [
+        "set an alarm", "wake me up", "alarm for", "timer for", "set timer", "remind me in"
+    ],
+    "alarm_list": [
+        "show alarms", "list alarms", "my alarms", "check alarms", "what alarms do i have"
+    ],
+    "alarm_delete": [
+        "cancel alarm", "delete alarm", "stop alarm", "remove alarm", "turn off alarm"
+    ],
     "time_query": [
         "what time is it", "current time", "clock", "tell me the time", 
         "what is the date", "what day is it"

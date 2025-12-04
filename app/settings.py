@@ -82,6 +82,9 @@ Available Tools:
 5. 'media_command' (Handle media/HA control, requires 'intent' and 'device_name')
 6. 'intent_learn' (Teach the AI a new phrase mapping)
 7. 'web_search' (Use for factual/external queries, if no other tool applies)
+8. 'alarm_set' (Set a timer or alarm)
+9. 'alarm_list' (List active alarms)
+10. 'alarm_delete' (Cancel an alarm)
 
 If the intent is a clear, confident action, generate the JSON for a tool call.
 If the query is conversational, informational, ambiguous, or requires the user's personal context/RAG, output 'CONVERSE'.
@@ -147,6 +150,7 @@ class GlobalResources:
     nextcloud_collection = None
     ha_collection = None
     redis_client = None
+    alarms = {} # In-memory storage for active alarm tasks
 
 def configure_hf_offline():
     """
