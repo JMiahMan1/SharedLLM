@@ -33,6 +33,9 @@ from .calendar_ops import (
     tool_calendar_list, tool_calendar_add, 
     tool_calendar_delete, tool_calendar_update, tool_calendar_read
 )
+from .alarm_ops import (
+    tool_alarm_set, tool_alarm_list, tool_alarm_delete
+)
 from .web_search import tool_web_search
 
 
@@ -89,7 +92,7 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
             if not p: continue
             
             # Identify Verb using Regex
-            verb_match = re.match(r"^(turn on|turn off|toggle|play|stop|schedule|list|open|launch|scroll|move)\b", p.lower())
+            verb_match = re.match(r"^(turn on|turn off|toggle|play|stop|schedule|list|open|launch|scroll|move|set|wake|cancel|delete)\b", p.lower())
             if verb_match:
                 first_verb = verb_match.group(1)
             elif first_verb and i > 0:
@@ -113,7 +116,8 @@ async def contextualize_query(query, user, model):
     stateless_intents = [
         "turn_on", "turn_off", "toggle", "play_media", "stop_media",
         "calendar_add", "calendar_delete", "calendar_list", "calendar_update",
-        "time_query", "intent_learn", "open_app", "media_next", "media_previous"
+        "time_query", "intent_learn", "open_app", "media_next", "media_previous",
+        "alarm_set", "alarm_list", "alarm_delete"
     ]
     
     # Use the new is_high_confidence flag
@@ -315,6 +319,16 @@ async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_cre
         
     elif tool_name == "calendar_update":
         return await tool_calendar_update(query, user_creds, model, GlobalResources.redis_client)
+
+    # --- ALARM TOOLS ---
+    elif tool_name == "alarm_set":
+        return await tool_alarm_set(query)
+    
+    elif tool_name == "alarm_list":
+        return await tool_alarm_list()
+        
+    elif tool_name == "alarm_delete":
+        return await tool_alarm_delete(query)
 
     # --- MEDIA/HA COMMANDS ---
     elif tool_name == "media_command":
