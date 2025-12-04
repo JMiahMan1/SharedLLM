@@ -33,16 +33,21 @@
   ],
   "play_media": [
     "play",
-    "resume",
-    "start music",
     "play music",
     "play song",
+    "play video",
+    "start music on",
+    "play * on *",
+    "play something on the tv",
+    "cast to",
+    "queue up",
+    "resume",
+    "start music",
     "play album",
     "put on some music",
     "start the tv",
     "play track",
-    "play artist",
-    "queue up"
+    "play artist"
   ],
   "open_app": [
     "open",
