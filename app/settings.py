@@ -227,7 +227,7 @@ async def load_resources():
             )
             # Home Assistant Collection
             GlobalResources.ha_collection = Chroma(
-                collection_name="ha_entities",
+                collection_name="home_assistant",
                 embedding_function=GlobalResources.embedding_model,
                 persist_directory=CHROMA_DIR
             )
