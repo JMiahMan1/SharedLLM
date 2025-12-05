@@ -53,7 +53,7 @@ def test_timer_flow():
     content = resp.get("message", {}).get("content", "")
     
     # FIX: More flexible assertion
-    if ("set" in content.lower() and "timer" in content.lower()) or "success" in str(resp).lower():
+    if any(x in content.lower() for x in ["set", "started", "created", "success"]) and "timer" in content.lower():
         print_pass(f"Timer created: {content}")
     else:
         print_fail(f"Failed to create timer. Response: {content}")
@@ -84,11 +84,12 @@ def test_timer_flow():
 
     # 5. Create Alarm
     alarm_name = "Test Long Alarm"
-    print_info(f"TEST 4: Set an alarm for 5 minutes: '{alarm_name}' (Expect SUCCESS)")
-    resp = send_chat(f"Set an alarm for 5 minutes for {alarm_name}")
+    # FIX: Use absolute time for alarm, as duration is no longer supported for alarms
+    print_info(f"TEST 4: Set an alarm for 8am: '{alarm_name}' (Expect SUCCESS)")
+    resp = send_chat(f"Set an alarm for 8am called {alarm_name}")
     content = resp.get("message", {}).get("content", "")
     
-    if "set" in content.lower() and "alarm" in content.lower():
+    if any(x in content.lower() for x in ["set", "started", "created", "success"]) and "alarm" in content.lower():
         print_pass(f"Alarm set: {content}")
     else:
         print_fail(f"Failed to set alarm. Response: {content}")
