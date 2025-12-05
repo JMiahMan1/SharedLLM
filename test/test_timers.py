@@ -49,8 +49,8 @@ def test_timer_flow():
     # 1. Create Timer (Short Duration)
     # Use a name without 'timer' to avoid it being stripped by the backend
     timer_name = "Test Short Task"
-    print_info(f"TEST 1: Set a 10-second timer: '{timer_name}' (Expect SUCCESS)")
-    resp = send_chat(f"Set a 10-second timer for {timer_name}")
+    print_info(f"TEST 1: Set a 60-second timer: '{timer_name}' (Expect SUCCESS)")
+    resp = send_chat(f"Set a 60-second timer for {timer_name}")
     content = resp.get("message", {}).get("content", "")
     
     # FIX: More flexible assertion
