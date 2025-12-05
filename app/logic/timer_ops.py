@@ -228,8 +228,9 @@ async def tool_alarm_add(query: str, user_creds: Dict[str, str], model: str, red
             recurrence = f"every {match.group(1)}"
 
     # 3. Parse Absolute Time
-    # Clean up common prefixes for better parsing
-    clean_input = re.sub(r'\b(set|alarm|wake|me|up|for|at)\b', '', query_lower, flags=re.IGNORECASE)
+    # Clean up common prefixes and recurrence phrases for better parsing
+    # Added: 'an', 'a', 'the', 'every', 'day', 'daily'
+    clean_input = re.sub(r'\b(set|alarm|wake|me|up|for|at|an|a|the|every|day|daily)\b', '', query_lower, flags=re.IGNORECASE)
     
     dt = dateparser.parse(
         clean_input,
