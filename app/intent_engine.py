@@ -46,10 +46,10 @@ DEFAULT_PHRASES = {
     "nav_enter": ["select", "enter", "click", "ok", "choose", "go"],
     "nav_back": ["back", "go back", "return", "exit", "escape"],
     "nav_home": ["home", "go home", "menu", "main menu"],
-    
+
     "calendar_add": [
         "schedule", "add event", "new appointment", "remind me", 
-        "create event", "set a reminder", "book a meeting"
+        "create event", "set a reminder", "book a meeting", "add to calendar"
     ],
     "calendar_list": [
         "list calendar", "show schedule", "what is on my calendar", 
@@ -63,19 +63,26 @@ DEFAULT_PHRASES = {
         "reschedule", "move event", "change time", "postpone", 
         "move meeting", "update event"
     ],
-    "alarm_set": [
-        "set an alarm", "wake me up", "alarm for", "timer for", "set timer", "remind me in"
-    ],
-    "alarm_list": [
-        "show alarms", "list alarms", "my alarms", "check alarms", "what alarms do i have"
-    ],
-    "alarm_delete": [
-        "cancel alarm", "delete alarm", "stop alarm", "remove alarm", "turn off alarm"
-    ],
     "time_query": [
         "what time is it", "current time", "clock", "tell me the time", 
         "what is the date", "what day is it"
     ],
+    # --- New Timer Intents ---
+    "timer_add": [
+        "set a timer", "start a timer", "set an alarm", "wake me up",
+        "remind me in", "countdown", "timer for"
+    ],
+    "timer_delete": [
+        "cancel timer", "stop timer", "delete alarm", "remove alarm",
+        "cancel the alarm", "stop the timer"
+    ],
+    "timer_list": [
+        "list timers", "show alarms", "what timers are running", 
+        "check alarms", "my timers"
+    ],
+    "timer_pause": ["pause timer", "pause alarm"],
+    "timer_resume": ["resume timer", "restart timer"],
+    # -------------------------
     "intent_learn": [
         "learn that", "teach you", "remember that", "map phrase", 
         "training mode", "i want to teach you"
@@ -101,7 +108,7 @@ class IntentEngine:
     async def load(self):
         """Loads phrases from disk and pre-computes vectors."""
         log.info("--- Initializing Semantic Intent Engine ---")
-        
+
         if os.path.exists(PHRASEBOOK_PATH):
             try:
                 with open(PHRASEBOOK_PATH, "r") as f:
