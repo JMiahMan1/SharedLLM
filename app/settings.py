@@ -153,6 +153,8 @@ Briefly confirm the action in 1 short sentence. Do not offer help. Do not be cha
 
 ### USER QUERY
 {query}
+
+{action_context}
 """
 
 def load_system_prompt():

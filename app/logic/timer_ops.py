@@ -65,21 +65,43 @@ async def trigger_alarm(timer: Dict):
             log.info(f"Timer {timer_id} removed from DB (processing started).")
             
         elif recurrence:
-            if "daily" in recurrence.lower() or "every day" in recurrence.lower():
-                try:
-                    # Parse current expiry safely
-                    current_exp = datetime.fromisoformat(timer["expires_at"])
-                    # Ensure naive for calculation
-                    if current_exp.tzinfo: current_exp = current_exp.replace(tzinfo=None)
-                    
+            try:
+                # Parse current expiry safely
+                current_exp = datetime.fromisoformat(timer["expires_at"])
+                if current_exp.tzinfo: current_exp = current_exp.replace(tzinfo=None)
+                
+                new_expiry = None
+                
+                if "daily" in recurrence.lower() or "every day" in recurrence.lower():
                     new_expiry = current_exp + timedelta(days=1)
+                elif "every" in recurrence.lower():
+                    # Handle "every Monday", "every Tuesday", etc.
+                    # 0=Monday, 6=Sunday
+                    days_map = {
+                        'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+                        'friday': 4, 'saturday': 5, 'sunday': 6
+                    }
+                    target_day_str = recurrence.lower().replace("every", "").strip()
+                    target_day = days_map.get(target_day_str)
+                    
+                    if target_day is not None:
+                        # Add 1 day first to avoid finding today if we are still on the same day
+                        next_day = current_exp + timedelta(days=1)
+                        while next_day.weekday() != target_day:
+                            next_day += timedelta(days=1)
+                        new_expiry = next_day
+                
+                if new_expiry:
                     await storage.update_timer(timer_id, {
                         "expires_at": new_expiry.isoformat(),
                         "active": True
                     })
                     log.info(f"Rescheduled recurring alarm '{timer['title']}' to {new_expiry}")
-                except Exception as e:
-                    log.error(f"Failed to calculate new expiry for {timer_id}: {e}")
+                else:
+                    log.warning(f"Could not calculate next recurrence for '{recurrence}'. Alarm will not repeat.")
+                    
+            except Exception as e:
+                log.error(f"Failed to calculate new expiry for {timer_id}: {e}")
     except Exception as e:
         log.error(f"Failed to update timer state {timer_id}: {e}")
         # We continue to play audio, but log the DB error.
@@ -94,156 +116,172 @@ async def trigger_alarm(timer: Dict):
         log.critical(f"Critical unhandled exception during alarm audio sequence for {timer_id}: {e}")
 
 
-async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, redis_client, ha_collection=None) -> Dict[str, Union[str, bool]]:
-    """
-    Adds a timer or alarm based on natural language query.
-    Supports target device extraction ("on Office TV").
-    """
-    now = datetime.now() # Naive local time
-    query_lower = query.lower()
+async def _create_timer_entry(
+    title: str,
+    expires_at: datetime,
+    is_alarm: bool,
+    recurrence: Optional[str],
+    origin_device: str,
+    target_device: Optional[str],
+    target_device_name: Optional[str],
+    redis_client
+) -> Dict[str, Union[str, bool]]:
+    """Internal helper to save timer/alarm to DB."""
     
-    # --- 0. Pre-process: Word-to-Digit Conversion ---
-    # Fixes "set a one minute timer" -> "set a 1 minute timer"
-    query_lower = convert_words_to_numbers(query_lower)
-    log.info(f"TimerAdd: Normalized query: '{query_lower}'")
-
-    # --- 1. Extract Target Device ("on Office TV") ---
-    target_device = None
-    target_device_name = None
-    
-    # Look for "on [Device]" pattern at the end of the string
-    device_match = re.search(r'\b(?:on|in)\s+(the\s+)?(.+?)$', query_lower)
-    
-    if device_match:
-        potential_name = device_match.group(2).strip()
-        # Safety check: verify it's not a time word
-        time_keywords = ['minute', 'second', 'hour', 'tomorrow', 'tonight', 'morning', 'evening', 'afternoon', 'day', 'week']
-        if not any(w in potential_name for w in time_keywords):
-            target_device_name = potential_name
-            # Remove the device part from the query so it doesn't confuse time parsing
-            query_lower = query_lower.replace(device_match.group(0), "")
-            
-    if target_device_name and ha_collection:
-        # Resolve to entity ID using media logic
-        tid, _ = await smart_resolve_entity(target_device_name, "play_media", ha_collection)
-        if tid:
-            target_device = tid
-            log.info(f"TimerAdd: Resolved target device '{target_device_name}' -> {target_device}")
-        else:
-            log.warning(f"TimerAdd: Could not resolve target device '{target_device_name}'")
-
-    # --- 2. Clean introductory words/filler ---
-    # Added 'set up', 'make a' to the cleanup list
-    clean_parse_input = re.sub(
-        r'^\s*[\d\.\s]*(?:can you|please|i want to|start|set|set up|make|create|add|a|an|\s+)+', '', query_lower, flags=re.IGNORECASE
-    ).strip()
-
-    expires_at = None
-    is_alarm = False
-
-    # --- 3. Robust Duration Parsing (Regex First) ---
-    # We use separate searches to handle mixed order ("1 minute 30 seconds")
-    hours = 0
-    minutes = 0
-    seconds = 0
-    found_duration = False
-    
-    # Hours
-    h_match = re.search(r'(\d+)\s*(?:hours?|hrs?)', clean_parse_input)
-    if h_match:
-        hours = int(h_match.group(1))
-        found_duration = True
-        
-    # Minutes
-    m_match = re.search(r'(\d+)\s*(?:minutes?|mins?)', clean_parse_input)
-    if m_match:
-        minutes = int(m_match.group(1))
-        found_duration = True
-        
-    # Seconds
-    s_match = re.search(r'(\d+)\s*-?\s*(?:seconds?|secs?)', clean_parse_input)
-    if s_match:
-        seconds = int(s_match.group(1))
-        found_duration = True
-
-    if found_duration:
-        expires_at = now + timedelta(hours=hours, minutes=minutes, seconds=seconds)
-        log.info(f"TimerAdd: Regex found duration: {hours}h {minutes}m {seconds}s")
-
-    # --- 4. Fallback to Dateparser (Absolute Time) ---
-    if not found_duration:
-        # Aggressive cleaning for dateparser
-        dp_input = re.sub(r'\b(timer|alarm|wake me|remind me|set|start|up)\b', '', clean_parse_input, flags=re.IGNORECASE)
-        
-        dt = dateparser.parse(
-            dp_input,
-            settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': now}
-        )
-        if dt:
-            expires_at = dt
-            log.info(f"TimerAdd: Dateparser matched absolute time: {dt}")
-
-    if not expires_at:
-        return {"status": "FAILURE", "message": "Could not understand the time or duration.", "service": "timer_add"}
-
-    # --- FIX: Enforce Naive Timezone ---
-    # This prevents crashes when subtracting from datetime.now() later
+    # Enforce Naive Timezone
     if expires_at.tzinfo is not None:
         expires_at = expires_at.replace(tzinfo=None)
 
-    # --- 5. Determine Title ---
-    title_temp = query_lower
-    title_temp = re.sub(r'\d+\s*-?\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)', '', title_temp)
-    title_temp = re.sub(r'\b(at|am|pm|tomorrow|tonight|o\'clock)\b', '', title_temp, flags=re.IGNORECASE)
-    title_temp = re.sub(r'\b(set|start|create|add|wake|me|up|please|can|you|timer|alarm|for|in)\b', '', title_temp, flags=re.IGNORECASE)
-    
-    title = re.sub(r'[\d]+', '', title_temp)
-    title = re.sub(r'[^\w\s]', '', title).strip()
-    title = re.sub(r'\s+', ' ', title).strip()
-    
-    if not title or len(title) < 2:
-        title = "Timer"
-
-    # --- 6. Determine Alarm vs Timer ---
-    time_difference = (expires_at - now).total_seconds()
-    is_absolute_time_syntax = any(word in query.lower() for word in ['am', 'pm', 'tonight', 'tomorrow', 'clock'])
-    
-    if time_difference > 3600 or is_absolute_time_syntax:
-        is_alarm = True
-        # Logic to ensure alarms set for "6am" when it's 10am are set for tomorrow
-        if expires_at < now and is_absolute_time_syntax:
-            expires_at += timedelta(days=1)
-
-    # --- 7. Determine Origin Device ---
-    origin = get_last_entity(redis_client, user_creds.get("user"))
-
-    # --- 8. Create Timer Object ---
     timer_obj = {
         "id": str(uuid.uuid4()),
         "type": "alarm" if is_alarm else "timer",
         "title": title,
-        "created_at": now.isoformat(),
+        "created_at": datetime.now().isoformat(),
         "expires_at": expires_at.isoformat(),
-        "origin_device": origin,
-        "target_device": target_device, # Stores the resolved Entity ID
+        "origin_device": origin_device,
+        "target_device": target_device,
         "active": True,
-        "recurrence": "daily" if "every day" in query.lower() else None
+        "recurrence": recurrence
     }
 
-    # --- 9. Save & Verify (CRITICAL FIX) ---
-    # Pass the active redis_client to ensure it's saved in this context
     saved_id = await storage.add_timer(timer_obj, redis_client)
     
     if not saved_id:
-        return {"status": "FAILURE", "message": "Database Error: Could not save timer. Check Redis connection.", "service": "timer_add"}
+        return {"status": "FAILURE", "message": "Database Error: Could not save timer.", "service": "timer_add"}
 
     time_str = expires_at.strftime("%I:%M %p")
-    msg = f"Set {timer_obj['type']} '{title}' for {time_str}."
+    msg = f"Set {timer_obj['type']} '{title}' for {time_str}"
+    if recurrence:
+        msg += f" (repeats {recurrence})"
+    msg += "."
     
     if target_device:
         msg += f" on {target_device_name}."
         
     return {"status": "SUCCESS", "message": msg, "service": "timer_add", "timer_id": timer_obj["id"]}
+
+
+async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, redis_client, ha_collection=None) -> Dict[str, Union[str, bool]]:
+    """
+    Strictly handles DURATION based timers (e.g. "10 minutes").
+    """
+    now = datetime.now()
+    query_lower = convert_words_to_numbers(query.lower())
+    log.info(f"TimerAdd: Normalized query: '{query_lower}'")
+
+    # 1. Extract Target Device
+    target_device, target_device_name = await _extract_target_device(query_lower, ha_collection)
+    if target_device_name:
+        # Remove device string to avoid parsing confusion
+        query_lower = query_lower.replace(target_device_name, "").replace("on ", "").replace("in ", "")
+
+    # 2. Parse Duration
+    hours, minutes, seconds = 0, 0, 0
+    found_duration = False
+    
+    h_match = re.search(r'(\d+)\s*(?:hours?|hrs?)', query_lower)
+    if h_match: hours, found_duration = int(h_match.group(1)), True
+        
+    m_match = re.search(r'(\d+)\s*(?:minutes?|mins?)', query_lower)
+    if m_match: minutes, found_duration = int(m_match.group(1)), True
+        
+    s_match = re.search(r'(\d+)\s*-?\s*(?:seconds?|secs?)', query_lower)
+    if s_match: seconds, found_duration = int(s_match.group(1)), True
+
+    if not found_duration:
+        return {"status": "FAILURE", "message": "Please specify a duration (e.g., '5 minutes') for a timer.", "service": "timer_add"}
+
+    expires_at = now + timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    
+    # 3. Determine Title
+    title = _extract_title(query_lower, ["timer", "set", "for", "minutes", "seconds", "hours"])
+
+    return await _create_timer_entry(
+        title, expires_at, False, None, 
+        get_last_entity(redis_client, user_creds.get("user")), 
+        target_device, target_device_name, redis_client
+    )
+
+
+async def tool_alarm_add(query: str, user_creds: Dict[str, str], model: str, redis_client, ha_collection=None) -> Dict[str, Union[str, bool]]:
+    """
+    Strictly handles ABSOLUTE TIME based alarms (e.g. "8am").
+    Supports Recurrence (e.g. "every day").
+    """
+    now = datetime.now()
+    query_lower = convert_words_to_numbers(query.lower())
+    log.info(f"AlarmAdd: Normalized query: '{query_lower}'")
+
+    # 1. Extract Target Device
+    target_device, target_device_name = await _extract_target_device(query_lower, ha_collection)
+    if target_device_name:
+        query_lower = query_lower.replace(target_device_name, "").replace("on ", "").replace("in ", "")
+
+    # 2. Parse Recurrence
+    recurrence = None
+    if "every day" in query_lower or "daily" in query_lower:
+        recurrence = "daily"
+    elif "every" in query_lower:
+        # Simple extraction for "every Monday", etc.
+        match = re.search(r'every\s+(\w+)', query_lower)
+        if match:
+            recurrence = f"every {match.group(1)}"
+
+    # 3. Parse Absolute Time
+    # Clean up common prefixes for better parsing
+    clean_input = re.sub(r'\b(set|alarm|wake|me|up|for|at)\b', '', query_lower, flags=re.IGNORECASE)
+    
+    dt = dateparser.parse(
+        clean_input,
+        settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': now}
+    )
+    
+    if not dt:
+         return {"status": "FAILURE", "message": "Please specify a time (e.g., '8am') for the alarm.", "service": "alarm_add"}
+
+    # If time is in the past (e.g. "8am" said at "10am"), dateparser might default to today.
+    # We want tomorrow.
+    if dt < now and "tomorrow" not in query_lower:
+        dt += timedelta(days=1)
+
+    # 4. Determine Title
+    title = _extract_title(query_lower, ["alarm", "set", "wake", "up", "at", "every", "daily"])
+
+    return await _create_timer_entry(
+        title, dt, True, recurrence, 
+        get_last_entity(redis_client, user_creds.get("user")), 
+        target_device, target_device_name, redis_client
+    )
+
+
+async def _extract_target_device(query: str, ha_collection):
+    target_device = None
+    target_device_name = None
+    device_match = re.search(r'\b(?:on|in)\s+(the\s+)?(.+?)$', query)
+    
+    if device_match:
+        potential_name = device_match.group(2).strip()
+        time_keywords = ['minute', 'second', 'hour', 'tomorrow', 'tonight', 'morning', 'evening', 'afternoon', 'day', 'week', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        if not any(w in potential_name for w in time_keywords):
+            target_device_name = potential_name
+            
+    if target_device_name and ha_collection:
+        tid, _ = await smart_resolve_entity(target_device_name, "play_media", ha_collection)
+        if tid:
+            target_device = tid
+    return target_device, target_device_name
+
+def _extract_title(query: str, ignore_words: List[str]) -> str:
+    title_temp = query
+    # Remove digits and time units
+    title_temp = re.sub(r'\d+\s*-?\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)', '', title_temp)
+    # Remove common words
+    for w in ignore_words + ['please', 'can', 'you', 'a', 'an', 'the']:
+        title_temp = re.sub(f'\\b{w}\\b', '', title_temp, flags=re.IGNORECASE)
+    
+    title = re.sub(r'[^\w\s]', '', title_temp).strip()
+    title = re.sub(r'\s+', ' ', title).strip()
+    return title if len(title) >= 2 else ("Alarm" if "alarm" in ignore_words else "Timer")
 
 
 async def tool_timer_list(user_creds: Dict[str, str], redis_client=None) -> Dict[str, Union[str, bool]]:
@@ -253,7 +291,8 @@ async def tool_timer_list(user_creds: Dict[str, str], redis_client=None) -> Dict
     if not timers:
         return {"status": "SUCCESS", "message": "No active timers or alarms.", "service": "timer_list"}
 
-    lines = []
+    timer_lines = []
+    alarm_lines = []
     now = datetime.now()
     
     for t in timers:
@@ -267,14 +306,25 @@ async def tool_timer_list(user_creds: Dict[str, str], redis_client=None) -> Dict
                 continue # Skip expired ones that haven't been cleaned yet
                 
             rem_str = str(remaining).split('.')[0]
-            lines.append(f"- {t['title']} ({t['type']}): expires in {rem_str} at {exp.strftime('%I:%M %p')}")
+            line = f"- {t['title']}: expires in {rem_str} at {exp.strftime('%I:%M %p')}"
+            
+            if t.get("type") == "alarm":
+                alarm_lines.append(line)
+            else:
+                timer_lines.append(line)
         except Exception as e:
             log.error(f"Error parsing timer for list: {e}")
 
-    if not lines:
+    if not timer_lines and not alarm_lines:
         return {"status": "SUCCESS", "message": "No active timers or alarms.", "service": "timer_list"}
 
-    return {"status": "SUCCESS", "message": "Active Timers:\n" + "\n".join(lines), "service": "timer_list"}
+    msg_parts = []
+    if timer_lines:
+        msg_parts.append("Active Timers:\n" + "\n".join(timer_lines))
+    if alarm_lines:
+        msg_parts.append("Active Alarms:\n" + "\n".join(alarm_lines))
+
+    return {"status": "SUCCESS", "message": "\n\n".join(msg_parts), "service": "timer_list"}
 
 
 async def tool_timer_delete(query: str, user_creds: Dict[str, str], redis_client=None) -> Dict[str, Union[str, bool]]:

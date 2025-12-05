@@ -156,6 +156,7 @@ async def contextualize_query(query, user, model):
         "calendar_list",
         "calendar_update",
         "timer_add",
+        "alarm_add",
         "timer_delete",
         "timer_list",
         "timer_pause",
@@ -185,6 +186,7 @@ async def contextualize_query(query, user, model):
         "map",
         "set",
         "start",
+        "wake",
     ]
     if any(query.lower().lstrip().startswith(v) for v in verbs):
         return query
@@ -353,6 +355,15 @@ async def _execute_tool_action(
         )
     elif tool_name == "timer_add":
         return await tool_timer_add(
+            query,
+            user_creds,
+            model,
+            GlobalResources.redis_client,
+            GlobalResources.ha_collection,
+        )
+    elif tool_name == "alarm_add":
+        from .timer_ops import tool_alarm_add
+        return await tool_alarm_add(
             query,
             user_creds,
             model,
