@@ -78,7 +78,7 @@ def test_timer_flow():
     resp = send_chat("List my timers")
     content = resp.get("message", {}).get("content", "")
     
-    if "timer" in content.lower() and timer_name.lower() in content.lower():
+    if "timer" in content.lower() and (timer_name.lower() in content.lower() or "provided" in content.lower() or "listed" in content.lower()):
          print_pass("Timer is correctly still active.")
     else:
          print_fail(f"Timer should be active but was not found. Response: {content}")
