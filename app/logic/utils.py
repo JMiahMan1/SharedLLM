@@ -7,8 +7,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Union
 
-from settings import (
-    log, run_blocking, get_user_creds, ha_cache_get, ha_cache_set,
+    log, run_blocking, get_user_creds,
     OLLAMA_URL, HA_URL, NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS,
     WHOOGLE_URL, OPENAI_MODEL, DEFAULT_MODEL, OLLAMA_TIMEOUT, OLLAMA_RETRY,
     GlobalResources, openai_client, EMB_MODEL, CHAT_HISTORY_TTL,
