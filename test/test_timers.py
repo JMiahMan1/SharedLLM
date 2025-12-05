@@ -51,6 +51,7 @@ def test_timer_flow():
     send_chat("Delete the timer Test Short Task")
     send_chat("Delete the alarm Test Long Alarm")
     send_chat("Delete the alarm Test Long")
+    send_chat("Delete the alarm for 8am test long")
     time.sleep(2)
 
     # 1. Create Timer (Short Duration)
@@ -123,7 +124,8 @@ def test_timer_flow():
     print_info(f"List Content: {content}")
     
     # Check for either the full name or the stripped name
-    if "alarm" in content.lower() and (alarm_name.lower() in content.lower() or expected_db_name.lower() in content.lower()):
+    # REMOVED: "alarm" in content.lower() check, as LLM might just say "Active timers:"
+    if alarm_name.lower() in content.lower() or expected_db_name.lower() in content.lower():
         print_pass("Alarm listed successfully.")
     else:
         print_fail(f"Alarm NOT found in list. Response: {content}")
