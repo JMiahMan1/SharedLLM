@@ -32,6 +32,10 @@ HA_URL = os.getenv("HA_URL")
 HA_DEFAULT_USER = os.getenv("HA_DEFAULT_USER", "Admin")
 HA_ENV_TOKEN = os.getenv("HA_TOKEN")
 
+SEARCH_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
+
 WHOOGLE_URL = os.getenv("WHOOGLE_URL", "https://search.sumemail.com")
 NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
