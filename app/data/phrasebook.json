@@ -33,16 +33,21 @@
   ],
   "play_media": [
     "play",
-    "resume",
-    "start music",
     "play music",
     "play song",
+    "play video",
+    "start music on",
+    "play * on *",
+    "play something on the tv",
+    "cast to",
+    "queue up",
+    "resume",
+    "start music",
     "play album",
     "put on some music",
     "start the tv",
     "play track",
-    "play artist",
-    "queue up"
+    "play artist"
   ],
   "open_app": [
     "open",
@@ -128,7 +133,8 @@
     "remind me",
     "create event",
     "set a reminder",
-    "book a meeting"
+    "book a meeting",
+    "add to calendar"
   ],
   "calendar_list": [
     "list calendar",
@@ -156,6 +162,44 @@
     "move meeting",
     "update event",
     "change the time"
+  ],
+  "timer_add": [
+    "set a timer",
+    "start a timer",
+    "set an alarm",
+    "wake me up",
+    "remind me in",
+    "countdown",
+    "timer for"
+  ],
+  "timer_delete": [
+    "cancel timer",
+    "stop timer",
+    "delete alarm",
+    "remove alarm",
+    "cancel the alarm",
+    "stop the timer",
+    "delete the timer",
+    "remove the alarm"
+  ],
+  "timer_list": [
+    "list timers",
+    "show alarms",
+    "what timers are running",
+    "check alarms",
+    "my timers",
+    "what alarms are set"
+  ],
+  "timer_pause": [
+    "pause timer",
+    "pause alarm",
+    "stop timer temporarily"
+  ],
+  "timer_resume": [
+    "resume timer",
+    "restart timer",
+    "unpause timer",
+    "start timer again"
   ],
   "time_query": [
     "what time is it",

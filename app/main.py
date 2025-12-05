@@ -22,6 +22,7 @@ from logic import (
     get_ha_context, get_rag_context, update_history
 )
 from intent_engine import engine as intent_engine
+from logic.timer_storage import storage as timer_storage
 
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -127,6 +128,17 @@ async def intent_export():
 async def intent_list():
     """List all available intents."""
     return {"intents": intent_engine.get_valid_intents()}
+
+# --- Timer/Alarm API ---
+@app.get("/api/timer/list")
+async def api_timer_list():
+    """Returns a raw JSON list of active timers."""
+    return await timer_storage.list_timers()
+
+@app.post("/api/timer/delete")
+async def api_timer_delete(timer_id: str):
+    await timer_storage.delete_timer(timer_id)
+    return {"status": "ok", "msg": f"Timer {timer_id} deleted."}
 
 # --- HA Proxy ---
 @app.get("/api/ha/state/{entity_id}")

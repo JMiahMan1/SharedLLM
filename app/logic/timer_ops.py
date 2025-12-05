@@ -10,13 +10,13 @@ from typing import Dict, List, Optional, Union
 from settings import log, GlobalResources, get_user_creds
 from .timer_storage import storage
 from .alarm_audio import audio_manager
-
 # Ensure we import smart_resolve_entity for device targeting
 from .media_ops import get_last_entity, smart_resolve_entity
 
 # Constants
 DEFAULT_TIMER_DURATION = 600  # 10 mins
 
+# Word to Number Mapping for Robust Parsing
 WORD_TO_NUM = {
     'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
     'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
@@ -38,11 +38,11 @@ def convert_words_to_numbers(text: str) -> str:
                 text = re.sub(pattern, str(v1 + v2), text, flags=re.IGNORECASE)
                 pattern_space = f"\\b{w1} {w2}\\b"
                 text = re.sub(pattern_space, str(v1 + v2), text, flags=re.IGNORECASE)
-
+    
     # Replace single words
     for word, value in WORD_TO_NUM.items():
         text = re.sub(f"\\b{word}\\b", str(value), text, flags=re.IGNORECASE)
-
+        
     return text
 
 
@@ -63,7 +63,7 @@ async def trigger_alarm(timer: Dict):
         if is_one_time:
             await storage.delete_timer(timer_id)
             log.info(f"Timer {timer_id} removed from DB (processing started).")
-
+            
         elif recurrence:
             if "daily" in recurrence.lower() or "every day" in recurrence.lower():
                 try:
@@ -71,7 +71,7 @@ async def trigger_alarm(timer: Dict):
                     current_exp = datetime.fromisoformat(timer["expires_at"])
                     # Ensure naive for calculation
                     if current_exp.tzinfo: current_exp = current_exp.replace(tzinfo=None)
-
+                    
                     new_expiry = current_exp + timedelta(days=1)
                     await storage.update_timer(timer_id, {
                         "expires_at": new_expiry.isoformat(),
@@ -101,7 +101,7 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
     """
     now = datetime.now() # Naive local time
     query_lower = query.lower()
-
+    
     # --- 0. Pre-process: Word-to-Digit Conversion ---
     # Fixes "set a one minute timer" -> "set a 1 minute timer"
     query_lower = convert_words_to_numbers(query_lower)
@@ -110,10 +110,10 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
     # --- 1. Extract Target Device ("on Office TV") ---
     target_device = None
     target_device_name = None
-
+    
     # Look for "on [Device]" pattern at the end of the string
     device_match = re.search(r'\b(?:on|in)\s+(the\s+)?(.+?)$', query_lower)
-
+    
     if device_match:
         potential_name = device_match.group(2).strip()
         # Safety check: verify it's not a time word
@@ -122,7 +122,7 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
             target_device_name = potential_name
             # Remove the device part from the query so it doesn't confuse time parsing
             query_lower = query_lower.replace(device_match.group(0), "")
-
+            
     if target_device_name and ha_collection:
         # Resolve to entity ID using media logic
         tid, _ = await smart_resolve_entity(target_device_name, "play_media", ha_collection)
@@ -147,19 +147,19 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
     minutes = 0
     seconds = 0
     found_duration = False
-
+    
     # Hours
     h_match = re.search(r'(\d+)\s*(?:hours?|hrs?)', clean_parse_input)
     if h_match:
         hours = int(h_match.group(1))
         found_duration = True
-
+        
     # Minutes
     m_match = re.search(r'(\d+)\s*(?:minutes?|mins?)', clean_parse_input)
     if m_match:
         minutes = int(m_match.group(1))
         found_duration = True
-
+        
     # Seconds
     s_match = re.search(r'(\d+)\s*-?\s*(?:seconds?|secs?)', clean_parse_input)
     if s_match:
@@ -174,7 +174,7 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
     if not found_duration:
         # Aggressive cleaning for dateparser
         dp_input = re.sub(r'\b(timer|alarm|wake me|remind me|set|start)\b', '', clean_parse_input, flags=re.IGNORECASE)
-
+        
         dt = dateparser.parse(
             dp_input,
             settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': now}
@@ -196,18 +196,18 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
     title_temp = re.sub(r'\d+\s*-?\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)', '', title_temp)
     title_temp = re.sub(r'\b(at|am|pm|tomorrow|tonight|o\'clock)\b', '', title_temp, flags=re.IGNORECASE)
     title_temp = re.sub(r'\b(set|start|create|add|wake|me|up|please|can|you|timer|alarm|for|in)\b', '', title_temp, flags=re.IGNORECASE)
-
+    
     title = re.sub(r'[\d]+', '', title_temp)
     title = re.sub(r'[^\w\s]', '', title).strip()
     title = re.sub(r'\s+', ' ', title).strip()
-
+    
     if not title or len(title) < 2:
         title = "Timer"
 
     # --- 6. Determine Alarm vs Timer ---
     time_difference = (expires_at - now).total_seconds()
     is_absolute_time_syntax = any(word in query.lower() for word in ['am', 'pm', 'tonight', 'tomorrow', 'clock'])
-
+    
     if time_difference > 3600 or is_absolute_time_syntax:
         is_alarm = True
         # Logic to ensure alarms set for "6am" when it's 10am are set for tomorrow
@@ -233,39 +233,39 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
     # --- 9. Save & Verify (CRITICAL FIX) ---
     # Pass the active redis_client to ensure it's saved in this context
     saved_id = await storage.add_timer(timer_obj, redis_client)
-
+    
     if not saved_id:
         return {"status": "FAILURE", "message": "Database Error: Could not save timer. Check Redis connection.", "service": "timer_add"}
 
     time_str = expires_at.strftime("%I:%M %p")
     msg = f"Set {timer_obj['type']} '{title}' for {time_str}."
-
+    
     if target_device:
         msg += f" on {target_device_name}."
-
+        
     return {"status": "SUCCESS", "message": msg, "service": "timer_add", "timer_id": timer_obj["id"]}
 
 
 async def tool_timer_list(user_creds: Dict[str, str], redis_client=None) -> Dict[str, Union[str, bool]]:
     # Pass redis_client to storage
     timers = await storage.list_timers(redis_client)
-
+    
     if not timers:
         return {"status": "SUCCESS", "message": "No active timers or alarms.", "service": "timer_list"}
 
     lines = []
     now = datetime.now()
-
+    
     for t in timers:
         try:
             exp = datetime.fromisoformat(t["expires_at"])
             # Safety: Ensure naive timezone for comparison
             if exp.tzinfo: exp = exp.replace(tzinfo=None)
-
+            
             remaining = exp - now
             if remaining.total_seconds() < 0:
                 continue # Skip expired ones that haven't been cleaned yet
-
+                
             rem_str = str(remaining).split('.')[0]
             lines.append(f"- {t['title']} ({t['type']}): expires in {rem_str} at {exp.strftime('%I:%M %p')}")
         except Exception as e:

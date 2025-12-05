@@ -110,14 +110,14 @@ async def get_active_media_players(user_creds: dict) -> list:
 async def get_available_media_players(user_creds: dict) -> list:
     """Returns a list of ALL valid media players (excluding unavailable)."""
     if not HA_URL: return []
-
+    
     url = f"{HA_URL.rstrip('/')}/api/states"
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
-
+    
     try:
         def _fetch_all():
             return requests.get(url, headers=headers, timeout=3.0)
-
+        
         r = await run_blocking(_fetch_all)
         if r.status_code == 200:
             all_states = r.json()
@@ -273,7 +273,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         return (None, None)
 
     q_low = query_name.lower()
-
+    
     # --- ENFORCED PRIORITY FOR MUSIC ---
     # Only runs if strict resolution (play_media + music keywords) is active.
     if is_music:
