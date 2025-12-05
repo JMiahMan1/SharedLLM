@@ -72,23 +72,32 @@ def test_timer_flow():
     else:
         print_fail(f"Failed to list timers. Response: {content}")
 
-    # 3. Wait for Expiration
-    print_info("TEST 3: Waiting 4 seconds for scheduler...")
+    # 3. Wait for Scheduler (Check if timer is still active)
+    print_info("TEST 3: Waiting 4 seconds... (Timer should still be active)")
     time.sleep(4)
+    resp = send_chat("List my timers")
+    content = resp.get("message", {}).get("content", "")
     
-    # 4. Check if list is empty
+    if "timer" in content.lower() and timer_name.lower() in content.lower():
+         print_pass("Timer is correctly still active.")
+    else:
+         print_fail(f"Timer should be active but was not found. Response: {content}")
+
+    # 4. Check if list is empty (after expiration)
+    print_info("TEST 4: Waiting 60 seconds for timer to expire...")
+    time.sleep(60) # Wait for the 60-second timer to expire
     resp = send_chat("List my timers")
     content = resp.get("message", {}).get("content", "")
     
     if "no active timers" in content.lower():
         print_pass("Timer expired and was cleaned up.")
     else:
-        print_fail(f"Timer still present: {content}")
+        print_fail(f"Timer still present after expiration: {content}")
 
     # 5. Create Alarm
     alarm_name = "Test Long Alarm"
     # FIX: Use absolute time for alarm, as duration is no longer supported for alarms
-    print_info(f"TEST 4: Set an alarm for 8am: '{alarm_name}' (Expect SUCCESS)")
+    print_info(f"TEST 5: Set an alarm for 8am: '{alarm_name}' (Expect SUCCESS)")
     resp = send_chat(f"Set an alarm for 8am called {alarm_name}")
     content = resp.get("message", {}).get("content", "")
     
