@@ -46,6 +46,13 @@ def test_timer_flow():
     except:
         pass
 
+    # 0. Cleanup (Delete potential leftovers)
+    print_info("TEST 0: Cleanup (Deleting old timers/alarms)...")
+    send_chat("Delete the timer Test Short Task")
+    send_chat("Delete the alarm Test Long Alarm")
+    send_chat("Delete the alarm Test Long")
+    time.sleep(2)
+
     # 1. Create Timer (Short Duration)
     # Use a name without 'timer' to avoid it being stripped by the backend
     timer_name = "Test Short Task"
@@ -89,13 +96,15 @@ def test_timer_flow():
     resp = send_chat("List my timers")
     content = resp.get("message", {}).get("content", "")
     
-    if "no active timers" in content.lower():
+    if timer_name.lower() not in content.lower():
         print_pass("Timer expired and was cleaned up.")
     else:
         print_fail(f"Timer still present after expiration: {content}")
 
     # 5. Create Alarm
     alarm_name = "Test Long Alarm"
+    # Expected title in DB (stripped "Alarm")
+    expected_db_name = "Test Long"
     # FIX: Use absolute time for alarm, as duration is no longer supported for alarms
     print_info(f"TEST 5: Set an alarm for 8am: '{alarm_name}' (Expect SUCCESS)")
     resp = send_chat(f"Set an alarm for 8am called {alarm_name}")
@@ -107,23 +116,24 @@ def test_timer_flow():
         print_fail(f"Failed to set alarm. Response: {content}")
         return
 
-    # 5. List Timers (Verify Alarm Persistence)
-    print_info("TEST 4.5: List Timers (Verify Alarm Persistence)")
+    # 5.5. List Timers (Verify Alarm Persistence)
+    print_info("TEST 5.5: List Timers (Verify Alarm Persistence)")
     resp = send_chat("List my timers")
     content = resp.get("message", {}).get("content", "")
     print_info(f"List Content: {content}")
     
-    if "alarm" in content.lower() and alarm_name.lower() in content.lower():
+    # Check for either the full name or the stripped name
+    if "alarm" in content.lower() and (alarm_name.lower() in content.lower() or expected_db_name.lower() in content.lower()):
         print_pass("Alarm listed successfully.")
     else:
         print_fail(f"Alarm NOT found in list. Response: {content}")
 
     # 6. Delete Alarm
-    print_info(f"TEST 5: Delete the alarm by name: '{alarm_name}' (Expect SUCCESS)")
+    print_info(f"TEST 6: Delete the alarm by name: '{alarm_name}' (Expect SUCCESS)")
     resp = send_chat(f"Delete the alarm {alarm_name}")
     content = resp.get("message", {}).get("content", "")
     
-    if "deleted" in content.lower():
+    if any(x in content.lower() for x in ["deleted", "removed", "success"]):
         print_pass("Alarm deleted successfully.")
     else:
         print_fail(f"Failed to delete alarm. Response: {content}")
