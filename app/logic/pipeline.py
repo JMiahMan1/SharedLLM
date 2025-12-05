@@ -545,9 +545,11 @@ async def generate_rag_stream(
         else:
             tasks.append(asyncio.sleep(0))
         
-        # Optimized: Only run Web Search if it wasn't already run as a Tool
+        # Optimized: Only run Web Search if no other tools were executed
         already_searched = any(r.get("service") == "web_search" for r in (action_results or []))
-        if not already_searched:
+        should_search = not action_results and not already_searched
+        
+        if should_search:
              tasks.append(tool_web_search(refined))
         else:
              tasks.append(asyncio.sleep(0))
