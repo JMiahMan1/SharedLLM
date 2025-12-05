@@ -44,6 +44,15 @@ EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+# Initialize OpenAI Client
+openai_client = None
+if OPENAI_API_KEY:
+    try:
+        from openai import AsyncOpenAI
+        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    except ImportError:
+        log.warning("openai module not installed, skipping client init")
+
 # Timeouts & Retries
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300")) 
 OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "2"))
@@ -219,6 +228,12 @@ async def load_resources():
             log.info(f"ChromaDB Loaded from {CHROMA_DIR}")
         except Exception as e:
             log.error(f"ChromaDB Load Failed: {e}")
+
+async def initialize_rag_resources():
+    """Reloads RAG resources for hot-reloading."""
+    await load_resources()
+    from intent_engine import engine
+    await engine.load()
 
 # --- LIFESPAN (Startup Logic) ---
 @asynccontextmanager
