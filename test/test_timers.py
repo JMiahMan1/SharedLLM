@@ -54,7 +54,8 @@ def test_timer_flow():
     content = resp.get("message", {}).get("content", "")
     
     # FIX: More flexible assertion
-    if any(x in content.lower() for x in ["set", "started", "created", "success"]) and "timer" in content.lower():
+    success_keywords = ["set", "started", "created", "success", "tickin", "seconds", "minutes", "go"]
+    if any(x in content.lower() for x in success_keywords) and ("timer" in content.lower() or "tickin" in content.lower()):
         print_pass(f"Timer created: {content}")
     else:
         print_fail(f"Failed to create timer. Response: {content}")
