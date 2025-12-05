@@ -249,7 +249,7 @@ async def lifespan(app: FastAPI):
     await engine.load()
 
     # Start Timer Scheduler
-    from app.logic.timer_scheduler import start_scheduler, stop_scheduler
+    from logic.timer_scheduler import start_scheduler, stop_scheduler
     log.info("Starting Timer/Alarm Scheduler...")
     scheduler_task = asyncio.create_task(start_scheduler())
     
