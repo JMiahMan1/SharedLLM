@@ -35,6 +35,7 @@ class TimerStorage:
         key = f"{REDIS_KEY_PREFIX}:{timer_id}"
         
         try:
+            log.info(f"TimerStorage: Saving key={key} using client={r}")
             r.set(key, json.dumps(timer_data))
             # Optional: Persist for 30 days to prevent infinite junk, or keep indefinite.
             # r.expire(key, 2592000) 
@@ -65,6 +66,7 @@ class TimerStorage:
         try:
             # NOTE: scan_iter is safer for production than keys(), but keys() is fine for <1000 timers
             keys = r.keys(f"{REDIS_KEY_PREFIX}:*")
+            log.info(f"TimerStorage: Listing keys. Found {len(keys)} keys using client={r}")
             timers = []
             for k in keys:
                 try:
