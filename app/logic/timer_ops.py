@@ -242,28 +242,21 @@ async def tool_alarm_add(query: str, user_creds: Dict[str, str], model: str, red
     # Remove "called X" or "named X" to prevent dateparser confusion
     clean_input = re.sub(r'\b(called|named)\b.*', '', clean_input, flags=re.IGNORECASE)
     
-    log.info(f"AlarmAdd: Cleaned input for dateparser: '{clean_input}'")
-    
     dt = dateparser.parse(
         clean_input,
         settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': now}
     )
     
     if not dt:
-         log.error(f"AlarmAdd: Dateparser failed to parse '{clean_input}'")
          return {"status": "FAILURE", "message": "Please specify a time (e.g., '8am') for the alarm.", "service": "alarm_add"}
-
-    log.info(f"AlarmAdd: Parsed date: {dt}")
 
     # If time is in the past (e.g. "8am" said at "10am"), dateparser might default to today.
     # We want tomorrow.
     if dt < now and "tomorrow" not in query_lower:
         dt += timedelta(days=1)
-        log.info(f"AlarmAdd: Adjusted date to tomorrow: {dt}")
 
     # 4. Determine Title
     title = _extract_title(query_lower, ["alarm", "set", "wake", "up", "at", "for", "every", "daily"])
-    log.info(f"AlarmAdd: Extracted title: '{title}'")
 
     return await _create_timer_entry(
         title, dt, True, recurrence, 
