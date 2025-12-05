@@ -611,8 +611,9 @@ async def generate_rag_stream(
         search_ctx=search_ctx,
         cal_ctx=cal_ctx,
         query=refined,
+        action_context=action_context,
     )
-    if action_context:
+    if action_context and not use_simple:
         prompt += f"\n{action_context}"
 
     yield builder.chunk(role="assistant")
