@@ -594,6 +594,7 @@ async def generate_rag_stream(
         "media_previous",
         "open_app",
         "timer_add",
+        "alarm_add",
         "timer_delete",
         "timer_list",
     ]
