@@ -238,6 +238,10 @@ async def tool_alarm_add(query: str, user_creds: Dict[str, str], model: str, red
     # Clean up common prefixes and recurrence phrases for better parsing
     # Added: 'an', 'a', 'the', 'every', 'day', 'daily'
     clean_input = re.sub(r'\b(set|alarm|wake|me|up|for|at|an|a|the|every|day|daily)\b', '', query_lower, flags=re.IGNORECASE)
+    
+    # Remove "called X" or "named X" to prevent dateparser confusion
+    clean_input = re.sub(r'\b(called|named)\b.*', '', clean_input, flags=re.IGNORECASE)
+    
     log.info(f"AlarmAdd: Cleaned input for dateparser: '{clean_input}'")
     
     dt = dateparser.parse(
@@ -353,8 +357,9 @@ async def tool_timer_delete(query: str, user_creds: Dict[str, str], redis_client
             log.info(f"Match found: {target_id}")
             break
 
-    if not target_id and len(timers) == 1:
-        target_id = timers[0]["id"]
+    # DANGEROUS FALLBACK REMOVED: Do not automatically delete the only timer if no name match.
+    # if not target_id and len(timers) == 1:
+    #     target_id = timers[0]["id"]
 
     if target_id:
         await storage.delete_timer(target_id, redis_client)
