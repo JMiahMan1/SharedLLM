@@ -108,7 +108,7 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
     # Matches 'and' only if followed by an even number of quotes (meaning it's outside)
     # Handles both single (') and double (") quotes
     split_pattern = r'\s+(?:and|then)\s+(?=(?:[^\'"]*[\'"][^\'"]*[\'"])*[^\'"]*$)'
-
+    
     try:
         parts = re.split(split_pattern, query, flags=re.IGNORECASE)
     except:
@@ -122,7 +122,7 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
             p = part.strip()
             if not p:
                 continue
-
+            
             # Detect verb carryover (e.g., "Turn on X and Y" -> "Turn on X", "Turn on Y")
             verb_match = re.match(
                 r"^(turn on|turn off|toggle|play|stop|schedule|list|open|launch|scroll|move|set|start)\b",
@@ -134,10 +134,10 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
                 # Only prepend verb if it's not a new natural language query (like "what is...")
                 if not re.match(r"^(what|who|how|when|where|is|are)\b", p.lower()):
                     p = f"{first_verb} {p}"
-
+            
             clean_parts.append(p)
         return clean_parts
-
+    
     return [query]
 
 
@@ -488,7 +488,7 @@ async def generate_rag_stream(
 
     action_context = ""
     run_knowledge_retrieval = True
-
+    
     if action_results:
         # 1. Determine if the action was purely informational (Search, List, Read)
         is_informational_tool = False
@@ -496,11 +496,11 @@ async def generate_rag_stream(
             svc = res.get("service", "")
             if svc in ["web_search", "calendar_list", "timer_list", "calendar_read"]:
                 is_informational_tool = True
-
+        
         # 2. Only disable RAG if it's NOT an informational intent AND NOT an informational tool
         if intent not in INFORMATIONAL_INTENTS and not is_informational_tool:
             run_knowledge_retrieval = False
-
+            
         action_context = "### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):\n"
         for res in action_results:
             status = res.get("status", "FAILURE")
@@ -544,7 +544,7 @@ async def generate_rag_stream(
             tasks.append(get_rag_context(refined))
         else:
             tasks.append(asyncio.sleep(0))
-
+        
         # Optimized: Only run Web Search if it wasn't already run as a Tool
         already_searched = any(r.get("service") == "web_search" for r in (action_results or []))
         if not already_searched:
@@ -557,7 +557,7 @@ async def generate_rag_stream(
         nc_ctx = results[1] if fetch_nc else ""
         if not already_searched:
             search_ctx = results[2]
-
+        
         if any(
             x in refined.lower()
             for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]
@@ -588,7 +588,7 @@ async def generate_rag_stream(
     if action_results and intent in simple_intents:
         if all(r.get("status") == "SUCCESS" for r in action_results) and not any(r.get("service") == "web_search" for r in action_results):
             use_simple = True
-
+            
     template_to_use = SIMPLE_RAG_TEMPLATE if use_simple else RAG_TEMPLATE
     prompt = template_to_use.format(
         system_prompt=base_sys_prompt,

@@ -9,7 +9,8 @@ from .media_ops import execute_ha_service, get_active_media_players, get_availab
 
 class AlarmAudioManager:
     def __init__(self):
-        self.config_cache = {}\n        self.last_load = 0
+        self.config_cache = {}
+        self.last_load = 0
 
     def _load_config(self):
         if os.path.exists(ALARM_KEYWORDS_PATH):
@@ -44,7 +45,7 @@ class AlarmAudioManager:
 
         # 1. Determine Target Devices
         targets = []
-
+        
         # Priority 1: Explicit Target (e.g. "on Office TV")
         if target_explicit:
             if target_explicit.startswith("media_player."):
@@ -65,7 +66,7 @@ class AlarmAudioManager:
             if active:
                 targets.extend(active)
                 log.info(f"Alarm Fallback: Playing on active media players: {active}")
-
+        
         # Priority 4: Fallback to ALL Available Players (Last Resort)
         if not targets:
             available = await get_available_media_players(user_creds)
@@ -107,24 +108,29 @@ class AlarmAudioManager:
 
             # Step B: Sound Loop (Fixed for Google Cast 500 Error)
             base_url = HA_URL.rstrip('/') if HA_URL else ""
-
+            
             # Construct Absolute URL if path is relative/local
             if base_url and ALARM_SOUNDS_DIR.startswith("/local"):
                  full_path = f"{base_url}{ALARM_SOUNDS_DIR}/{sound_file}"
             else:
-                 # Fallback for full URLs or other paths
-                 full_path = f"{ALARM_SOUNDS_DIR}/{sound_file}"
+                 # Fallback to raw path if no base URL or not a local path
+                 full_path = os.path.join(ALARM_SOUNDS_DIR, sound_file)
 
-            for i in range(repeat):
-                try:
-                    await execute_ha_service(
+            try:
+                for i in range(repeat):
+                    result = await execute_ha_service(
                         "media_player", "play_media", target, user_creds,
                         {"media_content_id": full_path, "media_content_type": "music"},
                         redis_client
                     )
-                    await asyncio.sleep(5) # Wait for sound to play
-                except Exception as e:
-                    log.error(f"Sound Playback Error on {target}: {e}")
-                    break
+                    
+                    if result.get("status") == "FAILURE":
+                        log.warning(f"Alarm Playback Failed on {target}: {result.get('message')}")
+                        break 
+
+                    await asyncio.sleep(3)
+
+            except Exception as e:
+                log.error(f"Error during alarm loop on {target}: {e}")
 
 audio_manager = AlarmAudioManager()
