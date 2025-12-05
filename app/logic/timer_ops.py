@@ -262,7 +262,7 @@ async def tool_alarm_add(query: str, user_creds: Dict[str, str], model: str, red
         log.info(f"AlarmAdd: Adjusted date to tomorrow: {dt}")
 
     # 4. Determine Title
-    title = _extract_title(query_lower, ["alarm", "set", "wake", "up", "at", "every", "daily"])
+    title = _extract_title(query_lower, ["alarm", "set", "wake", "up", "at", "for", "every", "daily"])
     log.info(f"AlarmAdd: Extracted title: '{title}'")
 
     return await _create_timer_entry(
@@ -291,8 +291,11 @@ async def _extract_target_device(query: str, ha_collection):
 
 def _extract_title(query: str, ignore_words: List[str]) -> str:
     title_temp = query
-    # Remove digits and time units
+    # Remove digits and time units (duration)
     title_temp = re.sub(r'\d+\s*-?\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)', '', title_temp)
+    # Remove absolute times (e.g. 8am, 8:30pm, 8:00)
+    title_temp = re.sub(r'\b\d+(?::\d+)?\s*(?:am|pm)?\b', '', title_temp, flags=re.IGNORECASE)
+    
     # Remove common words
     for w in ignore_words + ['please', 'can', 'you', 'a', 'an', 'the', 'called', 'named']:
         title_temp = re.sub(f'\\b{w}\\b', '', title_temp, flags=re.IGNORECASE)
