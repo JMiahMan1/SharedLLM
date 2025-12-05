@@ -596,7 +596,6 @@ async def generate_rag_stream(
         "timer_add",
         "alarm_add",
         "timer_delete",
-        "timer_list",
     ]
     use_simple = False
     # Only use simple template if success AND NOT searching
