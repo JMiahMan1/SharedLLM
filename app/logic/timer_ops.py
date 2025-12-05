@@ -277,7 +277,7 @@ def _extract_title(query: str, ignore_words: List[str]) -> str:
     # Remove digits and time units
     title_temp = re.sub(r'\d+\s*-?\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)', '', title_temp)
     # Remove common words
-    for w in ignore_words + ['please', 'can', 'you', 'a', 'an', 'the']:
+    for w in ignore_words + ['please', 'can', 'you', 'a', 'an', 'the', 'called', 'named']:
         title_temp = re.sub(f'\\b{w}\\b', '', title_temp, flags=re.IGNORECASE)
     
     title = re.sub(r'[^\w\s]', '', title_temp).strip()

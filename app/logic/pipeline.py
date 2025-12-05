@@ -521,7 +521,8 @@ async def generate_rag_stream(
                 friendly_name = res.get("friendly_name", "N/A")
                 service = res.get("service", "N/A")
                 action_context += f"- SUCCESS: Command '{service}' sent to {friendly_name}. Verified New State: {new_state}\n"
-                if service == "web_search": action_context += f"WEB RESULTS:\n{msg}\n"
+                if service in ["web_search", "timer_list", "calendar_list", "calendar_read"]:
+                    action_context += f"TOOL OUTPUT:\n{msg}\n"
             else:
                 entity = res.get("entity_id", "N/A")
                 service = res.get("service", "N/A")
