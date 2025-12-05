@@ -5,11 +5,12 @@ import os
 import time
 
 # Add app to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add app to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../app')))
 
-from app.logic.timer_ops import tool_timer_add, tool_timer_list, tool_timer_delete
-from app.logic.timer_storage import storage
-from app.settings import GlobalResources
+from logic.timer_ops import tool_timer_add, tool_timer_list, tool_timer_delete
+from logic.timer_storage import storage
+from settings import GlobalResources
 
 # Mock Redis
 class MockRedis:
