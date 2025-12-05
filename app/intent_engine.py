@@ -69,8 +69,11 @@ DEFAULT_PHRASES = {
     ],
     # --- New Timer Intents ---
     "timer_add": [
-        "set a timer", "start a timer", "set an alarm", "wake me up",
-        "remind me in", "countdown", "timer for"
+        "set a timer", "start a timer", "remind me in", "countdown", "timer for"
+    ],
+    "alarm_add": [
+        "set an alarm", "wake me up", "alarm for", "wake up", "set alarm",
+        "schedule alarm", "new alarm"
     ],
     "timer_delete": [
         "cancel timer", "stop timer", "delete alarm", "remove alarm",

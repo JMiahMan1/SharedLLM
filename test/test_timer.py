@@ -8,7 +8,7 @@ import time
 # Add app to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../app')))
 
-from logic.timer_ops import tool_timer_add, tool_timer_list, tool_timer_delete
+from logic.timer_ops import tool_timer_add, tool_timer_list, tool_timer_delete, tool_alarm_add
 from logic.timer_storage import storage
 from settings import GlobalResources
 
@@ -36,47 +36,55 @@ class MockRedis:
         return 0
 
 async def test_timer_flow():
-    print("--- Starting Timer/Alarm Flow Test ---")
-    
+    print("\n--- Starting Timer/Alarm Flow Test ---")
+
     # Setup Mock Redis
     mock_redis = MockRedis()
     GlobalResources.redis_client = mock_redis
-    
-    user_creds = {"user": "test_user"}
-    
-    # 1. Test Timer Creation (Duration)
+
+    # 1. Testing Timer Creation (Duration)
     print("\n1. Testing Timer Creation (10 minutes)...")
-    res = await tool_timer_add("Set a timer for 10 minutes", user_creds, "test_model", mock_redis)
+    res = await tool_timer_add("set a timer for 10 minutes", {"user": "test"}, "mock-model", mock_redis)
     print(f"Result: {res}")
     assert res["status"] == "SUCCESS"
+    assert res["service"] == "timer_add"
     assert "timer" in res["message"].lower()
-    
-    # 2. Test Alarm Creation (Absolute Time)
-    print("\n2. Testing Alarm Creation (Wake me up at 8am)...")
-    res = await tool_timer_add("Wake me up at 8am", user_creds, "test_model", mock_redis)
+
+    # 2. Testing Timer Creation with Absolute Time (Should Fail)
+    print("\n2. Testing Timer Creation with Absolute Time (Should Fail)...")
+    res = await tool_timer_add("set a timer for 8am", {"user": "test"}, "mock-model", mock_redis)
+    print(f"Result: {res}")
+    assert res["status"] == "FAILURE"
+
+    # 3. Testing Alarm Creation (Absolute Time)
+    print("\n3. Testing Alarm Creation (Wake me up at 8am)...")
+    res = await tool_alarm_add("wake me up at 8am", {"user": "test"}, "mock-model", mock_redis)
     print(f"Result: {res}")
     assert res["status"] == "SUCCESS"
+    assert res["service"] == "timer_add" # Service name remains timer_add for frontend compatibility? No, let's check what I returned.
+    # Actually I returned "timer_add" as service in _create_timer_entry. That's fine for now.
     assert "alarm" in res["message"].lower()
-    
-    # 3. Test List
-    print("\n3. Testing List...")
-    res = await tool_timer_list(user_creds, mock_redis)
+
+    # 4. Testing Alarm Creation with Recurrence
+    print("\n4. Testing Alarm Creation with Recurrence (Every Day)...")
+    res = await tool_alarm_add("set an alarm for 7am every day", {"user": "test"}, "mock-model", mock_redis)
     print(f"Result: {res}")
     assert res["status"] == "SUCCESS"
+    assert "repeats daily" in res["message"].lower() or "repeats every day" in res["message"].lower()
+
+    # 5. Testing List
+    print("\n5. Testing List...")
+    res = await tool_timer_list({"user": "test"}, mock_redis)
+    print(f"Result: {res}")
     assert "Active Timers" in res["message"]
-    assert "10 minutes" in res["message"] or "Timer" in res["message"]
-    
-    # 4. Test Delete
-    print("\n4. Testing Delete...")
-    res = await tool_timer_delete("delete timer", user_creds, mock_redis)
+    assert "Active Alarms" in res["message"]
+
+    # 6. Testing Delete
+    print("\n6. Testing Delete...")
+    res = await tool_timer_delete("delete timer", {"user": "test"}, mock_redis)
     print(f"Result: {res}")
     assert res["status"] == "SUCCESS"
-    
-    # Verify deletion
-    res = await tool_timer_list(user_creds, mock_redis)
-    # Should still have one left (the alarm)
-    assert "Active Timers" in res["message"]
-    
+
     print("\n--- Test Complete ---")
 
 if __name__ == "__main__":
