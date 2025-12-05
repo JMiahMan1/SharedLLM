@@ -341,8 +341,10 @@ async def tool_timer_delete(query: str, user_creds: Dict[str, str], redis_client
     query_low = query.lower()
 
     for t in timers:
+        log.info(f"Checking timer: '{t['title']}' against query: '{query_low}'")
         if t["title"].lower() in query_low or query_low in t["title"].lower():
             target_id = t["id"]
+            log.info(f"Match found: {target_id}")
             break
 
     if not target_id and len(timers) == 1:
