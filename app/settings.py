@@ -57,6 +57,7 @@ MAX_HISTORY_TURNS = 15
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
 CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400))
 
+# --- Intent Thresholds & Groups ---
 # CRITICAL FIX: Lowered from 0.80 to 0.45 to catch "Turn on X" commands (scoring ~0.5-0.6)
 ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.45
 INFORMATIONAL_INTENTS = ["general_query", "content_query", "time_query"]
@@ -65,15 +66,52 @@ INFORMATIONAL_INTENTS = ["general_query", "content_query", "time_query"]
 ALARM_KEYWORDS_PATH = os.getenv("ALARM_KEYWORDS_PATH", "/app/config/alarm_keywords.json")
 ALARM_SOUNDS_DIR = os.getenv("ALARM_SOUNDS_DIR", "/local/alarm_sounds")
 
+
 # --- Prompts (Externalized) ---
-def load_system_prompt():
-    if os.path.exists(SYSTEM_PROMPT_FILE):
-        try:
-            with open(SYSTEM_PROMPT_FILE, "r") as f:
-                return f.read().strip()
-        except Exception as e:
-            log.error(f"Failed to load system prompt: {e}")
-    return "You are a helpful AI assistant."
+DEFAULT_CONTEXT_PROMPT = "Rewrite the following query to be self-contained, resolving any pronouns (he, she, it, they, him, her) using the chat history.\nHistory:\n{history}\nInput: {query}\nRefined (Return ONLY the refined query string, NO JSON, NO MARKDOWN):"
+CONTEXT_REWRITE_PROMPT = os.getenv("CONTEXT_REWRITE_PROMPT", DEFAULT_CONTEXT_PROMPT)
+
+DEFAULT_CALENDAR_PROMPT = """Extract details from: "{query}".
+Return JSON with keys: 'summary' (string), 'start_time' (natural language), 'calendar_target' (string or null), 'intent' ('add', 'delete', 'update').
+IMPORTANT: 'summary' MUST be the event title. If input is 'RAG_Test_123', summary is 'RAG_Test_123'.
+JSON:"""
+CALENDAR_EXTRACT_PROMPT = os.getenv("CALENDAR_EXTRACT_PROMPT", DEFAULT_CALENDAR_PROMPT)
+
+DEFAULT_ORCHESTRATOR_PROMPT = """You are an action planning agent. Your task is to analyze the user's intent and decide the next action based on the available tools.
+User Query: {query}
+Best Vector Intent Match: {intent_name} (Confidence: {intent_score:.2f})
+
+Available Tools:
+1. 'calendar_add' (Schedule/create an event. Keywords: schedule, meeting, appointment, calendar)
+2. 'calendar_delete' (Cancel an event by fuzzy name match)
+3. 'calendar_list' (List available calendars)
+4. 'calendar_update' (Reschedule an existing event)
+5. 'timer_add' (Set a timer or alarm. Keywords: timer, alarm, wake me, remind me in X minutes)
+6. 'timer_delete' (Cancel a timer/alarm)
+7. 'timer_list' (List active timers/alarms)
+8. 'timer_pause' (Pause a timer)
+9. 'timer_resume' (Resume a timer)
+10. 'media_command' (Handle media/HA control, requires 'intent' and 'device_name')
+11. 'intent_learn' (Teach the AI a new phrase mapping)
+12. 'web_search' (Use for factual/external queries, if no other tool applies)
+
+CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
+- "Set an alarm for 8am" -> timer_add
+- "Remind me in 10 minutes" -> timer_add
+- "Wake me up at 7" -> timer_add
+- "Schedule a meeting at 8am" -> calendar_add
+- "Add to my calendar" -> calendar_add
+
+If the intent is a clear, confident action, generate the JSON for a tool call.
+If the query is conversational, informational, ambiguous, or requires the user's personal context/RAG, output 'CONVERSE'.
+
+Output ONLY a single JSON object (DO NOT use markdown backticks). Example:
+{{"action": "tool_call", "tool_name": "timer_add", "parameters": {{"summary": "Dinner", "time_expression": "20 minutes", "is_alarm": false}}}}
+OR
+{{"action": "CONVERSE"}}
+
+JSON:"""
+ORCHESTRATOR_PROMPT = os.getenv("ORCHESTRATOR_PROMPT", DEFAULT_ORCHESTRATOR_PROMPT)
 
 # --- TEMPLATE 1: FULL PERSONALITY (For Chat/Search) ---
 RAG_TEMPLATE = """{system_prompt}
@@ -104,51 +142,14 @@ Briefly confirm the action in 1 short sentence. Do not offer help. Do not be cha
 {query}
 """
 
-CONTEXT_REWRITE_PROMPT = """Given the chat history, rewrite the last user query to be standalone and fully descriptive.
-If the query is already standalone, return it exactly as is.
-Do not answer the query, just rewrite it.
-
-Chat History:
-{history}
-
-Last Query: {query}
-Rewritten Query:"""
-
-ORCHESTRATOR_PROMPT = """You are an action planning agent. Your task is to analyze the user's intent and decide the next action based on the available tools.
-
-User Query: "{query}"
-Detected Intent: "{intent_name}" (Confidence: {intent_score:.2f})
-
-Available Tools:
-1. 'media_command' (Turn on/off lights, switches, play music, stop music, volume control)
-   - Parameters: "intent" (turn_on, turn_off, toggle, play_media, stop_media, media_next, media_previous)
-2. 'calendar_add' (Schedule a new event/meeting)
-3. 'calendar_list' (List upcoming events)
-4. 'calendar_delete' (Delete/Cancel an event)
-5. 'calendar_update' (Reschedule/Update an event)
-6. 'intent_learn' (Teach the AI a new phrase mapping)
-7. 'web_search' (Use for factual/external queries, if no other tool applies)
-8. 'timer_add' (Set a timer or alarm)
-9. 'timer_list' (List active timers/alarms)
-10. 'timer_delete' (Cancel a timer/alarm)
-11. 'timer_pause' (Pause a timer)
-12. 'timer_resume' (Resume a timer)
-
-Instructions:
-- If the intent is clear and matches a tool, output a JSON object with "action": "tool_call", "tool_name": "<TOOL_NAME>", and "parameters": {{...}}.
-- If the intent is "general_query" or "content_query" (informational), or if no tool fits, output "action": "CONVERSE".
-- If the confidence is low (<0.4) and it's not a simple conversational greeting, output "action": "CONVERSE" (so the LLM can ask for clarification or answer generally).
-- IMPORTANT: For 'media_command', always include the "intent" parameter.
-
-Example JSON Output:
-{{
-  "action": "tool_call",
-  "tool_name": "media_command",
-  "parameters": {{ "intent": "turn_on" }}
-}}
-
-Respond ONLY with the JSON object.
-"""
+def load_system_prompt():
+    if os.path.exists(SYSTEM_PROMPT_FILE):
+        try:
+            with open(SYSTEM_PROMPT_FILE, "r") as f:
+                return f.read().strip()
+        except Exception as e:
+            log.error(f"Failed to load system prompt: {e}")
+    return "You are a helpful AI assistant."
 
 # --- Thread Pool ---
 executor = ThreadPoolExecutor(max_workers=4)
@@ -230,14 +231,23 @@ async def lifespan(app: FastAPI):
 
     # Start Timer Scheduler
     from app.logic.timer_scheduler import start_scheduler, stop_scheduler
+    log.info("Starting Timer/Alarm Scheduler...")
     scheduler_task = asyncio.create_task(start_scheduler())
     
     yield
     
     # Shutdown
-    stop_scheduler()
-    if scheduler_task:
+    log.info("--- SHUTDOWN: Cleaning up resources ---")
+    await stop_scheduler()
+    try:
         scheduler_task.cancel()
+    except: pass
+    
+    GlobalResources.embedding_model = None
+    GlobalResources.chroma_client = None
+    GlobalResources.ha_collection = None
+    GlobalResources.nextcloud_collection = None
+    if GlobalResources.redis_client:
         try:
             await scheduler_task
         except asyncio.CancelledError:
