@@ -7,14 +7,14 @@ from typing import Optional, Dict, Any, Tuple
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from fastapi import FastAPI 
+from fastapi import FastAPI
 
 # Import Redis
 try:
     import redis
 except ImportError:
     redis = None
-    
+
 # Load .env
 if os.getenv("DOCKER_ENV") != "1" and os.path.exists(".env"):
     from dotenv import load_dotenv
@@ -47,256 +47,211 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 # Timeouts & Retries
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300")) 
 OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "2"))
-HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "30.0"))
+
+# Lowered cache TTL for faster test feedback
+HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "5.0")) 
 QUERY_CACHE_TTL = float(os.getenv("QUERY_CACHE_TTL", "60.0"))
 MAX_HISTORY_TURNS = 15
 
 # Redis Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
-CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400)) 
+CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400))
 
-# --- Intent Thresholds & Groups ---
-ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.80
+# CRITICAL FIX: Lowered from 0.80 to 0.45 to catch "Turn on X" commands (scoring ~0.5-0.6)
+ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.45
 INFORMATIONAL_INTENTS = ["general_query", "content_query", "time_query"]
 
+# --- Alarm & Timer Config ---
+ALARM_KEYWORDS_PATH = os.getenv("ALARM_KEYWORDS_PATH", "/app/config/alarm_keywords.json")
+ALARM_SOUNDS_DIR = os.getenv("ALARM_SOUNDS_DIR", "/local/alarm_sounds")
 
 # --- Prompts (Externalized) ---
-DEFAULT_CONTEXT_PROMPT = "Rewrite the following query to be self-contained, resolving any pronouns (he, she, it, they, him, her) using the chat history.\nHistory:\n{history}\nInput: {query}\nRefined (Return ONLY the refined query string, NO JSON, NO MARKDOWN):"
-CONTEXT_REWRITE_PROMPT = os.getenv("CONTEXT_REWRITE_PROMPT", DEFAULT_CONTEXT_PROMPT)
-
-DEFAULT_CALENDAR_PROMPT = """Extract details from: "{query}".
-Return JSON with keys: 'summary' (string), 'start_time' (natural language), 'calendar_target' (string or null), 'intent' ('add', 'delete', 'update').
-IMPORTANT: 'summary' MUST be the event title. If input is 'RAG_Test_123', summary is 'RAG_Test_123'.
-JSON:"""
-CALENDAR_EXTRACT_PROMPT = os.getenv("CALENDAR_EXTRACT_PROMPT", DEFAULT_CALENDAR_PROMPT)
-
-DEFAULT_ORCHESTRATOR_PROMPT = """You are an action planning agent. Your task is to analyze the user's intent and decide the next action based on the available tools.
-User Query: {query}
-Best Vector Intent Match: {intent_name} (Confidence: {intent_score:.2f})
-
-Available Tools:
-1. 'calendar_add' (Schedule/create an event)
-2. 'calendar_delete' (Cancel an event by fuzzy name match)
-3. 'calendar_list' (List available calendars)
-4. 'calendar_update' (Reschedule an existing event)
-5. 'media_command' (Handle media/HA control, requires 'intent' and 'device_name')
-6. 'intent_learn' (Teach the AI a new phrase mapping)
-7. 'web_search' (Use for factual/external queries, if no other tool applies)
-8. 'alarm_set' (Set a timer or alarm)
-9. 'alarm_list' (List active alarms)
-10. 'alarm_delete' (Cancel an alarm)
-
-If the intent is a clear, confident action, generate the JSON for a tool call.
-If the query is conversational, informational, ambiguous, or requires the user's personal context/RAG, output 'CONVERSE'.
-
-Output ONLY a single JSON object (DO NOT use markdown backticks). Example:
-{{"action": "tool_call", "tool_name": "calendar_add", "parameters": {{"summary": "Dinner with Dad", "start_time": "tonight at 7pm"}}}}
-OR
-{{"action": "CONVERSE"}}
-
-JSON:"""
-ORCHESTRATOR_PROMPT = os.getenv("ORCHESTRATOR_PROMPT", DEFAULT_ORCHESTRATOR_PROMPT)
+def load_system_prompt():
+    if os.path.exists(SYSTEM_PROMPT_FILE):
+        try:
+            with open(SYSTEM_PROMPT_FILE, "r") as f:
+                return f.read().strip()
+        except Exception as e:
+            log.error(f"Failed to load system prompt: {e}")
+    return "You are a helpful AI assistant."
 
 # --- TEMPLATE 1: FULL PERSONALITY (For Chat/Search) ---
-DEFAULT_RAG_TEMPLATE = """### SYSTEM
-{system_prompt}
+RAG_TEMPLATE = """{system_prompt}
+
+### SYSTEM CONTEXT
 {sys_info}
 
-### CONTEXT
+### KNOWLEDGE CONTEXT
 {ha_ctx}
 {nc_ctx}
 {search_ctx}
 {cal_ctx}
 
-### QUERY
+### USER QUERY
 {query}
 """
-RAG_TEMPLATE = os.getenv("RAG_TEMPLATE", DEFAULT_RAG_TEMPLATE)
 
-# --- TEMPLATE 2: CONCISE ACTION (For Controls) ---
+# --- TEMPLATE 2: SIMPLE/ROBOTIC (For Success Confirmation) ---
 # This template omits the custom {system_prompt} and contextual RAG blocks for brevity.
-DEFAULT_SIMPLE_RAG_TEMPLATE = """### SYSTEM
-You are a helpful home assistant. Be brief.
+SIMPLE_RAG_TEMPLATE = """You are a concise home automation assistant.
+The user's command was successfully executed.
+Briefly confirm the action in 1 short sentence. Do not offer help. Do not be chatty.
+
+### SYSTEM CONTEXT
 {sys_info}
 
-Confirm the action results briefly and concisely. Do not be verbose. Do not give any jokes. Stick to short cordual repsonses. 
-
-### QUERY
+### USER QUERY
 {query}
 """
-SIMPLE_RAG_TEMPLATE = os.getenv("SIMPLE_RAG_TEMPLATE", DEFAULT_SIMPLE_RAG_TEMPLATE)
 
+CONTEXT_REWRITE_PROMPT = """Given the chat history, rewrite the last user query to be standalone and fully descriptive.
+If the query is already standalone, return it exactly as is.
+Do not answer the query, just rewrite it.
 
-SEARCH_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-}
+Chat History:
+{history}
+
+Last Query: {query}
+Rewritten Query:"""
+
+ORCHESTRATOR_PROMPT = """You are an action planning agent. Your task is to analyze the user's intent and decide the next action based on the available tools.
+
+User Query: "{query}"
+Detected Intent: "{intent_name}" (Confidence: {intent_score:.2f})
+
+Available Tools:
+1. 'media_command' (Turn on/off lights, switches, play music, stop music, volume control)
+   - Parameters: "intent" (turn_on, turn_off, toggle, play_media, stop_media, media_next, media_previous)
+2. 'calendar_add' (Schedule a new event/meeting)
+3. 'calendar_list' (List upcoming events)
+4. 'calendar_delete' (Delete/Cancel an event)
+5. 'calendar_update' (Reschedule/Update an event)
+6. 'intent_learn' (Teach the AI a new phrase mapping)
+7. 'web_search' (Use for factual/external queries, if no other tool applies)
+8. 'timer_add' (Set a timer or alarm)
+9. 'timer_list' (List active timers/alarms)
+10. 'timer_delete' (Cancel a timer/alarm)
+11. 'timer_pause' (Pause a timer)
+12. 'timer_resume' (Resume a timer)
+
+Instructions:
+- If the intent is clear and matches a tool, output a JSON object with "action": "tool_call", "tool_name": "<TOOL_NAME>", and "parameters": {{...}}.
+- If the intent is "general_query" or "content_query" (informational), or if no tool fits, output "action": "CONVERSE".
+- If the confidence is low (<0.4) and it's not a simple conversational greeting, output "action": "CONVERSE" (so the LLM can ask for clarification or answer generally).
+- IMPORTANT: For 'media_command', always include the "intent" parameter.
+
+Example JSON Output:
+{{
+  "action": "tool_call",
+  "tool_name": "media_command",
+  "parameters": {{ "intent": "turn_on" }}
+}}
+
+Respond ONLY with the JSON object.
+"""
 
 # --- Thread Pool ---
-EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("THREADPOOL_SIZE", "8")))
+executor = ThreadPoolExecutor(max_workers=4)
+
+async def run_blocking(func, *args):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, partial(func, *args))
 
 # --- Shared Resources ---
-openai_client = None
-if OPENAI_API_KEY:
-    try:
-        import openai
-        openai.api_key = OPENAI_API_KEY
-        openai_client = openai
-    except ImportError:
-        pass
-
 class GlobalResources:
     embedding_model = None
     chroma_client = None
     nextcloud_collection = None
     ha_collection = None
     redis_client = None
-    alarms = {} # In-memory storage for active alarm tasks
 
-def configure_hf_offline():
-    """
-    Checks if the embedding model is already cached. 
-    If so, forces offline mode to prevent hanging on lock files or network checks.
-    """
-    try:
-        # Standard HF cache location
-        cache_home = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
-        model_dir_name = f"models--{EMB_MODEL.replace('/', '--')}"
-        model_path = os.path.join(cache_home, model_dir_name)
-        
-        # Check if it looks like a valid cached model (has snapshots)
-        if os.path.exists(model_path) and os.path.isdir(model_path):
-            snapshots = os.path.join(model_path, "snapshots")
-            if os.path.exists(snapshots) and os.listdir(snapshots):
-                log.info(f"Embedding model found in cache at {model_path}. Forcing offline mode.")
-                os.environ["HF_HUB_OFFLINE"] = "1"
-                os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    except Exception as e:
-        log.warning(f"Failed to check HF cache: {e}")
+def get_user_creds(user: str = "default") -> Dict[str, str]:
+    # In a real app, this would fetch from DB
+    return {
+        "user": user,
+        "nextcloud_url": NEXTCLOUD_URL,
+        "nextcloud_user": NEXTCLOUD_USER,
+        "nextcloud_pass": NEXTCLOUD_PASS,
+        "ha_url": HA_URL,
+        "ha_token": HA_ENV_TOKEN
+    }
 
 # --- Resource Loading (Hot Reloadable) ---
-async def initialize_rag_resources():
-    """Initializes or re-initializes RAG and Intent Engine."""
-    log.info("--- Loading RAG Resources (Hot Reload) ---")
-    try:
-        os.environ["ANONYMIZED_TELEMETRY"] = "False"
-        configure_hf_offline() # Prevent hang on startup
-        
-        from langchain_huggingface import HuggingFaceEmbeddings
-        from langchain_chroma import Chroma
-        
-        # 1. Load Model
-        if not GlobalResources.embedding_model:
-            log.info(f"Loading embedding model: {EMB_MODEL} ...")
+async def load_resources():
+    log.info("Loading Global Resources...")
+    
+    # 1. Redis
+    if redis and REDIS_URL:
+        try:
+            GlobalResources.redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+            GlobalResources.redis_client.ping()
+            log.info("Redis Connected.")
+        except Exception as e:
+            log.error(f"Redis Connection Failed: {e}")
+            GlobalResources.redis_client = None
+
+    # 2. Embeddings (Mock or Real)
+    if EMB_MODEL:
+        try:
+            from langchain_huggingface import HuggingFaceEmbeddings
             GlobalResources.embedding_model = HuggingFaceEmbeddings(model_name=EMB_MODEL)
-        
-        # 2. Load ChromaDB
-        log.info(f"Connecting to ChromaDB at {CHROMA_DIR} ...")
-        GlobalResources.chroma_client = Chroma(
-            persist_directory=CHROMA_DIR,
-            embedding_function=GlobalResources.embedding_model
-        )
-        
-        GlobalResources.nextcloud_collection = Chroma(
-            collection_name="nextcloud_docs",
-            embedding_function=GlobalResources.embedding_model,
-            persist_directory=CHROMA_DIR
-        )
-        
-        GlobalResources.ha_collection = Chroma(
-            collection_name="ha_sensors",
-            embedding_function=GlobalResources.embedding_model,
-            persist_directory=CHROMA_DIR
-        )
-        
-        # 3. Load Intent Engine
-        from intent_engine import engine
-        await engine.load()
-        
-        log.info("RAG Resources & Intent Engine loaded successfully.")
-    except Exception as e:
-        log.critical(f"CRITICAL: Failed to load RAG resources: {e}")
-        log.critical(traceback.format_exc())
+            log.info(f"Embedding Model Loaded: {EMB_MODEL}")
+        except Exception as e:
+            log.error(f"Failed to load embedding model: {e}")
+
+    # 3. ChromaDB (Vector Store)
+    if CHROMA_DIR and GlobalResources.embedding_model:
+        try:
+            from langchain_chroma import Chroma
+            # Nextcloud Collection
+            GlobalResources.nextcloud_collection = Chroma(
+                collection_name="nextcloud_docs",
+                embedding_function=GlobalResources.embedding_model,
+                persist_directory=CHROMA_DIR
+            )
+            # Home Assistant Collection
+            GlobalResources.ha_collection = Chroma(
+                collection_name="ha_entities",
+                embedding_function=GlobalResources.embedding_model,
+                persist_directory=CHROMA_DIR
+            )
+            log.info(f"ChromaDB Loaded from {CHROMA_DIR}")
+        except Exception as e:
+            log.error(f"ChromaDB Load Failed: {e}")
 
 # --- LIFESPAN (Startup Logic) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Load RAG & Intents
-    await initialize_rag_resources()
+    await load_resources()
+    
+    # Initialize Intent Engine
+    from intent_engine import engine
+    await engine.load()
 
-    # 2. Initialize Redis
-    if redis:
-        try:
-            log.info(f"Connecting to Redis at {REDIS_URL} ...")
-            GlobalResources.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-            GlobalResources.redis_client.ping()
-            log.info("Redis connection successful.")
-        except Exception as e:
-            log.warning(f"Failed to connect to Redis. Falling back to in-memory cache. Error: {e}")
-            GlobalResources.redis_client = None
-    else:
-        log.warning("Redis library not installed. Falling back to in-memory cache.")
+    # Start Timer Scheduler
+    from app.logic.timer_scheduler import start_scheduler, stop_scheduler
+    scheduler_task = asyncio.create_task(start_scheduler())
     
     yield
     
-    log.info("--- SHUTDOWN: Cleaning up resources ---")
-    GlobalResources.embedding_model = None
-    GlobalResources.chroma_client = None
-    GlobalResources.ha_collection = None
-    GlobalResources.nextcloud_collection = None
-    if GlobalResources.redis_client:
+    # Shutdown
+    stop_scheduler()
+    if scheduler_task:
+        scheduler_task.cancel()
         try:
-            GlobalResources.redis_client.close()
-        except: pass
-    GlobalResources.redis_client = None
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+            
+    if GlobalResources.redis_client:
+        GlobalResources.redis_client.close()
+    log.info("Shutdown complete.")
 
 # --- Caching ---
-class TTLCache:
-    def __init__(self):
-        self._store: Dict[str, Tuple[float, Any]] = {}
-        self._lock = asyncio.Lock()
-
-    async def get(self, key: str):
-        async with self._lock:
-            v = self._store.get(key)
-            if not v: return None
-            import time
-            if time.time() - v[0] > QUERY_CACHE_TTL:
-                del self._store[key]
-                return None
-            return v[1]
-
-    async def set(self, key: str, value: Any):
-        import time
-        async with self._lock:
-            self._store[key] = (time.time(), value)
-
-_ha_cache = TTLCache()
-
-async def ha_cache_get(user: str) -> Optional[str]:
-    return await _ha_cache.get(user)
-
-async def ha_cache_set(user: str, value: str):
-    await _ha_cache.set(user, value)
+# Simple in-memory cache for HA states to reduce API spam
+ha_state_cache = {}
 
 # --- Utilities ---
-async def run_blocking(fn, *args, **kwargs):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(EXECUTOR, partial(fn, *args, **kwargs))
-
-def get_user_creds(user: Optional[str] = None, token: Optional[str] = None):
-    if token: return {"user": user or "API", "ha_token": token}
-    user = user or HA_DEFAULT_USER
-    ha_token = os.getenv(f"HA_{user}_TOKEN") or HA_ENV_TOKEN
-    nc_pass = os.getenv(f"NEXTCLOUD_{user}_PASS") or NEXTCLOUD_PASS
-    return {"user": user, "ha_token": ha_token, "nc_pass": nc_pass}
-
-def load_system_prompt():
-    default = "You are a helpful AI assistant. No emojis."
-    if os.path.exists(SYSTEM_PROMPT_FILE):
-        try:
-            with open(SYSTEM_PROMPT_FILE, "r") as f: return f.read().strip()
-        except Exception as e:
-            log.error(f"Error loading system prompt from {SYSTEM_PROMPT_FILE}: {e}")
-    else:
-        log.warning(f"System prompt file not found at {SYSTEM_PROMPT_FILE}")
-    return default
+def get_ha_state(entity_id: str) -> Optional[Dict]:
+    # TODO: Implement proper caching with TTL
+    return ha_state_cache.get(entity_id)
