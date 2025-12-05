@@ -98,6 +98,17 @@ def test_timer_flow():
         print_fail(f"Failed to set alarm. Response: {content}")
         return
 
+    # 5. List Timers (Verify Alarm Persistence)
+    print_info("TEST 4.5: List Timers (Verify Alarm Persistence)")
+    resp = send_chat("List my timers")
+    content = resp.get("message", {}).get("content", "")
+    print_info(f"List Content: {content}")
+    
+    if "alarm" in content.lower() and alarm_name.lower() in content.lower():
+        print_pass("Alarm listed successfully.")
+    else:
+        print_fail(f"Alarm NOT found in list. Response: {content}")
+
     # 6. Delete Alarm
     print_info(f"TEST 5: Delete the alarm by name: '{alarm_name}' (Expect SUCCESS)")
     resp = send_chat(f"Delete the alarm {alarm_name}")
