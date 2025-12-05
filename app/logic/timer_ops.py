@@ -189,6 +189,13 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
     if s_match: seconds, found_duration = int(s_match.group(1)), True
 
     if not found_duration:
+        # Check if it looks like an alarm (absolute time) and forward if necessary
+        # This handles intent misclassification (timer_add vs alarm_add)
+        is_absolute_time_syntax = any(word in query_lower for word in ['am', 'pm', 'tonight', 'tomorrow', 'clock', 'at', 'wake'])
+        if is_absolute_time_syntax:
+            log.info("TimerAdd: Detected absolute time syntax, forwarding to tool_alarm_add.")
+            return await tool_alarm_add(query, user_creds, model, redis_client, ha_collection)
+
         return {"status": "FAILURE", "message": "Please specify a duration (e.g., '5 minutes') for a timer.", "service": "timer_add"}
 
     expires_at = now + timedelta(hours=hours, minutes=minutes, seconds=seconds)
