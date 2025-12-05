@@ -173,7 +173,7 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
     # --- 4. Fallback to Dateparser (Absolute Time) ---
     if not found_duration:
         # Aggressive cleaning for dateparser
-        dp_input = re.sub(r'\b(timer|alarm|wake me|remind me|set|start)\b', '', clean_parse_input, flags=re.IGNORECASE)
+        dp_input = re.sub(r'\b(timer|alarm|wake me|remind me|set|start|up)\b', '', clean_parse_input, flags=re.IGNORECASE)
         
         dt = dateparser.parse(
             dp_input,
