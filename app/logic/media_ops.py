@@ -116,12 +116,17 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
     cache_key = f"capabilities:{entity_id}"
     if redis_client:
         try:
+            log.debug(f"[CAPABILITY] Checking cache for {entity_id}")
             cached = redis_client.get(cache_key)
             if cached:
                 cached_str = cached.decode('utf-8') if isinstance(cached, bytes) else cached
+                log.info(f"[CAPABILITY] Cache HIT for {entity_id}")
                 return json.loads(cached_str)
+            log.debug(f"[CAPABILITY] Cache MISS for {entity_id}")
         except Exception as e:
             log.warning(f"Cache read error for {cache_key}: {e}")
+    else:
+        log.debug(f"[CAPABILITY] No Redis client, skipping cache for {entity_id}")
     
     # Fetch from Home Assistant
     if not HA_URL:
@@ -131,10 +136,12 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
     
     try:
+        log.debug(f"[CAPABILITY] Fetching from HA API: {entity_id}")
         def _fetch():
             return requests.get(url, headers=headers, timeout=3.0)
         
         r = await run_blocking(_fetch)
+        log.debug(f"[CAPABILITY] HA API response: {r.status_code} for {entity_id}")
         
         if r.status_code != 200:
             log.warning(f"Failed to fetch capabilities for {entity_id}: {r.status_code}")
@@ -186,10 +193,11 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
         if redis_client:
             try:
                 redis_client.setex(cache_key, 3600, json.dumps(capabilities))
+                log.debug(f"[CAPABILITY] Cached capabilities for {entity_id}")
             except Exception as e:
                 log.warning(f"Cache write error for {cache_key}: {e}")
         
-        log.info(f"Capabilities for {entity_id}: {capabilities}")
+        log.info(f"[CAPABILITY] Parsed: {entity_id} → domain={capabilities['domain']}, features={capabilities.get('supported_features', 0)}, has_color={capabilities.get('has_color', False)}, has_brightness={capabilities.get('has_brightness', False)}")
         return capabilities
         
     except Exception as e:
@@ -633,11 +641,12 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     # COLOR & BRIGHTNESS CONTROL
     # -------------------------------------------------
     if intent in ["set_color", "set_brightness", "dim", "brighten"]:
-        if domain != "light":
+        log.debug(f\"[COLOR/BRIGHTNESS] Handling intent='{intent}' for {entity_id}\")\n        \n        if domain != "light":
             return {"status": "FAILURE", "message": f"Color/brightness control only works with lights, not {domain} devices.", "entity_id": entity_id, "service": intent}
         
         # Fetch device capabilities
-        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+        log.debug(f\"[COLOR/BRIGHTNESS] Fetching capabilities for {entity_id}...\")\n        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+        log.debug(f\"[COLOR/BRIGHTNESS] Capabilities retrieved for {entity_id}\")
         friendly_name = caps.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title())
         
         # Validate color support
