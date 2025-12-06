@@ -264,7 +264,9 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                     continue
 
             if intent in ["turn_on", "turn_off", "toggle"]:
-                 if domain in ["sensor", "binary_sensor", "sun", "weather"]:
+                 if domain in ["sensor", "binary_sensor", "sun", "weather", "remote"]:
+                     # Exclude remotes from power commands to prevent "Turn on Living Room TV Remote" interpretation
+                     # which usually fails or does nothing useful compared to "Turn on Living Room TV"
                      continue
 
             candidates.append((eid, integration))
@@ -318,7 +320,13 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     elif intent in ["open_app"]:
         preferred_type = "android"
     elif intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
-        preferred_type = "remote"
+        # CRITICAL FIX: Only prefer remote if navigation or explicit remote context.
+        # "Turn on TV" should map to the TV media_player entity (for Wake on LAN/CEC), not the remote entity.
+        if intent.startswith("nav_"):
+            preferred_type = "remote"
+        else:
+            # For pure power commands, we stick to generic unless we find a specific reason.
+            preferred_type = "generic"
 
     log.info(f"Smart Resolving '{query_name}' Intent '{intent}' Pref '{preferred_type}' Candidates {candidates[:3]}...")
 
