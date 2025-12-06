@@ -53,6 +53,11 @@ from .timer_ops import (
     tool_timer_pause,
     tool_timer_resume,
 )
+from .note_ops import (
+    tool_note_add,
+    tool_note_append,
+    tool_note_read,
+)
 from .web_search import tool_web_search
 
 
@@ -415,6 +420,15 @@ async def _execute_tool_action(
         log.info(f"Executing Tool: web_search for query: {query}")
         res = await tool_web_search(query)
         return {"status": "SUCCESS", "message": res, "service": "web_search"}
+    elif tool_name == "note_add":
+        res = await tool_note_add(params.get("title", "New Note"), params.get("content", query), params.get("category", "General"))
+        return {"status": "SUCCESS" if res.get("status") == "success" else "FAILURE", "message": res.get("msg", ""), "service": "note_add"}
+    elif tool_name == "note_append":
+        res = await tool_note_append(params.get("title", "Shopping List"), params.get("content", query))
+        return {"status": "SUCCESS" if res.get("status") == "success" else "FAILURE", "message": res.get("msg", ""), "service": "note_append"}
+    elif tool_name == "note_read":
+        res = await tool_note_read(params.get("title", ""))
+        return {"status": "SUCCESS" if "Note Content" in res else "FAILURE", "message": res, "service": "note_read"}
     return {
         "status": "FAILURE",
         "message": f"Action requested unhandled tool: {tool_name}",
