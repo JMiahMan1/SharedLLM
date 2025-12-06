@@ -393,7 +393,8 @@ async def _execute_tool_action(
     elif tool_name == "intent_learn":
         res = f"Cannot learn '{params.get('phrase')}' with current prompt context."
         return {"status": "FAILURE", "message": res, "service": "intent_learn"}
-    elif tool_name == "web_search":
+    elif tool_name.strip() == "web_search":
+        log.info(f"Executing Tool: web_search for query: {query}")
         res = await tool_web_search(query)
         return {"status": "SUCCESS", "message": res, "service": "web_search"}
     return {
