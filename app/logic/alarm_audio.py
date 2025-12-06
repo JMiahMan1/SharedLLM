@@ -5,7 +5,7 @@ import asyncio
 import time
 from typing import Dict, List, Optional
 from settings import ALARM_KEYWORDS_PATH, ALARM_SOUNDS_DIR, log, run_blocking, HA_URL
-from .media_ops import execute_ha_service, get_active_media_players, get_available_media_players
+from .media_ops import execute_ha_service, get_active_media_players, get_available_media_players, get_last_entity
 
 class AlarmAudioManager:
     def __init__(self):
@@ -53,31 +53,27 @@ class AlarmAudioManager:
             else:
                 log.warning(f"Alarm target '{target_explicit}' is not a media_player. Ignoring.")
 
-        # Priority 2: Origin Device (If valid media player)
+        # Priority 2: Last Used Entity (Follow Me Behavior)
+        # This ensures the alarm rings where the user was last active, rather than the origin (which might be a server/dashboard)
+        if not targets:
+            last_entity = get_last_entity(redis_client, user_creds.get("user"))
+            if last_entity and last_entity.startswith("media_player."):
+                 targets.append(last_entity)
+                 log.info(f"Alarm Target: Defaulting to last known entity: {last_entity}")
+
+        # Priority 3: Origin Device (If valid media player)
         if not targets and origin:
             if origin.startswith("media_player."):
                 targets.append(origin)
             else:
                 log.warning(f"Alarm Origin Device '{origin}' is NOT a media_player. Falling back.")
 
-        # Priority 3: Fallback to Active Players (Currently Playing/Paused)
+        # Priority 4: Default Fallback (NO LONGER BROADCASTS TO ALL)
         if not targets:
-            active = await get_active_media_players(user_creds)
-            if active:
-                targets.extend(active)
-                log.info(f"Alarm Fallback: Playing on active media players: {active}")
-        
-        # Priority 4: Fallback to ALL Available Players (Last Resort)
-        if not targets:
-            available = await get_available_media_players(user_creds)
-            if available:
-                 # Optional: Filter out groups/apps if desired
-                 targets.extend(available)
-                 log.info("Alarm Fallback: Broadcasting to all available media players.")
-
-        if not targets:
-            log.error(f"Alarm FAILURE: No suitable media player found for alarm '{title}'. Origin was: {origin}")
-            return
+             # We no longer fall back to 'all' devices to prevent house-wide disturbance.
+             # If we can't find a target, we log an error.
+             log.error(f"Alarm FAILURE: No suitable targeted media player found for alarm '{title}'. Origin: {origin}, Explicit: {target_explicit}")
+             return
 
         targets = list(set(targets))
 

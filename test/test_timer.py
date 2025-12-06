@@ -4,6 +4,23 @@ import sys
 import os
 import time
 
+# Mocking dependencies for test environment
+from unittest.mock import MagicMock
+sys.modules['fastapi'] = MagicMock()
+sys.modules['fastapi.middleware.cors'] = MagicMock()
+sys.modules['fastapi.responses'] = MagicMock()
+sys.modules['pydantic'] = MagicMock()
+sys.modules['uvicorn'] = MagicMock()
+sys.modules['dateparser'] = MagicMock()
+# Mock return of dateparser.parse to be tomorrow 8am for '8am' query
+from datetime import datetime, timedelta
+def mock_parse(date_string, settings=None):
+    now = datetime.now()
+    if '8am' in date_string:
+        return now.replace(hour=8, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return now + timedelta(days=1)
+sys.modules['dateparser'].parse = mock_parse
+
 # Add app to path
 # Add app to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../app')))
@@ -50,11 +67,12 @@ async def test_timer_flow():
     assert res["service"] == "timer_add"
     assert "timer" in res["message"].lower()
 
-    # 2. Testing Timer Creation with Absolute Time (Should Fail)
-    print("\n2. Testing Timer Creation with Absolute Time (Should Fail)...")
+    # 2. Testing Timer Creation with Absolute Time (Should Forward to Alarm)
+    print("\n2. Testing Timer Creation with Absolute Time (Should Forward to Alarm)...")
     res = await tool_timer_add("set a timer for 8am", {"user": "test"}, "mock-model", mock_redis)
     print(f"Result: {res}")
-    assert res["status"] == "FAILURE"
+    assert res["status"] == "SUCCESS"
+    assert "alarm" in res["message"].lower()
 
     # 3. Testing Alarm Creation (Absolute Time)
     print("\n3. Testing Alarm Creation (Wake me up at 8am)...")

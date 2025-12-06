@@ -253,17 +253,27 @@ async def system_reload():
 # --- RAG Management ---
 @app.post("/api/rag/upsert")
 async def rag_upsert(i: UpsertRagRequest):
-    if not GlobalResources.chroma_client: raise HTTPException(503)
-    from langchain_core.documents import Document
-    doc = Document(page_content=i.text, metadata=i.metadata or {})
-    await run_blocking(lambda: (GlobalResources.chroma_client.add_documents([doc]), GlobalResources.chroma_client.persist()))
-    return {"status": "ok"}
+    if not GlobalResources.chroma_client: 
+        raise HTTPException(503, detail="ChromaDB not initialized")
+    try:
+        from langchain_core.documents import Document
+        doc = Document(page_content=i.text, metadata=i.metadata or {})
+        await run_blocking(lambda: (GlobalResources.chroma_client.add_documents([doc]), GlobalResources.chroma_client.persist()))
+        return {"status": "ok"}
+    except Exception as e:
+        log.error(f"RAG Upsert Failed: {e}")
+        raise HTTPException(500, detail=f"Database Write Error: {str(e)}")
 
 @app.post("/api/rag/delete")
 async def rag_delete(id: str):
-    if not GlobalResources.chroma_client: raise HTTPException(503)
-    await run_blocking(lambda: GlobalResources.chroma_client.delete(ids=[id]))
-    return {"status": "ok"}
+    if not GlobalResources.chroma_client: 
+        raise HTTPException(503, detail="ChromaDB not initialized")
+    try:
+        await run_blocking(lambda: GlobalResources.chroma_client.delete(ids=[id]))
+        return {"status": "ok"}
+    except Exception as e:
+        log.error(f"RAG Delete Failed: {e}")
+        raise HTTPException(500, detail=f"Database Delete Error: {str(e)}")
 
 @app.get("/api/rag/list")
 async def rag_list(limit: int = 100):
