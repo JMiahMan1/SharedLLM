@@ -114,6 +114,7 @@ Available Tools:
 13. 'note_add' (Create a new note. Params: 'title', 'content')
 14. 'note_append' (Append to a note/list. Params: 'title', 'content')
 15. 'note_read' (Read a specific note file. Params: 'title')
+16. 'note_delete' (Delete a note file. Params: 'title')
 
 CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Set an alarm for 8am" -> timer_add

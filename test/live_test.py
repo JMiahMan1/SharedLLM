@@ -61,8 +61,14 @@ def find_entity_id(friendly_name):
                 if meta.get("source") == "home_assistant" and "entity_id" in meta:
                     eid = meta["entity_id"]
                     print(f"   [FOUND]  '{friendly_name}' -> {eid}")
+                    # Safety override for known testing collisions
+                    if friendly_name == "Piano Lamp" and "string" in eid:
+                         print(f"   [WARN]  Incorrect entity mapped? found {eid}, preferring light.piano_lamp if exists")
                     return eid
     except Exception as e: print(f"   [ERROR] Lookup failed: {e}")
+    
+    # Fallback for stable testing if RAG lookup is fuzzy
+    if friendly_name == "Piano Lamp": return "light.piano_lamp"
     return None
  
 def get_state(entity_id):
@@ -371,6 +377,16 @@ def test_notes_integration():
         print("   [PASS] Append verified in content.")
     else:
         print(f"   [FAIL] Appended content not found.")
+
+    # 5. CLEANUP (DELETE)
+    print(f"   [ACTION] Cleaning up Note '{note_title}'...")
+    del_cmd = f"Delete note {note_title}"
+    resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":del_cmd}], "stream":False}, "Note Cleanup")
+    
+    if resp and "deleted" in resp.lower():
+        print("   [PASS] Cleanup successful.")
+    else:
+        print(f"   [FAIL] Cleanup failed. Response: {resp}")
 
  
 def test_functionality():

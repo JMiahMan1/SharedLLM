@@ -115,5 +115,13 @@ class TestRunner:
             self.log("Note Read", "PASS")
         else:
             self.log("Note Read", "FAIL", str(r)[:100])
+            
+        # Cleanup
+        time.sleep(1)
+        r = self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Delete note {title}"}], "stream":False}, "Note Cleanup")
+        if r and "deleted" in r.lower():
+            self.log("Note Cleanup", "PASS")
+        else:
+             self.log("Note Cleanup", "FAIL", str(r)[:100])
 
 runner = TestRunner()
