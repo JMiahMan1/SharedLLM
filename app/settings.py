@@ -226,18 +226,23 @@ async def load_resources():
     # 3. ChromaDB (Vector Store)
     if CHROMA_DIR and GlobalResources.embedding_model:
         try:
+            import chromadb
             from langchain_chroma import Chroma
+            
+            # Initialize Native Client for Direct Access (Health/Upsert)
+            GlobalResources.chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
+
             # Nextcloud Collection
             GlobalResources.nextcloud_collection = Chroma(
+                client=GlobalResources.chroma_client,
                 collection_name="nextcloud_docs",
                 embedding_function=GlobalResources.embedding_model,
-                persist_directory=CHROMA_DIR
             )
             # Home Assistant Collection
             GlobalResources.ha_collection = Chroma(
+                client=GlobalResources.chroma_client,
                 collection_name="home_assistant",
                 embedding_function=GlobalResources.embedding_model,
-                persist_directory=CHROMA_DIR
             )
             log.info(f"ChromaDB Loaded from {CHROMA_DIR}")
         except Exception as e:
