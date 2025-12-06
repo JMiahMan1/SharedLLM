@@ -138,6 +138,8 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
             clean_parts.append(p)
         return clean_parts
     
+    # 3. Detect "Open/Start [App]" pattern and prevent Fast HA Path from grabbing it as "Turn On"
+    # Actually, we let decomposition happen, but we should ensure downstream handles it.
     return [query]
 
 
@@ -209,6 +211,15 @@ async def _attempt_fast_ha_command(
     q_low = query.lower().strip()
     if not any(x in q_low for x in ["turn on", "turn off", "toggle", "open", "close"]):
         return None
+    
+    # 3. Detect "Open/Start [App]" pattern and prevent Fast HA Path from grabbing it as "Turn On"
+    # If it looks like an app open command, let the semantic engine handle it
+    if "open" in q_low or "start" in q_low or "launch" in q_low:
+        from .media_ops import APP_PACKAGES
+        if any(app in q_low for app in APP_PACKAGES):
+             log.info(f"Fast HA Path Aborted: Detected App Launch intent in '{q_low}'")
+             return None
+
     if any(
         x in q_low
         for x in ["search", "find", "who", "what", "when", "where", "how", "explain"]
@@ -261,6 +272,13 @@ async def _attempt_fast_ha_command(
                     best_eid = potential_eid
         if not eid:
             eid = best_eid
+            # STIFFENED CHECK: If the query contains "lamp" or "light", ensure the matched entity also has that word in its ID or friendly name
+            if clean_q and ("lamp" in clean_q or "light" in clean_q):
+                if best_eid and best_eid.startswith("switch.") and "light" not in best_eid and "lamp" not in best_eid:
+                     # This is likely a bad semantic match (e.g. Piano Lamp -> String Lights switch)
+                     # Force fallback to LLM for smarter resolution
+                     log.info(f"Fast HA Path Aborted: matched switch '{best_eid}' for light query '{clean_q}' (Strict Check)")
+                     return None
     if not eid:
         return None
     service = None
