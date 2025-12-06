@@ -23,7 +23,11 @@ if os.getenv("DOCKER_ENV") != "1" and os.path.exists(".env"):
 # --- Logging ---
 DEBUG = os.getenv("DEBUG", "0") in ("1", "true", "True")
 logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s")
+                    format="%(asctime)s [%(levelname)s] %(message)s",
+                    handlers=[
+                        logging.StreamHandler(),
+                        logging.FileHandler("/data/app.log")
+                    ])
 log = logging.getLogger("unified-rag")
 
 # --- Configuration ---
