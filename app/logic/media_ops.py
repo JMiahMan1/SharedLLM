@@ -315,6 +315,27 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         log.warning(f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None.")
         return (None, None)
 
+    # --- POWER/HARDWARE PRIORITY (Turn On/Off) ---
+    # Prefer hardware integrations (Android TV, Roku, etc.) over software streams (Music Assistant) for power.
+    if intent in ["turn_on", "turn_off", "toggle"]:
+        hw_candidate = None
+        # Common hardware integrations that control physical power
+        HW_INTEGRATIONS = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc"]
+        
+        for eid, integration in candidates:
+             if integration in HW_INTEGRATIONS:
+                 hw_candidate = (eid, integration)
+                 break
+             
+             # Heuristic fallback: If it's NOT Music Assistant, and has "TV" in the ID, it's likely the hardware.
+             if "music_assistant" not in integration and any(x in eid.lower() for x in ["tv", "projector", "receiver"]):
+                 if not hw_candidate:
+                     hw_candidate = (eid, integration)
+
+        if hw_candidate:
+             log.info(f"Power Priority: Resolved '{query_name}' to hardware entity {hw_candidate[0]} ({hw_candidate[1]})")
+             return hw_candidate
+
     # --- NON-STRICT / GENERIC LOGIC (For power, nav, non-music play) ---
 
     preferred_type = "generic"
