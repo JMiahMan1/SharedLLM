@@ -3,7 +3,7 @@
 # Usage: ./deploy_remote.sh [user@machine_ip] [path_to_app]
 
 HOST="${1:-jeremiah@192.168.2.211}"
-DIR="${2:-/home/jeremiah/Summers Drive/Code/SharedLLM}"
+DIR="${2:-/home/jeremiah/SharedLLM}"
 
 echo "Deploying to $HOST:$DIR..."
 
