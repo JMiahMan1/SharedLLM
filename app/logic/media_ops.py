@@ -616,6 +616,12 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 service_data = {"media_content_id": clean_title, "media_content_type": new_type}
                 result = await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
 
+            # FINAL FALLBACK: If play_media failed with 500 (Server Error), and it's a TV/Remote, try waking it up or just logging clearly.
+            if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
+                 log.error(f"Persistent 500 Error on {entity_id}. Device might be unresponsive or integration broken.")
+                 # Optional: Try one last ditch 'turn_on' if we suspect sleep?
+                 # await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
+
             return result
 
     return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
