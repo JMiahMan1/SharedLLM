@@ -355,3 +355,50 @@ async def admin_run_tests(background_tasks: BackgroundTasks):
     from logic.test_runner import runner
     # We run it synchronously in a thread pool to avoid blocking the loop
     return await run_blocking(runner.run_all)
+
+@app.get("/api/device/capabilities/{entity_id:path}")
+async def get_device_capabilities(entity_id: str):
+    """
+    Query device capabilities from ChromaDB.
+    Returns supported_features, color_modes, and parsed capability flags.
+    
+    Example: /api/device/capabilities/light.piano_lamp
+    """
+    try:
+        from logic.media_ops import get_device_capabilities as get_caps
+        user_creds = get_user_creds("default")
+        redis_client = GlobalResources.redis_client
+        
+        capabilities = await get_caps(entity_id, user_creds, redis_client)
+        
+        # Add human-readable feature breakdown
+        if "supported_features" in capabilities:
+            features = capabilities["supported_features"]
+            domain = capabilities.get("domain", "")
+            
+            if domain == "light":
+                capabilities["features_breakdown"] = {
+                    "brightness": bool(features & 1),
+                    "color_temp": bool(features & 2),
+                    "effect": bool(features & 4),
+                    "flash": bool(features & 8),
+                    "color": bool(features & 16),
+                    "transition": bool(features & 32)
+                }
+            elif domain == "media_player":
+                capabilities["features_breakdown"] = {
+                    "pause": bool(features & 1),
+                    "seek": bool(features & 2),
+                    "volume": bool(features & 4),
+                    "volume_mute": bool(features & 8),
+                    "previous_track": bool(features & 16),
+                    "next_track": bool(features & 32),
+                    "turn_on": bool(features & 128),
+                    "turn_off": bool(features & 256),
+                    "play_media": bool(features & 512)
+                }
+        
+        return capabilities
+    except Exception as e:
+        log.error(f"Error fetching capabilities for {entity_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
