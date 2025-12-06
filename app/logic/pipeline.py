@@ -219,7 +219,6 @@ async def _attempt_fast_ha_command(
         return None
     
     # 3. Detect "Open/Start [App]" pattern and prevent Fast HA Path from grabbing it as "Turn On"
-    # If it looks like an app open command, let the semantic engine handle it
     if "open" in q_low or "start" in q_low or "launch" in q_low:
         from .media_ops import APP_PACKAGES
         if any(app in q_low for app in APP_PACKAGES):
@@ -231,62 +230,8 @@ async def _attempt_fast_ha_command(
         for x in ["search", "find", "who", "what", "when", "where", "how", "explain"]
     ):
         return None
-    clean_q = q_low
-    for phrase in [
-        "turn on",
-        "turn off",
-        "toggle",
-        "play",
-        "stop",
-        "the",
-        "please",
-        " on ",
-        "open",
-        "close",
-    ]:
-        clean_q = clean_q.replace(phrase, " ")
-    clean_q = clean_q.strip()
-    if not clean_q:
-        return None
-    eid = None
-    if ha_collection:
-        docs = await run_blocking(
-            lambda: safe_similarity_search(ha_collection, clean_q, k=5)
-        )
-        domain_priority = {
-            "cover": 5,
-            "switch": 4,
-            "light": 3,
-            "media_player": 3,
-            "remote": 2,
-            "automation": 1,
-            "script": 1,
-            "camera": 0,
-        }
-        best_eid = None
-        best_score = 0
-        for d in docs:
-            potential_eid = d.metadata.get("entity_id")
-            if potential_eid:
-                domain = potential_eid.split(".")[0]
-                priority = domain_priority.get(domain, 0)
-                if domain in ["automation", "script"] and domain in q_low:
-                    eid = potential_eid
-                    break
-                if priority > best_score:
-                    best_score = priority
-                    best_eid = potential_eid
-        if not eid:
-            eid = best_eid
-            # STIFFENED CHECK: If the query contains "lamp" or "light", ensure the matched entity also has that word in its ID or friendly name
-            if clean_q and ("lamp" in clean_q or "light" in clean_q):
-                if best_eid and best_eid.startswith("switch.") and "light" not in best_eid and "lamp" not in best_eid:
-                     # This is likely a bad semantic match (e.g. Piano Lamp -> String Lights switch)
-                     # Force fallback to LLM for smarter resolution
-                     log.info(f"Fast HA Path Aborted: matched switch '{best_eid}' for light query '{clean_q}' (Strict Check)")
-                     return None
-    if not eid:
-        return None
+
+    # Determine Service/Intent early
     service = None
     if "turn off" in q_low or "close" in q_low:
         service = "turn_off"
@@ -294,8 +239,33 @@ async def _attempt_fast_ha_command(
         service = "turn_on"
     elif "toggle" in q_low:
         service = "toggle"
+    
     if not service:
         return None
+
+    # Clean query for search
+    clean_q = q_low
+    for phrase in [
+        "turn on", "turn off", "toggle", "play", "stop", "the", "please", " on ", "open", "close"
+    ]:
+        clean_q = clean_q.replace(phrase, " ")
+    clean_q = clean_q.strip()
+    
+    if not clean_q:
+        return None
+
+    # Use unified smart resolution logic
+    from .media_ops import smart_resolve_entity
+    
+    # We pass the cleaned query (device name) and the intent (service)
+    eid, integration = await smart_resolve_entity(clean_q, service, ha_collection, is_music=False)
+    
+    if not eid:
+        # Fallback to LLM if no entity found
+        return None
+
+    log.info(f"Fast HA Path: Resolved '{clean_q}' -> {eid} ({integration}) via smart_resolve_entity")
+
     domain = eid.split(".")[0]
     target_dom = (
         "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
