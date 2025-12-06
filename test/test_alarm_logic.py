@@ -58,14 +58,29 @@ async def test_alarm_logic():
         # Reset mock
         mock_exec.reset_mock()
         
+        # SCENARIO 2a: Last Entity Only (No Origin)
         await audio_manager.play_alarm_sequence(timer, {"user": "test"}, mock_redis)
         
         if mock_exec.call_count > 0:
             args, _ = mock_exec.call_args
-            # args[2] is entity_id in execute_ha_service(domain, service, entity_id, ...)
             target = args[2]
             assert target == "media_player.living_room", f"FAIL: Targeted '{target}' instead of 'media_player.living_room'"
             print(f"PASS: Targeted last entity '{target}'")
+        else:
+            raise AssertionError("FAIL: No service called.")
+
+        # SCENARIO 2b: Origin vs Last Entity (Origin Should Win)
+        print("\n2b. Testing Origin > Last Entity Preference")
+        mock_exec.reset_mock()
+        timer_with_origin = {"id": "2", "title": "Origin Timer", "origin_device": "media_player.kitchen", "target_device": None}
+        
+        await audio_manager.play_alarm_sequence(timer_with_origin, {"user": "test"}, mock_redis)
+        
+        if mock_exec.call_count > 0:
+            args, _ = mock_exec.call_args
+            target = args[2]
+            assert target == "media_player.kitchen", f"FAIL: Targeted '{target}' instead of 'media_player.kitchen' (Origin)"
+            print(f"PASS: Targeted Origin '{target}' over Last Entity")
         else:
             raise AssertionError("FAIL: No service called.")
 
