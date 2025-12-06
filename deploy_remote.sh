@@ -5,14 +5,17 @@
 HOST="${1:-jeremiah@192.168.2.211}"
 DIR="${2:-/home/jeremiah/SharedLLM}"
 
-echo "Deploying to $HOST:$DIR..."
+# Detect current branch locally
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 
-ssh "$HOST" << 'EOF'
-    cd "/home/jeremiah/SharedLLM"
+echo "Deploying to $HOST:$DIR (branch: $BRANCH)..."
+
+ssh "$HOST" << EOF
+    cd "$DIR"
     echo "→ Fetching latest code..."
     git fetch origin
-    git checkout timer
-    git pull origin timer
+    git checkout $BRANCH
+    git pull origin $BRANCH
     echo "→ Restarting Docker container..."
     docker compose restart
     echo "→ Waiting for container to be ready..."
