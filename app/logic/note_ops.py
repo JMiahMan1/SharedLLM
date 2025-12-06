@@ -160,9 +160,4 @@ async def tool_note_delete(title: str):
     res = await delete_note(title)
     return res.get("msg")
 
-async def tool_note_delete(title: str):
-    """
-    Deletes a note from Nextcloud.
-    """
-    res = await delete_note(title)
-    return res.get("msg")
+
