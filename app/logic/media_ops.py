@@ -458,6 +458,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             if intent in ["play_media", "open_app", "media_next", "media_previous", "stop_media"]:
                 if domain not in ["media_player", "group", "script"]:
                     continue
+            
+            # Color and brightness commands only work on lights
+            if intent in ["set_color", "set_brightness", "dim", "brighten"]:
+                if domain != "light":
+                    continue
 
             if intent in ["turn_on", "turn_off", "toggle"]:
                  if domain in ["sensor", "binary_sensor", "sun", "weather", "remote"]:
