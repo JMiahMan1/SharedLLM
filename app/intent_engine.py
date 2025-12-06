@@ -110,6 +110,9 @@ DEFAULT_PHRASES = {
     "note_read": [
         "read note", "check note", "what is in my note", "show note", "read list",
         "check shopping list"
+    ],
+    "note_delete": [
+        "delete note", "remove note", "trash note", "delete my list"
     ]
 }
 

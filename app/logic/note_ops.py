@@ -108,6 +108,28 @@ async def read_note(title: str) -> dict:
     except Exception as e:
         return {"status": "error", "msg": str(e)}
 
+async def delete_note(title: str) -> dict:
+    """Deletes a note/file from Nextcloud."""
+    if not (NEXTCLOUD_URL and NEXTCLOUD_USER and NEXTCLOUD_PASS):
+        return {"status": "error", "msg": "Nextcloud credentials missing"}
+
+    safe_title = "".join([c for c in title if c.isalnum() or c in " -_"]).strip()
+    filename = f"{safe_title}.md"
+    url = _get_webdav_url(filename)
+
+    def _delete():
+        return requests.delete(url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), verify=False)
+
+    try:
+        resp = await run_blocking(_delete)
+        if resp.status_code in [200, 204]:
+            return {"status": "success", "msg": f"Note '{safe_title}' deleted."}
+        elif resp.status_code == 404:
+            return {"status": "error", "msg": f"Note '{safe_title}' not found (already deleted?)."}
+        return {"status": "error", "msg": f"WebDAV Error: {resp.status_code}"}
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
+
 # --- Intent Engine Logic ---
 
 async def tool_note_add(title: str, content: str, category: str = "General"):
@@ -129,4 +151,18 @@ async def tool_note_read(title: str):
     res = await read_note(title)
     if res.get("status") == "success":
         return f"Note Content ({title}):\n{res['content']}"
+    return res.get("msg")
+
+async def tool_note_delete(title: str):
+    """
+    Deletes a note/file from Nextcloud.
+    """
+    res = await delete_note(title)
+    return res.get("msg")
+
+async def tool_note_delete(title: str):
+    """
+    Deletes a note from Nextcloud.
+    """
+    res = await delete_note(title)
     return res.get("msg")
