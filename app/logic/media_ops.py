@@ -243,11 +243,16 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     Resolves the best entity based on query and intent.
     When is_music=True, it prioritizes Music Assistant devices over generic devices.
     """
+    log.info(f"DEBUG: Entering smart_resolve_entity. Q='{query_name}' Intent='{intent}' Collection={ha_collection}")
+    
     if not ha_collection or not query_name.strip():
+        log.warning("DEBUG: Early exit - No collection or empty query.")
         return (None, None)
 
     # Search top 15 to capture relevant but potentially lower-ranked MA entities
     docs = await run_blocking(lambda: safe_similarity_search(ha_collection, query_name, k=15))
+    log.info(f"DEBUG: Search returned {len(docs) if docs else 0} docs.")
+    
     if not docs:
         return (None, None)
 
