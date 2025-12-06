@@ -98,6 +98,18 @@ DEFAULT_PHRASES = {
     "content_query": [
         "read chapter", "summarize document", "find in my files", 
         "search my notes", "read from the book", "look up in nextcloud"
+    ],
+    "note_add": [
+        "create note", "write a note", "new note", "take a note", "jot down",
+        "make a note", "add note"
+    ],
+    "note_append": [
+        "add to note", "append to note", "add to list", "add item to", 
+        "put on my list", "add to shopping list"
+    ],
+    "note_read": [
+        "read note", "check note", "what is in my note", "show note", "read list",
+        "check shopping list"
     ]
 }
 

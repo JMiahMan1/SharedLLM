@@ -107,6 +107,9 @@ Available Tools:
 10. 'media_command' (Handle media/HA control, requires 'intent' and 'device_name')
 11. 'intent_learn' (Teach the AI a new phrase mapping)
 12. 'web_search' (Use for factual/external queries, if no other tool applies)
+13. 'note_add' (Create a new note. Params: 'title', 'content')
+14. 'note_append' (Append to a note/list. Params: 'title', 'content')
+15. 'note_read' (Read a specific note file. Params: 'title')
 
 CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Set an alarm for 8am" -> timer_add
