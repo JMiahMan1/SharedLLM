@@ -25,5 +25,10 @@ from .timer_ops import (
     tool_timer_pause,
     tool_timer_resume
 )
+from .note_ops import (
+    tool_note_add,
+    tool_note_append,
+    tool_note_read
+)
 from .timer_storage import storage as timer_storage
 from .timer_scheduler import start_scheduler, stop_scheduler

@@ -1,4 +1,5 @@
 # Core
+PyYAML>=6.0.2
 fastapi
 uvicorn[standard]
 requests
@@ -7,7 +8,7 @@ pydantic
 python-multipart
 
 # AI / RAG
-chromadb
+chromadb>=0.5.0
 langchain
 langchain-huggingface
 langchain-chroma
