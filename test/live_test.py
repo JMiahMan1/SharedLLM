@@ -323,6 +323,55 @@ def test_music_playback(entity_id, friendly_name):
     
     # FIXED: Added 'on' to acceptable stop states because many TVs stay on (idle) after stopping
     check_device_state(entity_id, ["paused", "idle", "off", "on"])
+
+def test_notes_integration():
+    print_header("Func: Notes System (Create -> Read -> Append)")
+    
+    timestamp = int(time.time())
+    note_title = f"LiveTest_{timestamp}"
+    content_body = "This is a live test note content."
+    
+    # 1. CREATE
+    print(f"   [ACTION] Creating Note '{note_title}'...")
+    create_cmd = f"Create a note called {note_title} that says {content_body}"
+    resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":create_cmd}], "stream":False}, "Note Create")
+    
+    if resp and ("success" in resp.lower() or "created" in resp.lower() or "saved" in resp.lower()):
+        print(f"   [PASS] Note creation confirmed.")
+    else:
+        print(f"   [FAIL] Note creation failed. Response: {resp}")
+
+    time.sleep(1)
+
+    # 2. READ
+    print(f"   [ACTION] Reading Note '{note_title}'...")
+    read_cmd = f"Read the note {note_title}"
+    resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":read_cmd}], "stream":False}, "Note Read")
+    
+    if resp and content_body in resp:
+        print(f"   [PASS] Note content verified.")
+    else:
+        print(f"   [FAIL] Content mismatch or read failure. Response: {resp}")
+
+    # 3. APPEND
+    print(f"   [ACTION] Appending to Note '{note_title}'...")
+    append_cmd = f"Add 'Buy Milk' to my {note_title} note"
+    resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":append_cmd}], "stream":False}, "Note Append")
+    
+    if resp and ("success" in resp.lower() or "added" in resp.lower()):
+        print(f"   [PASS] Note append confirmed.")
+    else:
+        print(f"   [FAIL] Note append failed. Response: {resp}")
+    
+    # 4. READ AGAIN
+    print(f"   [ACTION] Verifying Append...")
+    resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":read_cmd}], "stream":False}, "Note Verify")
+    
+    if resp and "Buy Milk" in resp:
+        print("   [PASS] Append verified in content.")
+    else:
+        print(f"   [FAIL] Appended content not found.")
+
  
 def test_functionality():
     print_header("Protocol: Health & Streaming")
@@ -341,6 +390,7 @@ def test_functionality():
     test_history_context() 
     test_web_search_explicit() 
     test_calendar_integration()
+    test_notes_integration()
     test_natural_language_date()
     test_cross_domain_multi_command(lamp_id, LAMP_NAME)
  

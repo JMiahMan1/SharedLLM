@@ -328,7 +328,30 @@ async def ping(): return {"ok": True}
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(r, e): return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+
 @app.exception_handler(Exception)
-async def generic_exception_handler(r, e): 
+async def generic_exception_handler(r, e):
     log.exception("Error")
     return JSONResponse(status_code=500, content={"detail": str(e)})
+
+# --- Admin Endpoints ---
+@app.get("/api/admin/logs")
+async def admin_logs(lines: int = 100):
+    """Read the last N lines of the application log file."""
+    log_file = "/data/app.log"
+    if not os.path.exists(log_file):
+        return {"error": "Log file not found"}
+    try:
+        # Simple tail implementation
+        with open(log_file, "r") as f:
+            all_lines = f.readlines()
+            return {"logs": all_lines[-lines:]}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/admin/run_tests")
+async def admin_run_tests(background_tasks: BackgroundTasks):
+    """Run the system verification suite."""
+    from logic.test_runner import runner
+    # We run it synchronously in a thread pool to avoid blocking the loop
+    return await run_blocking(runner.run_all)
