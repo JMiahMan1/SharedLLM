@@ -57,6 +57,7 @@ from .note_ops import (
     tool_note_add,
     tool_note_append,
     tool_note_read,
+    tool_note_delete,
 )
 from .web_search import tool_web_search
 
@@ -429,6 +430,9 @@ async def _execute_tool_action(
     elif tool_name == "note_read":
         res = await tool_note_read(params.get("title", ""))
         return {"status": "SUCCESS" if "Note Content" in res else "FAILURE", "message": res, "service": "note_read"}
+    elif tool_name == "note_delete":
+        res = await tool_note_delete(params.get("title", ""))
+        return {"status": "SUCCESS" if "deleted" in res.lower() else "FAILURE", "message": res, "service": "note_delete"}
     return {
         "status": "FAILURE",
         "message": f"Action requested unhandled tool: {tool_name}",
