@@ -53,20 +53,20 @@ class AlarmAudioManager:
             else:
                 log.warning(f"Alarm target '{target_explicit}' is not a media_player. Ignoring.")
 
-        # Priority 2: Last Used Entity (Follow Me Behavior)
+        # Priority 2: Origin Device (If valid media player)
+        if not targets and origin:
+            if origin.startswith("media_player."):
+                targets.append(origin)
+            else:
+                log.warning(f"Alarm Origin Device '{origin}' is NOT a media_player. Falling back.")
+
+        # Priority 3: Last Used Entity (Follow Me Behavior)
         # This ensures the alarm rings where the user was last active, rather than the origin (which might be a server/dashboard)
         if not targets:
             last_entity = get_last_entity(redis_client, user_creds.get("user"))
             if last_entity and last_entity.startswith("media_player."):
                  targets.append(last_entity)
                  log.info(f"Alarm Target: Defaulting to last known entity: {last_entity}")
-
-        # Priority 3: Origin Device (If valid media player)
-        if not targets and origin:
-            if origin.startswith("media_player."):
-                targets.append(origin)
-            else:
-                log.warning(f"Alarm Origin Device '{origin}' is NOT a media_player. Falling back.")
 
         # Priority 4: Default Fallback (NO LONGER BROADCASTS TO ALL)
         if not targets:

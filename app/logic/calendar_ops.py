@@ -33,7 +33,7 @@ def _get_cal_client(creds: Dict[str, str]):
         url=url, 
         username=NEXTCLOUD_USER, 
         password=creds.get('nc_pass', NEXTCLOUD_PASS), 
-        timeout=20
+        timeout=60
     )
 
 def _get_default_cal_key(user: str) -> str:
