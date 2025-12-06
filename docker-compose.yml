@@ -41,9 +41,8 @@ services:
     ports:
       - "11435:11435"
     working_dir: /app
-    entrypoint: [ "/bin/sh", "-c" ]
-    command: >
-      "uvicorn main:app --host 0.0.0.0 --port 11435 --workers 1 --reload --log-level debug"
+    entrypoint: []
+    command: [ "python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "11435", "--workers", "1", "--reload", "--log-level", "debug" ]
     depends_on:
       - redis # CRITICAL: Depend on Redis service
     networks:
