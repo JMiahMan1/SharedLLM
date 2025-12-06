@@ -22,6 +22,7 @@ from settings import (
     INFORMATIONAL_INTENTS,
 )
 from intent_engine import engine as intent_engine
+from .media_ops import REGEX_INTENT_MAP
 
 from .utils import (
     clean_llm_output,
@@ -149,10 +150,33 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
     return [query]
 
 
+def apply_regex_intent_override(query: str) -> Optional[str]:
+    """
+    Apply regex-based intent detection before LLM classification.
+    Returns intent name if pattern matches, None otherwise.
+    """
+    q_low = query.lower()
+    for pattern, intent in REGEX_INTENT_MAP.items():
+        if re.search(pattern, q_low):
+            log.debug(f"[REGEX OVERRIDE] Matched '{intent}' via pattern: {pattern[:50]}...")
+            return intent
+    return None
+
+
 async def contextualize_query(query, user, model):
-    intent, score, is_high_confidence = await intent_engine.classify(
-        query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD
-    )
+    # Try regex override first
+    regex_intent = apply_regex_intent_override(query)
+    if regex_intent:
+        log.info(f"[INTENT] Regex override: '{query}' → {regex_intent}")
+        intent = regex_intent
+        score = 1.0  # Perfect confidence for regex matches
+        is_high_confidence = True
+    else:
+        # Fall back to LLM classification
+        intent, score, is_high_confidence = await intent_engine.classify(
+            query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD
+        )
+    
     stateless_intents = [
         "turn_on",
         "turn_off",
@@ -424,9 +448,19 @@ async def _handle_single_command(
     )
     if action_result:
         return [action_result]
-    intent, score, is_high_confidence = await intent_engine.classify(
-        query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD
-    )
+    
+    # Try regex override first for color/brightness commands
+    regex_intent = apply_regex_intent_override(query)
+    if regex_intent:
+        log.info(f"[INTENT] Regex override in single_command: '{query}' → {regex_intent}")
+        intent = regex_intent
+        score = 1.0
+        is_high_confidence = True
+    else:
+        intent, score, is_high_confidence = await intent_engine.classify(
+            query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD
+        )
+    
     orchestration_plan = await _llm_orchestrator(
         query, intent or "unknown", score, model
     )
