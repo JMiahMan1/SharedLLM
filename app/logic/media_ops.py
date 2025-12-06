@@ -116,19 +116,86 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
     cache_key = f"capabilities:{entity_id}"
     if redis_client:
         try:
-            log.debug(f"[CAPABILITY] Checking cache for {entity_id}")
+            log.debug(f"[CAPABILITY] Checking Redis cache for {entity_id}")
             cached = redis_client.get(cache_key)
             if cached:
                 cached_str = cached.decode('utf-8') if isinstance(cached, bytes) else cached
-                log.info(f"[CAPABILITY] Cache HIT for {entity_id}")
+                log.info(f"[CAPABILITY] Redis cache HIT for {entity_id}")
                 return json.loads(cached_str)
-            log.debug(f"[CAPABILITY] Cache MISS for {entity_id}")
+            log.debug(f"[CAPABILITY] Redis cache MISS for {entity_id}")
         except Exception as e:
-            log.warning(f"Cache read error for {cache_key}: {e}")
+            log.warning(f"Redis cache read error for {cache_key}: {e}")
     else:
         log.debug(f"[CAPABILITY] No Redis client, skipping cache for {entity_id}")
     
-    # Fetch from Home Assistant
+    # Try ChromaDB next (faster than HA API, no rate limits)
+    try:
+        from settings import GlobalResources
+        log.debug(f"[CAPABILITY] Querying ChromaDB for {entity_id}")
+        
+        # Query by exact entity_id match
+        ha_collection = GlobalResources.ha_collection
+        results = await run_blocking(lambda: ha_collection.get(
+            where={"entity_id": entity_id},
+            include=["metadatas"]
+        ))
+        
+        if results and results["metadatas"] and len(results["metadatas"]) > 0:
+            metadata = results["metadatas"][0]
+            log.info(f"[CAPABILITY] ChromaDB HIT for {entity_id}")
+            
+            # Parse capabilities from stored metadata
+            capabilities = {
+                "domain": metadata.get("domain", entity_id.split('.')[0]),
+                "friendly_name": metadata.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title()),
+                "integration": metadata.get("integration", "unknown")
+            }
+            
+            # Parse supported_features if present
+            if "supported_features" in metadata:
+                try:
+                    features = int(metadata["supported_features"])
+                    capabilities["supported_features"] = features
+                    
+                    # Parse domain-specific capabilities
+                    if capabilities["domain"] == "light":
+                        capabilities["has_brightness"] = bool(features & 1)
+                        capabilities["has_color_temp"] = bool(features & 2)
+                        capabilities["has_color"] = bool(features & 16)
+                        
+                        # Parse color_modes if present
+                        if "supported_color_modes" in metadata:
+                            color_modes = json.loads(metadata["supported_color_modes"])
+                            capabilities["color_modes"] = color_modes
+                            # Override has_color based on color_modes (more authoritative)
+                            capabilities["has_color"] = any(m in color_modes for m in ["rgb", "hs", "xy", "rgbw", "rgbww"])
+                            capabilities["has_color_temp"] = "color_temp" in color_modes
+                    
+                    elif capabilities["domain"] == "media_player":
+                        capabilities["has_pause"] = bool(features & 1)
+                        capabilities["has_previous"] = bool(features & 16)
+                        capabilities["has_next"] = bool(features & 32)
+                        capabilities["has_volume"] = bool(features & 4)
+                        capabilities["has_play_media"] = bool(features & 512)
+                    
+                    # Cache in Redis and return
+                    if redis_client:
+                        try:
+                            redis_client.setex(cache_key, 3600, json.dumps(capabilities))
+                        except Exception as e:
+                            log.warning(f"Redis cache write error: {e}")
+                    
+                    log.info(f"[CAPABILITY] Parsed from ChromaDB: {entity_id} → has_color={capabilities.get('has_color', False)}, has_brightness={capabilities.get('has_brightness', False)}")
+                    return capabilities
+                    
+                except (ValueError, KeyError) as e:
+                    log.warning(f"[CAPABILITY] Error parsing ChromaDB metadata for {entity_id}: {e}")
+        else:
+            log.debug(f"[CAPABILITY] ChromaDB MISS for {entity_id}")
+    except Exception as e:
+        log.warning(f"[CAPABILITY] ChromaDB query error for {entity_id}: {e}")
+    
+    # Fallback to Home Assistant API
     if not HA_URL:
         return {"domain": entity_id.split('.')[0], "error": "no_ha_url"}
     

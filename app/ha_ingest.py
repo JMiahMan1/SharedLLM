@@ -179,8 +179,8 @@ def ingest_ha_metadata():
         # e.g., if user asks "Which light is red?", we need attributes.
         searchable_attrs = []
         for k, v in attributes.items():
-            # Skip noise attributes
-            if k not in ["friendly_name", "icon", "supported_features", "mass_player_type", "entity_picture"] and v and len(str(v)) < 50:
+            # Skip noise attributes (but keep supported_features and supported_color_modes for metadata)
+            if k not in ["friendly_name", "icon", "mass_player_type", "entity_picture", "supported_features", "supported_color_modes"] and v and len(str(v)) < 50:
                 searchable_attrs.append(f"{k}: {v}")
         
         if searchable_attrs:
@@ -196,6 +196,14 @@ def ingest_ha_metadata():
             "state": current_state,
             "source": "home_assistant"
         }
+        
+        # Include supported_features and supported_color_modes for capability detection
+        if "supported_features" in attributes:
+            metadata["supported_features"] = str(attributes["supported_features"])
+        if "supported_color_modes" in attributes:
+            # Store as JSON string for compatibility
+            import json
+            metadata["supported_color_modes"] = json.dumps(attributes["supported_color_modes"])
 
         docs_to_add.append(Document(page_content=content, metadata=metadata))
 
