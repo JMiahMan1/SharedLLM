@@ -28,7 +28,8 @@ MEDIA_INTENTS = [
     "stop_media", "play_media", "open_app",
     "media_next", "media_previous",
     "nav_up", "nav_down", "nav_left", "nav_right", 
-    "nav_enter", "nav_back", "nav_home"
+    "nav_enter", "nav_back", "nav_home",
+    "set_color", "set_brightness", "dim", "brighten"
 ]
 
 # Used by pipeline.py for Regex Overrides
@@ -45,6 +46,26 @@ REGEX_INTENT_MAP = {
     r"\bgo back\b|\bback\b": "nav_back",
     r"\bgo home\b|\bhome\b": "nav_home",
     r"\bselect\b|\benter\b|\bok\b": "nav_enter",
+    r"\b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
+    r"\b(dim|darken|lower)\b": "dim",
+    r"\b(brighten|brighter|increase)\b": "brighten",
+    r"\b(brightness|bright|set.+\d+%)": "set_brightness",
+}
+
+# Color name to RGB mapping
+COLOR_MAP = {
+    "red": [255, 0, 0],
+    "green": [0, 255, 0],
+    "blue": [0, 0, 255],
+    "yellow": [255, 255, 0],
+    "orange": [255, 165, 0],
+    "purple": [128, 0, 128],
+    "pink": [255, 192, 203],
+    "white": [255, 255, 255],
+    "warm white": [255, 220, 180],
+    "cool white": [200, 220, 255],
+    "cyan": [0, 255, 255],
+    "magenta": [255, 0, 255],
 }
 
 # --------------------------------------
@@ -79,6 +100,101 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
         log.error(f"State fetch error for {entity_id}: {e}")
 
     return "unknown"
+
+async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client) -> dict:
+    """
+    Fetch and cache device capabilities from Home Assistant.
+    Parses supported_features bitmask and available attributes.
+    
+    Returns dict with device capabilities:
+    - Light: has_brightness, has_color, has_color_temp, color_modes
+    - Media Player: has_next, has_previous, has_volume, has_play_media
+    """
+    import json
+    
+    # Check Redis cache first (TTL: 1 hour)
+    cache_key = f"capabilities:{entity_id}"
+    if redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                cached_str = cached.decode('utf-8') if isinstance(cached, bytes) else cached
+                return json.loads(cached_str)
+        except Exception as e:
+            log.warning(f"Cache read error for {cache_key}: {e}")
+    
+    # Fetch from Home Assistant
+    if not HA_URL:
+        return {"domain": entity_id.split('.')[0], "error": "no_ha_url"}
+    
+    url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
+    headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
+    
+    try:
+        def _fetch():
+            return requests.get(url, headers=headers, timeout=3.0)
+        
+        r = await run_blocking(_fetch)
+        
+        if r.status_code != 200:
+            log.warning(f"Failed to fetch capabilities for {entity_id}: {r.status_code}")
+            return {"domain": entity_id.split('.')[0], "error": "unavailable"}
+        
+        data = r.json()
+        attrs = data.get("attributes", {})
+        
+        # Base capabilities
+        capabilities = {
+            "domain": entity_id.split('.')[0],
+            "supported_features": attrs.get("supported_features", 0),
+            "available_attributes": list(attrs.keys()),
+            "friendly_name": attrs.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title())
+        }
+        
+        # Light-specific capability detection
+        if capabilities["domain"] == "light":
+            features = capabilities["supported_features"]
+            # HA Light Feature Bitmasks
+            # SUPPORT_BRIGHTNESS = 1, SUPPORT_COLOR_TEMP = 2, SUPPORT_EFFECT = 4
+            # SUPPORT_FLASH = 8, SUPPORT_COLOR = 16, SUPPORT_TRANSITION = 32
+            capabilities["has_brightness"] = bool(features & 1)
+            capabilities["has_color_temp"] = bool(features & 2)
+            capabilities["has_color"] = bool(features & 16)
+            capabilities["color_modes"] = attrs.get("supported_color_modes", [])
+            
+            # If color_modes is present, it's more authoritative
+            if capabilities["color_modes"]:
+                capabilities["has_color"] = any(m in capabilities["color_modes"] for m in ["rgb", "hs", "xy", "rgbw", "rgbww"])
+                capabilities["has_color_temp"] = "color_temp" in capabilities["color_modes"]
+        
+        # Media Player-specific capability detection
+        elif capabilities["domain"] == "media_player":
+            features = capabilities["supported_features"]
+            # HA Media Player Feature Bitmasks
+            # SUPPORT_PAUSE = 1, SUPPORT_SEEK = 2, SUPPORT_VOLUME_SET = 4, SUPPORT_VOLUME_MUTE = 8
+            # SUPPORT_PREVIOUS_TRACK = 16, SUPPORT_NEXT_TRACK = 32, SUPPORT_TURN_ON = 128
+            # SUPPORT_TURN_OFF = 256, SUPPORT_PLAY_MEDIA = 512
+            capabilities["has_pause"] = bool(features & 1)
+            capabilities["has_previous"] = bool(features & 16)
+            capabilities["has_next"] = bool(features & 32)
+            capabilities["has_volume"] = bool(features & 4)
+            capabilities["has_play_media"] = bool(features & 512)
+            capabilities["has_turn_on"] = bool(features & 128)
+            capabilities["has_turn_off"] = bool(features & 256)
+        
+        # Cache for 1 hour
+        if redis_client:
+            try:
+                redis_client.setex(cache_key, 3600, json.dumps(capabilities))
+            except Exception as e:
+                log.warning(f"Cache write error for {cache_key}: {e}")
+        
+        log.info(f"Capabilities for {entity_id}: {capabilities}")
+        return capabilities
+        
+    except Exception as e:
+        log.error(f"Error fetching capabilities for {entity_id}: {e}")
+        return {"domain": entity_id.split('.')[0], "error": str(e)}
 
 async def get_active_media_players(user_creds: dict) -> list:
     """Returns a list of entity_ids for media players that are currently playing or paused."""
@@ -512,6 +628,122 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     domain = entity_id.split('.')[0]
     service = intent
     service_data = {}
+
+    # -------------------------------------------------
+    # COLOR & BRIGHTNESS CONTROL
+    # -------------------------------------------------
+    if intent in ["set_color", "set_brightness", "dim", "brighten"]:
+        if domain != "light":
+            return {"status": "FAILURE", "message": f"Color/brightness control only works with lights, not {domain} devices.", "entity_id": entity_id, "service": intent}
+        
+        # Fetch device capabilities
+        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+        friendly_name = caps.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title())
+        
+        # Validate color support
+        if intent == "set_color":
+            if not caps.get("has_color") and not caps.get("has_color_temp"):
+                return {
+                    "status": "FAILURE", 
+                    "message": f"{friendly_name} doesn't support color control. It's a simple on/off or brightness-only light.",
+                    "entity_id": entity_id, 
+                    "service": "set_color"
+                }
+            
+            # Parse requested color
+            color_found = None
+            color_name_found = None
+            for color_name, rgb in COLOR_MAP.items():
+                if color_name in q_low:
+                    color_found = rgb
+                    color_name_found = color_name
+                    break
+            
+            if not color_found:
+                return {"status": "FAILURE", "message": "I couldn't determine which color you want. Try: red, blue, green, warm white, etc.", "entity_id": entity_id, "service": "set_color"}
+            
+            # Smart mode selection based on device capabilities
+            service = "turn_on"
+            color_modes = caps.get("color_modes", [])
+            
+            if caps.get("has_color") and "rgb" in color_modes:
+                # Full RGB color support
+                service_data = {"rgb_color": color_found}
+                log.info(f"Setting {entity_id} to RGB {color_found}")
+            
+            elif caps.get("has_color") and "hs" in color_modes:
+                # HS color mode (convert RGB to HS)
+                r, g, b = [x/255.0 for x in color_found]
+                max_c = max(r, g, b)
+                min_c = min(r, g, b)
+                diff = max_c - min_c
+                
+                # Hue calculation
+                if diff == 0:
+                    h = 0
+                elif max_c == r:
+                    h = (60 * ((g - b) / diff) + 360) % 360
+                elif max_c == g:
+                    h = (60 * ((b - r) / diff) + 120) % 360
+                else:
+                    h = (60 * ((r - g) / diff) + 240) % 360
+                
+                # Saturation calculation  
+                s = 0 if max_c == 0 else (diff / max_c) * 100
+                
+                service_data = {"hs_color": [h, s]}
+                log.info(f"Setting {entity_id} to HS [{h}, {s}]")
+            
+            elif caps.get("has_color_temp") and ("warm" in color_name_found or "cool" in color_name_found):
+                # Fallback to color temperature for warm/cool white
+                kelvin = 370 if "warm" in color_name_found else 200  # Warm = higher mireds (lower kelvin)
+                service_data = {"color_temp": kelvin}
+                log.info(f"Setting {entity_id} to color_temp {kelvin}")
+            
+            elif caps.get("has_color_temp"):
+                # Device only supports color temp, not full color
+                return {
+                    "status": "FAILURE",
+                    "message": f"{friendly_name} doesn't support full color. Try 'set to warm white' or 'set to cool white' instead.",
+                    "entity_id": entity_id,
+                    "service": "set_color"
+                }
+            else:
+                # Should not reach here, but safety fallback
+                service_data = {"rgb_color": color_found}
+        
+        # Validate brightness support
+        elif intent in ["set_brightness", "dim", "brighten"]:
+            if not caps.get("has_brightness"):
+                return {
+                    "status": "FAILURE",
+                    "message": f"{friendly_name} is an on/off only light and doesn't support brightness control.",
+                    "entity_id": entity_id,
+                    "service": "set_brightness"
+                }
+            
+            brightness = None
+            
+            # Look for percentage (e.g., "50%", "100%")
+            pct_match = re.search(r"(\d+)\s*%", query)
+            if pct_match:
+                pct = int(pct_match.group(1))
+                brightness = int((pct / 100.0) * 255)
+            
+            # Relative adjustments
+            elif intent == "dim":
+                brightness = 70  # ~30% brightness
+            elif intent == "brighten":
+                brightness = 255  # Max brightness
+            
+            if brightness is None:
+                brightness = 128  # Default to 50%
+            
+            service = "turn_on"
+            service_data = {"brightness": max(1, min(255, brightness))}
+            log.info(f"Setting {entity_id} brightness to {brightness}")
+        
+        return await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)
 
     # -------------------------------------------------
     # POWER, NAVIGATION
