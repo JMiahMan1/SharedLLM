@@ -554,6 +554,7 @@ async def generate_rag_stream(
             run_knowledge_retrieval = False
             
         action_context = "### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):\n"
+        log.debug(f"[ACTION RESULTS] {len(action_results)} results: {action_results}")
         for res in action_results:
             status = res.get("status", "FAILURE")
             msg = res.get("message", "Unknown action.")
@@ -568,6 +569,8 @@ async def generate_rag_stream(
                 entity = res.get("entity_id", "N/A")
                 service = res.get("service", "N/A")
                 action_context += f"- FAILURE: Command '{service}' on '{entity}' failed. Reason: {msg}\n"
+        
+        log.debug(f"[ACTION CONTEXT] Sending to LLM:\n{action_context}")
 
     ha_ctx, nc_ctx, search_ctx, cal_ctx = "", "", "", ""
     if run_knowledge_retrieval:
