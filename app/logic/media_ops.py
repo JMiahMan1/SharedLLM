@@ -806,7 +806,8 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     if intent in ["turn_on", "turn_off", "toggle"]:
         hw_candidate = None
         # Common hardware integrations that control physical power
-        HW_INTEGRATIONS = ["androidtv", "cast", "google_cast", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc"]
+        # Note: 'unknown' is sometimes returned by RAG for newly discovered or androidtv_remote devices
+        HW_INTEGRATIONS = ["androidtv", "cast", "google_cast", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc", "unknown"]
         
         for eid, integration in candidates:
              if integration in HW_INTEGRATIONS:
@@ -814,7 +815,9 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                  break
              
              # Heuristic fallback: If it's NOT Music Assistant, and has "TV" in the ID, it's likely the hardware.
-             if "music_assistant" not in integration and any(x in eid.lower() for x in ["tv", "projector", "receiver"]):
+             # Also allow "unknown" integration if it looks like a TV/Remote
+             is_tv_device = any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"])
+             if "music_assistant" not in integration and is_tv_device:
                  if not hw_candidate:
                      hw_candidate = (eid, integration)
 
