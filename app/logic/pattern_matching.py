@@ -13,7 +13,7 @@ PATTERNS = {
     'even': r'\b(even\s+number|even-number|even\s+numbered)\b',
     'odd': r'\b(odd\s+number|odd-number|odd\s+numbered)\b',
     'all': r'\b(all|every)\b',
-    'location': r'\b(upstairs|downstairs|inside|outside|front|back|yard|patio|basement|attic|garage)\b',
+    'location': r'\b(upstairs|downstairs|inside|outside|front|back|yard|patio|basement|attic|garage|kitchen|bedroom|office|bathroom|bath|living\s+room|dining\s+room|hall|hallway|study|gym|master\s+bedroom|guest\s+bedroom)\b',
     'direction': r'\b(north|south|east|west|left|right|center|middle)\b',
     'plural': r'\b(lights|lamps|bulbs|switches|fans|blinds|shades|speakers|players|tvs)\b'
 }
