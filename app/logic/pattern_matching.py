@@ -14,7 +14,8 @@ PATTERNS = {
     'odd': r'\b(odd\s+number|odd-number|odd\s+numbered)\b',
     'all': r'\b(all|every)\b',
     'location': r'\b(upstairs|downstairs|inside|outside|front|back|yard|patio|basement|attic|garage)\b',
-    'direction': r'\b(north|south|east|west|left|right|center|middle)\b'
+    'direction': r'\b(north|south|east|west|left|right|center|middle)\b',
+    'plural': r'\b(lights|lamps|bulbs|switches|fans|blinds|shades|speakers|players|tvs)\b'
 }
 
 def detect_entity_pattern(query: str) -> Tuple[Optional[str], Optional[Dict]]:
@@ -79,16 +80,21 @@ def filter_entities_by_pattern(
     matching = []
     target_val = pattern_data.get('value', '').lower()
 
+    # Simple singularization for plural matching
+    if pattern_type == 'plural':
+        # Remove trailing 's' roughly, or map specific cases if needed
+        if target_val.endswith('s'):
+            target_val = target_val[:-1]
+    
     for entity_id, integration in entities:
         friendly_name = friendly_names.get(entity_id, entity_id)
         fn_low = friendly_name.lower()
         
         matched = False
         
-        # Location / Direction Logic
-        if pattern_type in ['location', 'direction']:
-            # Check if the friendly name contains the specific direction/location
-            # e.g., pattern='north', fn="North Bedroom Light" -> Match
+        # Location / Direction / Plural Logic
+        # We match if the keyword (or singularized keyword) is in the name
+        if pattern_type in ['location', 'direction', 'plural']:
             if target_val in fn_low:
                 matched = True
         
