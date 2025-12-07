@@ -712,7 +712,7 @@ async def execute_batch_command(
         'service': intent,
         'batch_results': results,
         'success_count': success_count,
-        'failure_count': failure_count
+        'failure_count': failure_count,
         'friendly_name': f"{success_count} devices",  # For LLM context formatting
         'entity_id': 'batch_command'  # Identify as batch in context
     }
