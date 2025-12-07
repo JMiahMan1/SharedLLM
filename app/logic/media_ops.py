@@ -1038,6 +1038,20 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                  resolved_id, resolved_int = resolved_result
 
             if resolved_id:
+                # --- START MASS INTELLIGENCE SWAP ---
+                #, If we resolved a hardware device but assume music (or ambiguous), check if MA player exists.
+                # This fixes "Play Brandon Lake on Office TV" -> resolved hardware TV -> failed video play.
+                if not is_video_request and "music_assistant" not in resolved_int:
+                     ma_variants = [f"{resolved_id}_2", f"{resolved_id}_mass", f"{resolved_id}_music"]
+                     for variant in ma_variants:
+                         variant_state = await get_entity_state(variant, user_creds)
+                         if variant_state != "unknown":
+                             log.info(f"Mass Intelligence: Swapping hardware {resolved_id} -> MA Player {variant}")
+                             resolved_id = variant
+                             resolved_int = "music_assistant"
+                             break
+                # --- END MASS INTELLIGENCE SWAP ---
+
                 if strict_resolution and "music_assistant" not in resolved_int and not any(x in resolved_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                     log.error(f"Strict Resolution failure: Resolved {resolved_id} ({resolved_int}) which is not MA/TV.")
                     return {"status": "FAILURE", "message": f"I couldn't find a Music Assistant device named '{potential_device}'.", "entity_id": potential_device, "service": "media_command"}
@@ -1071,6 +1085,18 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                      entity_id, integration = None, None
             else:
                  entity_id, integration = resolved_result
+
+        # --- START MASS INTELLIGENCE SWAP (Standard Path) ---
+        if entity_id and not is_video_request and "music_assistant" not in (integration or ""):
+             ma_variants = [f"{entity_id}_2", f"{entity_id}_mass", f"{entity_id}_music"]
+             for variant in ma_variants:
+                 variant_state = await get_entity_state(variant, user_creds)
+                 if variant_state != "unknown":
+                     log.info(f"Mass Intelligence: Swapping hardware {entity_id} -> MA Player {variant}")
+                     entity_id = variant
+                     integration = "music_assistant"
+                     break
+        # --- END MASS INTELLIGENCE SWAP ---
 
     if entity_id:
         domain = entity_id.split('.')[0]
