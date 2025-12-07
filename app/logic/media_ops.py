@@ -787,7 +787,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 log.info(f"Setting {entity_id} to color_temp {kelvin}")
             
             elif caps.get("has_color_temp"):
-                # Device only supports color temp, not full color
+                # Device ONLY supports color temp (no RGB/HS), and user didn't request warm/cool
                 return {
                     "status": "FAILURE",
                     "message": f"{friendly_name} doesn't support full color. Try 'set to warm white' or 'set to cool white' instead.",
@@ -795,8 +795,9 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                     "service": "set_color"
                 }
             else:
-                # Should not reach here, but safety fallback
+                # Should not reach here, but safety fallback - try RGB anyway
                 service_data = {"rgb_color": color_found}
+                log.warning(f"No matching color mode for {entity_id}, trying RGB fallback")
         
         # Validate brightness support
         elif intent in ["set_brightness", "dim", "brighten"]:
