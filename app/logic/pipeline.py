@@ -21,6 +21,7 @@ from settings import (
     ACTION_TOOL_CONFIDENCE_THRESHOLD,
     INFORMATIONAL_INTENTS,
 )
+SILENT_SUCCESS_TOKEN = "[SILENT_SUCCESS]"
 from intent_engine import engine as intent_engine
 from .media_ops import REGEX_INTENT_MAP
 
@@ -642,9 +643,22 @@ async def generate_rag_stream(
         "timer_delete",
     ]
     use_simple = False
-    # Only use simple template if success AND NOT searching
     if action_results and intent in simple_intents:
         if all(r.get("status") == "SUCCESS" for r in action_results) and not any(r.get("service") == "web_search" for r in action_results):
+            # Check if we should be silent (Physical actions only)
+            # We already filtered simple_intents to mostly physical, but let's be sure.
+            # If it's pure Turn On/Off/Toggle or Media Play (start), we can be silent.
+            # But "timer_add" should probably speak "Timer set for X".
+            # The User Request said: "Physical action ... (e.g. Light turns on)".
+            
+            silent_candidates = ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "media_next", "media_previous", "open_app"]
+            if intent in silent_candidates:
+                 # Yield Silent Token and return
+                 yield builder.chunk(content=SILENT_SUCCESS_TOKEN)
+                 yield builder.chunk(finish_reason="stop")
+                 yield builder.done()
+                 return
+
             use_simple = True
             
     template_to_use = SIMPLE_RAG_TEMPLATE if use_simple else RAG_TEMPLATE
