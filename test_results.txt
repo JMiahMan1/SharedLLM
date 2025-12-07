@@ -1,0 +1,183 @@
+[*] Dependency 'python-dotenv' missing. Installing...
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: python-dotenv in /home/jeremiah/.local/lib/python3.14/site-packages (1.2.1)
+[*] 'python-dotenv' installed successfully.
+Starting Robust Tests on http://192.168.2.211:11435...
+
+
+============================================================
+TEST: Protocol: Health & Streaming
+============================================================
+   [PASS] Health Check OK
+
+============================================================
+TEST: Func: Entity Discovery
+============================================================
+   [LOOKUP] Finding entity ID for 'Piano Lamp'...
+   [FOUND]  'Piano Lamp' -> light.piano_lamp
+   [LOOKUP] Finding entity ID for 'Office TV'...
+   [FOUND]  'Office TV' -> media_player.office_tv
+   [PRE-CHECK] Piano Lamp is 'off' (Counts as OFF).
+
+============================================================
+TEST: Func: Shared Memory (Multi-Turn Context)
+============================================================
+   [TURN 1] User: 'Who is the president of France?'
+   [CRITICAL FAIL] Turn 1 Timed out or Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=180)
+   [TURN 2] User: 'What is his wife's name?'
+   [CRITICAL FAIL] Turn 2 Timed out or Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=180)
+   [FAIL] Context lost. Response didn't seem to reference previous subject.
+
+============================================================
+TEST: Func: Explicit Web Search
+============================================================
+   [QUERY] 'Search the web for current Linux kernel version'
+   [CRITICAL FAIL] Web Search Timed out or Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=180)
+   [FAIL] Response did not seem to contain search results.
+
+============================================================
+TEST: Func: Calendar (List -> Add -> Update -> Delete)
+============================================================
+   [SKIP] Nextcloud credentials not set in .env
+
+============================================================
+TEST: Func: Notes System (Create -> Read -> Append)
+============================================================
+   [ACTION] Creating Note 'LiveTest_1765049149'...
+   [CRITICAL FAIL] Note Create Timed out or Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=180)
+   [FAIL] Note creation failed. Response: None
+   [ACTION] Reading Note 'LiveTest_1765049149'...
+   [CRITICAL FAIL] Note Read Timed out or Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=180)
+   [FAIL] Content mismatch or read failure. Response: None
+   [ACTION] Appending to Note 'LiveTest_1765049149'...
+   [CRITICAL FAIL] Note Append Timed out or Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=180)
+   [FAIL] Note append failed. Response: None
+   [ACTION] Verifying Append...
+   [CRITICAL FAIL] Note Verify Timed out or Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=180)
+   [FAIL] Appended content not found.
+   [ACTION] Cleaning up Note 'LiveTest_1765049149'...
+   [CRITICAL FAIL] Note Cleanup Timed out or Error: None
+   [FAIL] Cleanup failed. Response: None
+
+============================================================
+TEST: Func: Calendar (Natural Language Date)
+============================================================
+   [SKIP] Nextcloud credentials not set.
+
+============================================================
+TEST: Func: Multi-Intent (Cross-Domain: HA + Calendar)
+============================================================
+   [SKIP] Credentials missing.
+
+============================================================
+TEST: Func: Control (Turn On Piano Lamp)
+============================================================
+   [CRITICAL FAIL] Turn On Timed out or Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f701e90d590>: Failed to establish a new connection: [Errno 111] Connection refused'))
+   [VERIFYING] light.piano_lamp -> ['on']...
+   [PASS] light.piano_lamp is 'on'.
+
+============================================================
+TEST: Func: Music Assistant (Play -> Stop on Office TV)
+============================================================
+   [PRE-CHECK] Office TV is 'off'. forcing 'on'...
+   [ACTION] Sending command: 'Turn on the Office TV'...
+   [READY] Office TV is now 'on' (ON).
+   [SENDING] 'Play Brandon Lake on the Office TV'
+   [RESPONSE] Music Play: I'm sorry, but the Office TV seems to be having a technical meltdown, like a 500 Internal Server Error. Maybe it's tryin...
+   [VERIFYING] media_player.office_tv -> 'playing'...
+   [FAIL] Music failed to start. Current State: on
+   [ACTION] Stopping music...
+   [CRITICAL FAIL] Music Stop Timed out or Error: None
+   [VERIFYING] media_player.office_tv -> ['paused', 'idle', 'off', 'on']...
+   [FAIL] media_player.office_tv state mismatch. Expected ['paused', 'idle', 'off', 'on'], got 'unknown'
+
+============================================================
+TEST: Func: Multi-Command (Turn OFF Both)
+============================================================
+   [SETUP] Forcing BOTH devices ON...
+   [PRE-CHECK] Piano Lamp is 'unknown'. forcing 'on'...
+   [ACTION] Sending command: 'Turn on the Piano Lamp'...
+Traceback (most recent call last):
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 225, in _new_conn
+    sock = self._resolver.create_connection(
+        (self._dns_host, self.port or self.default_port),
+    ...<8 lines>...
+        default_socket_family=self._socket_family,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/contrib/resolver/protocols.py", line 299, in create_connection
+    raise err
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/contrib/resolver/protocols.py", line 269, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 111] Connection refused
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1733, in urlopen
+    response = self._make_request(  # type: ignore[call-overload,misc]
+        conn,
+    ...<15 lines>...
+        extension=extension,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1256, in _make_request
+    raise new_e
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1232, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 787, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 274, in connect
+    self.sock = self._new_conn()
+                ~~~~~~~~~~~~~~^^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 245, in _new_conn
+    raise NewConnectionError(
+        self, f"Failed to establish a new connection: {e}"
+    ) from e
+urllib3.exceptions.NewConnectionError: <urllib3.connection.HTTPConnection object at 0x7f701f183250>: Failed to establish a new connection: [Errno 111] Connection refused
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1811, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/util/retry.py", line 544, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f701f183250>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/live_test.py", line 440, in <module>
+    main()
+    ~~~~^^
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/live_test.py", line 436, in main
+    test_functionality()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/live_test.py", line 415, in test_functionality
+    lamp_ready = ensure_device_state(LAMP_NAME, lamp_id, "on")
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/live_test.py", line 91, in ensure_device_state
+    requests.post(f"{API_URL}/api/chat", json={"messages":[{"role":"user","content":nl_cmd}], "stream":False}, headers=HEADERS)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 115, in post
+    return request("post", url, data=data, json=json, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 677, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f701f183250>: Failed to establish a new connection: [Errno 111] Connection refused'))
