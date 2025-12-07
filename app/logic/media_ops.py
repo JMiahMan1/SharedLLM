@@ -1050,7 +1050,14 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                              resolved_id = variant
                              resolved_int = "music_assistant"
                              break
+                         else:
+                             log.debug(f"Mass Intelligence: Variant {variant} not found/unknown.")
                 # --- END MASS INTELLIGENCE SWAP ---
+
+                # Update Context
+                user = user_creds.get("user")
+                if user and resolved_id:
+                     _set_last_entity(redis_client, user, resolved_id)
 
                 if strict_resolution and "music_assistant" not in resolved_int and not any(x in resolved_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                     log.error(f"Strict Resolution failure: Resolved {resolved_id} ({resolved_int}) which is not MA/TV.")
@@ -1096,7 +1103,14 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                      entity_id = variant
                      integration = "music_assistant"
                      break
+                 else:
+                     log.debug(f"Mass Intelligence: Variant {variant} not found/unknown.")
         # --- END MASS INTELLIGENCE SWAP ---
+
+        # Update Context
+        user = user_creds.get("user")
+        if user and entity_id:
+             _set_last_entity(redis_client, user, entity_id)
 
     if entity_id:
         domain = entity_id.split('.')[0]
@@ -1409,6 +1423,8 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     """Executes media transport command with self-healing fallback prioritizing remote control. Returns structured dict."""
 
     if intent == "stop_media":
+        # Update Context (though stopping usually means we're done, sometimes we want to resume)
+        # But 'stop' might imply we shouldn't target it sequentially. Let's keep it for now.
         return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
 
     is_mass = "music_assistant" in integration
