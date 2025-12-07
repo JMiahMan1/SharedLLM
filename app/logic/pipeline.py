@@ -679,6 +679,6 @@ async def generate_rag_stream(
         full_text = clean_llm_output(r["text"], is_voice)
         yield builder.chunk(content=full_text)
     update_history(user, "assistant", full_text)
-    log.info(f"[RESPONSE] Final response to user ({len(full_text)} chars): {full_text[:300]}")
+    log.debug(f"[RESPONSE] Final response to user ({len(full_text)} chars): {full_text[:300]}")
     yield builder.chunk(finish_reason="stop")
     yield builder.done()
