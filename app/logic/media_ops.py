@@ -64,7 +64,7 @@ REGEX_INTENT_MAP = {
     r"\bturn\s+.+\s+to\s+(red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
     r"\b(dim|darken|lower)\b": "dim",
     r"\b(brighten|brighter|increase)\b": "brighten",
-    r"\b(brightness|bright|set.+\d+%)": "set_brightness",
+    r"\b(brightness|bright)\b": "set_brightness",
 }
 
 # Color name to RGB mapping
@@ -740,10 +740,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         return [] if allow_multiple else (None, None)
 
     # 1. Detect Entity Grouping/Pattern (Numbers, Locations, Directions, Plurals)
-    pattern_type, pattern_data = detect_number_pattern(query_name) # Aliased to detect_entity_pattern
-    if pattern_type:
+    # 1. Detect Entity Grouping/Pattern (Numbers, Locations, Directions, Plurals)
+    patterns = detect_number_pattern(query_name) # Aliased to detect_entity_pattern
+    if patterns:
         allow_multiple = True
-        log.info(f"Detected grouping pattern: {pattern_type} {pattern_data}")
+        log.info(f"Detected grouping pattern: {patterns}")
 
     # 2. Similarity Search using Chroma
     # Increase k if looking for a group/pattern to ensure we catch all potential matches
@@ -809,17 +810,28 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         return [] if allow_multiple else (None, None)
 
     # 4. Pattern Logic Application
-    if pattern_type:
-        fn_map = {c["eid"]: c["friendly_name"] for c in raw_candidates}
-        tuples = [(c["eid"], c["integration"]) for c in raw_candidates]
+    if patterns:
+        # Prepare entities list with metadata for filtering [(eid, integration, metadata_dict)]
+        entities_with_meta = []
+        for c in raw_candidates:
+             # Reconstruct metadata dict
+             meta = {
+                 "friendly_name": c["friendly_name"],
+                 "area_name": "", # Start empty, would need to fetch if not present. 
+                 # Optimization: Ideally filter_entities_by_pattern logic shouldn't need re-fetching, 
+                 # but our current candidates dict lacks area_name explicitly unless we add it in step 3. 
+                 # For now, let's assume friendly_name/domain is enough for most patterns.
+                 "domain": c["eid"].split(".")[0]
+             }
+             entities_with_meta.append((c["eid"], c["integration"], meta))
         
-        filtered_tuples = filter_entities_by_pattern(tuples, pattern_type, pattern_data, fn_map)
+        filtered_tuples = filter_entities_by_pattern(entities_with_meta, patterns)
         
         if filtered_tuples:
-            log.info(f"Pattern '{pattern_type}' matched {len(filtered_tuples)} entities.")
+            log.info(f"Patterns {patterns} matched {len(filtered_tuples)} entities.")
             if allow_multiple:
                 return filtered_tuples
-            return filtered_tuples[0] # Should not happen if allow_multiple forced True
+            return [filtered_tuples[0]] # Should not happen if allow_multiple forced True
 
     # 5. Standard Priority Logic
     # Reconstruct simple candidates list for legacy logic
