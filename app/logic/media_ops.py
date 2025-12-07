@@ -1132,7 +1132,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client)
 
 
-    if not entity_id and intent not in ["turn_on", "turn_off", "toggle"]:
+    if not entity_id:
          return {"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}
 
     domain = entity_id.split('.')[0]
