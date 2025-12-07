@@ -754,8 +754,10 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
             if intent in ["turn_on", "turn_off", "toggle"]:
                  if domain in ["sensor", "binary_sensor", "sun", "weather", "remote"]:
-                     # Exclude remotes from power commands to prevent "Turn on Living Room TV Remote" interpretation
-                     # which usually fails or does nothing useful compared to "Turn on Living Room TV"
+                     # Exclude remotes from power commands
+                     continue
+                 if "music_assistant" in integration:
+                     # Music Assistant cannot control device power
                      continue
 
             candidates.append((eid, integration))
@@ -804,7 +806,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     if intent in ["turn_on", "turn_off", "toggle"]:
         hw_candidate = None
         # Common hardware integrations that control physical power
-        HW_INTEGRATIONS = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc"]
+        HW_INTEGRATIONS = ["androidtv", "cast", "google_cast", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc"]
         
         for eid, integration in candidates:
              if integration in HW_INTEGRATIONS:
