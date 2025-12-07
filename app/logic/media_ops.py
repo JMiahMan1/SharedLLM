@@ -978,7 +978,17 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
              potential_device_name = q_low.split(device_match.group(1))[-1].strip()
              if potential_device_name:
                  # Pass strict_resolution=True if we are skipping tracks, to prefer MA entities
-                 resolved_id, resolved_int = await smart_resolve_entity(potential_device_name, intent, ha_collection, is_music=True, is_video=is_video_request)
+                 resolved_result = await smart_resolve_entity(potential_device_name, intent, ha_collection, is_music=True, is_video=is_video_request)
+                 
+                 resolved_id, resolved_int = None, None
+                 if isinstance(resolved_result, list):
+                     # If patterns matched (e.g. "Kitchen Lights"), we shouldn't allow this Short Circuit 
+                     # to capture it as a single media device, unless there's only one.
+                     # For now, let's skip short circuit if it's a group, so it falls to standard resolution.
+                     log.info(f"Transport Short Circuit: Ignored group result for '{potential_device_name}' (Size: {len(resolved_result)})")
+                 else:
+                     resolved_id, resolved_int = resolved_result
+                 
                  if resolved_id:
                     log.info(f"Transport Short Circuit: Found explicit device {resolved_id} from query.")
                     entity_id = resolved_id
