@@ -753,31 +753,53 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         log.error(f"Error querying Chroma: {e}")
         return [] if allow_multiple else (None, None)
 
-    # 3. Filter & formatting (Consolidated loop)
-    # Convert docs to a manipulatable list of full info
+    # 3. Filter & formatting
     raw_candidates = []
     
-    for doc, score in results:
-        eid = doc.metadata.get("entity_id")
-        friendly_name = doc.metadata.get("friendly_name")
-        integration = doc.metadata.get("integration", "unknown")
-        
-        # Threshold
-        if score > 0.6: continue 
-        
-        # Basic Domain Safety
-        domain = eid.split('.')[0]
-        if intent in ["set_color", "set_brightness", "dim", "brighten"] and domain != "light":
-             continue
-        if intent in ["turn_on", "turn_off", "toggle"] and domain in ["sensor", "binary_sensor", "sun", "weather"]:
-             continue
+    if results:
+        # DEBUG: Inspect first result structure
+        first_item = results[0]
+        log.info(f"DEBUG: First result type: {type(first_item)} val: {first_item}")
 
-        raw_candidates.append({
-            "eid": eid, 
-            "integration": integration, 
-            "friendly_name": friendly_name,
-            "score": score
-        })
+    try:
+        for item in results:
+            # Handle potential variation in return type (Doc, Score) vs (Doc,)
+            if isinstance(item, tuple) and len(item) == 2:
+                doc, score = item
+            elif isinstance(item, tuple) and len(item) == 1:
+                doc = item[0]
+                score = 0.0 # Default score if missing
+            elif hasattr(item, 'metadata'): # It's just a Document
+                doc = item
+                score = 0.0
+            else:
+                log.warning(f"Unexpected result item format: {type(item)}")
+                continue
+
+            eid = doc.metadata.get("entity_id")
+            friendly_name = doc.metadata.get("friendly_name")
+            integration = doc.metadata.get("integration", "unknown")
+            
+            # Threshold
+            if score > 0.6: continue 
+            
+            # Basic Domain Safety
+            domain = eid.split('.')[0]
+            if intent in ["set_color", "set_brightness", "dim", "brighten"] and domain != "light":
+                 continue
+            if intent in ["turn_on", "turn_off", "toggle"] and domain in ["sensor", "binary_sensor", "sun", "weather"]:
+                 continue
+            
+            raw_candidates.append({
+                "eid": eid, 
+                "integration": integration, 
+                "friendly_name": friendly_name,
+                "score": score
+            })
+
+    except Exception as e:
+        log.error(f"Error filtering candidates: {e}")
+        return [] if allow_multiple else (None, None)
 
     if not raw_candidates:
         return [] if allow_multiple else (None, None)
