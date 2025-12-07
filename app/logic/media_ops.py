@@ -922,23 +922,9 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     q_low = query.lower()
     integration = "unknown"
     
-    # --- PATTERN DETECTION FOR MULTI-DEVICE CONTROL ---
-    # If no specific entity_id provided, check for patterns
-    if not entity_id:
-        pattern_type, pattern_data = detect_number_pattern(query)
-        if pattern_type:
-            log.info(f"[PATTERN] Detected '{pattern_type}' pattern - attempting batch execution")
-            entities = await resolve_multiple_entities_with_pattern(query, intent, ha_collection)
-            if entities:
-                return await execute_batch_command(
-                    entities, intent, query, user_creds, ha_collection, redis_client
-                )
-            else:
-                return {
-                    'status': 'FAILURE',
-                    'message': f'No devices found matching pattern "{pattern_type}"',
-                    'service': intent
-                }
+    # --- PATTERN PREVENTION (Handled downstream) ---
+    # Manual pattern checks removed to prevent list unpacking errors.
+    # Patterns are now handled within smart_resolve_entity -> resolve_multiple_entities_with_pattern
 
     # --- Sanitize Intent if LLM hallucinated a full sentence ---
     if intent not in MEDIA_INTENTS:
