@@ -716,131 +716,134 @@ async def execute_batch_command(
         'friendly_name': f"{success_count} devices",  # For LLM context formatting
         'entity_id': 'batch_command'  # Identify as batch in context
     }
-async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False, is_video: bool = False) -> tuple:
+async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False, is_video: bool = False, allow_multiple: bool = False) -> list:
     """
-    Resolves the best entity based on query and intent.
+    Resolves the best entity (or entities) based on query and intent.
     When is_music=True, it prioritizes Music Assistant devices.
-    When is_video=True, it prioritizes Hardware/Android TV devices.
+    
+    Returns:
+       - If allow_multiple=False: (entity_id, integration) tuple (legacy)
+       - If allow_multiple=True: List of (entity_id, integration) tuples
     """
-    log.info(f"DEBUG: Entering smart_resolve_entity. Q='{query_name}' Intent='{intent}' Collection={ha_collection}")
+    log.info(f"DEBUG: Entering smart_resolve_entity. Q='{query_name}' Intent='{intent}' Multiple={allow_multiple}")
     
-    if not ha_collection or not query_name.strip():
-        log.warning("DEBUG: Early exit - No collection or empty query.")
-        return (None, None)
+    # 0. Setup & lazy imports
+    try:
+        from settings import GlobalResources 
+        from langchain_chroma import Chroma
+    except ImportError:
+        log.error("Could not import dependencies for resolution.")
+        return [] if allow_multiple else (None, None)
 
-    # Search top 15 to capture relevant but potentially lower-ranked MA entities
-    docs = await run_blocking(lambda: safe_similarity_search(ha_collection, query_name, k=15))
-    log.info(f"DEBUG: Search returned {len(docs) if docs else 0} docs.")
+    # 1. Detect Entity Grouping/Pattern (Numbers, Locations, Directions, Plurals)
+    pattern_type, pattern_data = detect_number_pattern(query_name) # Aliased to detect_entity_pattern
+    if pattern_type:
+        allow_multiple = True
+        log.info(f"Detected grouping pattern: {pattern_type} {pattern_data}")
+
+    # 2. Similarity Search using Chroma
+    # Increase k if looking for a group/pattern to ensure we catch all potential matches
+    k = 30 if allow_multiple else 15
+    try:
+        results = await GlobalResources.run_blocking(
+            lambda: ha_collection.similarity_search_with_score(query_name, k=k)
+        )
+        log.info(f"DEBUG: Search returned {len(results)} docs.")
+    except Exception as e:
+        log.error(f"Error querying Chroma: {e}")
+        return [] if allow_multiple else (None, None)
+
+    # 3. Filter & formatting (Consolidated loop)
+    # Convert docs to a manipulatable list of full info
+    raw_candidates = []
     
-    if not docs:
-        return (None, None)
+    for doc, score in results:
+        eid = doc.metadata.get("entity_id")
+        friendly_name = doc.metadata.get("friendly_name")
+        integration = doc.metadata.get("integration", "unknown")
+        
+        # Threshold
+        if score > 0.6: continue 
+        
+        # Basic Domain Safety
+        domain = eid.split('.')[0]
+        if intent in ["set_color", "set_brightness", "dim", "brighten"] and domain != "light":
+             continue
+        if intent in ["turn_on", "turn_off", "toggle"] and domain in ["sensor", "binary_sensor", "sun", "weather"]:
+             continue
 
-    candidates = []
-    for d in docs:
-        eid = d.metadata.get("entity_id")
-        integration = d.metadata.get("integration", "unknown")
-        if eid:
-            domain = eid.split('.')[0]
+        raw_candidates.append({
+            "eid": eid, 
+            "integration": integration, 
+            "friendly_name": friendly_name,
+            "score": score
+        })
 
-            # Domain Filtering
-            if intent in ["play_media", "open_app", "media_next", "media_previous", "stop_media"]:
-                if domain not in ["media_player", "group", "script"]:
-                    continue
-            
-            # Color and brightness commands only work on lights
-            if intent in ["set_color", "set_brightness", "dim", "brighten"]:
-                if domain != "light":
-                    continue
+    if not raw_candidates:
+        return [] if allow_multiple else (None, None)
 
-            if intent in ["turn_on", "turn_off", "toggle"]:
-                 if domain in ["sensor", "binary_sensor", "sun", "weather", "remote"]:
-                     # Exclude remotes from power commands
-                     continue
-                 if "music_assistant" in integration:
-                     # Music Assistant cannot control device power
-                     continue
+    # 4. Pattern Logic Application
+    if pattern_type:
+        fn_map = {c["eid"]: c["friendly_name"] for c in raw_candidates}
+        tuples = [(c["eid"], c["integration"]) for c in raw_candidates]
+        
+        filtered_tuples = filter_entities_by_pattern(tuples, pattern_type, pattern_data, fn_map)
+        
+        if filtered_tuples:
+            log.info(f"Pattern '{pattern_type}' matched {len(filtered_tuples)} entities.")
+            if allow_multiple:
+                return filtered_tuples
+            return filtered_tuples[0] # Should not happen if allow_multiple forced True
 
-            candidates.append((eid, integration))
+    # 5. Standard Priority Logic
+    # Reconstruct simple candidates list for legacy logic
+    candidates = [(c["eid"], c["integration"]) for c in raw_candidates]
 
-    if not candidates:
-        return (None, None)
-
-    q_low = query_name.lower()
+    # ... [Re-inserting priority logic for Music/Power/Etc] ...
     
     # --- ENFORCED PRIORITY FOR MUSIC ---
-    # Only runs if strict resolution (play_media + music keywords) is active.
     if is_music:
         ma_candidate = None
         tv_candidate = None
-
-        # Pass 1: Find the absolute highest ranked MA and TV candidates
         for eid, integration in candidates:
-            # Look for MA candidate first
             if "music_assistant" in integration:
-                # Found the most relevant MA entity based on search rank. Use it immediately.
                 ma_candidate = (eid, integration)
                 break 
-
-            # Look for generic TV/Chromecast candidate as a fallback
             if eid.startswith("media_player.") and any(x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
-                # Keep the best ranked TV as a fallback
                 if tv_candidate is None:
                     tv_candidate = (eid, integration)
 
-        # Priority 1: Use Music Assistant entity if found.
         if ma_candidate:
-            log.info(f"Strict Music Mode: Prioritizing MA candidate: {ma_candidate[0]}")
-            return ma_candidate
-
-        # Priority 2: Use the best ranked generic TV/Chromecast if MA not found.
+            return [ma_candidate] if allow_multiple else ma_candidate
         if tv_candidate:
-            log.info(f"Strict Music Mode: Falling back to generic TV candidate: {tv_candidate[0]}")
-            return tv_candidate
-
-        # Priority 3: Fail if no suitable music device found.
+            return [tv_candidate] if allow_multiple else tv_candidate
         log.warning(f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None.")
-        return (None, None)
+        return [] if allow_multiple else (None, None)
 
-    # --- POWER/HARDWARE PRIORITY (Turn On/Off) ---
-    # Prefer hardware integrations (Android TV, Roku, etc.) over software streams (Music Assistant) for power.
+    # --- POWER/HARDWARE PRIORITY ---
     if intent in ["turn_on", "turn_off", "toggle"]:
-        hw_candidate = None
-        # Common hardware integrations that control physical power
         HW_INTEGRATIONS_POWER = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc", "denonavr", "yamaha"]
         
-        # Capability Enrichment Step
-        # The user wants us to "pull that data" to know for sure if it's Chrome or Android
-        from settings import GlobalResources, get_user_creds
+        # Capability Enrichment (Re-added)
+        from settings import get_user_creds
         redis_client = GlobalResources.redis_client
         admin_creds = get_user_creds("admin")
         
         enriched_candidates = []
-        for eid, integration in candidates:
-            # If we don't know the integration, or we want to be sure, check capabilities
-            # We do this for ALL candidates in the shortlist to ensure fairness
-            try:
-                # This function caches heavily, so it's safe to call
-                caps = await get_device_capabilities(eid, admin_creds, redis_client)
-                
-                # Update integration if found
-                real_integration = caps.get("integration", integration)
-                if real_integration == "unknown": real_integration = integration # Fallback
-                
-                features = caps.get("features_breakdown", {})
-                
-                enriched_candidates.append({
-                    "eid": eid,
-                    "integration": real_integration,
-                    "supported_features": features,
-                    "friendly_name": caps.get("friendly_name", eid)
-                })
-            except Exception as e:
-                log.warning(f"Error enriching {eid}: {e}")
-                enriched_candidates.append({"eid": eid, "integration": integration, "supported_features": {}, "friendly_name": eid})
+        for c in raw_candidates:
+             try:
+                 caps = await get_device_capabilities(c["eid"], admin_creds, redis_client)
+                 real_int = caps.get("integration", c["integration"])
+                 if real_int == "unknown": real_int = c["integration"]
+                 enriched_candidates.append({
+                     "eid": c["eid"], 
+                     "integration": real_int, 
+                     "supported_features": caps.get("features_breakdown", {}),
+                     "friendly_name": caps.get("friendly_name", c["friendly_name"])
+                 })
+             except:
+                 enriched_candidates.append({"eid": c["eid"], "integration": c["integration"], "supported_features": {}, "friendly_name": c["friendly_name"]})
 
-        log.info(f"Enriched Candidates: {[(c['eid'], c['integration']) for c in enriched_candidates]}")
-
-        # Strict Capability Routing Logic
         matches = []
         for c in enriched_candidates:
             score = 0
@@ -848,71 +851,36 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             eid = c["eid"]
             feats = c["supported_features"]
             
-            # --- POWER LOGIC ---
-            # Prefer: Explicit HW Integration > Supports Turn Off > Has "TV" in name
-            # Avoid: Chromecast (Chrome) for Power (unless it's the only way)
+            if integ in HW_INTEGRATIONS_POWER: score += 20
+            if feats.get("turn_off"): score += 10
+            if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]): score += 5
             
-            if integ in HW_INTEGRATIONS_POWER:
-                score += 20
-            
-            # Boost if it explicitly claims to support Turn Off
-            if feats.get("turn_off"):
-                score += 10
-            
-            # Boost if name suggests it's the device itself
-            if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]):
-                score += 5
-                
-            # Penalize Cast/Chrome for Power
             is_chrome = "chrome" in integ.lower() or "cast" in integ.lower() or "google_cast" in integ.lower()
-            if is_chrome:
-                score -= 20 # Strong penalty for power
+            if is_chrome: score -= 20
             
             matches.append((score, eid, integ))
 
         if matches:
             matches.sort(key=lambda x: x[0], reverse=True)
-            log.info(f"Capability Priority: Candidates sorted: {matches}")
-            best_score, best_eid, best_int = matches[0]
-            if best_score > -100: # Sanity threshold
-                log.info(f"Capability Priority: Selected '{best_eid}' ({best_int}) for '{query_name}'")
-                return (best_eid, best_int)
+            res = (matches[0][1], matches[0][2])
+            return [res] if allow_multiple else res
 
-    # --- NON-STRICT / GENERIC LOGIC (For power, nav, non-music play) ---
-
+    # --- FALLBACK / GENERIC ---
     preferred_type = "generic"
-
     if intent == "play_media":
-         # Fallback for play_media if NOT strictly music (meaning video/generic)
-         # If app package detected, prefer Android
-         if any(app in q_low for app in APP_PACKAGES):
-             preferred_type = "android"
-         
-         # EXCEPTION: If is_video flag passed (Watch/Video keywords), prefer hardware
-         if is_video:
+         APP_PACKAGES = ["netflix", "youtube", "hulu", "plex", "spotify", "disney"] 
+         q_low = query_name.lower()
+         if any(app in q_low for app in APP_PACKAGES) or is_video:
              preferred_type = "android"
 
     elif intent in ["open_app"]:
         preferred_type = "android"
     
     elif intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
-        # Hardware Priority for Power/Nav
-        # "Turn on TV" -> Android TV / Hardware
-        preferred_type = "hardware"
+        preferred_type = "android" # Prefer hardware for these if no explicit match above
 
-    log.info(f"Smart Resolving '{query_name}' Intent '{intent}' Pref '{preferred_type}' Candidates {candidates[:3]}...")
-
-    # Standard Preference Logic for generic/remote/hardware
+    best_candidate = None
     for eid, integration in candidates:
-        if preferred_type == "android" and ("media_player" in eid) and ("androidtv" in integration or "known_hardware" in integration):
-             return eid, integration
-        
-        if preferred_type == "hardware":
-             # Prioritize hardware integrations for power
-             if integration in ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc"]:
-                 return eid, integration
-             if "music_assistant" not in integration and any(x in eid.lower() for x in ["tv", "projector", "receiver"]):
-                 return eid, integration
 
         if preferred_type == "remote" and ("remote" in eid or "androidtv" in integration):
             return eid, integration
