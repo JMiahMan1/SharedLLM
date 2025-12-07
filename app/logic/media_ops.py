@@ -809,24 +809,38 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         # Note: 'unknown' is sometimes returned by RAG for newly discovered or androidtv_remote devices
         HW_INTEGRATIONS = ["androidtv", "cast", "google_cast", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc", "unknown"]
         
+        hw_matches = []
         for eid, integration in candidates:
-             if integration in HW_INTEGRATIONS:
-                 hw_candidate = (eid, integration)
-                 break
+             score = 0
+             # 1. Explicit Hardware Integration (High Confidence)
+             if integration in HW_INTEGRATIONS and integration != "unknown" and integration != "cast" and integration != "google_cast":
+                 score += 10
              
-             # Heuristic fallback: If it's NOT Music Assistant, and has "TV" in the ID, it's likely the hardware.
-             # Also allow "unknown" integration if it looks like a TV/Remote
-             # BUT exclude "chrome" (Chromecast) unless it's the only option, as turning off Chromecast often doesn't turn off TV.
-             is_tv_device = any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"])
-             is_chrome = "chrome" in eid.lower()
+             # 2. Heuristic: "TV" or "Remote" in ID
+             if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]):
+                 score += 5
              
-             if "music_assistant" not in integration and is_tv_device and not is_chrome:
-                 if not hw_candidate:
-                     hw_candidate = (eid, integration)
+             # 3. Penalize "Chrome"/"Cast" if the query didn't strictly ask for it
+             # This allows "Turn off Office TV" to prefer the Android Remote over the Chromecast
+             # But "Turn off Chromecast" will still work via vector match routing or if it's the only option.
+             is_chrome = "chrome" in eid.lower() or "cast" in eid.lower()
+             if is_chrome and "chrome" not in query_name.lower() and "cast" not in query_name.lower():
+                 score -= 5
 
-        if hw_candidate:
-             log.info(f"Power Priority: Resolved '{query_name}' to hardware entity {hw_candidate[0]} ({hw_candidate[1]})")
-             return hw_candidate
+             # 4. Valid candidate check
+             is_valid_hw = (integration in HW_INTEGRATIONS) or \
+                           ("music_assistant" not in integration and any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]))
+             
+             if is_valid_hw and integration != "music_assistant":
+                  hw_matches.append((score, eid, integration))
+        
+        if hw_matches:
+            # Sort by score descending
+            hw_matches.sort(key=lambda x: x[0], reverse=True)
+            log.info(f"Power Priority: Candidates sorted: {hw_matches}")
+            best_score, best_eid, best_int = hw_matches[0]
+            log.info(f"Power Priority: Selected '{best_eid}' ({best_int}) for '{query_name}'")
+            return (best_eid, best_int)
 
     # --- NON-STRICT / GENERIC LOGIC (For power, nav, non-music play) ---
 
