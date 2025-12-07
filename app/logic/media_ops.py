@@ -806,41 +806,77 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     if intent in ["turn_on", "turn_off", "toggle"]:
         hw_candidate = None
         # Common hardware integrations that control physical power
-        # Note: 'unknown' is sometimes returned by RAG for newly discovered or androidtv_remote devices
-        HW_INTEGRATIONS = ["androidtv", "cast", "google_cast", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc", "unknown"]
+        HW_INTEGRATIONS_POWER = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc", "denonavr", "yamaha"]
         
-        hw_matches = []
+        # Capability Enrichment Step
+        # The user wants us to "pull that data" to know for sure if it's Chrome or Android
+        from settings import GlobalResources, get_user_creds
+        redis_client = GlobalResources.redis_client
+        admin_creds = get_user_creds("admin")
+        
+        enriched_candidates = []
         for eid, integration in candidates:
-             score = 0
-             # 1. Explicit Hardware Integration (High Confidence)
-             if integration in HW_INTEGRATIONS and integration != "unknown" and integration != "cast" and integration != "google_cast":
-                 score += 10
-             
-             # 2. Heuristic: "TV" or "Remote" in ID
-             if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]):
-                 score += 5
-             
-             # 3. Penalize "Chrome"/"Cast" if the query didn't strictly ask for it
-             # This allows "Turn off Office TV" to prefer the Android Remote over the Chromecast
-             # But "Turn off Chromecast" will still work via vector match routing or if it's the only option.
-             is_chrome = "chrome" in eid.lower() or "cast" in eid.lower()
-             if is_chrome and "chrome" not in query_name.lower() and "cast" not in query_name.lower():
-                 score -= 5
+            # If we don't know the integration, or we want to be sure, check capabilities
+            # We do this for ALL candidates in the shortlist to ensure fairness
+            try:
+                # This function caches heavily, so it's safe to call
+                caps = await get_device_capabilities(eid, admin_creds, redis_client)
+                
+                # Update integration if found
+                real_integration = caps.get("integration", integration)
+                if real_integration == "unknown": real_integration = integration # Fallback
+                
+                features = caps.get("features_breakdown", {})
+                
+                enriched_candidates.append({
+                    "eid": eid,
+                    "integration": real_integration,
+                    "supported_features": features,
+                    "friendly_name": caps.get("friendly_name", eid)
+                })
+            except Exception as e:
+                log.warning(f"Error enriching {eid}: {e}")
+                enriched_candidates.append({"eid": eid, "integration": integration, "supported_features": {}, "friendly_name": eid})
 
-             # 4. Valid candidate check
-             is_valid_hw = (integration in HW_INTEGRATIONS) or \
-                           ("music_assistant" not in integration and any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]))
-             
-             if is_valid_hw and integration != "music_assistant":
-                  hw_matches.append((score, eid, integration))
-        
-        if hw_matches:
-            # Sort by score descending
-            hw_matches.sort(key=lambda x: x[0], reverse=True)
-            log.info(f"Power Priority: Candidates sorted: {hw_matches}")
-            best_score, best_eid, best_int = hw_matches[0]
-            log.info(f"Power Priority: Selected '{best_eid}' ({best_int}) for '{query_name}'")
-            return (best_eid, best_int)
+        log.info(f"Enriched Candidates: {[(c['eid'], c['integration']) for c in enriched_candidates]}")
+
+        # Strict Capability Routing Logic
+        matches = []
+        for c in enriched_candidates:
+            score = 0
+            integ = c["integration"]
+            eid = c["eid"]
+            feats = c["supported_features"]
+            
+            # --- POWER LOGIC ---
+            # Prefer: Explicit HW Integration > Supports Turn Off > Has "TV" in name
+            # Avoid: Chromecast (Chrome) for Power (unless it's the only way)
+            
+            if integ in HW_INTEGRATIONS_POWER:
+                score += 20
+            
+            # Boost if it explicitly claims to support Turn Off
+            if feats.get("turn_off"):
+                score += 10
+            
+            # Boost if name suggests it's the device itself
+            if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]):
+                score += 5
+                
+            # Penalize Cast/Chrome for Power
+            is_chrome = "chrome" in integ.lower() or "cast" in integ.lower() or "google_cast" in integ.lower()
+            if is_chrome:
+                score -= 20 # Strong penalty for power
+            
+            matches.append((score, eid, integ))
+
+        if matches:
+            matches.sort(key=lambda x: x[0], reverse=True)
+            log.info(f"Capability Priority: Candidates sorted: {matches}")
+            best_score, best_eid, best_int = matches[0]
+            if best_score > -100: # Sanity threshold
+                log.info(f"Capability Priority: Selected '{best_eid}' ({best_int}) for '{query_name}'")
+                return (best_eid, best_int)
 
     # --- NON-STRICT / GENERIC LOGIC (For power, nav, non-music play) ---
 
