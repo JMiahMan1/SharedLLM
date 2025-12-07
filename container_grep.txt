@@ -1,0 +1,1 @@
+    log.info(f"DEBUG: Entering smart_resolve_entity. Q='{query_name}' Intent='{intent}' Collection={ha_collection}")

@@ -498,7 +498,7 @@ async def resolve_multiple_entities_with_pattern(
                 continue
         
         candidates.append((eid, integration))
-       friendly_names[eid] = friendly_name
+        friendly_names[eid] = friendly_name
     
     # Filter by pattern
     matching_entities = filter_entities_by_pattern(
