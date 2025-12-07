@@ -1,1 +1,0 @@
-python3: can't open file '/app/test/unit/test_capability_detection.py': [Errno 2] No such file or directory

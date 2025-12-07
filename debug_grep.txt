@@ -1,2 +1,0 @@
-2025-12-06 11:59:31,712 [INFO] DEBUG: Entering smart_resolve_entity. Q='the office tv' Intent='play_media' Collection=<langchain_chroma.vectorstores.Chroma object at 0x7fc126fb7f10>
-2025-12-06 11:59:31,748 [INFO] DEBUG: Search returned 15 docs.
