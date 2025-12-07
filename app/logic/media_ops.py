@@ -961,7 +961,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
     # NEW: Audiobooks
     audiobook_keywords = ["read", "book", "chapter", "audiobook"]
-    video_keywords = ["movie", "film", "show", "video", "youtube", "netflix", "watch", "tv"]
+    video_keywords = ["movie", "film", "show", "video", "youtube", "netflix", "watch"]
     
     is_music_request = any(x in q_low for x in music_keywords)
     is_audiobook_request = any(x in q_low for x in audiobook_keywords)
