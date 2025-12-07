@@ -93,20 +93,24 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
         log.error(f"Error accumulating response: {e}")
     
     if format_type == "openai":
-        return {
+        response = {
             "id": f"chat-{int(time.time())}",
             "object": "chat.completion",
             "created": int(time.time()),
             "model": body.model,
             "choices": [{"message": {"role": "assistant", "content": full_text}, "finish_reason": "stop", "index": 0}]
         }
+        log.debug(f"[RESPONSE] Returning to client: {full_text[:200]}")
+        return response
     
-    return {
+    response = {
         "model": body.model, 
         "created_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         "message": {"role": "assistant", "content": full_text}, 
         "done": True
     }
+    log.debug(f"[RESPONSE] Returning to client: {full_text[:200]}")
+    return response
 
 # --- Intent Engine Endpoints ---
 @app.post("/api/intent/learn")
