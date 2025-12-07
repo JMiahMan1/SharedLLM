@@ -816,8 +816,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
              
              # Heuristic fallback: If it's NOT Music Assistant, and has "TV" in the ID, it's likely the hardware.
              # Also allow "unknown" integration if it looks like a TV/Remote
+             # BUT exclude "chrome" (Chromecast) unless it's the only option, as turning off Chromecast often doesn't turn off TV.
              is_tv_device = any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"])
-             if "music_assistant" not in integration and is_tv_device:
+             is_chrome = "chrome" in eid.lower()
+             
+             if "music_assistant" not in integration and is_tv_device and not is_chrome:
                  if not hw_candidate:
                      hw_candidate = (eid, integration)
 
