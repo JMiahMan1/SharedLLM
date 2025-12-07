@@ -286,6 +286,7 @@ async def _attempt_fast_ha_command(
     result = await smart_resolve_entity(clean_q, service, ha_collection, is_music=False)
     
     if isinstance(result, list):
+        # Batch entities detected (e.g. from pattern matching) -> Fall back to Orchestrator to handle multiple entities
         log.info(f"Fast HA Path Aborted: Batch entities detected ({len(result)}) - falling back to Orchestrator")
         return None
         
