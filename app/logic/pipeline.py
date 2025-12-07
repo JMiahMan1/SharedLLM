@@ -283,7 +283,13 @@ async def _attempt_fast_ha_command(
     from .media_ops import smart_resolve_entity
     
     # We pass the cleaned query (device name) and the intent (service)
-    eid, integration = await smart_resolve_entity(clean_q, service, ha_collection, is_music=False)
+    result = await smart_resolve_entity(clean_q, service, ha_collection, is_music=False)
+    
+    if isinstance(result, list):
+        log.info(f"Fast HA Path Aborted: Batch entities detected ({len(result)}) - falling back to Orchestrator")
+        return None
+        
+    eid, integration = result
     
     if not eid:
         # Fallback to LLM if no entity found
