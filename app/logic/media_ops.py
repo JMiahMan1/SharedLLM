@@ -618,12 +618,12 @@ async def resolve_multiple_entities_with_pattern(
     
     # Build candidates list with domain filtering
     candidates = []
-    friendly_names = {}
     
     for d in docs:
         eid = d.metadata.get("entity_id")
         integration = d.metadata.get("integration", "unknown")
-        friendly_name = d.metadata.get("friendly_name", eid)
+        # Ensure we keep all metadata (like friendly_name, area_name)
+        metadata = d.metadata
         
         if not eid:
             continue
@@ -638,14 +638,13 @@ async def resolve_multiple_entities_with_pattern(
             if domain not in ["media_player", "group", "script"]:
                 continue
         
-        candidates.append((eid, integration))
-        friendly_names[eid] = friendly_name
+        # Append tuple of (entity_id, integration, metadata_dict)
+        candidates.append((eid, integration, metadata))
     
     # Filter by pattern
     matching_entities = filter_entities_by_pattern(
         candidates,
-        detected_patterns,
-        friendly_names
+        detected_patterns
     )
     
     log.info(f"[PATTERN] Resolved {len(matching_entities)} entities matching pattern '{pattern_type}'")
