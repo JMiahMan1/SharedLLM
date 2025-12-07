@@ -713,12 +713,15 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     # COLOR & BRIGHTNESS CONTROL
     # -------------------------------------------------
     if intent in ["set_color", "set_brightness", "dim", "brighten"]:
-        log.debug(f\"[COLOR/BRIGHTNESS] Handling intent='{intent}' for {entity_id}\")\n        \n        if domain != "light":
+        log.debug(f"[COLOR/BRIGHTNESS] Handling intent='{intent}' for {entity_id}")
+        
+        if domain != "light":
             return {"status": "FAILURE", "message": f"Color/brightness control only works with lights, not {domain} devices.", "entity_id": entity_id, "service": intent}
         
         # Fetch device capabilities
-        log.debug(f\"[COLOR/BRIGHTNESS] Fetching capabilities for {entity_id}...\")\n        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-        log.debug(f\"[COLOR/BRIGHTNESS] Capabilities retrieved for {entity_id}\")
+        log.debug(f"[COLOR/BRIGHTNESS] Fetching capabilities for {entity_id}...")
+        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+        log.debug(f"[COLOR/BRIGHTNESS] Capabilities retrieved for {entity_id}")
         friendly_name = caps.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title())
         
         # Validate color support
