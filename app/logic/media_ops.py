@@ -593,20 +593,26 @@ async def resolve_multiple_entities_with_pattern(
     If pattern detected (even/odd/range/list/all), returns all matching entities.
     Otherwise returns single best match.
     """
-    # Detect number pattern
-    pattern_type, pattern_data = detect_number_pattern(query)
+    # Detect entity patterns (returns list of type/data tuples)
+    detected_patterns = detect_number_pattern(query)
     
-    if not pattern_type:
+    if not detected_patterns:
         # No pattern - use single entity resolution
-        entity_id, integration = await smart_resolve_entity(query, intent, ha_collection)
+        result = await smart_resolve_entity(query, intent, ha_collection)
+        
+        # Check if smart_resolve_entity returned a list (batch)
+        if isinstance(result, list):
+             return result
+        
+        entity_id, integration = result
         if entity_id:
             return [(entity_id, integration)]
         return []
     
-    log.info(f"[PATTERN] Detected pattern '{pattern_type}' in query")
+    log.info(f"[PATTERN] Detected patterns: {[p[0] for p in detected_patterns]}")
     
     # Pattern detected - get all candidates and filter
-    docs = await run_blocking(lambda: safe_similarity_search(ha_collection, query, k=30))
+    docs = await run_blocking(lambda: safe_similarity_search(ha_collection, query, k=50))
     if not docs:
         return []
     
@@ -638,8 +644,7 @@ async def resolve_multiple_entities_with_pattern(
     # Filter by pattern
     matching_entities = filter_entities_by_pattern(
         candidates,
-        pattern_type,
-        pattern_data,
+        detected_patterns,
         friendly_names
     )
     
