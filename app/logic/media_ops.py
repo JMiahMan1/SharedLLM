@@ -716,10 +716,11 @@ async def execute_batch_command(
         'friendly_name': f"{success_count} devices",  # For LLM context formatting
         'entity_id': 'batch_command'  # Identify as batch in context
     }
-async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False) -> tuple:
+async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False, is_video: bool = False) -> tuple:
     """
     Resolves the best entity based on query and intent.
-    When is_music=True, it prioritizes Music Assistant devices over generic devices.
+    When is_music=True, it prioritizes Music Assistant devices.
+    When is_video=True, it prioritizes Hardware/Android TV devices.
     """
     log.info(f"DEBUG: Entering smart_resolve_entity. Q='{query_name}' Intent='{intent}' Collection={ha_collection}")
     
@@ -823,26 +824,38 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
     preferred_type = "generic"
 
-    # Determine Preference for non-music intents
-    if intent == "play_media" and any(app in q_low for app in APP_PACKAGES):
-        preferred_type = "android"
+    if intent == "play_media":
+         # Fallback for play_media if NOT strictly music (meaning video/generic)
+         # If app package detected, prefer Android
+         if any(app in q_low for app in APP_PACKAGES):
+             preferred_type = "android"
+         
+         # EXCEPTION: If is_video flag passed (Watch/Video keywords), prefer hardware
+         if is_video:
+             preferred_type = "android"
+
     elif intent in ["open_app"]:
         preferred_type = "android"
+    
     elif intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
-        # CRITICAL FIX: Only prefer remote if navigation or explicit remote context.
-        # "Turn on TV" should map to the TV media_player entity (for Wake on LAN/CEC), not the remote entity.
-        if intent.startswith("nav_"):
-            preferred_type = "remote"
-        else:
-            # For pure power commands, we stick to generic unless we find a specific reason.
-            preferred_type = "generic"
+        # Hardware Priority for Power/Nav
+        # "Turn on TV" -> Android TV / Hardware
+        preferred_type = "hardware"
 
     log.info(f"Smart Resolving '{query_name}' Intent '{intent}' Pref '{preferred_type}' Candidates {candidates[:3]}...")
 
-    # Standard Preference Logic for generic/remote
+    # Standard Preference Logic for generic/remote/hardware
     for eid, integration in candidates:
-        if preferred_type == "android" and ("media_player" in eid):
-            return eid, integration
+        if preferred_type == "android" and ("media_player" in eid) and ("androidtv" in integration or "known_hardware" in integration):
+             return eid, integration
+        
+        if preferred_type == "hardware":
+             # Prioritize hardware integrations for power
+             if integration in ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc"]:
+                 return eid, integration
+             if "music_assistant" not in integration and any(x in eid.lower() for x in ["tv", "projector", "receiver"]):
+                 return eid, integration
+
         if preferred_type == "remote" and ("remote" in eid or "androidtv" in integration):
             return eid, integration
 
@@ -896,14 +909,16 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
 
     # 1. EARLY MUSIC DETECTION
     music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
-    video_keywords = ["movie", "film", "show", "video", "youtube", "netflix"]
+    # NEW: Audiobooks
+    audiobook_keywords = ["read", "book", "chapter", "audiobook"]
+    video_keywords = ["movie", "film", "show", "video", "youtube", "netflix", "watch", "tv"]
     
     is_music_request = any(x in q_low for x in music_keywords)
+    is_audiobook_request = any(x in q_low for x in audiobook_keywords)
     is_video_request = any(x in q_low for x in video_keywords)
     
     # For play_media intent, default to music mode UNLESS explicitly requesting video
-    # This ensures artist names like "Brandon Lake" default to Music Assistant
-    strict_resolution = (is_music_request or (intent == "play_media" and not is_video_request))
+    strict_resolution = ((is_music_request or is_audiobook_request) or (intent == "play_media" and not is_video_request))
     is_transport = intent in ["media_next", "media_previous", "stop_media"]
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---
@@ -915,7 +930,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
              potential_device_name = q_low.split(device_match.group(1))[-1].strip()
              if potential_device_name:
                  # Pass strict_resolution=True if we are skipping tracks, to prefer MA entities
-                 resolved_id, resolved_int = await smart_resolve_entity(potential_device_name, intent, ha_collection, is_music=True)
+                 resolved_id, resolved_int = await smart_resolve_entity(potential_device_name, intent, ha_collection, is_music=True, is_video=is_video_request)
                  if resolved_id:
                     log.info(f"Transport Short Circuit: Found explicit device {resolved_id} from query.")
                     entity_id = resolved_id
@@ -950,7 +965,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         potential_device = parts[2].strip()
 
         if len(potential_device) > 2:
-            resolved_id, resolved_int = await smart_resolve_entity(potential_device, intent, ha_collection, is_music=strict_resolution)
+            resolved_id, resolved_int = await smart_resolve_entity(potential_device, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
 
             if resolved_id:
                 if strict_resolution and "music_assistant" not in resolved_int and not any(x in resolved_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
@@ -977,7 +992,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             # THIS triggers the context memory retrieval
             entity_id = get_last_entity(redis_client, user_creds.get("user"))
         else:
-            entity_id, integration = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution)
+            entity_id, integration = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
 
     if entity_id:
         domain = entity_id.split('.')[0]
@@ -1199,6 +1214,10 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             elif re.search(r"\b(radio|station)\b", q_low):
                 ctype = "radio"
                 detected_specific_type = True
+        
+        if is_audiobook_request:
+            ctype = "audiobook"
+            detected_specific_type = True
 
         # TV Logic: TVs play video unless music is explicitly requested
         is_tv = any(x in entity_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"])
