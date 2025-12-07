@@ -338,7 +338,7 @@ async def generate_rag_stream(
     refined = await contextualize_query(query, user, model)
     update_history(user, "user", query)
     creds = get_user_creds(user)
-    intent, score, _ = await intent_engine.classify(refined)
+    intent, score, _ = await IntentClassifier.get_intent(refined)
     t_action = time.time()
     action_results = await try_handle_compound_command(refined, creds, model)
 
