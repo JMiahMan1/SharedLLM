@@ -729,7 +729,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     
     # 0. Setup & lazy imports
     try:
-        from settings import GlobalResources 
+        from settings import GlobalResources, run_blocking
         from langchain_chroma import Chroma
     except ImportError:
         log.error("Could not import dependencies for resolution.")
@@ -745,8 +745,8 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     # Increase k if looking for a group/pattern to ensure we catch all potential matches
     k = 30 if allow_multiple else 15
     try:
-        results = await GlobalResources.run_blocking(
-            lambda: ha_collection.similarity_search_with_score(query_name, k=k)
+        results = await run_blocking(
+            lambda: GlobalResources.ha_collection.similarity_search_with_score(query_name, k=k)
         )
         log.info(f"DEBUG: Search returned {len(results)} docs.")
     except Exception as e:
