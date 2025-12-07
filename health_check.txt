@@ -1,21 +1,0 @@
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 192.168.2.211:11435...
-* Connected to 192.168.2.211 (192.168.2.211) port 11435
-* using HTTP/1.x
-> GET /health HTTP/1.1
-> Host: 192.168.2.211:11435
-> User-Agent: curl/8.15.0
-> Accept: */*
-> 
-* Request completely sent off
-< HTTP/1.1 200 OK
-< date: Sat, 06 Dec 2025 19:16:37 GMT
-< server: uvicorn
-< content-length: 26
-< content-type: application/json
-< 
-{ [26 bytes data]
-100    26  100    26    0     0    387      0 --:--:-- --:--:-- --:--:--   388
-* Connection #0 to host 192.168.2.211 left intact
-{"status":"ok","db":false}

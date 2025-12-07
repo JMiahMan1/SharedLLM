@@ -1,2 +1,0 @@
-214:async def _attempt_fast_ha_command(
-452:    action_result = await _attempt_fast_ha_command(
