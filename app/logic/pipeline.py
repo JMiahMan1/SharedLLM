@@ -40,7 +40,7 @@ from .execution.registry import ActionDispatcher
 from .execution.fast_path import FastPathExecutor
 from .intents.classifier import IntentClassifier
 # Ensure handlers are registered
-import app.logic.execution.handlers 
+import logic.execution.handlers 
 
 class StreamResponseBuilder:
     def __init__(self, model: str, format_type: str):

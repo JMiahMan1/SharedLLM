@@ -1,19 +1,19 @@
 from settings import GlobalResources, log
 from .registry import ActionDispatcher
 
-from app.logic.calendar_ops import (
+from logic.calendar_ops import (
     tool_calendar_list, tool_calendar_add, tool_calendar_delete, 
     tool_calendar_update, tool_calendar_read
 )
-from app.logic.timer_ops import (
+from logic.timer_ops import (
     tool_timer_add, tool_timer_list, tool_timer_delete, 
     tool_timer_pause, tool_timer_resume, tool_alarm_add
 )
-from app.logic.note_ops import (
+from logic.note_ops import (
     tool_note_add, tool_note_append, tool_note_read, tool_note_delete
 )
-from app.logic.web_search import tool_web_search
-from app.logic.media_ops import handle_media_command
+from logic.web_search import tool_web_search
+from logic.media_ops import handle_media_command
 
 # --- CALENDAR TOOLS ---
 @ActionDispatcher.register("calendar_add")
