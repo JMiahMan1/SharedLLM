@@ -2,7 +2,7 @@ import re
 from typing import Tuple, Optional
 from settings import log, ACTION_TOOL_CONFIDENCE_THRESHOLD
 from intent_engine import engine as intent_engine
-from app.logic.media_ops import REGEX_INTENT_MAP
+from logic.media_ops import REGEX_INTENT_MAP
 
 class IntentClassifier:
     """
