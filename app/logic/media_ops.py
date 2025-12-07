@@ -713,6 +713,8 @@ async def execute_batch_command(
         'batch_results': results,
         'success_count': success_count,
         'failure_count': failure_count
+        'friendly_name': f"{success_count} devices",  # For LLM context formatting
+        'entity_id': 'batch_command'  # Identify as batch in context
     }
 async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False) -> tuple:
     """
@@ -894,9 +896,14 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
 
     # 1. EARLY MUSIC DETECTION
     music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
+    video_keywords = ["movie", "film", "show", "video", "youtube", "netflix"]
+    
     is_music_request = any(x in q_low for x in music_keywords)
-
-    strict_resolution = is_music_request and intent == "play_media"
+    is_video_request = any(x in q_low for x in video_keywords)
+    
+    # For play_media intent, default to music mode UNLESS explicitly requesting video
+    # This ensures artist names like "Brandon Lake" default to Music Assistant
+    strict_resolution = (is_music_request or (intent == "play_media" and not is_video_request))
     is_transport = intent in ["media_next", "media_previous", "stop_media"]
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---
