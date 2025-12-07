@@ -752,8 +752,10 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             service = "turn_on"
             color_modes = caps.get("color_modes", [])
             
-            if caps.get("has_color") and "rgb" in color_modes:
-                # Full RGB color support
+            # Check for any RGB variant (rgb, rgbw, rgbww)
+            has_rgb_mode = any(mode.startswith("rgb") for mode in color_modes)
+            if caps.get("has_color") and has_rgb_mode:
+                # Full RGB color support (works for rgb, rgbw, rgbww modes)
                 service_data = {"rgb_color": color_found}
                 log.info(f"Setting {entity_id} to RGB {color_found}")
             
