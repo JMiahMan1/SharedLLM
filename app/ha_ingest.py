@@ -65,37 +65,44 @@ def fetch_ha_data() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     states = fetch_endpoint("states") or []
     device_registry_list = fetch_endpoint("config/device_registry/list") or []
     entity_registry_list = fetch_endpoint("config/entity_registry/list") or []
+    area_registry_list = fetch_endpoint("config/area_registry/list") or []
 
-    # Index registries for fast lookup by ID
+    # Index registries for fast lookup
     device_registry = {dev["id"]: dev for dev in device_registry_list if "id" in dev}
     entity_registry = {ent["entity_id"]: ent for ent in entity_registry_list if "entity_id" in ent}
+    area_registry = {area["area_id"]: area["name"] for area in area_registry_list if "area_id" in area}
 
-    return states, device_registry, entity_registry
+    return states, device_registry, entity_registry, area_registry
 
-def get_device_info(entity_id: str, device_registry: Dict[str, Any], entity_registry: Dict[str, Any]) -> Tuple[str, str]:
-    """Retrieves device name and integration from registry data."""
+def get_device_info(entity_id: str, device_registry: Dict[str, Any], entity_registry: Dict[str, Any], area_registry: Dict[str, str]) -> Tuple[str, str, str]:
+    """Retrieves device name, integration, and area name from registry data."""
     registry_entry = entity_registry.get(entity_id, {})
     device_id = registry_entry.get("device_id")
     platform = registry_entry.get("platform", "unknown")
-
+    
+    # Try to find area in entity registry first, then device registry
+    area_id = registry_entry.get("area_id")
+    
     integration = platform
     device_name = ""
     
     if device_id and device_id in device_registry:
         device = device_registry[device_id]
-        # Combine Manufacturer + Model for a better description
-        # e.g., "Philips Hue" is better than just "light"
+        if not area_id:
+            area_id = device.get("area_id")
+            
         integration = (device.get("manufacturer", "") + " " + device.get("model", "")).strip()
         device_name = device.get("name_by_user") or device.get("name") or ""
         
-        # Override integration if the platform name is more specific (like music_assistant)
         if platform and "integration" not in integration.lower():
             integration = platform
 
     if not integration.strip():
         integration = platform
         
-    return device_name, integration.strip()
+    area_name = area_registry.get(area_id, "") if area_id else ""
+        
+    return device_name, integration.strip(), area_name
 
 # ----------------------
 # Ingestion Main
@@ -121,7 +128,7 @@ def ingest_ha_metadata():
         pass
 
     # 3. Fetch HA Data
-    states, device_registry, entity_registry = fetch_ha_data()
+    states, device_registry, entity_registry, area_registry = fetch_ha_data()
     if not states:
         logger.error("No states received from HA. Aborting.")
         return
@@ -157,7 +164,7 @@ def ingest_ha_metadata():
             continue
             
         # Get enriched metadata
-        device_name, integration = get_device_info(entity_id, device_registry, entity_registry)
+        device_name, integration, area_name = get_device_info(entity_id, device_registry, entity_registry, area_registry)
         
         # --- MUSIC ASSISTANT SELF-CORRECTION ---
         # If integration is unknown but it has MA attributes, force it.
@@ -172,6 +179,8 @@ def ingest_ha_metadata():
         # Build Content (The text the LLM actually searches against)
         # We explicitly mention "is a X device" to help vector matching.
         content = f"{friendly_name} ({entity_id}) is a {integration} device."
+        if area_name:
+             content += f" Located in {area_name}."
         if device_name and device_name not in friendly_name:
              content += f" Part of device: {device_name}."
         
@@ -193,6 +202,7 @@ def ingest_ha_metadata():
             "friendly_name": friendly_name,
             "integration": integration, 
             "device_name": device_name,
+            "area_name": area_name or "",
             "state": current_state,
             "source": "home_assistant"
         }
