@@ -780,8 +780,8 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             friendly_name = doc.metadata.get("friendly_name")
             integration = doc.metadata.get("integration", "unknown")
             
-            # Threshold
-            if score > 0.6: continue 
+            # Threshold (Relaxed for distance-based scoring)
+            if score > 1.4: continue 
             
             # Basic Domain Safety
             domain = eid.split('.')[0]
@@ -1013,7 +1013,17 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         potential_device = parts[2].strip()
 
         if len(potential_device) > 2:
-            resolved_id, resolved_int = await smart_resolve_entity(potential_device, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
+            resolved_result = await smart_resolve_entity(potential_device, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
+            
+            # Handle List Return (Batch)
+            if isinstance(resolved_result, list):
+                 if resolved_result:
+                     log.info(f"['On' Split] Resolved {len(resolved_result)} entities. Executing Batch.")
+                     return await execute_batch_command(resolved_result, intent, query, user_creds, ha_collection, redis_client)
+                 else:
+                     resolved_id, resolved_int = None, None
+            else:
+                 resolved_id, resolved_int = resolved_result
 
             if resolved_id:
                 if strict_resolution and "music_assistant" not in resolved_int and not any(x in resolved_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
@@ -1040,7 +1050,15 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             # THIS triggers the context memory retrieval
             entity_id = get_last_entity(redis_client, user_creds.get("user"))
         else:
-            entity_id, integration = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
+            resolved_result = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
+            if isinstance(resolved_result, list):
+                 if resolved_result:
+                     log.info(f"[Standard] Resolved {len(resolved_result)} entities. Executing Batch.")
+                     return await execute_batch_command(resolved_result, intent, query, user_creds, ha_collection, redis_client)
+                 else:
+                     entity_id, integration = None, None
+            else:
+                 entity_id, integration = resolved_result
 
     if entity_id:
         domain = entity_id.split('.')[0]
