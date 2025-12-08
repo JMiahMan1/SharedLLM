@@ -73,18 +73,6 @@ async def run_test():
             print(f"[FAIL] API Error: {type(e).__name__}: {e}")
             return {}
 
-    # Play Music
-    chat("Play 'The Dark Side of the Moon' on Office Speaker")
-    await asyncio.sleep(5)  # Wait for buffer
-
-    # Get Initial Volume
-    init_vol = await get_volume(OFFICE_SPEAKER)
-    print(f"Initial Volume: {init_vol}")
-
-    if init_vol is None:
-        print(
-            "[WARN] Warning: Could not read volume. Device might not support it or be off."
-        )
         init_vol = 0.5
 
     # 2. Set Volume Low
@@ -100,25 +88,40 @@ async def run_test():
     else:
         print(f"[FAIL] Failure: Expected 0.3, got {curr_vol}")
 
-    # 3. Set Volume High
-    print("\n3. Setting Volume to 60%...")
-    chat("Turn the volume up to 60%")
-    await asyncio.sleep(3)
+    targets = ["media_player.office_tv", "media_player.office_speaker"]
+    
+    for entity_id in targets:
+        print(f"\n--- Starting Volume Lifecycle Test on {entity_id} ---")
+        
+        # Derive a friendly name for the prompt
+        name = entity_id.split(".")[-1].replace("_", " ").title()
+        
+        # Get Initial Volume
+        init_vol = await get_volume(entity_id)
+        print(f"Initial Volume: {init_vol}")
+        if init_vol is None:
+             init_vol = 0.5
+        
+        # 1. Set Volume Low
+        await test_step(
+            f"Set the volume on {name} to 30%", 
+            entity_id, 
+            0.3
+        )
+        
+        # 2. Set Volume High
+        await test_step(
+            f"Turn the volume up to 60% on {name}", 
+            entity_id, 
+            0.6
+        )
 
-    curr_vol = await get_volume(OFFICE_SPEAKER)
-    print(f"Volume is now: {curr_vol}")
-
-    if curr_vol == 0.6:
-        print("[OK] Success: Volume matches 60%")
-    else:
-        print(f"[FAIL] Failure: Expected 0.6, got {curr_vol}")
-
-    # 4. Restore
-    print(f"\n4. Restoring to {init_vol * 100}%...")
-    chat(f"Set volume to {int(init_vol * 100)}%")
-    await asyncio.sleep(2)
-    final_vol = await get_volume(OFFICE_SPEAKER)
-    print(f"Final Volume: {final_vol}")
+        # 3. Restore
+        print(f"\n4. Restoring to {init_vol * 100}%...")
+        await chat(f"Set volume on {name} to {int(init_vol * 100)}%")
+        await asyncio.sleep(2)
+        final_vol = await get_volume(entity_id)
+        print(f"Final Volume: {final_vol}")
 
 
 if __name__ == "__main__":
