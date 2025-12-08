@@ -974,9 +974,12 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
         integration = m.get("integration", "unknown")
         caps = m.get("capabilities", "").split(",")
         
+        friendly_name = m.get("friendly_name", "").lower()
+        
         # POWER
         if intent in ["turn_on", "turn_off", "toggle"]:
             if domain == "remote": score += 100
+            elif "remote" in friendly_name: score += 95 # High priority for "Office TV Remote"
             elif integration == "androidtv_remote": score += 90
             elif domain == "switch": score += 50 # Smart plug?
             elif domain == "media_player":

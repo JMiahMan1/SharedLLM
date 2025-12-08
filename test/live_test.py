@@ -124,6 +124,13 @@ def safe_post(url, payload, label):
         try:
             resp_json = r.json()
             msg = resp_json.get("message", {}).get("content", "") or resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            # --- SILENT SUCCESS CHECK ---
+            if "[SILENT_SUCCESS]" in msg:
+                print(f"   [RESPONSE] {label}: <SILENT SUCCESS TOKEN RECEIVED>")
+                return "[SILENT_SUCCESS]"
+            # ----------------------------
+
             print(f"   [RESPONSE] {label}: {msg.strip()[:120]}...")
             return msg
         except:
@@ -405,7 +412,12 @@ def test_functionality():
     test_cross_domain_multi_command(lamp_id, LAMP_NAME)
  
     print_header(f"Func: Control (Turn On {LAMP_NAME})")
-    safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":f"Turn on the {LAMP_NAME}"}], "stream":False}, "Turn On")
+    resp = safe_post(f"{API_URL}/api/chat", {"messages":[{"role":"user","content":f"Turn on the {LAMP_NAME}"}], "stream":False}, "Turn On")
+    if resp == "[SILENT_SUCCESS]":
+        print("   [PASS] Silent Success token received for Turn On.")
+    else:
+        print(f"   [FAIL] Expected Silent Success, got: {resp}")
+        
     check_device_state(lamp_id, "on")
  
     test_music_playback(tv_id, MEDIA_NAME)
