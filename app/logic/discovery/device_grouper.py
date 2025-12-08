@@ -69,7 +69,8 @@ def group_entities(entities: list) -> dict:
             "domain": eid.split(".")[0],
             "integration": integration,
             "state": e.get("state"),
-            "features": attrs.get("supported_features", 0)
+            "features": attrs.get("supported_features", 0),
+            "attributes": attrs  # Preserve raw attributes for ingestion
         })
         
         # Update Group Meta
