@@ -1304,7 +1304,20 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 if base_state != "unknown":
                     log.info(f"Smart Power Swap: Switching {entity_id} -> {base_id} for power control.")
                     entity_id = base_id
+                    log.info(f"Smart Power Swap: Switching {entity_id} -> {base_id} for power control.")
+                    entity_id = base_id
                     domain = entity_id.split('.')[0]
+
+            # CHECK FOR REMOTE (User Preference)
+            # If we are turning off a TV/Media Player, check if there's a corresponding 'remote' entity
+            # e.g. media_player.office_tv -> remote.office_tv
+            potential_remote = entity_id.replace("media_player.", "remote.")
+            if "media_player" in entity_id and potential_remote != entity_id:
+                remote_state = await get_entity_state(potential_remote, user_creds)
+                if remote_state != "unknown":
+                    log.info(f"Smart Power Swap: Found explicit remote {potential_remote}. Swapping for power command.")
+                    entity_id = potential_remote
+                    domain = "remote"
 
         if intent.startswith("nav_"):
             cmd_map = {
@@ -1358,6 +1371,9 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             elif re.search(r"\b(radio|station)\b", q_low):
                 ctype = "radio"
                 detected_specific_type = True
+            elif re.search(r"\b(podcast)\b", q_low):
+                ctype = "podcast"
+                detected_specific_type = True
         
         if is_audiobook_request:
             ctype = "audiobook"
@@ -1385,7 +1401,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
 
         # Only remove content TYPE keywords IF the request is for MUSIC
         if is_music_request:
-            clean_title = re.sub(r"\b(music|song|album|track|playlist|artist|radio)\b", " ", clean_title)
+            clean_title = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean_title)
 
         # Remove filler words
         clean_title = re.sub(r"\b(by|the|some|a|an)\b", " ", clean_title)
