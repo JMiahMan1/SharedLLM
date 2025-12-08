@@ -1339,7 +1339,7 @@ async def handle_media_command(
                     and "music_assistant" not in resolved_int
                     and not any(
                         x in resolved_id.lower()
-                        for x in ["tv", "chromecast", "shield", "androidtv"]
+                        for x in ["tv", "chromecast", "shield", "androidtv", "speaker", "receiver", "stereo"]
                     )
                 ):
                     log.error(
