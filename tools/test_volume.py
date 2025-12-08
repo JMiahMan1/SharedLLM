@@ -52,7 +52,8 @@ async def run_test():
     # Actually, user wants to test OUR routing.
     # So we should hit OUR API.
 
-    API_URL = "http://localhost:8000/api/chat"
+    API_URL = os.getenv("RAG_API_URL", "http://192.168.2.211:11435/api/chat")
+    print(f"📡 Using API URL: {API_URL}")
 
     def chat(q):
         print(f"\nUser: {q}")
