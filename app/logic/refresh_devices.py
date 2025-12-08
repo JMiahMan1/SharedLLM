@@ -86,7 +86,27 @@ async def refresh_db():
     db = GlobalResources.ha_collection 
     
     if docs and db:
+    if docs and db:
         log.info(f"Upserting {len(docs)} documents to ChromaDB...")
+        
+        # Log first 5 docs for verification
+        for d in docs[:5]:
+            log.info(f"Preparing Doc: {d.id} | Group: {d.metadata.get('group_id')} | Integ: {d.metadata.get('integration')}")
+            
+        # CRITICAL: Delete existing IDs first to ensure metadata updates stick
+        ids_to_update = [d.id for d in docs if d.id]
+        if ids_to_update:
+            try:
+                # We use synchronous delete via run_blocking if async not available, 
+                # but langchain_chroma usually has adelete.
+                # If adelete is missing, fall back to synchronous delete.
+                if hasattr(db, 'adelete'):
+                    await db.adelete(ids=ids_to_update)
+                else:
+                    db.delete(ids=ids_to_update)
+            except Exception as e:
+                log.warning(f"Delete prior to upsert failed (might be new docs): {e}")
+
         await db.aadd_documents(docs)
         log.info("Upsert OK.")
     else:
