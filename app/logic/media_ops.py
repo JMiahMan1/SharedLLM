@@ -2047,6 +2047,16 @@ async def handle_media_command(
             await execute_ha_service(
                 domain, "turn_on", entity_id, user_creds, redis_client=redis_client
             )
+            
+        # --- ROBUST MA DETECTION ---
+        # Fetch capabilities to double-check integration (since search metadata might be stale)
+        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+        if caps.get("integration") == "music_assistant" or "mass_player_type" in caps.get("attributes", {}):
+             log.info(f"[Play Media] Capability Check: Detected Music Assistant attributes. Overriding integration.")
+             integration = "music_assistant"
+             # Also force content type to music if generic, to ensure correct routing
+             if ctype not in ["radio", "track", "album", "artist", "playlist"]:
+                 ctype = "music"
 
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices ---
         if "music_assistant" in integration:
