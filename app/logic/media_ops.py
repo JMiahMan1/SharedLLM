@@ -1297,27 +1297,39 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     # -------------------------------------------------
     if intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
         # SMART POWER SWAP: Prefer parent 'TV' entity over 'Chromecast' for power commands
-        if intent in ["turn_on", "turn_off", "toggle"] and any(s in entity_id for s in ["_chrome", "_cast", "_chromecast"]):
-            base_id = entity_id.replace("_chrome", "").replace("_chromecast", "").replace("_cast", "")
-            if base_id != entity_id:
-                base_state = await get_entity_state(base_id, user_creds)
-                if base_state != "unknown":
-                    log.info(f"Smart Power Swap: Switching {entity_id} -> {base_id} for power control.")
-                    entity_id = base_id
-                    log.info(f"Smart Power Swap: Switching {entity_id} -> {base_id} for power control.")
-                    entity_id = base_id
-                    domain = entity_id.split('.')[0]
+        if intent in ["turn_on", "turn_off", "toggle"]:
+            is_cast = any(s in entity_id for s in ["_chrome", "_chromecast", "_cast"])
+            base_media_id = entity_id
+            
+            if is_cast:
+                # 1. Try to unwrap suffix -> media_player.office_tv
+                base_media_id = entity_id.replace("_chrome", "").replace("_chromecast", "").replace("_cast", "")
+                
+                # Try swapping to Base Media Player logic
+                if base_media_id != entity_id:
+                     base_state = await get_entity_state(base_media_id, user_creds)
+                     log.info(f"Smart Power Swap: Checking base media candidate {base_media_id} (State: {base_state})")
+                     if base_state not in ["unknown", "unavailable", None]:
+                         log.info(f"Smart Power Swap: Switching {entity_id} -> {base_media_id} (Media Player)")
+                         entity_id = base_media_id
+                         domain = entity_id.split('.')[0] # e.g. media_player
 
-            # CHECK FOR REMOTE (User Preference)
-            # If we are turning off a TV/Media Player, check if there's a corresponding 'remote' entity
-            # e.g. media_player.office_tv -> remote.office_tv
+            # 2. Check for REMOTE entity based on current entity_id (which might be the base now)
+            # Strategy: media_player.office_tv -> remote.office_tv
             potential_remote = entity_id.replace("media_player.", "remote.")
             if "media_player" in entity_id and potential_remote != entity_id:
-                remote_state = await get_entity_state(potential_remote, user_creds)
-                if remote_state != "unknown":
-                    log.info(f"Smart Power Swap: Found explicit remote {potential_remote}. Swapping for power command.")
+                # Also check strict base remote if we haven't swapped yet but it was a cast device
+                # e.g. media_player.office_tv_chrome -> remote.office_tv (skip remote.office_tv_chrome)
+                if is_cast and base_media_id != entity_id:
+                     potential_remote = base_media_id.replace("media_player.", "remote.")
+
+                rem_state = await get_entity_state(potential_remote, user_creds)
+                log.info(f"Smart Power Swap: Checking remote candidate {potential_remote} (State: {rem_state})")
+                if rem_state not in ["unknown", "unavailable", None]:
+                    log.info(f"Smart Power Swap: Switching {entity_id} -> {potential_remote} (Remote)")
                     entity_id = potential_remote
                     domain = "remote"
+
 
         if intent.startswith("nav_"):
             cmd_map = {
