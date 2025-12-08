@@ -6,10 +6,6 @@ import logging
 import requests
 from dotenv import load_dotenv
 
-# Add app directory to path
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "app"))
-
-from logic.media_ops import execute_ha_service, get_entity_state
 
 # settings import might fail if dependencies aren't perfect, let's mock credits
 load_dotenv()
