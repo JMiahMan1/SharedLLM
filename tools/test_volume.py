@@ -99,10 +99,10 @@ async def run_test():
 
         # 0. Wake up / Play Music
         print(f"0. Activating {name}...")
-        # Use a Radio URL to guarantee playback (no search required)
-        song = "http://icecast.omroep.nl/3fm-bb-mp3"
+        # User requested local library test (Artist)
+        song = "Brandon Lake"
         await chat(f"Play {song} on {name}")
-        await asyncio.sleep(5)
+        await asyncio.sleep(8)
         
         # Get Initial Volume
         init_vol = await get_volume(entity_id)

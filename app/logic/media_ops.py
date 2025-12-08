@@ -2082,17 +2082,13 @@ async def handle_media_command(
                 f"Executing Music Assistant specific Play on {entity_id} Type: {ctype}"
             )
             # MA Service requires: media_id, media_type, enqueue
-            # Map 'music' to 'track' as 'music' is not a valid MA MediaType
-            ma_type = ctype
-            if ma_type == "music":
-                ma_type = "track" # Default to track search for generic music requests
             
             # Use Standard User Service for consistent behavior
             # Convert MA specific fields to standard media_player fields
             service_data = {
                 "media_content_id": clean_title,
-                "media_content_type": ma_type,
-                "enqueue": "play" # Some custom integrations support this in extra fields, strict MA ignores it in standard call but defaults to play
+                "media_content_type": ctype, # Pass 'music', 'artist', etc directly. Don't force 'track'.
+                "enqueue": "play" 
             }
             
             # Execute standard service
