@@ -2069,6 +2069,11 @@ async def handle_media_command(
                 log.info(f"[Play Media] Redirecting MA command from {entity_id} to Active Queue: {active_queue}")
                 entity_id = active_queue
             
+            # Detect if content is a URL
+            if clean_title.startswith("http://") or clean_title.startswith("https://"):
+                ctype = "url"
+                log.info(f"Detected URL content: {clean_title} -> type=url")
+
             log.info(
                 f"Executing Music Assistant specific Play on {entity_id} Type: {ctype}"
             )
@@ -2078,50 +2083,51 @@ async def handle_media_command(
             if ma_type == "music":
                 ma_type = "track" # Default to track search for generic music requests
             
-            ma_service_data = {
-                "media_id": clean_title,
-                "media_type": ma_type,
-                "enqueue": "play",
-            }
-            # Attempt MA service first
-            result = await execute_ha_service(
-                "music_assistant",
-                "play_media",
-                entity_id,
-                user_creds,
-                ma_service_data,
-                redis_client,
-            )
-            if result.get("status") == "FAILURE":
-                log.info(
-                    "MA play_media failed with specific type. Retrying with media_type='search'..."
-                )
-                ma_service_data["media_type"] = "search"
-                result = await execute_ha_service(
-                    "music_assistant",
-                    "play_media",
-                    entity_id,
-                    user_creds,
-                    ma_service_data,
-                    redis_client,
-                )
-
-            return result
-        else:
-            # Standard Media Player Service
-            log.info(f"Executing Standard Play on {entity_id} Type: {ctype}")
-            std_service_data = {
+            # Use Standard User Service for consistent behavior
+            # Convert MA specific fields to standard media_player fields
+            service_data = {
                 "media_content_id": clean_title,
-                "media_content_type": ctype,
+                "media_content_type": ma_type,
+                "enqueue": "play" # Some custom integrations support this in extra fields, strict MA ignores it in standard call but defaults to play
             }
+            
+            # Execute standard service
             result = await execute_ha_service(
-                domain,
+                "media_player",
                 "play_media",
                 entity_id,
                 user_creds,
-                std_service_data,
+                service_data,
                 redis_client,
             )
+            return result
+
+        # Standard Media Player Handling
+        # Android TV often triggers 500 on 'music'; default to 'video' or 'url' if needed
+        # but for now, we just ensure we don't send 'track' which is MA specific
+        if ctype == "track" and integration != "music_assistant": 
+             ctype = "music" # Revert back to HA standard if we accidentally mapped it
+
+        service_data = {
+            "media_content_id": clean_title,
+            "media_content_type": ctype,
+        }
+        
+        # Youtube/Cast specific overrides could go here
+        if "androidtv" in integration and ctype == "music":
+             # Optional: Fallback to video for Android TV if music fails?
+             # For now, just logging or keeping as is. Code below sends standard service.
+             pass
+
+        # Execute standard service
+        result = await execute_ha_service(
+            "media_player",
+            "play_media",
+            entity_id,
+            user_creds,
+            service_data,
+            redis_client,
+        )
 
             # Self-Healing for generic players
             if result.get("status") == "FAILURE":
