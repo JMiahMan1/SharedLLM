@@ -14,8 +14,18 @@ ssh "$HOST" << EOF
     cd "$DIR"
     echo "→ Fetching latest code..."
     git fetch origin
-    git checkout $BRANCH
+    # Ensure we are on the correct branch and sync hard
+    git checkout $BRANCH || git checkout -b $BRANCH origin/$BRANCH
+    git reset --hard origin/$BRANCH
     git pull origin $BRANCH
+    
+    # Prune pycache
+    rm -rf app/__pycache__ app/logic/__pycache__
+
+    echo "→ Purging Stale DB (using updated tools)..."
+    # Execute purge inside the currently running container (volume mount makes new tool available)
+    docker exec unified_rag_api python /app/tools/purge_chroma.py || echo "Purge failed (container down?), skipping."
+
     echo "→ Restarting Docker container..."
     docker compose restart
     echo "→ Waiting for container to be ready..."
