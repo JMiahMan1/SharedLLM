@@ -999,13 +999,27 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         # 2b. If we have an entity_id now (from Redis or short circuit), check its state
         if entity_id:
              # Check if an MA version exists and is active, swap if needed
-             if "music_assistant" not in integration:
-                 ma_entity_guess = f"{entity_id}_2"
-                 ma_state = await get_entity_state(ma_entity_guess, user_creds)
-                 if ma_state in ["playing", "paused"]:
-                     log.info(f"Transport Smart Swap: Swapping {entity_id} for active MA player {ma_entity_guess}")
-                     entity_id = ma_entity_guess
-                     integration = "music_assistant"
+             # Check if an MA version exists and is active, swap if needed
+             # FIX: Do not swap for power commands (turn_off checks hardware)
+             if "music_assistant" not in integration and intent not in ["turn_on", "turn_off", "toggle"]:
+                 # Clean Lookup for linked MA player
+                 # Try finding a device with same name but 'music_assistant' integration
+                 from settings import GlobalResources
+                 ma_docs = GlobalResources.ha_collection.similarity_search(f"{entity_id} music assistant", k=1)
+                 ma_entity = None
+                 
+                 for d in ma_docs:
+                     if d.metadata.get("integration") == "music_assistant":
+                         # Check strict overlap if possible, or just trust the search
+                         ma_entity = d.metadata.get("entity_id")
+                         break
+                 
+                 if ma_entity:
+                     ma_state = await get_entity_state(ma_entity, user_creds)
+                     if ma_state in ["playing", "paused"]:
+                         log.info(f"Transport Smart Swap: Swapping {entity_id} for active MA player {ma_entity}")
+                         entity_id = ma_entity
+                         integration = "music_assistant"
 
              state = await get_entity_state(entity_id, user_creds)
              if state in ["playing", "paused", "buffering"]:
@@ -1041,17 +1055,17 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 # --- START MASS INTELLIGENCE SWAP ---
                 #, If we resolved a hardware device but assume music (or ambiguous), check if MA player exists.
                 # This fixes "Play Brandon Lake on Office TV" -> resolved hardware TV -> failed video play.
-                if not is_video_request and "music_assistant" not in resolved_int and "media_player" in resolved_id:
-                     ma_variants = [f"{resolved_id}_2", f"{resolved_id}_mass", f"{resolved_id}_music"]
-                     for variant in ma_variants:
-                         variant_state = await get_entity_state(variant, user_creds)
-                         if variant_state != "unknown":
-                             log.info(f"Mass Intelligence: Swapping hardware {resolved_id} -> MA Player {variant}")
-                             resolved_id = variant
+                if not is_video_request and "music_assistant" not in resolved_int and "media_player" in resolved_id and intent not in ["turn_on", "turn_off", "toggle"]:
+                     from settings import GlobalResources
+                     # Search for MA alternative in DB
+                     ma_docs = GlobalResources.ha_collection.similarity_search(f"{potential_device} music assistant", k=3)
+                     for d in ma_docs:
+                         if d.metadata.get("integration") == "music_assistant":
+                             found_id = d.metadata.get("entity_id")
+                             log.info(f"Mass Intelligence: Swapping hardware {resolved_id} -> MA Player {found_id}")
+                             resolved_id = found_id
                              resolved_int = "music_assistant"
                              break
-                         else:
-                             log.debug(f"Mass Intelligence: Variant {variant} not found/unknown.")
                 # --- END MASS INTELLIGENCE SWAP ---
 
                 # Update Context
@@ -1095,17 +1109,18 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                  entity_id, integration = resolved_result
 
         # --- START MASS INTELLIGENCE SWAP (Standard Path) ---
-        if entity_id and "media_player" in entity_id and not is_video_request and "music_assistant" not in (integration or ""):
-             ma_variants = [f"{entity_id}_2", f"{entity_id}_mass", f"{entity_id}_music"]
-             for variant in ma_variants:
-                 variant_state = await get_entity_state(variant, user_creds)
-                 if variant_state != "unknown":
-                     log.info(f"Mass Intelligence: Swapping hardware {entity_id} -> MA Player {variant}")
-                     entity_id = variant
+        if entity_id and "media_player" in entity_id and not is_video_request and "music_assistant" not in (integration or "") and intent not in ["turn_on", "turn_off", "toggle"]:
+             from settings import GlobalResources
+             # Search for MA alternative in DB
+             clean_name = entity_id.split('.')[-1].replace('_', ' ')
+             ma_docs = GlobalResources.ha_collection.similarity_search(f"{clean_name} music assistant", k=3)
+             for d in ma_docs:
+                 if d.metadata.get("integration") == "music_assistant":
+                     found_id = d.metadata.get("entity_id")
+                     log.info(f"Mass Intelligence: Swapping hardware {entity_id} -> MA Player {found_id}")
+                     entity_id = found_id
                      integration = "music_assistant"
                      break
-                 else:
-                     log.debug(f"Mass Intelligence: Variant {variant} not found/unknown.")
         # --- END MASS INTELLIGENCE SWAP ---
 
         # Update Context
