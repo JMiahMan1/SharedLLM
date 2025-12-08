@@ -226,7 +226,7 @@ async def get_device_capabilities(
                 }
                 
                 # If we successfully parsed attrs, proceed to return
-                features = int(metadata.get("supported_features", 0))
+                features = int(attrs.get("supported_features", 0))
                 # ... (Logic continues below, but I need to construct the logic flow cleanly)
                 
                 # Check domain
@@ -1801,10 +1801,12 @@ async def handle_media_command(
         features = caps.get("supported_features", 0)
         
         # Override Integration if Capabilities detected MA (from Attributes)
+        is_ma = False
         if caps.get("integration") == "music_assistant" or "mass_player_type" in caps.get("attributes", {}):
             log.info(f"Capability Check: Overriding integration to 'music_assistant' for {entity_id}")
             integration = "music_assistant"
             ctype = "music" # Force music type for MA players
+            is_ma = True
 
         # Bitmasks: 4=Set, 8=Mute
         # Note: Many devices support Step (Up/Down) even if they don't support Set.
