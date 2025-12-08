@@ -167,7 +167,13 @@ async def get_device_capabilities(
                     cached.decode("utf-8") if isinstance(cached, bytes) else cached
                 )
                 log.info(f"[CAPABILITY] Redis cache HIT for {entity_id}")
-                return json.loads(cached_str)
+                cached_data = json.loads(cached_str)
+                # Ensure we have the new 'attributes' field, otherwise treat as stale
+                if "attributes" in cached_data:
+                    log.info(f"[CAPABILITY] Redis cache HIT for {entity_id}")
+                    return cached_data
+                else:
+                    log.info(f"[CAPABILITY] Redis cache HIT but STALE (no attributes) for {entity_id}")
             log.debug(f"[CAPABILITY] Redis cache MISS for {entity_id}")
         except Exception as e:
             log.warning(f"Redis cache read error for {cache_key}: {e}")
