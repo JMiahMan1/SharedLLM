@@ -2014,9 +2014,6 @@ async def handle_media_command(
                 entity_id,
                 user_creds,
                 ma_service_data,
-                redis_client,
-            )
-
             # Fallback to 'search' if specific type fails (fuzzy search)
             if result.get("status") == "FAILURE":
                 log.info(
@@ -2050,31 +2047,16 @@ async def handle_media_command(
             )
 
             # Self-Healing for generic players
-            if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
-                new_type = "video" if ctype == "music" else "music"
-                log.info(
-                    f"Self-Healing: Retrying '{clean_title}' as '{new_type}' on {entity_id}"
-                )
-                service_data = {
-                    "media_content_id": clean_title,
-                    "media_content_type": new_type,
-                }
-                result = await execute_ha_service(
-                    domain,
-                    "play_media",
-                    entity_id,
-                    user_creds,
-                    service_data,
-                    redis_client,
-                )
+            if result.get("status") == "FAILURE":
+                 # User requested disabling blind video fallback.
+                 # Only log failure.
+                 log.warning(f"Media Playback Failed for {entity_id}. Video fallback disabled.")
 
             # FINAL FALLBACK: If play_media failed with 500 (Server Error), and it's a TV/Remote, try waking it up or just logging clearly.
             if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
                 log.error(
                     f"Persistent 500 Error on {entity_id}. Device might be unresponsive or integration broken."
                 )
-                # Optional: Try one last ditch 'turn_on' if we suspect sleep?
-                # await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
 
             return result
 
