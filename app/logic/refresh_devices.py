@@ -86,7 +86,6 @@ async def refresh_db():
     db = GlobalResources.ha_collection 
     
     if docs and db:
-    if docs and db:
         log.info(f"Upserting {len(docs)} documents to ChromaDB...")
         
         # Log first 5 docs for verification
