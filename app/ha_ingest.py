@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 import shutil
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 
 # LangChain and Chroma Imports
 try:
@@ -42,11 +42,15 @@ logger = logging.getLogger("HA_Ingest")
 # Core HA Data Fetching
 # ----------------------
 
-def fetch_ha_data() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-    """Fetches all states, device registry, and entity registry info from Home Assistant."""
+def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any], Dict[str, str]]:
+    """Fetches all states, device registry, entity registry, and area registry info from Home Assistant.
+    
+    Returns:
+        Tuple of (states, device_registry, entity_registry, area_registry)
+    """
     if not HA_TOKEN:
         logger.error("HA_TOKEN not configured.")
-        return [], {}, {}
+        return [], {}, {}, {}
     
     headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
     

@@ -14,21 +14,21 @@ TARGET_IP=${RAG_ADDRESS:-192.168.2.211}
 HOST="${ARG_HOST:-jeremiah@$TARGET_IP}"
 DIR="${2:-/home/jeremiah/SharedLLM}"
 
-echo "🚀 Deploying to $HOST:$DIR"
+echo "Deploying to $HOST:$DIR"
 
 # Sync local .env to remote to ensure config match
 if [ -f .env ]; then
-    echo "📂 Syncing local .env to remote..."
+    echo "Syncing local .env to remote..."
     scp .env "$HOST:$DIR/.env"
 fi
 
 # Detect current branch locally
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-echo "ℹ️  Branch: $BRANCH"
+echo "Branch: $BRANCH"
 
 ssh "$HOST" << EOF
     cd "$DIR"
-    echo "⬇️  Fetching latest code..."
+    echo "Fetching latest code..."
     git fetch origin
     
     # Ensure we are on the correct branch and sync hard
@@ -39,13 +39,10 @@ ssh "$HOST" << EOF
     # Prune pycache to prevent lingering issues
     find app -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
 
-    echo "🧹 Purging Stale DB..."
-    docker exec unified_rag_api python /app/tools/purge_chroma.py || echo "⚠️ Purge failed (container down?), proceeding."
-
-    echo "🔄 Restarting Docker container..."
+    echo "Restarting Docker container..."
     docker compose restart
 
-    echo "⏳ Waiting for application startup..."
+    echo "Waiting for application startup..."
     # Monitor logs for success or failure
     # Timeout after 60 seconds
     TIMEOUT=60
@@ -55,14 +52,14 @@ ssh "$HOST" << EOF
     # Check logs until success message or timeout
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
         if docker logs --tail 20 unified_rag_api 2>&1 | grep -q "Application startup complete"; then
-            echo "✅ Application started successfully!"
+            echo "[OK] Application started successfully!"
             SUCCESS=1
             break
         fi
         
         # Check for immediate failure (Traceback)
         if docker logs --tail 20 unified_rag_api 2>&1 | grep -q "Traceback"; then
-            echo "❌ Application failed to start! Traceback detected."
+            echo "[FAIL] Application failed to start! Traceback detected."
             docker logs --tail 20 unified_rag_api
             exit 1
         fi
@@ -74,7 +71,7 @@ ssh "$HOST" << EOF
 
     echo ""
     if [ \$SUCCESS -eq 0 ]; then
-        echo "❌ Timeout waiting for application startup."
+        echo "[FAIL] Timeout waiting for application startup."
         echo "Last 20 lines of logs:"
         docker logs --tail 20 unified_rag_api
         exit 1
@@ -82,8 +79,8 @@ ssh "$HOST" << EOF
 EOF
 
 if [ $? -eq 0 ]; then
-    echo "🎉 Deployment Verification Successful."
+    echo "[OK] Deployment Verification Successful."
 else
-    echo "🔥 Deployment Failed."
+    echo "[FAIL] Deployment Failed."
     exit 1
 fi

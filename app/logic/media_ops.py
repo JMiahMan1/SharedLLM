@@ -593,6 +593,8 @@ async def resolve_multiple_entities_with_pattern(
     # Filter by pattern
     matching_entities = filter_entities_by_pattern(candidates, detected_patterns)
 
+    # Extract pattern type for logging
+    pattern_type = detected_patterns[0][0] if detected_patterns else "unknown"
     log.info(
         f"[PATTERN] Resolved {len(matching_entities)} entities matching pattern '{pattern_type}'"
     )
@@ -991,10 +993,11 @@ async def smart_resolve_entity(
                             log.info(
                                 f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}"
                             )
-                            return (
+                            result = (
                                 selected["entity_id"],
                                 selected.get("integration", "unknown"),
                             )
+                            return [result] if allow_multiple else result
 
             except Exception as e:
                 log.error(f"Group Routing Failed: {e}")
@@ -1004,9 +1007,9 @@ async def smart_resolve_entity(
         if preferred_type == "remote" and (
             "remote" in eid or "androidtv" in integration
         ):
-            return eid, integration
+            return [candidates[0]] if allow_multiple else (eid, integration)
 
-    return candidates[0]
+    return [candidates[0]] if allow_multiple else candidates[0]
 
 
 def _route_by_intent(
