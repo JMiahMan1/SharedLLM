@@ -199,13 +199,59 @@ async def get_device_capabilities(
             log.info(f"[CAPABILITY] ChromaDB HIT for {entity_id}")
 
             # Parse capabilities from stored metadata
-            capabilities = {
-                "domain": metadata.get("domain", entity_id.split(".")[0]),
-                "friendly_name": metadata.get(
-                    "friendly_name", entity_id.split(".")[-1].replace("_", " ").title()
-                ),
-                "integration": metadata.get("integration", "unknown"),
-            }
+            # Parse capabilities from stored metadata
+            # Ensure we have 'attributes' in metadata (serialized), otherwise treat as incomplete
+            raw_attrs = metadata.get("attributes", "{}")
+            try:
+                if isinstance(raw_attrs, str):
+                    attrs = json.loads(raw_attrs)
+                else:
+                    attrs = raw_attrs
+            except:
+                attrs = {}
+            
+            # If attributes are empty/missing, we might be missing critical data (like mass_player_type)
+            # So if attrs is empty, fallback to HA API
+            if not attrs and "mass_player_type" not in metadata:
+                 log.info(f"[CAPABILITY] ChromaDB HIT but STALE/INCOMPLETE (no attributes) for {entity_id}")
+                 # Intentionally bypass returning here to fall through to HA API
+            else:
+                capabilities = {
+                    "domain": metadata.get("domain", entity_id.split(".")[0]),
+                    "friendly_name": metadata.get(
+                        "friendly_name", entity_id.split(".")[-1].replace("_", " ").title()
+                    ),
+                    "integration": metadata.get("integration", "unknown"),
+                    "attributes": attrs
+                }
+                
+                # If we successfully parsed attrs, proceed to return
+                features = int(metadata.get("supported_features", 0))
+                # ... (Logic continues below, but I need to construct the logic flow cleanly)
+                
+                # Check domain
+                if capabilities["domain"] == "light":
+                     features = int(metadata.get("supported_features", 0)) if metadata.get("supported_features") else 0
+                     capabilities["has_brightness"] = bool(features & 1)
+                     capabilities["has_color_temp"] = bool(features & 2)
+                     capabilities["has_color"] = bool(features & 16)
+                     if "supported_color_modes" in metadata:
+                        try:
+                            color_modes = json.loads(metadata["supported_color_modes"])
+                            capabilities["color_modes"] = color_modes
+                            capabilities["has_color"] = any(m in color_modes for m in ["rgb", "hs", "xy", "rgbw", "rgbww"])
+                            capabilities["has_color_temp"] = "color_temp" in color_modes
+                        except: pass
+                elif capabilities["domain"] == "media_player":
+                     features = int(metadata.get("supported_features", 0)) if metadata.get("supported_features") else 0
+                     capabilities["has_pause"] = bool(features & 1)
+                     capabilities["has_previous"] = bool(features & 16)
+                     capabilities["has_next"] = bool(features & 32)
+                     capabilities["has_volume"] = bool(features & 4)
+                     capabilities["has_play_media"] = bool(features & 512)
+                     capabilities["supported_features"] = features
+
+                return capabilities
 
             # Parse supported_features if present
             if "supported_features" in metadata:
