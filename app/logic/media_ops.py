@@ -2129,19 +2129,19 @@ async def handle_media_command(
             redis_client,
         )
 
-            # Self-Healing for generic players
-            if result.get("status") == "FAILURE":
-                 # User requested disabling blind video fallback.
-                 # Only log failure.
-                 log.warning(f"Media Playback Failed for {entity_id}. Video fallback disabled.")
+        # Self-Healing for generic players
+        if result.get("status") == "FAILURE":
+             # User requested disabling blind video fallback.
+             # Only log failure.
+             log.warning(f"Media Playback Failed for {entity_id}. Video fallback disabled.")
 
-            # FINAL FALLBACK: If play_media failed with 500 (Server Error), and it's a TV/Remote, try waking it up or just logging clearly.
-            if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
-                log.error(
-                    f"Persistent 500 Error on {entity_id}. Device might be unresponsive or integration broken."
-                )
+        # FINAL FALLBACK: If play_media failed with 500 (Server Error), and it's a TV/Remote, try waking it up or just logging clearly.
+        if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
+            log.error(
+                f"Persistent 500 Error on {entity_id}. Device might be unresponsive or integration broken."
+            )
 
-            return result
+        return result
 
     return {
         "status": "FAILURE",
