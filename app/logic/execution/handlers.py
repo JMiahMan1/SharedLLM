@@ -166,6 +166,29 @@ async def handle_set_color(query: str, user_creds: dict, params: dict = None, **
         GlobalResources.redis_client,
     )
 
+# --- MUSIC ASSISTANT TOOLS ---
+@ActionDispatcher.register("list_playlists")
+async def handle_list_playlists(query: str, user_creds: dict, **kwargs):
+    return await tool_list_playlists(query, user_creds)
+
+@ActionDispatcher.register("list_radio")
+async def handle_list_radio(query: str, user_creds: dict, **kwargs):
+    return await tool_list_radio(query, user_creds)
+
+@ActionDispatcher.register("music_search")
+async def handle_music_search(query: str, user_creds: dict, **kwargs):
+    return await tool_music_search(query, user_creds)
+
+# --- ANDROID TV TOOLS ---
+@ActionDispatcher.register("remote_command")
+async def handle_remote_command(query: str, user_creds: dict, params: dict = None, **kwargs):
+    cmd = params.get("command", query)
+    entity_id = params.get("entity_id") 
+    if not entity_id:
+        return {"status": "FAILURE", "message": "No entity specified for remote command."}
+        
+    return await tool_remote_command(cmd, entity_id, user_creds, GlobalResources.redis_client)
+
 # --- NOTE TOOLS ---
 @ActionDispatcher.register("note_add")
 async def handle_note_add(query: str, params: dict = None, **kwargs):
