@@ -25,8 +25,8 @@ def call_rag_api(endpoint, payload):
 def test_play_media():
     print(f"\n--- Testing Play Media: '{MEDIA_QUERY}' on '{DEVICE_NAME}' ---")
     payload = {
-        "text": f"Play {MEDIA_QUERY} on {DEVICE_NAME}",
-        "user_id": USER
+        "query": f"Play {MEDIA_QUERY} on {DEVICE_NAME}",
+        "user": USER # 'user' matches the schema too
     }
     result = call_rag_api("/api/chat", payload)
     
