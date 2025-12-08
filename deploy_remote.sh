@@ -8,12 +8,19 @@ if [ -f .env ]; then
 fi
 
 # Fallback or Override
-# Prioritize Argument -> ENV -> Hardcoded Default
+# Prioritize Argument -> RAG_ADDRESS -> Hardcoded Default
 ARG_HOST=$1
-HOST="${ARG_HOST:-${SSH_HOST:-jeremiah@192.168.2.211}}"
+TARGET_IP=${RAG_ADDRESS:-192.168.2.211}
+HOST="${ARG_HOST:-jeremiah@$TARGET_IP}"
 DIR="${2:-/home/jeremiah/SharedLLM}"
 
 echo "🚀 Deploying to $HOST:$DIR"
+
+# Sync local .env to remote to ensure config match
+if [ -f .env ]; then
+    echo "📂 Syncing local .env to remote..."
+    scp .env "$HOST:$DIR/.env"
+fi
 
 # Detect current branch locally
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
