@@ -367,7 +367,7 @@ async def generate_rag_stream(
         is_informational_tool = False
         for res in action_results:
             svc = res.get("service", "")
-            if svc in ["web_search", "calendar_list", "timer_list", "calendar_read"]:
+            if svc in ["web_search", "calendar_list", "timer_list", "calendar_read", "note_read", "note_list"]:
                 is_informational_tool = True
         
         # 2. Only disable RAG if it's NOT an informational intent AND NOT an informational tool
@@ -384,7 +384,7 @@ async def generate_rag_stream(
                 friendly_name = res.get("friendly_name", "N/A")
                 service = res.get("service", "N/A")
                 action_context += f"- SUCCESS: Command '{service}' sent to {friendly_name}. Verified New State: {new_state}\n"
-                if service in ["web_search", "timer_list", "calendar_list", "calendar_read"]:
+                if service in ["web_search", "timer_list", "calendar_list", "calendar_read", "note_read", "note_list"]:
                     action_context += f"TOOL OUTPUT:\n{msg}\n"
             else:
                 entity = res.get("entity_id", "N/A")
