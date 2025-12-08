@@ -39,8 +39,8 @@ ssh "$HOST" << EOF
     # Prune pycache to prevent lingering issues
     find app -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
 
-    echo "Restarting Docker container..."
-    docker compose restart
+    echo "Recreating Docker container to apply config..."
+    docker compose up -d --force-recreate
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure
