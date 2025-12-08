@@ -79,6 +79,13 @@ REGEX_INTENT_MAP = {
     r"\b(dim|darken|lower)\b": "dim",
     r"\b(brighten|brighter|increase)\b": "brighten",
     r"\b(brightness|bright)\b": "set_brightness",
+    # Volume control patterns
+    r"\b(set|change|make|turn).*volume.*(?:to|at)\s*(\d+)": "volume_set",
+    r"\bvolume\s+(?:to|at)\s*(\d+)": "volume_set",
+    r"\b(turn|set)\s+(?:the\s+)?volume\s+(?:on|of|to)": "volume_set",
+    r"\b(volume\s+up|turn\s+up|louder|increase\s+volume|raise\s+volume)": "volume_up",
+    r"\b(volume\s+down|turn\s+down|quieter|decrease\s+volume|lower\s+volume)": "volume_down",
+    r"\b(mute|unmute|silence|quiet|hush)\b": "volume_mute",
 }
 
 # Color name to RGB mapping
@@ -1127,9 +1134,11 @@ async def handle_media_command(
     is_video_request = any(x in q_low for x in video_keywords)
 
     # For play_media intent, default to music mode UNLESS explicitly requesting video
+    # Volume commands should NOT use strict music mode - they work on any media_player
+    is_volume_command = intent in ["volume_up", "volume_down", "volume_set", "volume_mute"]
     strict_resolution = (is_music_request or is_audiobook_request) or (
         intent == "play_media" and not is_video_request
-    )
+    ) if not is_volume_command else False
     is_transport = intent in ["media_next", "media_previous", "stop_media"]
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---

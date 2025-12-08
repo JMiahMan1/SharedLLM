@@ -168,7 +168,17 @@ DEFAULT_PHRASES = {
         "too loud",
         "drop volume",
     ],
-    "volume_set": ["set volume to", "volume", "change volume to", "make the volume"],
+    "volume_set": [
+        "set volume to",
+        "set the volume to",
+        "volume to",
+        "volume at",
+        "change volume to",
+        "make the volume",
+        "set volume",
+        "turn volume to",
+        "set the volume",
+    ],
     "volume_mute": ["mute", "shut up", "silence", "unmute", "quiet", "hush"],
     # -------------------------
     "music_list": [
