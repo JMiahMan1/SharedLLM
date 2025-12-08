@@ -1296,6 +1296,16 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     # POWER, NAVIGATION
     # -------------------------------------------------
     if intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
+        # SMART POWER SWAP: Prefer parent 'TV' entity over 'Chromecast' for power commands
+        if intent in ["turn_on", "turn_off", "toggle"] and any(s in entity_id for s in ["_chrome", "_cast", "_chromecast"]):
+            base_id = entity_id.replace("_chrome", "").replace("_chromecast", "").replace("_cast", "")
+            if base_id != entity_id:
+                base_state = await get_entity_state(base_id, user_creds)
+                if base_state != "unknown":
+                    log.info(f"Smart Power Swap: Switching {entity_id} -> {base_id} for power control.")
+                    entity_id = base_id
+                    domain = entity_id.split('.')[0]
+
         if intent.startswith("nav_"):
             cmd_map = {
                 "nav_up": "DPAD_UP", "nav_down": "DPAD_DOWN",
