@@ -146,6 +146,11 @@ async def call_ollama_generate(prompt: str, model: str = DEFAULT_MODEL, stream: 
                 return {"iterable": async_iter}
             else:
                 return {"text": resp.json().get("response", "")}
+        except requests.exceptions.ConnectTimeout:
+            log.error(f"Ollama Connection Timed Out (Attempt {attempt+1}/{OLLAMA_RETRY}) - Host unreachable?")
+            if attempt == OLLAMA_RETRY - 1: return {"error": f"Ollama Unreachable ({OLLAMA_URL})"}
+        except requests.exceptions.ReadTimeout:
+            log.warning(f"Ollama Generation Timed Out (Attempt {attempt+1}) - Model too slow?")
         except Exception as e:
             log.warning(f"Ollama attempt {attempt+1} failed: {e}")
             await asyncio.sleep(0.5)

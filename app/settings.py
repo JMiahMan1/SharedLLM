@@ -63,8 +63,9 @@ if OPENAI_API_KEY:
         log.warning("openai module not installed, skipping client init")
 
 # Timeouts & Retries
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
-OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "2"))
+# Timeouts & Retries
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "10"))
+OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "1"))
 
 # Lowered cache TTL for faster test feedback
 HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "5.0"))
