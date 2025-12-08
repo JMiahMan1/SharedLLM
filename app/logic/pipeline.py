@@ -262,20 +262,36 @@ async def _handle_single_command(
         return [action_result]
     
     # 2. Intent Classification (Regex Override + Vector Engine)
-    intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
-    
+    try:
+        intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
+        if intent:
+             log.info(f"[PIPELINE DEBUG] Intent detected: {intent} (Score: {score})")
+    except Exception as e:
+        log.exception(f"[PIPELINE ERROR] IntentClassifier failed: {e}")
+        intent, score, is_high_confidence = None, 0.0, False
+
     # 3. LLM Orchestration
-    orchestration_plan = await _llm_orchestrator(
-        query, intent or "unknown", score, model
-    )
+    try:
+        orchestration_plan = await _llm_orchestrator(
+            query, intent or "unknown", score, model
+        )
+        log.info(f"[PIPELINE DEBUG] Orchestration Plan: {orchestration_plan}")
+    except Exception as e:
+        log.exception(f"[PIPELINE ERROR] Orchestrator failed: {e}")
+        return None
+
     action_type = orchestration_plan.get("action")
     if action_type == "CONVERSE":
         return None
     if action_type == "tool_call":
-        result = await _execute_tool_action(
-            orchestration_plan, query, user_creds, model
-        )
-        return [result] if result else None
+        try:
+            result = await _execute_tool_action(
+                orchestration_plan, query, user_creds, model
+            )
+            return [result] if result else None
+        except Exception as e:
+            log.exception(f"[PIPELINE ERROR] Tool Execution failed: {e}")
+            return [{"status": "FAILURE", "message": f"Tool execution crashed: {e}", "service": "unknown"}]
     return None
 
 
