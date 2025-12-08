@@ -39,6 +39,7 @@ from .utils import (
 from .execution.registry import ActionDispatcher
 from .execution.fast_path import FastPathExecutor
 from .intents.classifier import IntentClassifier
+from .web_search import tool_web_search
 # Ensure handlers are registered
 import logic.execution.handlers 
 
