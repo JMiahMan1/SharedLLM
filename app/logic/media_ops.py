@@ -958,8 +958,8 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                                log.info(f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}")
                                return (selected["entity_id"], selected.get("integration", "unknown"))
 
-        except Exception as e:
-            log.error(f"Group Routing Failed: {e}")
+            except Exception as e:
+                log.error(f"Group Routing Failed: {e}")
 
     # Fallback to standard selection
     for eid, integration in candidates:
