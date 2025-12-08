@@ -262,6 +262,10 @@ async def lifespan(app: FastAPI):
     # Initialize Intent Engine
     from intent_engine import engine
     await engine.load()
+    
+    # Start Device DB Refresh (Async)
+    from logic.refresh_devices import refresh_db
+    asyncio.create_task(refresh_db())
 
     # Start Timer Scheduler
     from logic.timer_scheduler import start_scheduler, stop_scheduler
