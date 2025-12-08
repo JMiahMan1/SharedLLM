@@ -21,6 +21,7 @@ from logic import (
     call_ollama_generate, call_openai_chat, 
     get_ha_context, get_rag_context, update_history
 )
+from logic.refresh_devices import refresh_db
 from intent_engine import engine as intent_engine
 from logic.timer_storage import storage as timer_storage
 
@@ -143,6 +144,18 @@ async def api_timer_list():
 async def api_timer_delete(timer_id: str):
     await timer_storage.delete_timer(timer_id)
     return {"status": "ok", "msg": f"Timer {timer_id} deleted."}
+
+@app.post("/api/admin/reindex")
+async def admin_reindex(background_tasks: BackgroundTasks, request: Request):
+    creds = get_user_creds(request.headers.get("X-RAG-User") or "admin")
+    background_tasks.add_task(intent_engine.load)
+    return {"status": "Re-indexing started"}
+
+@app.post("/api/admin/refresh_devices")
+async def admin_refresh_devices(background_tasks: BackgroundTasks, request: Request):
+    """Triggers a full refresh of the Device DB for grouping."""
+    background_tasks.add_task(refresh_db)
+    return {"status": "Device DB Refresh started"}
 
 # --- HA Proxy ---
 @app.get("/api/ha/state/{entity_id}")
