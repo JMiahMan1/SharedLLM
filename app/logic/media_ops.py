@@ -936,27 +936,27 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         group_id = top_doc.metadata.get("group_id")
         
         if group_id:
-        log.info(f"match found in Group: {group_id} (via {top_doc.page_content[:20]}...)")
-        try:
-            # Fetch all group members from Chroma
-            # Note: ha_collection is Langchain wrapper. Access internal collection if possible, 
-            # or rely on metadata from the search result if we indexed enough? 
-            # Better to query. keys: "entity_id", "integration", "capabilities", "domain"
-            
-            # Access underlying chromadb collection if available
-            if hasattr(ha_collection, "_collection"):
-                 group_res = ha_collection._collection.get(where={"group_id": group_id})
-                 # group_res keys: ids, metadatas, documents...
-                 
-                 if group_res and group_res.get("metadatas"):
-                      members = group_res["metadatas"]
-                      log.info(f"Group {group_id} has {len(members)} members.")
-                      
-                      # ROUTING LOGIC
-                      selected = _route_by_intent(intent, members, is_music, is_video)
-                      if selected:
-                           log.info(f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}")
-                           return (selected["entity_id"], selected.get("integration", "unknown"))
+            log.info(f"match found in Group: {group_id} (via {top_doc.page_content[:20]}...)")
+            try:
+                # Fetch all group members from Chroma
+                # Note: ha_collection is Langchain wrapper. Access internal collection if possible, 
+                # or rely on metadata from the search result if we indexed enough? 
+                # Better to query. keys: "entity_id", "integration", "capabilities", "domain"
+                
+                # Access underlying chromadb collection if available
+                if hasattr(ha_collection, "_collection"):
+                     group_res = ha_collection._collection.get(where={"group_id": group_id})
+                     # group_res keys: ids, metadatas, documents...
+                     
+                     if group_res and group_res.get("metadatas"):
+                          members = group_res["metadatas"]
+                          log.info(f"Group {group_id} has {len(members)} members.")
+                          
+                          # ROUTING LOGIC
+                          selected = _route_by_intent(intent, members, is_music, is_video)
+                          if selected:
+                               log.info(f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}")
+                               return (selected["entity_id"], selected.get("integration", "unknown"))
 
         except Exception as e:
             log.error(f"Group Routing Failed: {e}")
