@@ -281,6 +281,44 @@ async def _handle_single_command(
     else:
         log.info(f"[PIPELINE DEBUG] Using provided intent: {intent} (Score: {score})")
 
+    # --- FAST PATH ORCHESTRATION ---
+    # Skip LLM for simple, high-confidence intents to avoid timeouts
+    if is_high_confidence and intent:
+        action_plan = None
+        if intent in ["volume_set", "volume_up", "volume_down", "volume_mute"]:
+             # Extract volume from query using regex here or in the tool?
+             # The tool logic already handles extraction from query.
+             # We just need to route it.
+             action_plan = {
+                "action": "tool_call",
+                "tool_name": "media_command",
+                "parameters": {"intent": intent, "device_name": query} # Passing query as device_name is simplified, but media_ops parses it better.
+             }
+        elif intent in ["media_next", "media_previous"]:
+             action_plan = {
+                "action": "tool_call",
+                "tool_name": "media_command",
+                "parameters": {"intent": intent, "device_name": query}
+             }
+        elif intent in ["open_app"]:
+             action_plan = {
+                "action": "tool_call",
+                "tool_name": "media_command",
+                "parameters": {"intent": intent, "device_name": query, "media": query}
+             }
+        
+        if action_plan:
+            log.info(f"[FAST ORCHESTRA] Bypassing LLM for {intent}")
+            try:
+                result = await _execute_tool_action(
+                    action_plan, query, user_creds, model
+                )
+                return [result] if result else None
+            except Exception as e:
+                log.error(f"[FAST ORCHESTRA] Failed: {e}")
+                # Fallback to LLM if fast path fails?
+                pass
+
     # 3. LLM Orchestration
     try:
         orchestration_plan = await _llm_orchestrator(
