@@ -1385,6 +1385,89 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         return await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)
 
     # -------------------------------------------------
+    # VOLUME CONTROL
+    # -------------------------------------------------
+    if intent in ["volume_up", "volume_down", "volume_set", "volume_mute"]:
+        log.debug(f"[VOLUME] Handling intent='{intent}' for {entity_id}")
+
+        if domain != "media_player":
+             # Special case: Remotes often handle volume via IR
+             if domain == "remote":
+                 cmd = None
+                 if intent == "volume_up": cmd = "VOLUME_UP"
+                 elif intent == "volume_down": cmd = "VOLUME_DOWN"
+                 elif intent == "volume_mute": cmd = "MUTE"
+                 
+                 if cmd:
+                     return await execute_ha_service("remote", "send_command", entity_id, user_creds, {"command": cmd}, redis_client)
+                 else:
+                     return {"status": "FAILURE", "message": "I can't set a specific volume level on a remote, only Up/Down/Mute.", "entity_id": entity_id, "service": intent}
+
+             return {"status": "FAILURE", "message": f"Volume control is not supported for {domain} devices.", "entity_id": entity_id, "service": intent}
+
+        # Check Capabilities
+        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+        features = caps.get("supported_features", 0)
+        
+        # Bitmasks: 4=Set, 8=Mute
+        # Note: Many devices support Step (Up/Down) even if they don't support Set.
+        # HA doesn't explicitly expose "Step" bitmask in all docs, but usually if it's a media player, we try.
+        
+        can_set_vol = bool(features & 4)
+        can_mute = bool(features & 8)
+
+        service_data = {}
+
+        if intent == "volume_mute":
+            if not can_mute:
+                 # Fallback: Try it anyway, some devices misreport
+                 log.warning(f"{entity_id} reports no Mute capability, trying anyway.")
+            
+            # Toggle mute state if currently muted? Or strictly "mute"?
+            # Intent "mute" usually means "toggle mute" or "silence". 
+            # safe assumption: call volume_mute with is_volume_muted=True (silence) or toggle?
+            # Let's assume 'toggle' for 'mute' phrase, or explicit 'true' for 'silence'.
+            # actually HA service usually takes 'is_volume_muted': True/False/toggle.
+            # Let's default to toggle or True. 'mute' -> True. 'unmute' -> False.
+            # Regex usually maps 'mute' to 'volume_mute'.
+            is_mute = True
+            if "unmute" in query.lower(): is_mute = False
+            
+            service = "volume_mute"
+            service_data = {"is_volume_muted": is_mute}
+
+        elif intent == "volume_set":
+            if not can_set_vol:
+                 return {"status": "FAILURE", "message": f"{caps.get('friendly_name', entity_id)} doesn't support setting specific volume levels, try Up/Down.", "entity_id": entity_id, "service": intent}
+            
+            # Parse percentage
+            import re
+            pct_match = re.search(r"(\d+)\s*%", query)
+            if pct_match:
+                vol_pct = int(pct_match.group(1))
+                service = "volume_set"
+                service_data = {"volume_level": vol_pct / 100.0}
+            else:
+                # Try simple number "Volume 50"
+                num_match = re.search(r"\b(\d+)\b", query)
+                if num_match:
+                     vol_pct = int(num_match.group(1))
+                     if vol_pct > 1: # "Volume 1" might mean 100% or 1%. Assume >1 is %.
+                         service = "volume_set"
+                         service_data = {"volume_level": vol_pct / 100.0}
+                     else:
+                         # "Volume 0.5"
+                         service = "volume_set"
+                         service_data = {"volume_level": float(num_match.group(1))}
+                else:
+                    return {"status": "FAILURE", "message": "I didn't hear a volume level (e.g. '50%').", "entity_id": entity_id, "service": intent}
+
+        elif intent in ["volume_up", "volume_down"]:
+             service = intent  # matches service name exactly
+        
+        return await execute_ha_service("media_player", service, entity_id, user_creds, service_data, redis_client)
+
+    # -------------------------------------------------
     # POWER, NAVIGATION
     # -------------------------------------------------
     if intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):

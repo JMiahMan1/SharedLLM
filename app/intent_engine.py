@@ -86,6 +86,21 @@ DEFAULT_PHRASES = {
     "timer_pause": ["pause timer", "pause alarm"],
     "timer_resume": ["resume timer", "restart timer"],
     # -------------------------
+    "volume_up": [
+        "turn it up", "louder", "volume up", "increase volume", "raise volume", 
+        "can't hear it", "boost volume"
+    ],
+    "volume_down": [
+        "turn it down", "quieter", "volume down", "decrease volume", "lower volume", 
+        "too loud", "drop volume"
+    ],
+    "volume_set": [
+        "set volume to", "volume", "change volume to", "make the volume"
+    ],
+    "volume_mute": [
+        "mute", "shut up", "silence", "unmute", "quiet", "hush"
+    ],
+    # -------------------------
     "intent_learn": [
         "learn that", "teach you", "remember that", "map phrase", 
         "training mode", "i want to teach you"
