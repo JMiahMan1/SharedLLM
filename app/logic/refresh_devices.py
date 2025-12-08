@@ -92,19 +92,36 @@ async def refresh_db():
         for d in docs[:5]:
             log.info(f"Preparing Doc: {d.id} | Group: {d.metadata.get('group_id')} | Integ: {d.metadata.get('integration')}")
             
-        # CRITICAL: Delete existing IDs first to ensure metadata updates stick
-        ids_to_update = [d.id for d in docs if d.id]
-        if ids_to_update:
-            try:
-                # We use synchronous delete via run_blocking if async not available, 
-                # but langchain_chroma usually has adelete.
-                # If adelete is missing, fall back to synchronous delete.
+        # CRITICAL: Implement Full Sync (Prune Obsolete IDs)
+        # This removes "Ghost Documents" (old UUID-based entries) that persist and hijack routing.
+        try:
+            # 1. Get ALL existing IDs in the collection
+            existing_data = db.get()
+            existing_ids = set(existing_data["ids"])
+            
+            # 2. Get new IDs we are about to insert
+            new_ids = set(d.id for d in docs)
+            
+            # 3. Determine IDs to remove (Ghost UUIDs + Removed Devices)
+            ids_to_delete = list(existing_ids - new_ids)
+            
+            if ids_to_delete:
+                log.info(f"Pruning {len(ids_to_delete)} stale/ghost documents from DB...")
                 if hasattr(db, 'adelete'):
-                    await db.adelete(ids=ids_to_update)
+                    await db.adelete(ids=ids_to_delete)
                 else:
-                    db.delete(ids=ids_to_update)
-            except Exception as e:
-                log.warning(f"Delete prior to upsert failed (might be new docs): {e}")
+                    db.delete(ids=ids_to_delete)
+            
+            # 4. Force Update existing ones (ToDelete intersection New? No, we update everything)
+            # To ensure clean state, we can delete the NEW IDs too before re-inserting, 
+            # Or just rely on upsert. Chroma upsert is generally safe if IDs match.
+            # But let's be paranoid and delete conflicting IDs just in case.
+            # ids_to_overwrite = existing_ids.intersection(new_ids)
+            # if ids_to_overwrite:
+            #    ... (Upsert handles this)
+            
+        except Exception as e:
+            log.warning(f"Pruning failed: {e}")
 
         await db.aadd_documents(docs)
         log.info("Upsert OK.")
