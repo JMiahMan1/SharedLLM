@@ -22,7 +22,7 @@ from settings import (
     INFORMATIONAL_INTENTS,
 )
 
-SILENT_SUCCESS_TOKEN = "[SILENT_SUCCESS]"
+SILENT_SUCCESS_TOKEN = "Done."
 
 from .utils import (
     clean_llm_output,
