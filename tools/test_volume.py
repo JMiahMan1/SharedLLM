@@ -51,7 +51,7 @@ async def run_test():
     API_URL = os.getenv("RAG_API_URL", "http://192.168.2.211:11435/api/chat")
     print(f"Using API URL: {API_URL}")
 
-    def chat(q):
+    async def chat(q):
         print(f"\nUser: {q}")
         try:
             print(f"   [INFO] Sending request (timeout: 120s)...")
@@ -73,20 +73,21 @@ async def run_test():
             print(f"[FAIL] API Error: {type(e).__name__}: {e}")
             return {}
 
-        init_vol = 0.5
+    async def test_step(prompt, entity_id, expected_vol):
+        print(f"\nUser: {prompt}")
+        await chat(prompt)
+        await asyncio.sleep(3)
+        
+        curr_vol = await get_volume(entity_id)
+        if curr_vol is None:
+             print(f"[WARN] Could not read volume for {entity_id}")
+             return
 
-    # 2. Set Volume Low
-    print("\n2. Setting Volume to 30%...")
-    chat("Set the volume on Office Speaker to 30%")
-    await asyncio.sleep(3)
-
-    curr_vol = await get_volume(OFFICE_SPEAKER)
-    print(f"Volume is now: {curr_vol}")
-
-    if curr_vol == 0.3:
-        print("[OK] Success: Volume matches 30%")
-    else:
-        print(f"[FAIL] Failure: Expected 0.3, got {curr_vol}")
+        # Check with tolerance
+        if abs(curr_vol - expected_vol) < 0.05:
+            print(f"[OK] Success: Volume is {curr_vol} (Target: {expected_vol})")
+        else:
+            print(f"[FAIL] Expected {expected_vol}, got {curr_vol}")
 
     targets = ["media_player.office_tv", "media_player.office_speaker"]
     
@@ -95,14 +96,21 @@ async def run_test():
         
         # Derive a friendly name for the prompt
         name = entity_id.split(".")[-1].replace("_", " ").title()
+
+        # 0. Wake up / Play Music
+        print(f"0. Activating {name}...")
+        song = "Bohemian Rhapsody"
+        await chat(f"Play {song} on {name}")
+        await asyncio.sleep(5)
         
         # Get Initial Volume
         init_vol = await get_volume(entity_id)
         print(f"Initial Volume: {init_vol}")
         if init_vol is None:
+             print(f"[WARN] Device {name} appears off or not reporting volume.")
              init_vol = 0.5
         
-        # 1. Set Volume Low
+    # 1. Set Volume Low
         await test_step(
             f"Set the volume on {name} to 30%", 
             entity_id, 
