@@ -2054,25 +2054,37 @@ async def handle_media_command(
                 domain, "turn_on", entity_id, user_creds, redis_client=redis_client
             )
             
-        # --- ROBUST MA DETECTION ---
-        # Fetch capabilities to double-check integration (since search metadata might be stale)
+        # --- ROBUST MA DETECTION & SWAP ---
+        # Fetch capabilities
         caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-        if caps.get("integration") == "music_assistant" or "mass_player_type" in caps.get("attributes", {}):
-             log.info(f"[Play Media] Capability Check: Detected Music Assistant attributes. Overriding integration.")
+        attributes = caps.get("attributes", {})
+        friendly_name = attributes.get("friendly_name", "")
+        
+        # If we have a generic device (not MA), try to find its MA counterpart using Friendly Name
+        if caps.get("integration") != "music_assistant" and "mass_player_type" not in attributes:
+            if friendly_name:
+                log.info(f"Target {entity_id} is Generic. Searching for MA counterpart via name: {friendly_name}")
+                from settings import GlobalResources
+                ma_docs = GlobalResources.ha_collection.similarity_search(f"{friendly_name} music assistant", k=3)
+                for d in ma_docs:
+                    if d.metadata.get("integration") == "music_assistant":
+                        found_id = d.metadata.get("entity_id")
+                        log.info(f"Mass Smart Swap: {entity_id} -> {found_id}")
+                        entity_id = found_id
+                        # Update caps for new entity
+                        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+                        attributes = caps.get("attributes", {})
+                        integration = "music_assistant"
+                        break
+
+        # Check again if we are now MA
+        if caps.get("integration") == "music_assistant" or "mass_player_type" in attributes:
+             log.info(f"[Play Media] Identified Music Assistant Entity: {entity_id}")
              integration = "music_assistant"
-             # Also force content type to music if generic, to ensure correct routing
              if ctype not in ["radio", "track", "album", "artist", "playlist"]:
                  ctype = "music"
 
         if "music_assistant" in integration:
-            # CHECK FOR ACTIVE QUEUE (Critical Fix for 500 Errors)
-            # MA Players ('mass_player_type': 'player') delegate playback to a queue entity ('active_queue')
-            # detailed in their attributes. We must target the queue, not the player.
-            active_queue = caps.get("attributes", {}).get("active_queue")
-            if active_queue:
-                log.info(f"[Play Media] Redirecting MA command from {entity_id} to Active Queue: {active_queue}")
-                entity_id = active_queue
-            
             # Detect if content is a URL
             if clean_title.startswith("http://") or clean_title.startswith("https://"):
                 ctype = "url"
@@ -2081,19 +2093,18 @@ async def handle_media_command(
             log.info(
                 f"Executing Music Assistant specific Play on {entity_id} Type: {ctype}"
             )
-            # MA Service requires: media_id, media_type, enqueue
             
-            # Use Standard User Service for consistent behavior
-            # Convert MA specific fields to standard media_player fields
+            # Use Specific MA Service
             service_data = {
-                "media_content_id": clean_title,
-                "media_content_type": ctype, # Pass 'music', 'artist', etc directly. Don't force 'track'.
+                "entity_id": entity_id,
+                "media_id": clean_title,
+                "media_type": ctype,
                 "enqueue": "play" 
             }
             
-            # Execute standard service
+            # Execute MA service
             result = await execute_ha_service(
-                "media_player",
+                "music_assistant",
                 "play_media",
                 entity_id,
                 user_creds,
