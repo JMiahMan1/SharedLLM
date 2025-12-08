@@ -1438,6 +1438,13 @@ async def handle_media_command(
             else:
                 entity_id, integration = resolved_result
 
+            # --- FALLBACK: If resolution failed (e.g. "turn to 60%" found no device), try context ---
+            if not entity_id:
+                potential_context = get_last_entity(redis_client, user_creds.get("user"))
+                if potential_context:
+                    log.info(f"Resolution failed for '{cleaned_for_res}', using context fallback: {potential_context}")
+                    entity_id = potential_context
+
         # --- START MASS INTELLIGENCE SWAP (Standard Path) ---
         if (
             entity_id
