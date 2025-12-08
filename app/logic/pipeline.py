@@ -128,6 +128,10 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
 
 
 async def contextualize_query(query, user, model):
+    """
+    Contextualizes query and returns both refined query and intent.
+    Returns: (refined_query, intent, score, is_high_confidence)
+    """
     # Use Modular Classifier
     intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
 
@@ -158,7 +162,7 @@ async def contextualize_query(query, user, model):
         "volume_mute",
     ]
     if is_high_confidence and intent in stateless_intents:
-        return query
+        return query, intent, score, is_high_confidence
     verbs = [
         "turn",
         "play",
@@ -179,18 +183,18 @@ async def contextualize_query(query, user, model):
         "wake",
     ]
     if any(query.lower().lstrip().startswith(v) for v in verbs):
-        return query
+        return query, intent, score, is_high_confidence
     hist = get_history_context(user)
     if not hist:
-        return query
+        return query, intent, score, is_high_confidence
     if len(query) > 150:
-        return query
+        return query, intent, score, is_high_confidence
     prompt = CONTEXT_REWRITE_PROMPT.format(history=hist, query=query)
     r = await call_ollama_generate(prompt, model)
     refined = clean_llm_output(r.get("text", query), is_voice=False)
     if len(refined) > len(query) * 3:
-        return query
-    return refined
+        return query, intent, score, is_high_confidence
+    return refined, intent, score, is_high_confidence
 
 
 async def _llm_orchestrator(
@@ -248,7 +252,8 @@ async def _execute_tool_action(
 
 
 async def _handle_single_command(
-    query: Union[str, Dict], user_creds: Dict[str, str], model: str = None
+    query: Union[str, Dict], user_creds: Dict[str, str], model: str = None, 
+    intent: Optional[str] = None, score: float = 0.0, is_high_confidence: bool = False
 ) -> Optional[List[Dict[str, Any]]]:
     if isinstance(query, dict):
         query = str(query.get("response", query.get("text", str(query))))
@@ -264,14 +269,17 @@ async def _handle_single_command(
     if action_result:
         return [action_result]
 
-    # 2. Intent Classification (Regex Override + Vector Engine)
-    try:
-        intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
-        if intent:
-            log.info(f"[PIPELINE DEBUG] Intent detected: {intent} (Score: {score})")
-    except Exception as e:
-        log.exception(f"[PIPELINE ERROR] IntentClassifier failed: {e}")
-        intent, score, is_high_confidence = None, 0.0, False
+    # 2. Intent Classification (only if not provided)
+    if intent is None:
+        try:
+            intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
+            if intent:
+                log.info(f"[PIPELINE DEBUG] Intent detected: {intent} (Score: {score})")
+        except Exception as e:
+            log.exception(f"[PIPELINE ERROR] IntentClassifier failed: {e}")
+            intent, score, is_high_confidence = None, 0.0, False
+    else:
+        log.info(f"[PIPELINE DEBUG] Using provided intent: {intent} (Score: {score})")
 
     # 3. LLM Orchestration
     try:
@@ -305,7 +313,8 @@ async def _handle_single_command(
 
 
 async def try_handle_compound_command(
-    query, user_creds, model
+    query, user_creds, model, intent: Optional[str] = None, 
+    score: float = 0.0, is_high_confidence: bool = False
 ) -> Optional[List[Dict[str, Any]]]:
     if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
         return None
@@ -325,9 +334,11 @@ async def try_handle_compound_command(
     if len(cmds) > 1:
         for c in cmds:
             if isinstance(c, str) and len(c.strip()) > 2:
+                # For compound commands, don't pass intent (each sub-command needs its own)
                 tasks.append(_handle_single_command(c, user_creds, model))
     else:
-        tasks.append(_handle_single_command(query, user_creds, model))
+        # For single command, pass the intent to avoid re-classification
+        tasks.append(_handle_single_command(query, user_creds, model, intent, score, is_high_confidence))
     if not tasks:
         return None
     results = await asyncio.gather(*tasks)
@@ -360,12 +371,12 @@ async def generate_rag_stream(
         yield builder.done()
         return
 
-    refined = await contextualize_query(query, user, model)
+    refined, intent, score, is_high_confidence = await contextualize_query(query, user, model)
     update_history(user, "user", query)
     creds = get_user_creds(user)
-    intent, score, _ = await IntentClassifier.get_intent(refined)
+    # Intent already obtained from contextualize_query, no need to re-classify
     t_action = time.time()
-    action_results = await try_handle_compound_command(refined, creds, model)
+    action_results = await try_handle_compound_command(refined, creds, model, intent, score, is_high_confidence)
 
     action_context = ""
     run_knowledge_retrieval = True
