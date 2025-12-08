@@ -1041,7 +1041,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                 # --- START MASS INTELLIGENCE SWAP ---
                 #, If we resolved a hardware device but assume music (or ambiguous), check if MA player exists.
                 # This fixes "Play Brandon Lake on Office TV" -> resolved hardware TV -> failed video play.
-                if not is_video_request and "music_assistant" not in resolved_int:
+                if not is_video_request and "music_assistant" not in resolved_int and "media_player" in resolved_id:
                      ma_variants = [f"{resolved_id}_2", f"{resolved_id}_mass", f"{resolved_id}_music"]
                      for variant in ma_variants:
                          variant_state = await get_entity_state(variant, user_creds)
@@ -1095,7 +1095,7 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
                  entity_id, integration = resolved_result
 
         # --- START MASS INTELLIGENCE SWAP (Standard Path) ---
-        if entity_id and not is_video_request and "music_assistant" not in (integration or ""):
+        if entity_id and "media_player" in entity_id and not is_video_request and "music_assistant" not in (integration or ""):
              ma_variants = [f"{entity_id}_2", f"{entity_id}_mass", f"{entity_id}_music"]
              for variant in ma_variants:
                  variant_state = await get_entity_state(variant, user_creds)
