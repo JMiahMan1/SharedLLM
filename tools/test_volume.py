@@ -99,7 +99,8 @@ async def run_test():
 
         # 0. Wake up / Play Music
         print(f"0. Activating {name}...")
-        song = "Bohemian Rhapsody"
+        # Use a Radio URL to guarantee playback (no search required)
+        song = "http://icecast.omroep.nl/3fm-bb-mp3"
         await chat(f"Play {song} on {name}")
         await asyncio.sleep(5)
         
