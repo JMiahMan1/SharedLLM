@@ -42,6 +42,7 @@ from .intents.classifier import IntentClassifier
 from .web_search import tool_web_search
 # Ensure handlers are registered
 import logic.execution.handlers 
+from logic.calendar_ops import tool_calendar_read 
 
 class StreamResponseBuilder:
     def __init__(self, model: str, format_type: str):
