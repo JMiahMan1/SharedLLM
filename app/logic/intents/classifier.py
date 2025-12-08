@@ -33,5 +33,7 @@ class IntentClassifier:
         
         # 2. Vector Engine
         return await intent_engine.classify(
-            query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD
+            query, 
+            threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD,
+            high_confidence_threshold=0.85 
         )
