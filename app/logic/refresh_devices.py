@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 import logging
+import json
 import requests
 from langchain_core.documents import Document
 
@@ -77,6 +78,7 @@ async def refresh_db():
                 "group_id": group_key,
                 "state": m.get("state", "unknown"),
                 "capabilities": ",".join(caps),
+                "attributes": json.dumps(attrs), # Store attributes for smart capability parsing
                 "last_updated": str(asyncio.get_event_loop().time())
             }
             
