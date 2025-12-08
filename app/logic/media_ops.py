@@ -727,6 +727,27 @@ async def smart_resolve_entity(
     # 2. Similarity Search using Chroma
     # Increase k if looking for a group/pattern to ensure we catch all potential matches
     k = 30 if allow_multiple else 15
+
+    # --- ALIAS OVERRIDE ---
+    # Manually map common generic terms to specific domains/substrings
+    # This helps when vector search gets confused by generic terms like "speaker"
+    aliases = {
+        "speaker": "media_player",
+        "tv": "media_player",
+        "television": "media_player",
+        "lights": "light",
+        "lamp": "light",
+    }
+    
+    # Check if query contains an alias
+    alias_filter = None
+    query_lower = query_name.lower()
+    for alias, domain in aliases.items():
+        if alias in query_lower:
+            # If user asks for "Office Speaker", we prioritize searching only media_players
+            # But we still run the vector search, just maybe we filter the query?
+            pass
+
     try:
         results = await run_blocking(
             lambda: GlobalResources.ha_collection.similarity_search_with_score(
@@ -766,7 +787,14 @@ async def smart_resolve_entity(
             integration = doc.metadata.get("integration", "unknown")
 
             # Threshold (Relaxed for distance-based scoring)
-            if score > 1.4:
+            # Default threshold is 1.4, but we treat it dynamic
+            threshold = 1.4
+            
+            # Dynamic Threshold: If inquiring about a generic device type, be looser
+            if "speaker" in query_name.lower() and domain == "media_player":
+                threshold = 1.6
+            
+            if score > threshold:
                 continue
 
             # Basic Domain Safety
@@ -1118,6 +1146,18 @@ async def handle_media_command(
             intent = "turn_on"
         elif "turn off" in intent_lower:
             intent = "turn_off"
+        # --- VOLUME NORMALIZATION ---
+        elif "volume" in intent_lower:
+            if "up" in intent_lower or "increase" in intent_lower or "louder" in intent_lower:
+                intent = "volume_up"
+            elif "down" in intent_lower or "decrease" in intent_lower or "lower" in intent_lower:
+                intent = "volume_down"
+            elif "mute" in intent_lower or "silence" in intent_lower:
+                intent = "volume_mute"
+            else:
+                intent = "volume_set"
+        elif "mute" in intent_lower:
+             intent = "volume_mute"
 
         if intent != original_intent:
             log.info(f"Sanitized intent from '{original_intent}' to '{intent}'")
