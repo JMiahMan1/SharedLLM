@@ -1747,11 +1747,16 @@ async def handle_media_command(
         # Check Capabilities
         caps = await get_device_capabilities(entity_id, user_creds, redis_client)
         features = caps.get("supported_features", 0)
+        
+        # Override Integration if Capabilities detected MA (from Attributes)
+        if caps.get("integration") == "music_assistant" or "mass_player_type" in caps.get("attributes", {}):
+            log.info(f"Capability Check: Overriding integration to 'music_assistant' for {entity_id}")
+            integration = "music_assistant"
+            ctype = "music" # Force music type for MA players
 
         # Bitmasks: 4=Set, 8=Mute
         # Note: Many devices support Step (Up/Down) even if they don't support Set.
-        # HA doesn't explicitly expose "Step" bitmask in all docs, but usually if it's a media player, we try.
-
+        
         can_set_vol = bool(features & 4)
         can_mute = bool(features & 8)
 
