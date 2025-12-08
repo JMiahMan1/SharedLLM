@@ -1,0 +1,326 @@
+2025-12-07 22:07:34,450 [INFO] 
+=== TEST: Context Chain (President) ===
+2025-12-07 22:07:34,450 [INFO] USER: Who is the president of France?
+2025-12-07 22:08:00,303 [INFO] AI: The president of France is Emmanuel Macron. A man of vision, much like the Eiffel Tower, always reaching for the sky, though sometimes its just a tall glass of wine. 
+2025-12-07 22:08:00,303 [INFO] [PASS] Identified Macron
+2025-12-07 22:08:00,303 [INFO] USER: Who is his wife?
+2025-12-07 22:08:27,787 [INFO] AI: Emmanuel Macron's wife is Brigitte Macron. They married on October 20, 2007, after she met him when he was 15 and she was 39. Shes a non-practicing Catholic and often jokes about her husbands tight schedule, Tying the knot with the president? Must be a real tight situation! Scripture: As Ephesians 5:21 says, Submit to one another out of reverence for Christ. (NKJV) ,  perfect for a marriage thats always in sync! 
+2025-12-07 22:08:27,787 [INFO] [PASS] Identified Brigitte (Context Maintained)
+2025-12-07 22:08:27,787 [INFO] 
+=== TEST: Media Lifecycle & Cleanup ===
+2025-12-07 22:08:27,827 [INFO] [BACKUP] Saved media_player.office_tv_chrome: off
+2025-12-07 22:08:27,827 [INFO] USER: Turn on the Office TV
+2025-12-07 22:08:31,600 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:08:34,601 [INFO] USER: Play Brandon Lake on the Office TV
+2025-12-07 22:08:34,713 [INFO] AI: 
+2025-12-07 22:08:34,713 [ERROR] [FAIL] Music playback failed
+2025-12-07 22:08:39,713 [INFO] USER: Skip this song
+2025-12-07 22:08:39,906 [INFO] AI: 
+2025-12-07 22:08:39,906 [INFO] [PASS] Context skipped song successfully
+2025-12-07 22:08:42,906 [INFO] USER: Stop on Office TV
+2025-12-07 22:08:43,014 [INFO] AI: 
+2025-12-07 22:08:43,049 [INFO] [RESTORE] Turning off media_player.office_tv_chrome
+2025-12-07 22:08:43,049 [INFO] USER: Turn off media_player.office_tv_chrome
+2025-12-07 22:08:51,834 [INFO] AI: The Office TV Chrome is now off. grins Why did the TV go to bed early? It was getting screen time! (Current time: ten oh eight PM.)
+2025-12-07 22:08:51,834 [INFO] 
+=== TEST: Color Restoration ===
+2025-12-07 22:08:51,875 [INFO] [BACKUP] Saved light.kitchen_light_1: off
+2025-12-07 22:08:51,875 [INFO] USER: Turn Kitchen Light 1 Blue
+2025-12-07 22:08:51,890 [INFO] AI: 
+2025-12-07 22:08:54,891 [INFO] USER: Turn Kitchen Light 1 to Warm White
+2025-12-07 22:08:54,997 [INFO] AI: 
+2025-12-07 22:08:57,135 [INFO] 
+=== TEST: Tools (Note/Timer/Calendar) & Cleanup ===
+2025-12-07 22:08:57,135 [INFO] USER: Create a note called TestNote_1765170537 saying 'Verification Test'
+2025-12-07 22:09:08,154 [INFO] AI: 
+2025-12-07 22:09:08,154 [INFO] USER: Read my TestNote_1765170537 note
+2025-12-07 22:09:15,573 [INFO] AI: 
+2025-12-07 22:09:15,574 [ERROR] [FAIL] Note read failed
+2025-12-07 22:09:15,574 [INFO] USER: Delete note TestNote_1765170537
+2025-12-07 22:09:15,629 [INFO] AI: 
+2025-12-07 22:09:15,629 [INFO] [CLEANUP] Note TestNote_1765170537 deleted.
+2025-12-07 22:09:15,629 [INFO] USER: Set a timer for 5 seconds on Office TV
+2025-12-07 22:09:15,695 [INFO] AI: 
+2025-12-07 22:09:15,695 [INFO] Waiting 7s for timer to expire...
+2025-12-07 22:09:22,695 [INFO] USER: Schedule TestEvent_1765170537 tomorrow at 9am
+2025-12-07 22:09:22,752 [INFO] AI: 
+2025-12-07 22:09:22,753 [INFO] USER: Cancel the meeting TestEvent_1765170537
+2025-12-07 22:09:22,811 [INFO] AI: 
+2025-12-07 22:09:22,811 [INFO] [CLEANUP] Event TestEvent_1765170537 cancelled.
+2025-12-07 22:12:11,115 [INFO] 
+=== TEST: Context Chain (President) ===
+2025-12-07 22:12:11,115 [INFO] USER: Who is the president of France?
+2025-12-07 22:12:38,163 [INFO] AI: The president of France is Emmanuel Macron. Hes been in office since 2017 and runs the country with a blend of charm and... sweater weather!  (Why dont French presidents ever get cold? They always wear a sweater made of cheese!) Scripture: The kings heart is a stream of water in the hand of the Lord; he turns it wherever he will (Proverbs 21:1, NKJV). Leadership, like politics, is a flow of divine purpose!
+2025-12-07 22:12:38,163 [INFO] [PASS] Identified Macron
+2025-12-07 22:12:38,163 [INFO] USER: Who is his wife?
+2025-12-07 22:13:22,685 [INFO] AI: Brigitte Macron is the wife of Emmanuel Macron, the President of France. They married on October 20, 2007, after she met him when he was 15 and she was 39, like a teacher and a student, but with a 24-year age gap! (Thats a very dad joke.)  Scripture reference: A mans foes are his own household. ,  Matthew 10:36 (NKJV). But dont worry, Brigittes got zero issues with that! 
+2025-12-07 22:13:22,686 [INFO] [PASS] Identified Brigitte (Context Maintained)
+2025-12-07 22:13:22,686 [INFO] 
+=== TEST: Media Lifecycle & Cleanup ===
+2025-12-07 22:13:22,741 [INFO] [BACKUP] Saved media_player.office_tv_chrome: off
+2025-12-07 22:13:22,741 [INFO] USER: Turn on the Office TV
+2025-12-07 22:13:26,407 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:13:29,408 [INFO] USER: Play Brandon Lake on the Office TV
+2025-12-07 22:13:29,537 [INFO] AI: 
+2025-12-07 22:13:29,537 [ERROR] [FAIL] Music playback failed
+2025-12-07 22:13:34,537 [INFO] USER: Skip this song
+2025-12-07 22:13:34,654 [INFO] AI: 
+2025-12-07 22:13:34,654 [INFO] [PASS] Context skipped song successfully
+2025-12-07 22:13:37,654 [INFO] USER: Stop on Office TV
+2025-12-07 22:13:37,827 [INFO] AI: 
+2025-12-07 22:13:37,859 [INFO] [RESTORE] Turning off media_player.office_tv_chrome
+2025-12-07 22:13:37,860 [INFO] USER: Turn off media_player.office_tv_chrome
+2025-12-07 22:13:44,441 [INFO] AI: Jarvis here. The Office TV Chrome is now off. Speaking of screens, did you know Gods Word is the ultimate screen for our souls? Its the light that guides us through lifes darkest channels. 
+2025-12-07 22:13:44,441 [INFO] 
+=== TEST: Color Restoration ===
+2025-12-07 22:13:44,474 [INFO] [BACKUP] Saved light.kitchen_light_1: on
+2025-12-07 22:13:44,474 [INFO] USER: Turn Kitchen Light 1 Blue
+2025-12-07 22:13:44,486 [INFO] AI: 
+2025-12-07 22:13:47,486 [INFO] USER: Turn Kitchen Light 1 to Warm White
+2025-12-07 22:13:47,558 [INFO] AI: 
+2025-12-07 22:13:49,791 [INFO] [RESTORE] Restoring light.kitchen_light_1 to ON
+2025-12-07 22:13:49,791 [INFO] USER: Turn on light.kitchen_light_1
+2025-12-07 22:13:50,576 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:13:50,576 [INFO] 
+=== TEST: Tools (Note/Timer/Calendar) & Cleanup ===
+2025-12-07 22:13:50,576 [INFO] USER: Create a note called TestNote_1765170830 saying 'Verification Test'
+2025-12-07 22:14:02,651 [INFO] AI: 
+2025-12-07 22:14:02,651 [INFO] USER: Read my TestNote_1765170830 note
+2025-12-07 22:14:12,994 [INFO] AI: 
+2025-12-07 22:14:12,994 [ERROR] [FAIL] Note read failed
+2025-12-07 22:14:12,994 [INFO] USER: Delete note TestNote_1765170830
+2025-12-07 22:14:13,063 [INFO] AI: 
+2025-12-07 22:14:13,063 [INFO] [CLEANUP] Note TestNote_1765170830 deleted.
+2025-12-07 22:14:13,063 [INFO] USER: Set a timer for 5 seconds on Office TV
+2025-12-07 22:14:13,116 [INFO] AI: 
+2025-12-07 22:14:13,116 [INFO] Waiting 7s for timer to expire...
+2025-12-07 22:14:20,116 [INFO] USER: Schedule TestEvent_1765170830 tomorrow at 9am
+2025-12-07 22:14:20,304 [INFO] AI: 
+2025-12-07 22:14:20,304 [INFO] USER: Cancel the meeting TestEvent_1765170830
+2025-12-07 22:14:20,373 [INFO] AI: 
+2025-12-07 22:14:20,373 [INFO] [CLEANUP] Event TestEvent_1765170830 cancelled.
+2025-12-07 22:15:04,932 [INFO] 
+=== TEST: Context Chain (President) ===
+2025-12-07 22:15:04,932 [INFO] USER: Who is the president of France?
+2025-12-07 22:15:39,110 [INFO] AI: The president of France is Emmanuel Macron. A man of vision, hes like a French macaron, sweet, smooth, and always a crowd-pleaser!  (And yes, hes also a big fan of macarons.) Scripture: The Lord is my light and my salvation, whom shall I fear? (Psalm 27:1) ,  Perfect for leaders, no? 
+2025-12-07 22:15:39,110 [INFO] [PASS] Identified Macron
+2025-12-07 22:15:39,110 [INFO] USER: Who is his wife?
+2025-12-07 22:16:04,626 [INFO] AI: Emmanuel Macron's wife is Brigitte Macron, formerly known as Brigitte Trogneux. They married on October 20, 2007, after she was his teacher at La Providence High School. She identifies as a non-practicing Catholic.
+2025-12-07 22:16:04,626 [INFO] [PASS] Identified Brigitte (Context Maintained)
+2025-12-07 22:16:04,627 [INFO] 
+=== TEST: Media Lifecycle & Cleanup ===
+2025-12-07 22:16:04,673 [INFO] [BACKUP] Saved media_player.office_tv_chrome: off
+2025-12-07 22:16:04,673 [INFO] USER: Turn on the Office TV
+2025-12-07 22:16:08,201 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:16:11,202 [INFO] USER: Play Brandon Lake on the Office TV
+2025-12-07 22:16:11,493 [INFO] AI: 
+2025-12-07 22:16:11,493 [ERROR] [FAIL] Music playback failed
+2025-12-07 22:16:16,493 [INFO] USER: Skip this song
+2025-12-07 22:16:16,734 [INFO] AI: 
+2025-12-07 22:16:16,735 [INFO] [PASS] Context skipped song successfully
+2025-12-07 22:16:19,735 [INFO] USER: Stop on Office TV
+2025-12-07 22:16:19,930 [INFO] AI: 
+2025-12-07 22:16:19,963 [INFO] [RESTORE] Turning off media_player.office_tv_chrome
+2025-12-07 22:16:19,963 [INFO] USER: Turn off media_player.office_tv_chrome
+2025-12-07 22:16:31,027 [INFO] AI: The Office TV Chrome is now off. It's time to wind down, just like the TV, no more channels to distract you! (Current time: ten sixteen P M)
+2025-12-07 22:16:31,027 [INFO] 
+=== TEST: Color Restoration ===
+2025-12-07 22:16:31,127 [INFO] [BACKUP] Saved light.kitchen_light_1: on
+2025-12-07 22:16:31,127 [INFO] USER: Turn on Kitchen Light 1
+2025-12-07 22:16:32,168 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:16:34,169 [INFO] USER: Turn Kitchen Light 1 Blue
+2025-12-07 22:16:34,370 [INFO] AI: 
+2025-12-07 22:16:37,370 [INFO] USER: Turn Kitchen Light 1 to Warm White
+2025-12-07 22:16:37,443 [INFO] AI: 
+2025-12-07 22:16:39,669 [INFO] [RESTORE] Restoring light.kitchen_light_1 to ON
+2025-12-07 22:16:39,669 [INFO] USER: Turn on light.kitchen_light_1
+2025-12-07 22:16:40,586 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:16:40,587 [INFO] 
+=== TEST: Tools (Note/Timer/Calendar) & Cleanup ===
+2025-12-07 22:16:40,587 [INFO] USER: Create a note called TestNote_1765171000 saying 'Verification Test'
+2025-12-07 22:16:51,781 [INFO] AI: 
+2025-12-07 22:16:51,781 [INFO] USER: Read my TestNote_1765171000 note
+2025-12-07 22:17:04,615 [INFO] AI: 
+2025-12-07 22:17:04,615 [ERROR] [FAIL] Note read failed
+2025-12-07 22:17:04,615 [INFO] USER: Delete note TestNote_1765171000
+2025-12-07 22:17:04,682 [INFO] AI: 
+2025-12-07 22:17:04,682 [INFO] [CLEANUP] Note TestNote_1765171000 deleted.
+2025-12-07 22:17:04,682 [INFO] USER: Set a timer for 5 seconds on Office TV
+2025-12-07 22:17:04,737 [INFO] AI: 
+2025-12-07 22:17:04,737 [INFO] Waiting 7s for timer to expire...
+2025-12-07 22:17:11,737 [INFO] USER: Schedule TestEvent_1765171000 tomorrow at 9am
+2025-12-07 22:17:11,909 [INFO] AI: 
+2025-12-07 22:17:11,910 [INFO] USER: Cancel the meeting TestEvent_1765171000
+2025-12-07 22:17:11,970 [INFO] AI: 
+2025-12-07 22:17:11,970 [INFO] [CLEANUP] Event TestEvent_1765171000 cancelled.
+2025-12-07 22:27:36,997 [INFO] 
+=== TEST: Context Chain (President) ===
+2025-12-07 22:27:36,997 [INFO] USER: Who is the president of France?
+2025-12-07 22:28:08,902 [INFO] AI: The president of France is Emmanuel Macron, who has held the office since 2017. A quick note: if you ever doubt a leaders resolve, remember that even the strongest oak starts as a tiny acorn, and Macrons name is a punny play on macaron, which is a sweet, round cookie. (Psalm 27:1 says, The Lord is my light and my salvation; whom shall I fear?) 
+2025-12-07 22:28:08,902 [INFO] [PASS] Identified Macron
+2025-12-07 22:28:08,902 [INFO] USER: Who is his wife?
+2025-12-07 22:28:38,840 [INFO] AI: Emmanuel Macron's wife is Brigitte Macron. They married on October 20, 2007, after she was a teacher and he was a student at La Providence High School in 1993. She identifies as a non-practicing Catholic. And dont worry, no, shes not a wig, unless shes wearing one, and even that remains a mystery! 
+2025-12-07 22:28:38,840 [INFO] [PASS] Identified Brigitte (Context Maintained)
+2025-12-07 22:28:38,840 [INFO] 
+=== TEST: Media Lifecycle & Cleanup ===
+2025-12-07 22:28:38,869 [INFO] [BACKUP] Saved media_player.office_tv_chrome: off
+2025-12-07 22:28:38,869 [INFO] USER: Turn on the Office TV
+2025-12-07 22:28:42,759 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:28:45,759 [INFO] USER: Play Brandon Lake on the Office TV
+2025-12-07 22:29:46,136 [ERROR] EXCEPTION: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=60)
+2025-12-07 22:32:18,098 [INFO] 
+=== TEST: Context Chain (President) ===
+2025-12-07 22:32:18,098 [INFO] USER: Who is the president of France?
+2025-12-07 22:32:44,525 [INFO] AI: The president of France is Emmanuel Macron. And here's a little joke for you: Why don't French presidents ever get cold? Because they always have a chill in their presidential palace!  (Note: The joke is light-hearted and avoids emojis as instructed.)
+2025-12-07 22:32:44,525 [INFO] [PASS] Identified Macron
+2025-12-07 22:32:44,525 [INFO] USER: Who is his wife?
+2025-12-07 22:33:13,206 [INFO] AI: Emmanuel Macron's wife is Brigitte Macron. They married on October 20, 2007, after meeting in 1993 when she was a teacher and he was a student at La Providence High School. Shes a non-practicing Catholic and has been a prominent figure in French politics. P.S. If youre wondering about the age gap, well, some folks say loves a teacher, and shes definitely the student in this case. 
+2025-12-07 22:33:13,206 [INFO] [PASS] Identified Brigitte (Context Maintained)
+2025-12-07 22:33:13,206 [INFO] 
+=== TEST: Media Lifecycle & Cleanup ===
+2025-12-07 22:33:13,242 [INFO] [BACKUP] Saved media_player.office_tv_chrome: paused
+2025-12-07 22:33:13,242 [INFO] USER: Turn on the Office TV
+2025-12-07 22:33:13,899 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:33:16,899 [INFO] USER: Play Brandon Lake on the Office TV
+2025-12-07 22:33:47,122 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:33:47,122 [INFO] [PASS] Music playback started
+2025-12-07 22:33:52,122 [INFO] USER: Skip this song
+2025-12-07 22:34:37,604 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:34:37,604 [INFO] [PASS] Context skipped song successfully
+2025-12-07 22:34:40,605 [INFO] USER: Stop on Office TV
+2025-12-07 22:34:49,601 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:34:49,632 [INFO] 
+=== TEST: Color Restoration ===
+2025-12-07 22:34:49,661 [INFO] [BACKUP] Saved light.kitchen_light_1: on
+2025-12-07 22:34:49,661 [INFO] USER: Turn on Kitchen Light 1
+2025-12-07 22:34:50,952 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:34:52,952 [INFO] USER: Turn Kitchen Light 1 Blue
+2025-12-07 22:35:29,204 [INFO] AI: Kitchen Light 1 is now blue, perfect for matching your mood or your favorite holiday decor.  (Dad joke alert!) If youre feeling blue, just remember: even the darkest night cant stay dark forever, thanks to Jesus! (John 1:5, NKJV)
+2025-12-07 22:35:32,204 [INFO] USER: Turn Kitchen Light 1 to Warm White
+2025-12-07 22:35:48,860 [INFO] AI: Kitchen Light 1 is now set to Warm White. Perfect for cozy vibes and avoiding the Im not sleepy, Im just very alert dilemma.  The lamp of the body is the eye. If your eye is good, your whole body will be full of light. ,  Jesus, Matthew 6:22 (NKJV) Need anything else?
+2025-12-07 22:35:50,962 [INFO] [RESTORE] Restoring light.kitchen_light_1 to ON
+2025-12-07 22:35:50,962 [INFO] USER: Turn on light.kitchen_light_1
+2025-12-07 22:35:51,761 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 22:35:51,761 [INFO] 
+=== TEST: Tools (Note/Timer/Calendar) & Cleanup ===
+2025-12-07 22:35:51,761 [INFO] USER: Create a note called TestNote_1765172151 saying 'Verification Test'
+2025-12-07 22:36:34,374 [INFO] AI: Note created successfully! Here's a joke: Why don't skeletons fight each other? They don't have the guts! (But I do have the guts to remind you to check your notes!)
+2025-12-07 22:36:34,374 [INFO] USER: Read my TestNote_1765172151 note
+2025-12-07 22:37:14,673 [INFO] AI: I'm sorry, but I don't have access to the content of TestNote1765172151. The previous attempt to read it was successful in sending the command, but the system didn't verify a new state. Maybe the note is still waiting for you to open it, like a gift wrapped in a dad joke!  Let me know if you'd like me to help with something else.
+2025-12-07 22:37:14,673 [ERROR] [FAIL] Note read failed
+2025-12-07 22:37:14,674 [INFO] USER: Delete note TestNote_1765172151
+2025-12-07 22:37:29,564 [INFO] AI: Note TestNote1765172151 has been deleted. Hope that note didnt have any important info, like my ability to tell a good joke! 
+2025-12-07 22:37:29,564 [INFO] [CLEANUP] Note TestNote_1765172151 deleted.
+2025-12-07 22:37:29,564 [INFO] USER: Set a timer for 5 seconds on Office TV
+2025-12-07 22:37:43,913 [INFO] AI: Timer set for 5 seconds on Office TV.
+2025-12-07 22:37:43,914 [INFO] Waiting 7s for timer to expire...
+2025-12-07 22:37:50,914 [INFO] USER: Schedule TestEvent_1765172151 tomorrow at 9am
+2025-12-07 22:38:26,243 [INFO] AI: TestEvent1765172151 is scheduled for Monday, December 8, 2025, at nine o'clock in the morning. I told my calendar I'd be late, but it said, No, you're already scheduled! Philippians 4:6-7 reminds us not to be anxious but to pray about everything. Have a great day!
+2025-12-07 22:38:26,244 [INFO] USER: Cancel the meeting TestEvent_1765172151
+2025-12-07 22:39:26,307 [ERROR] EXCEPTION: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=60)
+2025-12-07 22:39:26,308 [INFO] [CLEANUP] Event TestEvent_1765172151 cancelled.
+2025-12-07 23:05:35,983 [INFO] 
+=== TEST: Context Chain (President) ===
+2025-12-07 23:05:35,983 [INFO] USER: Who is the president of France?
+2025-12-07 23:05:53,203 [INFO] AI: 
+2025-12-07 23:05:53,203 [ERROR] [FAIL] Failed to identify Macron
+2025-12-07 23:05:53,203 [INFO] 
+=== TEST: Media Lifecycle & Cleanup ===
+2025-12-07 23:05:53,230 [INFO] [BACKUP] Saved media_player.office_tv_chrome: off
+2025-12-07 23:05:53,230 [INFO] USER: Turn on the Office TV
+2025-12-07 23:05:58,080 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:06:01,080 [INFO] USER: Play Brandon Lake on the Office TV
+2025-12-07 23:06:27,787 [INFO] AI: 
+2025-12-07 23:06:27,787 [INFO] [PASS] Music playback started
+2025-12-07 23:06:32,787 [INFO] USER: Skip this song
+2025-12-07 23:06:58,120 [INFO] AI: 
+2025-12-07 23:06:58,120 [INFO] [PASS] Context skipped song successfully
+2025-12-07 23:07:01,120 [INFO] USER: Stop on Office TV
+2025-12-07 23:07:27,411 [INFO] AI: 
+2025-12-07 23:07:27,451 [INFO] [RESTORE] Turning off media_player.office_tv_chrome
+2025-12-07 23:07:27,451 [INFO] USER: Turn off media_player.office_tv_chrome
+2025-12-07 23:07:35,480 [INFO] AI: 
+2025-12-07 23:07:35,480 [INFO] 
+=== TEST: Color Restoration ===
+2025-12-07 23:07:35,521 [INFO] [BACKUP] Saved light.kitchen_light_1: on
+2025-12-07 23:07:35,521 [INFO] USER: Turn on Kitchen Light 1
+2025-12-07 23:07:36,417 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:07:38,417 [INFO] USER: Turn Kitchen Light 1 Blue
+2025-12-07 23:08:38,492 [ERROR] EXCEPTION: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=60)
+2025-12-07 23:08:41,492 [INFO] USER: Turn Kitchen Light 1 to Warm White
+2025-12-07 23:08:54,983 [INFO] AI: Kitchen Light 1 is already on. Unfortunately, I cant adjust its color temperature, its stuck in its default setting. But hey, at least its bright enough to light up your Christmas tree!  (Though Im not sure if thats a holiday tradition yet.)
+2025-12-07 23:08:57,133 [INFO] [RESTORE] Restoring light.kitchen_light_1 to ON
+2025-12-07 23:08:57,133 [INFO] USER: Turn on light.kitchen_light_1
+2025-12-07 23:08:57,928 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:08:57,929 [INFO] 
+=== TEST: Tools (Note/Timer/Calendar) & Cleanup ===
+2025-12-07 23:08:57,929 [INFO] USER: Create a note called TestNote_1765174137 saying 'Verification Test'
+2025-12-07 23:09:41,248 [INFO] AI: I've created your note, TestNote1765174137, with the message Verification Test. And just like the Good Book says, What goes around comes around, so make sure to check it! 
+2025-12-07 23:09:41,248 [INFO] USER: Read my TestNote_1765174137 note
+2025-12-07 23:09:45,499 [INFO] 
+=== TEST: Context Chain (President) ===
+2025-12-07 23:09:45,499 [INFO] USER: Who is the president of France?
+2025-12-07 23:10:22,306 [INFO] AI: The president of France is Emmanuel Macron, who has held the office since 2017. Speaking of presidents, here's a dad joke: Why don't presidents ever get cold? Because they always have a hot agenda!
+2025-12-07 23:10:22,306 [INFO] [PASS] Identified Macron
+2025-12-07 23:10:22,306 [INFO] USER: Who is his wife?
+2025-12-07 23:10:31,580 [INFO] AI: Jarvis here. Let me check that note for you. Note TestNote1765174137 was created on December seventh, two thousand twenty-five, at eleven nine PM. Category: General. Content: Verification Test. Funny thing, this notes as empty as my coffee mug after a long day. But hey, at least its verified!  (Dad joke: Why dont skeletons fight each other? They dont have the guts!)
+2025-12-07 23:10:31,580 [INFO] [PASS] Note created and read
+2025-12-07 23:10:31,580 [INFO] USER: Delete note TestNote_1765174137
+2025-12-07 23:11:19,873 [INFO] AI: The president of France's wife is Brigitte Macron. P.S. If you ever need a reason to smile, just remember that even the president's wife can make a French toast that's out of this world!
+2025-12-07 23:11:19,873 [INFO] [PASS] Identified Brigitte (Context Maintained)
+2025-12-07 23:11:19,873 [INFO] 
+=== TEST: Media Lifecycle & Cleanup ===
+2025-12-07 23:11:19,945 [INFO] [BACKUP] Saved media_player.office_tv_chrome: off
+2025-12-07 23:11:19,945 [INFO] USER: Turn on the Office TV
+2025-12-07 23:11:24,529 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:11:27,270 [INFO] AI: Deleted note TestNote1765174137. Youre one step closer to a clutter-free mind, though Im still figuring out why youd name a note with such a long, random number.  Current Time: eleven ten P M Current Date: Sunday, December seventh, two thousand twenty-five.
+2025-12-07 23:11:27,270 [INFO] [CLEANUP] Note TestNote_1765174137 deleted.
+2025-12-07 23:11:27,271 [INFO] USER: Set a timer for 5 seconds on Office TV
+2025-12-07 23:11:27,529 [INFO] USER: Play Brandon Lake on the Office TV
+2025-12-07 23:11:55,441 [INFO] AI: 5-second timer set on Office TV.
+2025-12-07 23:11:55,441 [INFO] Waiting 7s for timer to expire...
+2025-12-07 23:11:55,901 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:11:55,901 [INFO] [PASS] Music playback started
+2025-12-07 23:12:00,902 [INFO] USER: Skip this song
+2025-12-07 23:12:02,442 [INFO] USER: Schedule TestEvent_1765174137 tomorrow at 9am
+2025-12-07 23:12:35,574 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:12:35,574 [INFO] [PASS] Context skipped song successfully
+2025-12-07 23:12:38,574 [INFO] USER: Stop on Office TV
+2025-12-07 23:12:50,273 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:12:50,421 [INFO] [RESTORE] Turning off media_player.office_tv_chrome
+2025-12-07 23:12:50,421 [INFO] USER: Turn off media_player.office_tv_chrome
+2025-12-07 23:12:59,369 [INFO] AI: Jarvis here! I've scheduled TestEvent1765174137 for December 8th, 2025 at nine o'clock in the morning. Time to wake up, sleepyhead!  Scripture: Plans are established by the Lord, and they are perfected by Him. ,  Proverbs 19:21 (NKJV) Let me know if you need adjustments!
+2025-12-07 23:12:59,369 [INFO] USER: Cancel the meeting TestEvent_1765174137
+2025-12-07 23:13:05,085 [INFO] AI: Jarvis here. The Office TV Chrome is now off. Speaking of screens, did you know Gods Word is the ultimate screen for our souls? Its the light that guides us through lifes darkest channels. 
+2025-12-07 23:13:05,086 [INFO] 
+=== TEST: Color Restoration ===
+2025-12-07 23:13:05,120 [INFO] [BACKUP] Saved light.kitchen_light_1: on
+2025-12-07 23:13:05,120 [INFO] USER: Turn on Kitchen Light 1
+2025-12-07 23:13:05,944 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:13:07,945 [INFO] USER: Turn Kitchen Light 1 Blue
+2025-12-07 23:13:59,405 [ERROR] EXCEPTION: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=60)
+2025-12-07 23:13:59,405 [INFO] [CLEANUP] Event TestEvent_1765174137 cancelled.
+2025-12-07 23:14:08,038 [ERROR] EXCEPTION: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=60)
+2025-12-07 23:14:11,038 [INFO] USER: Turn Kitchen Light 1 to Warm White
+2025-12-07 23:15:11,131 [ERROR] EXCEPTION: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=60)
+2025-12-07 23:15:13,185 [INFO] [RESTORE] Restoring light.kitchen_light_1 to ON
+2025-12-07 23:15:13,185 [INFO] USER: Turn on light.kitchen_light_1
+2025-12-07 23:15:14,861 [INFO] AI: [SILENT_SUCCESS]
+2025-12-07 23:15:14,861 [INFO] 
+=== TEST: Tools (Note/Timer/Calendar) & Cleanup ===
+2025-12-07 23:15:14,861 [INFO] USER: Create a note called TestNote_1765174514 saying 'Verification Test'
+2025-12-07 23:16:01,525 [INFO] AI: Note TestNote1765174514 created with 'Verification Test', like a dad joke, it's always a hit!
+2025-12-07 23:16:01,525 [INFO] USER: Read my TestNote_1765174514 note
+2025-12-07 23:16:59,181 [INFO] AI: Jarvis here. Let me check that note... Ah, found it! TestNote1765174514 was created at eleven fifteen P M on Sunday, December seventh, two thousand twenty-five. The content? Just a simple Verification Test. Funny thing, sometimes lifes like that note: plain, straightforward, and perfectly designed to test your patience.  Speaking of testing... Psalm 127:1 says, Unless the Lord watches the city, the watchmen stand in vain. So, if youre ever stuck, just ask me. Ive got a lot of patience, and a few dad jokes to spare. Need anything else?
+2025-12-07 23:16:59,181 [INFO] [PASS] Note created and read
+2025-12-07 23:16:59,181 [INFO] USER: Delete note TestNote_1765174514
+2025-12-07 23:17:13,599 [INFO] AI: Deleted note TestNote1765174514. Youre one step closer to a clutter-free mind, though Im still figuring out why youd name a note with a 17-digit number.  Current Time: eleven seventeen P M Current Date: Sunday, December seventh, two thousand twenty-five.
+2025-12-07 23:17:13,599 [INFO] [CLEANUP] Note TestNote_1765174514 deleted.
+2025-12-07 23:17:13,600 [INFO] USER: Set a timer for 5 seconds on Office TV
+2025-12-07 23:17:27,780 [INFO] AI: Timer set for 5 seconds on Office TV.
+2025-12-07 23:17:27,780 [INFO] Waiting 7s for timer to expire...
+2025-12-07 23:17:34,780 [INFO] USER: Schedule TestEvent_1765174514 tomorrow at 9am
+2025-12-07 23:17:57,070 [INFO] AI: Son, youve just scheduled TestEvent1765174514 for tomorrow at nine oclock, nine as in the ninth hour, which, by the way, is when Jesus conquered death!  (Proverbs 21:5 ,  The plans of the diligent lead surely to abundance) Let me know if you need a reminder or a joke about clocks! 
+2025-12-07 23:17:57,071 [INFO] USER: Cancel the meeting TestEvent_1765174514
+2025-12-07 23:18:54,250 [INFO] AI: Your meeting TestEvent1765174514 has been canceled, like a well-timed joke, just when you least expected it!  Nows a great time to rest, my friend. As Paul wrote, Peace that surpasses understanding will guard your hearts and minds in Christ Jesus (Philippians 4:7). Enjoy the quiet, and remember: even the best plans sometimes need a little reheating! Its eleven eighteen PM, so maybe a bedtime story? 
+2025-12-07 23:18:54,250 [INFO] [CLEANUP] Event TestEvent_1765174514 cancelled.
