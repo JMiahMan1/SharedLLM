@@ -127,9 +127,9 @@ If the intent is a clear, confident action, generate the JSON for a tool call.
 If the query is conversational, informational, ambiguous, or requires the user's personal context/RAG (e.g., "What devices are in the office?", "Is the garage door open?"), output 'CONVERSE'.
 
 Output ONLY a single JSON object (DO NOT use markdown backticks). Example:
-{"action": "tool_call", "tool_name": "timer_add", "parameters": {"summary": "Dinner", "time_expression": "20 minutes", "is_alarm": false}}
+{{"action": "tool_call", "tool_name": "timer_add", "parameters": {{"summary": "Dinner", "time_expression": "20 minutes", "is_alarm": false}}}}
 OR
-{"action": "CONVERSE"}
+{{"action": "CONVERSE"}}
 
 JSON:"""
 ORCHESTRATOR_PROMPT = os.getenv("ORCHESTRATOR_PROMPT", DEFAULT_ORCHESTRATOR_PROMPT)
