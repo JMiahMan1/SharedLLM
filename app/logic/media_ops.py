@@ -2009,26 +2009,30 @@ async def handle_media_command(
         # --- CONTENT CLEANING ---
         original_title = clean_title
 
-        # Only remove control/action words
-        clean_title = re.sub(
-            r"\b(play|please|from|on|open|launch|playback|listen to)\b",
-            " ",
-            clean_title,
-        )
+        # Check for URL first - if URL, skip all cleaning
+        is_url = clean_title.startswith("http://") or clean_title.startswith("https://")
 
-        # Only remove content TYPE keywords IF the request is for MUSIC
-        if is_music_request:
+        if not is_url:
+            # Only remove control/action words
             clean_title = re.sub(
-                r"\b(music|song|album|track|playlist|artist|radio|podcast)\b",
+                r"\b(play|please|from|on|open|launch|playback|listen to)\b",
                 " ",
                 clean_title,
             )
 
-        # Remove filler words
-        clean_title = re.sub(r"\b(by|the|some|a|an)\b", " ", clean_title)
+            # Only remove content TYPE keywords IF the request is for MUSIC
+            if is_music_request:
+                clean_title = re.sub(
+                    r"\b(music|song|album|track|playlist|artist|radio|podcast)\b",
+                    " ",
+                    clean_title,
+                )
 
-        clean_title = re.sub(r"[^\w\s]", " ", clean_title)
-        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+            # Remove filler words
+            clean_title = re.sub(r"\b(by|the|some|a|an)\b", " ", clean_title)
+
+            clean_title = re.sub(r"[^\w\s]", " ", clean_title)
+            clean_title = re.sub(r"\s+", " ", clean_title).strip()
 
         if len(clean_title) < 3:
             clean_title = original_title
