@@ -2058,8 +2058,15 @@ async def handle_media_command(
              if ctype not in ["radio", "track", "album", "artist", "playlist"]:
                  ctype = "music"
 
-        # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices ---
         if "music_assistant" in integration:
+            # CHECK FOR ACTIVE QUEUE (Critical Fix for 500 Errors)
+            # MA Players ('mass_player_type': 'player') delegate playback to a queue entity ('active_queue')
+            # detailed in their attributes. We must target the queue, not the player.
+            active_queue = caps.get("attributes", {}).get("active_queue")
+            if active_queue:
+                log.info(f"[Play Media] Redirecting MA command from {entity_id} to Active Queue: {active_queue}")
+                entity_id = active_queue
+            
             log.info(
                 f"Executing Music Assistant specific Play on {entity_id} Type: {ctype}"
             )
