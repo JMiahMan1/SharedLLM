@@ -918,13 +918,95 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         preferred_type = "android" # Prefer hardware for these if no explicit match above
 
     best_candidate = None
+    
+    # ---------------------------------------------------------
+    # CAPABILITY / GROUP ROUTING (NEW)
+    # ---------------------------------------------------------
+    # If we found a match, check if it belongs to a Device Group.
+    # If so, fetch the whole group and route based on Intent.
+    
+    top_doc = docs[0]
+    group_id = top_doc.metadata.get("group_id")
+    
+    if group_id:
+        log.info(f"match found in Group: {group_id} (via {top_doc.page_content[:20]}...)")
+        try:
+            # Fetch all group members from Chroma
+            # Note: ha_collection is Langchain wrapper. Access internal collection if possible, 
+            # or rely on metadata from the search result if we indexed enough? 
+            # Better to query. keys: "entity_id", "integration", "capabilities", "domain"
+            
+            # Access underlying chromadb collection if available
+            if hasattr(ha_collection, "_collection"):
+                 group_res = ha_collection._collection.get(where={"group_id": group_id})
+                 # group_res keys: ids, metadatas, documents...
+                 
+                 if group_res and group_res.get("metadatas"):
+                      members = group_res["metadatas"]
+                      log.info(f"Group {group_id} has {len(members)} members.")
+                      
+                      # ROUTING LOGIC
+                      selected = _route_by_intent(intent, members, is_music, is_video)
+                      if selected:
+                           log.info(f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}")
+                           return (selected["entity_id"], selected.get("integration", "unknown"))
+
+        except Exception as e:
+            log.error(f"Group Routing Failed: {e}")
+
+    # Fallback to standard selection
     for eid, integration in candidates:
-
         if preferred_type == "remote" and ("remote" in eid or "androidtv" in integration):
-            return eid, integration
-
-    # Default fallback for generic intents
+             return eid, integration
+    
     return candidates[0]
+
+def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool) -> dict:
+    """Selects best entity from a group based on intent and capabilities."""
+    
+    # Score candidates
+    scored = []
+    
+    for m in members:
+        score = 0
+        eid = m.get("entity_id", "")
+        domain = m.get("domain", "")
+        integration = m.get("integration", "unknown")
+        caps = m.get("capabilities", "").split(",")
+        
+        # POWER
+        if intent in ["turn_on", "turn_off", "toggle"]:
+            if domain == "remote": score += 100
+            elif integration == "androidtv_remote": score += 90
+            elif domain == "switch": score += 50 # Smart plug?
+            elif domain == "media_player":
+                # Deprioritize cast/chrome for power
+                if "cast" in integration or "_chrome" in eid: score -= 50
+                if "turn_off" in caps: score += 10
+        
+        # MEDIA PLAY
+        elif intent == "play_media":
+            if is_music:
+                if integration == "music_assistant": score += 100
+                elif "play_media" in caps: score += 10
+            elif is_video:
+                if "cast" in integration or "androidtv" in integration: score += 100
+            else:
+                # Ambiguous
+                if integration == "music_assistant": score += 50
+                elif "play_media" in caps: score += 10
+        
+        # REMOTE CONTROL
+        elif intent.startswith("nav_") or intent == "open_app":
+            if domain == "remote": score += 100
+            elif integration == "androidtv_remote": score += 90
+        
+        scored.append((score, m))
+    
+    scored.sort(key=lambda x: x[0], reverse=True)
+    if scored:
+        return scored[0][1]
+    return None
 
 async def handle_media_command(intent: str, query: str, entity_id: str, user_creds: dict, ha_collection, redis_client):
     """
@@ -1297,38 +1379,37 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
     # -------------------------------------------------
     if intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
         # SMART POWER SWAP: Prefer parent 'TV' entity over 'Chromecast' for power commands
-        if intent in ["turn_on", "turn_off", "toggle"]:
-            is_cast = any(s in entity_id for s in ["_chrome", "_chromecast", "_cast"])
-            base_media_id = entity_id
+        # SMART POWER SWAP: Always prefer a 'remote' entity for power commands on media players
+        # This handles Android TV, Roku, etc. where the media_player might be a cast target or less capable.
+        if intent in ["turn_on", "turn_off", "toggle"] and domain == "media_player":
+            from settings import GlobalResources
             
-            if is_cast:
-                # 1. Try to unwrap suffix -> media_player.office_tv
-                base_media_id = entity_id.replace("_chrome", "").replace("_chromecast", "").replace("_cast", "")
+            # 1. Naive Check: media_player.foo -> remote.foo
+            candidates = [entity_id.replace("media_player.", "remote.")]
+            
+            # 2. Vector Search: Find "remote" entities related to this device
+            # e.g. "Office TV Chrome" -> finds "remote.office_tv"
+            search_query = entity_id.split(".")[-1].replace("_", " ")
+            docs = GlobalResources.ha_collection.similarity_search(f"{search_query} remote", k=3)
+            for d in docs:
+                if d.metadata.get("domain") == "remote":
+                    candidates.append(d.metadata.get("entity_id"))
+            
+            # 3. Validation: Pick the first candidate that actually exists/is effective
+            best_remote = None
+            for cand in candidates:
+                if cand == entity_id: continue
                 
-                # Try swapping to Base Media Player logic
-                if base_media_id != entity_id:
-                     base_state = await get_entity_state(base_media_id, user_creds)
-                     log.info(f"Smart Power Swap: Checking base media candidate {base_media_id} (State: {base_state})")
-                     if base_state not in ["unknown", "unavailable", None]:
-                         log.info(f"Smart Power Swap: Switching {entity_id} -> {base_media_id} (Media Player)")
-                         entity_id = base_media_id
-                         domain = entity_id.split('.')[0] # e.g. media_player
-
-            # 2. Check for REMOTE entity based on current entity_id (which might be the base now)
-            # Strategy: media_player.office_tv -> remote.office_tv
-            potential_remote = entity_id.replace("media_player.", "remote.")
-            if "media_player" in entity_id and potential_remote != entity_id:
-                # Also check strict base remote if we haven't swapped yet but it was a cast device
-                # e.g. media_player.office_tv_chrome -> remote.office_tv (skip remote.office_tv_chrome)
-                if is_cast and base_media_id != entity_id:
-                     potential_remote = base_media_id.replace("media_player.", "remote.")
-
-                rem_state = await get_entity_state(potential_remote, user_creds)
-                log.info(f"Smart Power Swap: Checking remote candidate {potential_remote} (State: {rem_state})")
-                if rem_state not in ["unknown", "unavailable", None]:
-                    log.info(f"Smart Power Swap: Switching {entity_id} -> {potential_remote} (Remote)")
-                    entity_id = potential_remote
-                    domain = "remote"
+                # Check state to verify existence
+                st = await get_entity_state(cand, user_creds)
+                if st not in ["unknown", "unavailable", None]:
+                    best_remote = cand
+                    break
+            
+            if best_remote:
+                log.info(f"Smart Power Swap: Switching {entity_id} -> {best_remote} (Remote Integration)")
+                entity_id = best_remote
+                domain = "remote"
 
 
         if intent.startswith("nav_"):
