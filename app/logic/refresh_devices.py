@@ -76,7 +76,8 @@ async def refresh_db():
                 "group_name": fname,
                 "group_id": group_key,
                 "state": m.get("state", "unknown"),
-                "capabilities": ",".join(caps) 
+                "capabilities": ",".join(caps),
+                "last_updated": str(asyncio.get_event_loop().time())
             }
             
             docs.append(Document(page_content=desc, metadata=metadata, id=eid))
