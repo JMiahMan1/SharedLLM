@@ -2014,7 +2014,8 @@ async def handle_media_command(
                 entity_id,
                 user_creds,
                 ma_service_data,
-            # Fallback to 'search' if specific type fails (fuzzy search)
+                redis_client,
+            )
             if result.get("status") == "FAILURE":
                 log.info(
                     "MA play_media failed with specific type. Retrying with media_type='search'..."
