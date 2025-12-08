@@ -18,7 +18,7 @@ OFFICE_REMOTE = "remote.office_tv_remote"
 OFFICE_SPEAKER = "media_player.office_speaker"  # Music Assistant?
 
 if not HA_URL or not HA_TOKEN:
-    print("❌ Error: HA_URL or HA_TOKEN not set in .env")
+    print("[FAIL] Error: HA_URL or HA_TOKEN not set in .env")
     sys.exit(1)
 
 logging.basicConfig(level=logging.INFO)
@@ -42,25 +42,35 @@ async def run_test():
     print(f"--- Starting Volume Lifecycle Test on {OFFICE_TV} ---")
 
     # 1. Start Music (to ensure it's active)
-    print("\n1. ▶️ Playing Music on Office Speaker (MA)...")
+    print("\n1. Playing Music on Office Speaker (MA)...")
     # Using MA directly to ensure music context
     # Try generic play logic via our pipeline? No, let's direct hit to ensure state.
     # Actually, user wants to test OUR routing.
     # So we should hit OUR API.
 
     API_URL = os.getenv("RAG_API_URL", "http://192.168.2.211:11435/api/chat")
-    print(f"📡 Using API URL: {API_URL}")
+    print(f"Using API URL: {API_URL}")
 
     def chat(q):
         print(f"\nUser: {q}")
         try:
+            print(f"   [INFO] Sending request (timeout: 120s)...")
             r = requests.post(
-                API_URL, json={"query": q, "user_id": "test_user"}, timeout=30
+                API_URL, json={"query": q, "user_id": "test_user"}, timeout=120
             )
-            print(f"Bot: {r.json().get('response', '')}")
-            return r.json()
+            if r.status_code == 200:
+                response = r.json()
+                print(f"Bot: {response.get('response', '')}")
+                return response
+            else:
+                print(f"[FAIL] API returned status {r.status_code}: {r.text[:200]}")
+                return {}
+        except requests.exceptions.Timeout:
+            print(f"[FAIL] API Timeout: Request took longer than 120s")
+            print(f"   This suggests Ollama connectivity or model loading issues")
+            return {}
         except Exception as e:
-            print(f"❌ API Error: {e}")
+            print(f"[FAIL] API Error: {type(e).__name__}: {e}")
             return {}
 
     # Play Music
@@ -69,46 +79,46 @@ async def run_test():
 
     # Get Initial Volume
     init_vol = await get_volume(OFFICE_SPEAKER)
-    print(f"📊 Initial Volume: {init_vol}")
+    print(f"Initial Volume: {init_vol}")
 
     if init_vol is None:
         print(
-            "⚠️ Warning: Could not read volume. Device might not support it or be off."
+            "[WARN] Warning: Could not read volume. Device might not support it or be off."
         )
         init_vol = 0.5
 
     # 2. Set Volume Low
-    print("\n2. 🔉 Setting Volume to 30%...")
+    print("\n2. Setting Volume to 30%...")
     chat("Set the volume on Office Speaker to 30%")
     await asyncio.sleep(3)
 
     curr_vol = await get_volume(OFFICE_SPEAKER)
-    print(f"📊 Volume is now: {curr_vol}")
+    print(f"Volume is now: {curr_vol}")
 
     if curr_vol == 0.3:
-        print("✅ Success: Volume matches 30%")
+        print("[OK] Success: Volume matches 30%")
     else:
-        print(f"❌ Failure: Expected 0.3, got {curr_vol}")
+        print(f"[FAIL] Failure: Expected 0.3, got {curr_vol}")
 
     # 3. Set Volume High
-    print("\n3. 🔊 Setting Volume to 60%...")
+    print("\n3. Setting Volume to 60%...")
     chat("Turn the volume up to 60%")
     await asyncio.sleep(3)
 
     curr_vol = await get_volume(OFFICE_SPEAKER)
-    print(f"📊 Volume is now: {curr_vol}")
+    print(f"Volume is now: {curr_vol}")
 
     if curr_vol == 0.6:
-        print("✅ Success: Volume matches 60%")
+        print("[OK] Success: Volume matches 60%")
     else:
-        print(f"❌ Failure: Expected 0.6, got {curr_vol}")
+        print(f"[FAIL] Failure: Expected 0.6, got {curr_vol}")
 
     # 4. Restore
-    print(f"\n4. 🔄 Restoring to {init_vol * 100}%...")
+    print(f"\n4. Restoring to {init_vol * 100}%...")
     chat(f"Set volume to {int(init_vol * 100)}%")
     await asyncio.sleep(2)
     final_vol = await get_volume(OFFICE_SPEAKER)
-    print(f"📊 Final Volume: {final_vol}")
+    print(f"Final Volume: {final_vol}")
 
 
 if __name__ == "__main__":

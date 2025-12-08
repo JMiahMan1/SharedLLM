@@ -1,8 +1,7 @@
 # app/logic/__init__.py
 
-from .pipeline import generate_rag_stream, try_handle_compound_command
+from .pipeline import generate_rag_stream, try_handle_compound_command, contextualize_query
 from .utils import (
-    contextualize_query,
     call_ollama_generate,
     call_openai_chat,
     get_ha_context,
