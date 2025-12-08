@@ -150,6 +150,10 @@ async def contextualize_query(query, user, model):
         "open_app",
         "media_next",
         "media_previous",
+        "volume_up",
+        "volume_down",
+        "volume_set",
+        "volume_mute",
     ]
     if is_high_confidence and intent in stateless_intents:
         return query
@@ -458,6 +462,10 @@ async def generate_rag_stream(
         "stop_media",
         "media_next",
         "media_previous",
+        "volume_up",
+        "volume_down",
+        "volume_set",
+        "volume_mute",
         "open_app",
         "timer_add",
         "alarm_add",
@@ -468,7 +476,7 @@ async def generate_rag_stream(
         log.info(f"DEBUG: Checking Simple Intent '{intent}' for silent mode. Results: {len(action_results)}")
         if all(r.get("status") == "SUCCESS" for r in action_results) and not any(r.get("service") == "web_search" for r in action_results):
             # Check if we should be silent (Physical actions only)
-            silent_candidates = ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "media_next", "media_previous", "open_app"]
+            silent_candidates = ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "media_next", "media_previous", "open_app", "volume_up", "volume_down", "volume_set", "volume_mute"]
             if intent in silent_candidates:
                  log.info(f"DEBUG: Entering Silent Mode for intent '{intent}'")
                  # Yield Silent Token and return
