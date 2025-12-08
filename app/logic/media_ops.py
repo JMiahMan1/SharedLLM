@@ -16,8 +16,8 @@ def safe_similarity_search(collection, query: str, k: int = 5):
     if not docs:
         log.warning(f"No docs returned from ChromaDB for query '{query}'.")
     return docs
-
-
+# Alias for consistency if used elsewhere
+# get_last_entity = _get_last_entity
 # --- Media Intent Definitions ---
 # App Package IDs for Android TV Smart Routing
 APP_PACKAGES = {
@@ -1392,6 +1392,19 @@ async def handle_media_command(
             "current song",
             "track",
             "music",
+            "volume",
+            "up",
+            "down",
+            "set",
+            "change",
+            "make",
+            "increase",
+            "decrease",
+            "lower",
+            "louder",
+            "quieter",
+            "mute",
+            "unmute",
         ]:
             cleaned_for_res = cleaned_for_res.replace(p, " ")
         cleaned_for_res = cleaned_for_res.strip()
@@ -1766,7 +1779,7 @@ async def handle_media_command(
                 }
 
             # Parse percentage
-            import re
+            # import re (REMOVED: Global import used)
 
             pct_match = re.search(r"(\d+)\s*%", query)
             if pct_match:
