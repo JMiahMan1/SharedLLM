@@ -26,14 +26,20 @@ def infer_integration(entity_id: str, attributes: dict) -> str:
         # Check for Cast / Android TV via attributes
         app_id = attributes.get("app_id")
         device_class = attributes.get("device_class")
+        fname = attributes.get("friendly_name", "").lower()
         
-        if "_chrome" in eid or "_cast" in eid:
-            return "cast"
-            
-        if "android" in eid or app_id == "com.google.android.youtube.tv":
-            # Likely Android TV
+        # Robust Cast/Android Detection
+        # Android TV often uses 'com.google.android.youtube.tv' or similar package names
+        if app_id and ("android" in str(app_id).lower() or "." in str(app_id)):
             return "androidtv"
             
+        # Standard Cast IDs (Netflix, YouTube, Default Media Receiver) or Keywords
+        if app_id or "chromecast" in fname or "google cast" in fname:
+            return "cast"
+            
+        if "android" in eid or "shield" in eid or "fire" in eid:
+             return "androidtv"
+
         if device_class == "tv":
             return "tv"
             

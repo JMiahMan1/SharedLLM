@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/tools/test_grouping.py", line 2, in <module>
+    from logic.discovery.device_grouper import group_entities
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/app/logic/__init__.py", line 3, in <module>
+    from .pipeline import generate_rag_stream, try_handle_compound_command
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/app/logic/pipeline.py", line 10, in <module>
+    from settings import (
+    ...<12 lines>...
+    )
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/app/settings.py", line 29, in <module>
+    logging.FileHandler("/data/app.log")
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/logging/__init__.py", line 1219, in __init__
+    StreamHandler.__init__(self, self._open())
+                                 ~~~~~~~~~~^^
+  File "/usr/lib64/python3.14/logging/__init__.py", line 1248, in _open
+    return open_func(self.baseFilename, self.mode,
+                     encoding=self.encoding, errors=self.errors)
+FileNotFoundError: [Errno 2] No such file or directory: '/data/app.log'

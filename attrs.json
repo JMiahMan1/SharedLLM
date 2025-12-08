@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/tools/dump_attr.py", line 5, in <module>
+    from settings import get_user_creds
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/app/settings.py", line 29, in <module>
+    logging.FileHandler("/data/app.log")
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/logging/__init__.py", line 1219, in __init__
+    StreamHandler.__init__(self, self._open())
+                                 ~~~~~~~~~~^^
+  File "/usr/lib64/python3.14/logging/__init__.py", line 1248, in _open
+    return open_func(self.baseFilename, self.mode,
+                     encoding=self.encoding, errors=self.errors)
+FileNotFoundError: [Errno 2] No such file or directory: '/data/app.log'
