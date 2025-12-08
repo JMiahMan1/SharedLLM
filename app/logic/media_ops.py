@@ -869,7 +869,7 @@ async def smart_resolve_entity(
                 ma_candidate = (eid, integration)
                 break
             if eid.startswith("media_player.") and any(
-                x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv"]
+                x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv", "speaker", "receiver", "stereo"]
             ):
                 if tv_candidate is None:
                     tv_candidate = (eid, integration)
