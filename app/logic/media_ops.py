@@ -1075,7 +1075,8 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
         cleaned_for_res = clean_title
         # --- FIXED: Added transport verbs to cleaning list so 'skip' becomes empty string ---
         for p in ["turn on", "turn off", "toggle", "play", "stop", "open", "launch", "the", " on ", " please ",
-                  "skip", "next", "previous", "back", "pause", "resume"]:
+                  "skip", "next", "previous", "back", "pause", "resume",
+                  "this song", "the song", "current song", "track", "music"]:
             cleaned_for_res = cleaned_for_res.replace(p, " ")
         cleaned_for_res = cleaned_for_res.strip()
 
