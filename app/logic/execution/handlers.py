@@ -84,6 +84,85 @@ async def handle_media_tool(query: str, user_creds: dict, params: dict = None, *
         GlobalResources.redis_client,
     )
 
+@ActionDispatcher.register("play_media")
+async def handle_play_media(query: str, user_creds: dict, params: dict = None, **kwargs):
+    return await handle_media_command(
+        "play_media",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
+@ActionDispatcher.register("stop_media")
+@ActionDispatcher.register("media_pause")
+async def handle_stop_media(query: str, user_creds: dict, params: dict = None, **kwargs):
+    return await handle_media_command(
+        "stop_media",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
+@ActionDispatcher.register("media_next")
+@ActionDispatcher.register("media_skip")
+async def handle_media_next(query: str, user_creds: dict, params: dict = None, **kwargs):
+    return await handle_media_command(
+        "media_next",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
+@ActionDispatcher.register("media_previous")
+async def handle_media_previous(query: str, user_creds: dict, params: dict = None, **kwargs):
+    return await handle_media_command(
+        "media_previous",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
+@ActionDispatcher.register("turn_on")
+async def handle_turn_on(query: str, user_creds: dict, params: dict = None, **kwargs):
+    return await handle_media_command(
+        "turn_on",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
+@ActionDispatcher.register("turn_off")
+async def handle_turn_off(query: str, user_creds: dict, params: dict = None, **kwargs):
+    return await handle_media_command(
+        "turn_off",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
+@ActionDispatcher.register("set_color")
+async def handle_set_color(query: str, user_creds: dict, params: dict = None, **kwargs):
+    return await handle_media_command(
+        "set_color",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
 # --- NOTE TOOLS ---
 @ActionDispatcher.register("note_add")
 async def handle_note_add(query: str, params: dict = None, **kwargs):
