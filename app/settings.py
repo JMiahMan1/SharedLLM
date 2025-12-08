@@ -18,16 +18,16 @@ except ImportError:
 # Load .env
 if os.getenv("DOCKER_ENV") != "1" and os.path.exists(".env"):
     from dotenv import load_dotenv
+
     load_dotenv(".env")
 
 # --- Logging ---
 DEBUG = os.getenv("DEBUG", "0") in ("1", "true", "True")
-logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s",
-                    handlers=[
-                        logging.StreamHandler(),
-                        logging.FileHandler("/data/app.log")
-                    ])
+logging.basicConfig(
+    level=logging.DEBUG if DEBUG else logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler("/data/app.log")],
+)
 log = logging.getLogger("unified-rag")
 
 # --- Configuration ---
@@ -57,30 +57,46 @@ openai_client = None
 if OPENAI_API_KEY:
     try:
         from openai import AsyncOpenAI
+
         openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     except ImportError:
         log.warning("openai module not installed, skipping client init")
 
 # Timeouts & Retries
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300")) 
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
 OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "2"))
 
 # Lowered cache TTL for faster test feedback
-HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "5.0")) 
+HA_CACHE_TTL = float(os.getenv("HA_CACHE_TTL", "5.0"))
 QUERY_CACHE_TTL = float(os.getenv("QUERY_CACHE_TTL", "60.0"))
 MAX_HISTORY_TURNS = 15
 
 # Redis Configuration
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 CHAT_HISTORY_TTL = int(os.getenv("CHAT_HISTORY_TTL", 86400))
 
 # --- Intent Thresholds & Groups ---
 # CRITICAL FIX: Lowered from 0.80 to 0.45 to catch "Turn on X" commands (scoring ~0.5-0.6)
 ACTION_TOOL_CONFIDENCE_THRESHOLD = 0.45
-INFORMATIONAL_INTENTS = ["general_query", "content_query", "time_query"]
+INFORMATIONAL_INTENTS = [
+    "time_query",
+    "calendar_list",
+    "timer_list",
+    "web_search",
+    "weather_query",
+    "content_query",
+    "calendar_read",
+    "note_read",
+    "note_list",
+    "music_search",
+    "music_list",
+    "general_query",
+]
 
 # --- Alarm & Timer Config ---
-ALARM_KEYWORDS_PATH = os.getenv("ALARM_KEYWORDS_PATH", "/app/config/alarm_keywords.json")
+ALARM_KEYWORDS_PATH = os.getenv(
+    "ALARM_KEYWORDS_PATH", "/app/config/alarm_keywords.json"
+)
 ALARM_SOUNDS_DIR = os.getenv("ALARM_SOUNDS_DIR", "/local/alarm_sounds")
 
 
@@ -115,6 +131,8 @@ Available Tools:
 14. 'note_append' (Append to a note/list. Params: 'title', 'content')
 15. 'note_read' (Read a specific note file. Params: 'title')
 16. 'note_delete' (Delete a note file. Params: 'title')
+17. 'music_list' (List playlists or radio stations in Music Assistant)
+18. 'music_search' (Search Music Assistant library for artist/album/track)
 
 CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Set an alarm for 8am" -> timer_add
@@ -165,6 +183,7 @@ Briefly confirm the action in 1 short sentence. Do not offer help. Do not be cha
 {action_context}
 """
 
+
 def load_system_prompt():
     if os.path.exists(SYSTEM_PROMPT_FILE):
         try:
@@ -174,12 +193,15 @@ def load_system_prompt():
             log.error(f"Failed to load system prompt: {e}")
     return "You are a helpful AI assistant."
 
+
 # --- Thread Pool ---
 executor = ThreadPoolExecutor(max_workers=4)
+
 
 async def run_blocking(func, *args):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(executor, partial(func, *args))
+
 
 # --- Shared Resources ---
 class GlobalResources:
@@ -189,6 +211,7 @@ class GlobalResources:
     ha_collection = None
     redis_client = None
 
+
 def get_user_creds(user: str = "default") -> Dict[str, str]:
     # In a real app, this would fetch from DB
     return {
@@ -197,17 +220,20 @@ def get_user_creds(user: str = "default") -> Dict[str, str]:
         "nextcloud_user": NEXTCLOUD_USER,
         "nextcloud_pass": NEXTCLOUD_PASS,
         "ha_url": HA_URL,
-        "ha_token": HA_ENV_TOKEN
+        "ha_token": HA_ENV_TOKEN,
     }
+
 
 # --- Resource Loading (Hot Reloadable) ---
 async def load_resources():
     log.info("Loading Global Resources...")
-    
+
     # 1. Redis
     if redis and REDIS_URL:
         try:
-            GlobalResources.redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+            GlobalResources.redis_client = redis.Redis.from_url(
+                REDIS_URL, decode_responses=True
+            )
             GlobalResources.redis_client.ping()
             log.info("Redis Connected.")
         except Exception as e:
@@ -218,7 +244,10 @@ async def load_resources():
     if EMB_MODEL:
         try:
             from langchain_huggingface import HuggingFaceEmbeddings
-            GlobalResources.embedding_model = HuggingFaceEmbeddings(model_name=EMB_MODEL)
+
+            GlobalResources.embedding_model = HuggingFaceEmbeddings(
+                model_name=EMB_MODEL
+            )
             log.info(f"Embedding Model Loaded: {EMB_MODEL}")
         except Exception as e:
             log.error(f"Failed to load embedding model: {e}")
@@ -228,7 +257,7 @@ async def load_resources():
         try:
             import chromadb
             from langchain_chroma import Chroma
-            
+
             # Initialize Native Client for Direct Access (Health/Upsert)
             GlobalResources.chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 
@@ -248,39 +277,46 @@ async def load_resources():
         except Exception as e:
             log.error(f"ChromaDB Load Failed: {e}")
 
+
 async def initialize_rag_resources():
     """Reloads RAG resources for hot-reloading."""
     await load_resources()
     from intent_engine import engine
+
     await engine.load()
+
 
 # --- LIFESPAN (Startup Logic) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await load_resources()
-    
+
     # Initialize Intent Engine
     from intent_engine import engine
+
     await engine.load()
-    
+
     # Start Device DB Refresh (Async)
     from logic.refresh_devices import refresh_db
+
     asyncio.create_task(refresh_db())
 
     # Start Timer Scheduler
     from logic.timer_scheduler import start_scheduler, stop_scheduler
+
     log.info("Starting Timer/Alarm Scheduler...")
     scheduler_task = asyncio.create_task(start_scheduler())
-    
+
     yield
-    
+
     # Shutdown
     log.info("--- SHUTDOWN: Cleaning up resources ---")
     await stop_scheduler()
     try:
         scheduler_task.cancel()
-    except: pass
-    
+    except:
+        pass
+
     GlobalResources.embedding_model = None
     GlobalResources.chroma_client = None
     GlobalResources.ha_collection = None
@@ -290,14 +326,16 @@ async def lifespan(app: FastAPI):
             await scheduler_task
         except asyncio.CancelledError:
             pass
-            
+
     if GlobalResources.redis_client:
         GlobalResources.redis_client.close()
     log.info("Shutdown complete.")
 
+
 # --- Caching ---
 # Simple in-memory cache for HA states to reduce API spam
 ha_state_cache = {}
+
 
 # --- Utilities ---
 def get_ha_state(entity_id: str) -> Optional[Dict]:

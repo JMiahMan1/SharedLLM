@@ -40,9 +40,11 @@ from .execution.registry import ActionDispatcher
 from .execution.fast_path import FastPathExecutor
 from .intents.classifier import IntentClassifier
 from .web_search import tool_web_search
+
 # Ensure handlers are registered
-import logic.execution.handlers 
-from logic.calendar_ops import tool_calendar_read 
+import logic.execution.handlers
+from logic.calendar_ops import tool_calendar_read
+
 
 class StreamResponseBuilder:
     def __init__(self, model: str, format_type: str):
@@ -94,7 +96,7 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
 
     # 2. Smart Split: Split on 'and'/'then' ONLY if NOT inside quotes
     split_pattern = r'\s+(?:and|then)\s+(?=(?:[^\'"]*[\'"][^\'"]*[\'"])*[^\'"]*$)'
-    
+
     try:
         parts = re.split(split_pattern, query, flags=re.IGNORECASE)
     except:
@@ -107,7 +109,7 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
             p = part.strip()
             if not p:
                 continue
-            
+
             # Detect verb carryover
             verb_match = re.match(
                 r"^(turn on|turn off|toggle|play|stop|schedule|list|open|launch|scroll|move|set|start)\b",
@@ -118,17 +120,17 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
             elif first_verb and i > 0:
                 if not re.match(r"^(what|who|how|when|where|is|are)\b", p.lower()):
                     p = f"{first_verb} {p}"
-            
+
             clean_parts.append(p)
         return clean_parts
-    
+
     return [query]
 
 
 async def contextualize_query(query, user, model):
     # Use Modular Classifier
     intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
-    
+
     stateless_intents = [
         "turn_on",
         "turn_off",
@@ -241,11 +243,7 @@ async def _execute_tool_action(
     params = action_plan.get("parameters", {})
 
     return await ActionDispatcher.dispatch(
-        tool_name, 
-        query=query, 
-        user_creds=user_creds, 
-        model=model, 
-        params=params
+        tool_name, query=query, user_creds=user_creds, model=model, params=params
     )
 
 
@@ -258,19 +256,19 @@ async def _handle_single_command(
         query = str(query)
     if len(query) > 150:
         return None
-    
+
     # 1. Attempt Fast Path (Direct HA Command)
     action_result = await FastPathExecutor.attempt_fast_command(
         query, user_creds, GlobalResources.ha_collection
     )
     if action_result:
         return [action_result]
-    
+
     # 2. Intent Classification (Regex Override + Vector Engine)
     try:
         intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
         if intent:
-             log.info(f"[PIPELINE DEBUG] Intent detected: {intent} (Score: {score})")
+            log.info(f"[PIPELINE DEBUG] Intent detected: {intent} (Score: {score})")
     except Exception as e:
         log.exception(f"[PIPELINE ERROR] IntentClassifier failed: {e}")
         intent, score, is_high_confidence = None, 0.0, False
@@ -296,9 +294,14 @@ async def _handle_single_command(
             return [result] if result else None
         except Exception as e:
             log.exception(f"[PIPELINE ERROR] Tool Execution failed: {e}")
-            return [{"status": "FAILURE", "message": f"Tool execution crashed: {e}", "service": "unknown"}]
+            return [
+                {
+                    "status": "FAILURE",
+                    "message": f"Tool execution crashed: {e}",
+                    "service": "unknown",
+                }
+            ]
     return None
-
 
 
 async def try_handle_compound_command(
@@ -366,19 +369,28 @@ async def generate_rag_stream(
 
     action_context = ""
     run_knowledge_retrieval = True
-    
+
     if action_results:
         # 1. Determine if the action was purely informational (Search, List, Read)
         is_informational_tool = False
         for res in action_results:
             svc = res.get("service", "")
-            if svc in ["web_search", "calendar_list", "timer_list", "calendar_read", "note_read", "note_list"]:
+            if svc in [
+                "web_search",
+                "calendar_list",
+                "timer_list",
+                "calendar_read",
+                "note_read",
+                "note_list",
+                "music_search",
+                "music_list",
+            ]:
                 is_informational_tool = True
-        
+
         # 2. Only disable RAG if it's NOT an informational intent AND NOT an informational tool
         if intent not in INFORMATIONAL_INTENTS and not is_informational_tool:
             run_knowledge_retrieval = False
-            
+
         action_context = "### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):\n"
         log.debug(f"[ACTION RESULTS] {len(action_results)} results: {action_results}")
         for res in action_results:
@@ -389,13 +401,20 @@ async def generate_rag_stream(
                 friendly_name = res.get("friendly_name", "N/A")
                 service = res.get("service", "N/A")
                 action_context += f"- SUCCESS: Command '{service}' sent to {friendly_name}. Verified New State: {new_state}\n"
-                if service in ["web_search", "timer_list", "calendar_list", "calendar_read", "note_read", "note_list"]:
+                if service in [
+                    "web_search",
+                    "timer_list",
+                    "calendar_list",
+                    "calendar_read",
+                    "note_read",
+                    "note_list",
+                ]:
                     action_context += f"TOOL OUTPUT:\n{msg}\n"
             else:
                 entity = res.get("entity_id", "N/A")
                 service = res.get("service", "N/A")
                 action_context += f"- FAILURE: Command '{service}' on '{entity}' failed. Reason: {msg}\n"
-        
+
         log.debug(f"[ACTION CONTEXT] Sending to LLM:\n{action_context}")
 
     ha_ctx, nc_ctx, search_ctx, cal_ctx = "", "", "", ""
@@ -426,22 +445,24 @@ async def generate_rag_stream(
             tasks.append(get_rag_context(refined))
         else:
             tasks.append(asyncio.sleep(0))
-        
+
         # Optimized: Only run Web Search if no other tools were executed
-        already_searched = any(r.get("service") == "web_search" for r in (action_results or []))
+        already_searched = any(
+            r.get("service") == "web_search" for r in (action_results or [])
+        )
         should_search = not action_results and not already_searched
-        
+
         if should_search:
-             tasks.append(tool_web_search(refined))
+            tasks.append(tool_web_search(refined))
         else:
-             tasks.append(asyncio.sleep(0))
+            tasks.append(asyncio.sleep(0))
 
         results = await asyncio.gather(*tasks)
         ha_ctx = results[0] if fetch_ha else ""
         nc_ctx = results[1] if fetch_nc else ""
         if not already_searched:
             search_ctx = results[2]
-        
+
         if any(
             x in refined.lower()
             for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]
@@ -473,20 +494,37 @@ async def generate_rag_stream(
     ]
     use_simple = False
     if action_results and intent in simple_intents:
-        log.info(f"DEBUG: Checking Simple Intent '{intent}' for silent mode. Results: {len(action_results)}")
-        if all(r.get("status") == "SUCCESS" for r in action_results) and not any(r.get("service") == "web_search" for r in action_results):
+        log.info(
+            f"DEBUG: Checking Simple Intent '{intent}' for silent mode. Results: {len(action_results)}"
+        )
+        if all(r.get("status") == "SUCCESS" for r in action_results) and not any(
+            r.get("service") == "web_search" for r in action_results
+        ):
             # Check if we should be silent (Physical actions only)
-            silent_candidates = ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "media_next", "media_previous", "open_app", "volume_up", "volume_down", "volume_set", "volume_mute"]
+            silent_candidates = [
+                "turn_on",
+                "turn_off",
+                "toggle",
+                "play_media",
+                "stop_media",
+                "media_next",
+                "media_previous",
+                "open_app",
+                "volume_up",
+                "volume_down",
+                "volume_set",
+                "volume_mute",
+            ]
             if intent in silent_candidates:
-                 log.info(f"DEBUG: Entering Silent Mode for intent '{intent}'")
-                 # Yield Silent Token and return
-                 yield builder.chunk(content=SILENT_SUCCESS_TOKEN)
-                 yield builder.chunk(finish_reason="stop")
-                 yield builder.done()
-                 return
-            
+                log.info(f"DEBUG: Entering Silent Mode for intent '{intent}'")
+                # Yield Silent Token and return
+                yield builder.chunk(content=SILENT_SUCCESS_TOKEN)
+                yield builder.chunk(finish_reason="stop")
+                yield builder.done()
+                return
+
             use_simple = True
-            
+
     template_to_use = SIMPLE_RAG_TEMPLATE if use_simple else RAG_TEMPLATE
     prompt = template_to_use.format(
         system_prompt=base_sys_prompt,
@@ -519,6 +557,8 @@ async def generate_rag_stream(
         full_text = clean_llm_output(r["text"], is_voice)
         yield builder.chunk(content=full_text)
     update_history(user, "assistant", full_text)
-    log.debug(f"[RESPONSE] Final response to user ({len(full_text)} chars): {full_text[:300]}")
+    log.debug(
+        f"[RESPONSE] Final response to user ({len(full_text)} chars): {full_text[:300]}"
+    )
     yield builder.chunk(finish_reason="stop")
     yield builder.done()
