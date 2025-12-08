@@ -925,10 +925,17 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     # If we found a match, check if it belongs to a Device Group.
     # If so, fetch the whole group and route based on Intent.
     
-    top_doc = docs[0]
-    group_id = top_doc.metadata.get("group_id")
+    top_doc = None
+    if results:
+         # Handle (Doc, Score) tuple or just Doc
+         item = results[0]
+         if isinstance(item, tuple): top_doc = item[0]
+         else: top_doc = item
     
-    if group_id:
+    if top_doc:
+        group_id = top_doc.metadata.get("group_id")
+        
+        if group_id:
         log.info(f"match found in Group: {group_id} (via {top_doc.page_content[:20]}...)")
         try:
             # Fetch all group members from Chroma
