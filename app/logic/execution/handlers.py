@@ -44,9 +44,9 @@ async def handle_calendar_update(query: str, user_creds: dict, model: str, **kwa
 
 # --- TIMER/ALARM TOOLS ---
 @ActionDispatcher.register("timer_add")
-async def handle_timer_add(query: str, user_creds: dict, model: str, **kwargs):
+async def handle_timer_add(query: str, user_creds: dict, model: str, params: dict = None, **kwargs):
     return await tool_timer_add(
-        query, user_creds, model, GlobalResources.redis_client, GlobalResources.ha_collection
+        query, user_creds, model, GlobalResources.redis_client, GlobalResources.ha_collection, params
     )
 
 @ActionDispatcher.register("alarm_add")

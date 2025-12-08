@@ -161,11 +161,14 @@ async def _create_timer_entry(
     return {"status": "SUCCESS", "message": msg, "service": "timer_add", "timer_id": timer_obj["id"]}
 
 
-async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, redis_client, ha_collection=None) -> Dict[str, Union[str, bool]]:
+async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, redis_client, ha_collection=None, params: Dict = None) -> Dict[str, Union[str, bool]]:
     """
     Strictly handles DURATION based timers (e.g. "10 minutes").
     """
     now = datetime.now()
+    params = params or {}
+    origin_device = params.get("origin_device")
+    
     query_lower = convert_words_to_numbers(query.lower())
     log.info(f"TimerAdd: Normalized query: '{query_lower}'")
 
@@ -205,7 +208,7 @@ async def tool_timer_add(query: str, user_creds: Dict[str, str], model: str, red
 
     return await _create_timer_entry(
         title, expires_at, False, None, 
-        get_last_entity(redis_client, user_creds.get("user")), 
+        origin_device or get_last_entity(redis_client, user_creds.get("user")), 
         target_device, target_device_name, redis_client
     )
 

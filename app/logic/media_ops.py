@@ -61,7 +61,7 @@ REGEX_INTENT_MAP = {
     r"\bselect\b|\benter\b|\bok\b": "nav_enter",
     # Color control: matches "set/change/make X color" OR "turn X to color"
     r"\b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
-    r"\bturn\s+.+\s+to\s+(red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
+    r"\bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
     r"\b(dim|darken|lower)\b": "dim",
     r"\b(brighten|brighter|increase)\b": "brighten",
     r"\b(brightness|bright)\b": "set_brightness",
@@ -1337,10 +1337,14 @@ async def handle_media_command(intent: str, query: str, entity_id: str, user_cre
             ctype = "audiobook"
             detected_specific_type = True
 
-        # TV Logic: TVs play video unless music is explicitly requested
+        # TV Logic: TVs play video ONLY if explicitly video request
+        # Fix: Don't force video for ambiguous music requests like "Play Brandon Lake"
         is_tv = any(x in entity_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"])
-        if is_tv and not is_music_request:
+        if is_tv and is_video_request:
             ctype = "video"
+        elif not is_video_request and not is_music_request:
+            # Ambiguous request (no keywords): default to music for play_media intent
+            ctype = "music"
 
         # Fallback Logic for Non-MA Devices:
         if detected_specific_type and "music_assistant" not in integration:
