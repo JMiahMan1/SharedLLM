@@ -904,27 +904,31 @@ async def handle_media_command(
     # If Orchestrator provides device_name but no entity_id, resolve it
     if not entity_id and device_name:
         log.info(f"[Device Fallback] No entity_id provided. Attempting to resolve device_name: '{device_name}'")
-        resolved = await smart_resolve_entity(
-            device_name,
-            intent,
-            ha_collection, # Corrected Arg Position
-            is_music=False,
-            is_video=False,
-            allow_multiple=True # Allow patterns to return lists
-        )
-        
-        if isinstance(resolved, list):
-            if resolved:
-                log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
-                return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
-            else:
-                 log.info(f"[Device Fallback] No devices found for {device_name}")
-        elif isinstance(resolved, tuple):
-             entity_id, integration = resolved
-             log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
-        elif resolved: # Legacy string return (unlikely but safe)
-             entity_id = resolved
-             log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
+        try:
+            resolved = await smart_resolve_entity(
+                device_name,
+                intent,
+                ha_collection, 
+                is_music=False,
+                is_video=False,
+                allow_multiple=True
+            )
+            
+            if isinstance(resolved, list):
+                if resolved:
+                    log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
+                    return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
+                else:
+                     log.info(f"[Device Fallback] No devices found for {device_name}")
+            elif isinstance(resolved, tuple):
+                 entity_id, integration = resolved
+                 log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
+            elif resolved: 
+                 entity_id = resolved
+                 log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
+        except Exception as e:
+            log.error(f"[Device Fallback] Error resolving '{device_name}': {e}", exc_info=True)
+            # Fallback failed, continue to standard resolution (which might also fail, but safely)
     
     # --- PATTERN PREVENTION (Handled downstream) ---
     # Manual pattern checks removed to prevent list unpacking errors.
