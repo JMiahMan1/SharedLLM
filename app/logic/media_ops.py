@@ -926,7 +926,6 @@ async def smart_resolve_entity(
                 if tv_candidate is None:
                     tv_candidate = (eid, integration)
 
-        if ma_candidate:
         # --- INTELLIGENT RESOLUTION (Capability Hunting) ---
         # If we found a generic media player, check if a "Music Assistant" version exists.
         # This prevents us from returning a limited hardware device when a capable software player exists.
