@@ -1018,13 +1018,40 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
         return scored[0][1]
     return None
 
-async def handle_media_command(intent: str, query: str, entity_id: str, user_creds: dict, ha_collection, redis_client):
+async def handle_media_command(
+    intent: str, 
+    query: str, 
+    entity_id: str, 
+    user_creds: dict, 
+    ha_collection, 
+    redis_client,
+    device_name: str = None,  # Optional: Explicit device name from Orchestrator
+):
     """
     Handles media command and ensures a structured dictionary is returned.
     Supports multi-device pattern matching (even/odd/range/list/all).
     """
     q_low = query.lower()
     integration = "unknown"
+    
+    # --- Device Name Fallback ---
+    # If Orchestrator provides device_name but no entity_id, resolve it
+    if not entity_id and device_name:
+        log.info(f"[Device Fallback] No entity_id provided. Attempting to resolve device_name: '{device_name}'")
+        resolved = await smart_resolve_entity(
+            device_name,
+            intent,
+            user_creds,
+            ha_collection,
+            redis_client,
+            allow_multiple=False
+        )
+        if resolved:
+            if isinstance(resolved, tuple):
+                entity_id, integration = resolved
+            else:
+                entity_id = resolved
+            log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
     
     # --- PATTERN PREVENTION (Handled downstream) ---
     # Manual pattern checks removed to prevent list unpacking errors.
