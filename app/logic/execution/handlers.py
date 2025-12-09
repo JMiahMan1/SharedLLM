@@ -122,7 +122,8 @@ async def handle_media_tool(
     query: str, user_creds: dict, params: dict = None, **kwargs
 ):
     intent = params.get("intent", "turn_on") if params else "turn_on"
-    entity_id = params.get("entity_id") or params.get("device_name")
+    entity_id = params.get("entity_id") if params else None
+    device_name = params.get("device_name") if params else None
     return await handle_media_command(
         intent,
         query,
@@ -130,6 +131,7 @@ async def handle_media_tool(
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
+        device_name,  # Pass device_name as separate parameter
     )
 
 

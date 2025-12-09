@@ -1240,6 +1240,7 @@ async def handle_media_command(
     user_creds: dict,
     ha_collection,
     redis_client,
+    device_name: str = None,  # Optional: Explicit device name from Orchestrator
 ):
     """
     Handles media command and ensures a structured dictionary is returned.
@@ -1300,6 +1301,28 @@ async def handle_media_command(
         intent == "play_media" and not is_video_request
     ) if not is_volume_command else False
     is_transport = intent in ["media_next", "media_previous", "stop_media"]
+    
+    # --- DEVICE_NAME FALLBACK RESOLUTION ---
+    # If Orchestrator provided device_name but entity_id is missing, resolve it now
+    if not entity_id and device_name:
+        log.info(f"[Device Fallback] No entity_id provided. Attempting to resolve device_name: '{device_name}'")
+        resolved_result = await smart_resolve_entity(
+            device_name,
+            intent,
+            ha_collection,
+            is_music=strict_resolution,
+            is_video=is_video_request,
+        )
+        
+        if isinstance(resolved_result, list):
+            if resolved_result:
+                # Got multiple, use first for now (could enhance to handle multiple)
+                entity_id, integration = resolved_result[0]
+                log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
+        elif resolved_result and resolved_result != (None, None):
+            entity_id, integration = resolved_result
+            log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
+    # --- END DEVICE_NAME FALLBACK ---
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---
     if is_transport:
