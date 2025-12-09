@@ -48,7 +48,15 @@ async def run_test():
     # Actually, user wants to test OUR routing.
     # So we should hit OUR API.
 
-    API_URL = os.getenv("RAG_API_URL", "http://192.168.2.211:11435/api/chat")
+    API_URL = os.getenv("RAG_ADDRESS")
+    if not API_URL:
+        print("[FAIL] Error: RAG_ADDRESS not set in .env")
+        return
+    # Add http:// if not present
+    if not API_URL.startswith("http"):
+        API_URL = f"http://{API_URL}:11435"
+    if not API_URL.endswith("/api/chat"):
+        API_URL = f"{API_URL}/api/chat"
     print(f"Using API URL: {API_URL}")
 
     async def chat(q):
@@ -89,13 +97,14 @@ async def run_test():
         else:
             print(f"[FAIL] Expected {expected_vol}, got {curr_vol}")
 
-    targets = ["media_player.office_tv", "media_player.office_speaker"]
+    # Test both devices as requested
+    targets = [
+        ("media_player.office_tv_chrome_2", "Office TV"),  
+        ("media_player.office_speaker", "Office Speaker")
+    ]
     
-    for entity_id in targets:
-        print(f"\n--- Starting Volume Lifecycle Test on {entity_id} ---")
-        
-        # Derive a friendly name for the prompt
-        name = entity_id.split(".")[-1].replace("_", " ").title()
+    for entity_id, name in targets:
+        print(f"\n--- Starting Volume Lifecycle Test on {entity_id} ({name}) ---")
 
         # 0. Wake up / Play Music
         print(f"0. Activating {name}...")
