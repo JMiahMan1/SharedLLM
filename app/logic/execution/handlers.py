@@ -13,7 +13,7 @@ from logic.note_ops import (
     tool_note_add, tool_note_append, tool_note_read, tool_note_delete
 )
 from logic.web_search import tool_web_search
-from logic.web_search import tool_web_search
+
 from logic.media_ops import handle_media_command
 from logic.music_assistant_ops import tool_list_playlists, tool_list_radio, tool_music_search
 from logic.android_remote_ops import tool_remote_command, tool_launch_app_android

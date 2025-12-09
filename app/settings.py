@@ -279,44 +279,7 @@ async def load_resources():
             log.error(f"ChromaDB Load Failed: {e}")
 
 
-async def initialize_rag_resources():
-    """Reloads RAG resources for hot-reloading."""
-    await load_resources()
-    from intent_engine import engine
-
-    await engine.load()
-
-
-# --- LIFESPAN (Startup Logic) ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await load_resources()
-
-    # Initialize Intent Engine
-    from intent_engine import engine
-
-    await engine.load()
-
-    # Start Device DB Refresh (Async)
-    from logic.refresh_devices import refresh_db
-
-    asyncio.create_task(refresh_db())
-
-    # Start Timer Scheduler
-    from logic.timer_scheduler import start_scheduler, stop_scheduler
-
-    log.info("Starting Timer/Alarm Scheduler...")
-    scheduler_task = asyncio.create_task(start_scheduler())
-
-    yield
-
-    # Shutdown
-    log.info("--- SHUTDOWN: Cleaning up resources ---")
-    await stop_scheduler()
-    try:
-        scheduler_task.cancel()
-    except:
-        pass
+# --- Lifespan moved to main.py to avoid circular imports ---
 
     GlobalResources.embedding_model = None
     GlobalResources.chroma_client = None
@@ -324,8 +287,9 @@ async def lifespan(app: FastAPI):
     GlobalResources.nextcloud_collection = None
     if GlobalResources.redis_client:
         try:
-            await scheduler_task
-        except asyncio.CancelledError:
+            # Cleanup only what's initialized here
+            pass 
+        except Exception:
             pass
 
     if GlobalResources.redis_client:
