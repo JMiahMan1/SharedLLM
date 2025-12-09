@@ -102,7 +102,27 @@ async def run_test():
         # User requested local library test (Artist)
         song = "Brandon Lake"
         await chat(f"Play {song} on {name}")
-        await asyncio.sleep(8)
+        
+        # VERIFY STATE CHANGE (Strict)
+        print("   Verifying playback state...", end="", flush=True)
+        is_playing = False
+        for _ in range(10):
+            await asyncio.sleep(1)
+            url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
+            try:
+                state_resp = requests.get(url, headers={"Authorization": f"Bearer {HA_TOKEN}"})
+                if state_resp.json().get("state") == "playing":
+                    print(" [OK] State: playing")
+                    is_playing = True
+                    break
+                print(".", end="", flush=True)
+            except: pass
+        
+        if not is_playing:
+            print(f" [FAIL] Device failed to start playing {song}. Aborting volume test for {name}.")
+            continue
+            
+        await asyncio.sleep(2)
         
         # Get Initial Volume
         init_vol = await get_volume(entity_id)
