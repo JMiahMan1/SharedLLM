@@ -281,20 +281,7 @@ async def load_resources():
 
 # --- Lifespan moved to main.py to avoid circular imports ---
 
-    GlobalResources.embedding_model = None
-    GlobalResources.chroma_client = None
-    GlobalResources.ha_collection = None
-    GlobalResources.nextcloud_collection = None
-    if GlobalResources.redis_client:
-        try:
-            # Cleanup only what's initialized here
-            pass 
-        except Exception:
-            pass
 
-    if GlobalResources.redis_client:
-        GlobalResources.redis_client.close()
-    log.info("Shutdown complete.")
 
 
 # --- Caching ---
