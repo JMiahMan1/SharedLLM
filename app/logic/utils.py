@@ -133,6 +133,7 @@ async def call_ollama_generate(prompt: str, model: str = DEFAULT_MODEL, stream: 
     payload = {"model": model, "prompt": prompt, "stream": stream, "options": {"temperature": 0.0}}
     for attempt in range(max(1, OLLAMA_RETRY)):
         try:
+            log.info(f"DEBUG: OLLAMA REQ URL={url} MODEL={model} PROMPT_LEN={len(prompt)}")
             def _post(): return requests.post(url, json=payload, timeout=OLLAMA_TIMEOUT, stream=stream)
             resp = await run_blocking(_post)
             resp.raise_for_status()
