@@ -1,0 +1,20 @@
+--- Starting Volume Lifecycle Test on media_player.office_tv ---
+
+1. Playing Music on Office Speaker (MA)...
+Using API URL: http://192.168.2.211:11435/api/chat
+
+--- Starting Volume Lifecycle Test on media_player.office_tv ---
+0. Activating Office Tv...
+
+User: Play Brandon Lake on Office Tv
+   [INFO] Sending request (timeout: 120s)...
+Bot: 
+   Verifying playback state............. [FAIL] Device failed to start playing Brandon Lake. Aborting volume test for Office Tv.
+
+--- Starting Volume Lifecycle Test on media_player.office_speaker ---
+0. Activating Office Speaker...
+
+User: Play Brandon Lake on Office Speaker
+   [INFO] Sending request (timeout: 120s)...
+Bot: 
+   Verifying playback state............. [FAIL] Device failed to start playing Brandon Lake. Aborting volume test for Office Speaker.
