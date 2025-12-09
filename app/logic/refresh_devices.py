@@ -79,7 +79,8 @@ async def refresh_db():
                 "state": m.get("state", "unknown"),
                 "capabilities": ",".join(caps),
                 "attributes": json.dumps(attrs), # Store attributes for smart capability parsing
-                "last_updated": str(asyncio.get_event_loop().time())
+                "last_updated": str(asyncio.get_event_loop().time()),
+                "source": "home_assistant"
             }
             
             docs.append(Document(page_content=desc, metadata=metadata, id=eid))
