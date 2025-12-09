@@ -95,46 +95,46 @@ def compare_inventory(current_inventory, baseline_inventory):
     return list(missing)
 
 def main():
-    print("--- 🛡️  VERIFYING INTEGRITY 🛡️ ---")
+    print("--- 🛡️  VERIFYING INTEGRITY 🛡️ ---", flush=True)
     all_passed = True
     
     # 1. Forbidden Patterns
-    print("\n[1] Checking for forbidden patterns (incomplete code)...")
+    print("\n[1] Checking for forbidden patterns (incomplete code)...", flush=True)
     files_to_check = glob.glob("app/**/*.py", recursive=True)
     for f in files_to_check:
         issues = check_forbidden_patterns(f)
         if issues:
-            print(f"❌ {f} FAILED:")
+            print(f"❌ {f} FAILED:", flush=True)
             for issue in issues:
-                print(f"   - {issue}")
+                print(f"   - {issue}", flush=True)
             all_passed = False
     
     # 2. Import Audit
-    print("\n[2] Checking for dangerous circular imports...")
+    print("\n[2] Checking for dangerous circular imports...", flush=True)
     import_issues = check_circular_imports()
     if import_issues:
-        print("❌ CIRCULAR IMPORT RISKS:")
+        print("❌ CIRCULAR IMPORT RISKS:", flush=True)
         for issue in import_issues:
-            print(f"   - {issue}")
+            print(f"   - {issue}", flush=True)
         all_passed = False
     else:
-        print("✅ Settings.py is clean.")
+        print("✅ Settings.py is clean.", flush=True)
 
     # 3. Simple Syntax Check
-    print("\n[3] Verifying syntax...")
+    print("\n[3] Verifying syntax...", flush=True)
     for f in files_to_check:
         try:
             with open(f, "r") as f_obj:
                 ast.parse(f_obj.read())
         except SyntaxError as e:
-            print(f"❌ SYNTAX ERROR in {f}: {e}")
+            print(f"❌ SYNTAX ERROR in {f}: {e}", flush=True)
             all_passed = False
 
     if all_passed:
-        print("\n✅ INTEGRITY CHECK PASSED.")
+        print("\n✅ INTEGRITY CHECK PASSED.", flush=True)
         sys.exit(0)
     else:
-        print("\n❌ INTEGRITY CHECK FAILED.")
+        print("\n❌ INTEGRITY CHECK FAILED.", flush=True)
         sys.exit(1)
 
 if __name__ == "__main__":

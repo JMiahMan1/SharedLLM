@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import requests
+from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
@@ -12,9 +13,9 @@ from pydantic import BaseModel
 
 # Fixed imports
 from settings import (
-    lifespan, get_user_creds, run_blocking, GlobalResources, log,
+    get_user_creds, run_blocking, GlobalResources, log,
     DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
-    initialize_rag_resources # IMPORTED HOT RELOAD FUNCTION
+    load_resources
 )
 from logic import (
     generate_rag_stream, contextualize_query, try_handle_compound_command, 
@@ -24,6 +25,55 @@ from logic import (
 from logic.refresh_devices import refresh_db
 from intent_engine import engine as intent_engine
 from logic.timer_storage import storage as timer_storage
+
+async def initialize_rag_resources():
+    """Reloads RAG resources for hot-reloading."""
+    await load_resources()
+    from intent_engine import engine
+
+    await engine.load()
+
+# --- LIFESPAN (Startup Logic) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await load_resources()
+
+    # Initialize Intent Engine
+    from intent_engine import engine
+    await engine.load()
+
+    # Start Device DB Refresh (Async)
+    from logic.refresh_devices import refresh_db
+    asyncio.create_task(refresh_db())
+
+    # Start Timer Scheduler
+    from logic.timer_scheduler import start_scheduler, stop_scheduler
+    log.info("Starting Timer/Alarm Scheduler...")
+    scheduler_task = asyncio.create_task(start_scheduler())
+
+    yield
+
+    # Shutdown
+    log.info("--- SHUTDOWN: Cleaning up resources ---")
+    await stop_scheduler()
+    try:
+        scheduler_task.cancel()
+    except:
+        pass
+
+    GlobalResources.embedding_model = None
+    GlobalResources.chroma_client = None
+    GlobalResources.ha_collection = None
+    GlobalResources.nextcloud_collection = None
+    if GlobalResources.redis_client:
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+
+    if GlobalResources.redis_client:
+        GlobalResources.redis_client.close()
+    log.info("Shutdown complete.")
 
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
