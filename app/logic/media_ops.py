@@ -933,12 +933,21 @@ async def smart_resolve_entity(
         # Only do this if NOT looking for power control (usually hardware)
         if intent not in ["turn_on", "turn_off", "toggle"]:
             best_match = None
-            if ma_candidate: best_match = ma_candidate
-            elif tv_candidate: best_match = tv_candidate
-            elif raw_candidates: best_match = raw_candidates[0] # Fallback to first raw match
+            
+            # Helper to find full dict from tuple
+            def find_full_candidate(target_tuple, candidates_list):
+                 if not target_tuple: return None
+                 tgt_id = target_tuple[0]
+                 for c in candidates_list:
+                     if c["eid"] == tgt_id: return c
+                 return None
+
+            if ma_candidate: best_match = find_full_candidate(ma_candidate, raw_candidates)
+            elif tv_candidate: best_match = find_full_candidate(tv_candidate, raw_candidates)
+            elif raw_candidates: best_match = raw_candidates[0]
             
             if best_match:
-               eid = best_match["entity_id"]
+               eid = best_match["eid"] # raw_candidates uses 'eid', not 'entity_id'
                integ = best_match["integration"]
                friendly = best_match.get("friendly_name", "")
                
