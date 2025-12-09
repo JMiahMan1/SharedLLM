@@ -927,9 +927,69 @@ async def smart_resolve_entity(
                     tv_candidate = (eid, integration)
 
         if ma_candidate:
+        # --- INTELLIGENT RESOLUTION (Capability Hunting) ---
+        # If we found a generic media player, check if a "Music Assistant" version exists.
+        # This prevents us from returning a limited hardware device when a capable software player exists.
+        
+        # Only do this if NOT looking for power control (usually hardware)
+        if intent not in ["turn_on", "turn_off", "toggle"]:
+            best_match = None
+            if ma_candidate: best_match = ma_candidate
+            elif tv_candidate: best_match = tv_candidate
+            elif raw_candidates: best_match = raw_candidates[0] # Fallback to first raw match
+            
+            if best_match:
+               eid = best_match["entity_id"]
+               integ = best_match["integration"]
+               friendly = best_match.get("friendly_name", "")
+               
+               if "media_player" in eid and integ != "music_assistant":
+                   # Check if this device has MA attributes hidden
+                   # (We need capabilities for this, import lazy)
+                   from settings import get_user_creds
+                   redis_client = GlobalResources.redis_client
+                   admin_creds = get_user_creds("admin") # Internal resolution uses admin checks
+                   
+                   try:
+                       caps = await get_device_capabilities(eid, admin_creds, redis_client)
+                       attrs = caps.get("attributes", {})
+                       
+                       # If Generic, hunt for MA
+                       if "mass_player_type" not in attrs and friendly:
+                           log.info(f"[Intelligent Resolve] '{eid}' is Generic. Hunting for MA counterpart: {friendly}")
+                           ma_docs = GlobalResources.ha_collection.similarity_search(f"{friendly} music assistant", k=3)
+                           
+                           for d in ma_docs:
+                               found_integ = d.metadata.get("integration")
+                               found_attrs = d.metadata.get("attributes", "")
+                               if found_integ == "music_assistant" or "mass_player_type" in found_attrs:
+                                   found_id = d.metadata.get("entity_id")
+                                   if found_id != eid:
+                                       log.info(f"[Intelligent Resolve] Found Superior Match: {eid} -> {found_id}")
+                                       # Construct new candidate tuple
+                                       new_candidate = (found_id, "music_assistant")
+                                       
+                                       # Return this IMMEDIATELY as the best single match
+                                       if not allow_multiple:
+                                           return new_candidate
+                                       
+                                       # If multiple allowed, we should probably add it to the list?
+                                       # For now, let's just return it as the single best match since MA supersedes hardware
+                                       return [new_candidate] if allow_multiple else new_candidate
+                   except Exception as e:
+                       log.error(f"[Intelligent Resolve] Error performing lookahead: {e}")
+
+        # Standard Returns
+        if ma_candidate:
             return [ma_candidate] if allow_multiple else ma_candidate
         if tv_candidate:
             return [tv_candidate] if allow_multiple else tv_candidate
+        
+        # Fallback for generic
+        if raw_candidates:
+             top = raw_candidates[0]
+             return [(top['entity_id'], top['integration'])] if allow_multiple else (top['entity_id'], top['integration'])
+
         log.warning(
             f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None."
         )
