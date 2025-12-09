@@ -17,7 +17,19 @@ def call_rag_api(endpoint, payload):
     url = f"{API_URL}{endpoint}"
     try:
         response = requests.post(url, json=payload, timeout=60) # High timeout for MA search
-        return response.json()
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                print("\nResponse Data:")
+                print(json.dumps(data, indent=2))
+                return data
+            except json.JSONDecodeError:
+                print(f"Response Text (not JSON): {response.text}")
+                return None
+        else:
+            print(f"Failed: {response.status_code}")
+            print(response.text)
+            return None
     except Exception as e:
         print(f"Error calling {endpoint}: {e}")
         return None
