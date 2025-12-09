@@ -12,6 +12,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # CRITICAL: Preserve the OLLAMA_URL configuration passed from .env
       - OLLAMA_URL=${OLLAMA_URL}
+      - DEFAULT_MODEL=${DEFAULT_MODEL}
       - DOCKER_ENV=1
       - DEBUG_RAG_CONTEXT=true
       - DEBUG=1
