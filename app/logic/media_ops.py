@@ -16,8 +16,7 @@ def safe_similarity_search(collection, query: str, k: int = 5):
     if not docs:
         log.warning(f"No docs returned from ChromaDB for query '{query}'.")
     return docs
-# Alias for consistency if used elsewhere
-# get_last_entity = _get_last_entity
+
 # --- Media Intent Definitions ---
 # App Package IDs for Android TV Smart Routing
 APP_PACKAGES = {
@@ -32,31 +31,18 @@ APP_PACKAGES = {
     "twitch": "tv.twitch.android.app",
     "kodi": "org.xbmc.kodi",
     "hulu": "com.hulu.livingroomplus",
-    "hbo": "com.wbd.stream",
-    "max": "com.wbd.stream",
+    "hbo": "com.wbd.stream", 
+    "max": "com.wbd.stream"
 }
 
 # Used by pipeline.py for routing
 MEDIA_INTENTS = [
-    "turn_on",
-    "turn_off",
-    "toggle",
-    "stop_media",
-    "play_media",
-    "open_app",
-    "media_next",
-    "media_previous",
-    "nav_up",
-    "nav_down",
-    "nav_left",
-    "nav_right",
-    "nav_enter",
-    "nav_back",
-    "nav_home",
-    "set_color",
-    "set_brightness",
-    "dim",
-    "brighten",
+    "turn_on", "turn_off", "toggle", 
+    "stop_media", "play_media", "open_app",
+    "media_next", "media_previous",
+    "nav_up", "nav_down", "nav_left", "nav_right", 
+    "nav_enter", "nav_back", "nav_home",
+    "set_color", "set_brightness", "dim", "brighten"
 ]
 
 # Used by pipeline.py for Regex Overrides
@@ -79,13 +65,6 @@ REGEX_INTENT_MAP = {
     r"\b(dim|darken|lower)\b": "dim",
     r"\b(brighten|brighter|increase)\b": "brighten",
     r"\b(brightness|bright)\b": "set_brightness",
-    # Volume control patterns
-    r"\b(set|change|make|turn).*volume.*(?:to|at)\s*(\d+)": "volume_set",
-    r"\bvolume\s+(?:to|at)\s*(\d+)": "volume_set",
-    r"\b(turn|set)\s+(?:the\s+)?volume\s+(?:on|of|to)": "volume_set",
-    r"\b(volume\s+up|turn\s+up|louder|increase\s+volume|raise\s+volume)": "volume_up",
-    r"\b(volume\s+down|turn\s+down|quieter|decrease\s+volume|lower\s+volume)": "volume_down",
-    r"\b(mute|unmute|silence|quiet|hush)\b": "volume_mute",
 }
 
 # Color name to RGB mapping
@@ -104,23 +83,19 @@ COLOR_MAP = {
     "magenta": [255, 0, 255],
 }
 
-
 # --------------------------------------
 def _get_last_entity_key(user: str) -> str:
     return f"rag:last_entity:{user}"
-
 
 def _set_last_entity(redis_client, user: str, entity_id: str):
     if redis_client and entity_id:
         redis_client.setex(_get_last_entity_key(user), 86400, entity_id)
 
-
 def get_last_entity(redis_client, user: str) -> str:
     if redis_client:
         val = redis_client.get(_get_last_entity_key(user))
-        return val.decode("utf-8") if isinstance(val, bytes) else val
+        return val.decode('utf-8') if isinstance(val, bytes) else val
     return None
-
 
 async def get_entity_state(entity_id: str, user_creds: dict) -> str:
     if not HA_URL:
@@ -130,7 +105,6 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
 
     try:
-
         def _fetch():
             return requests.get(url, headers=headers, timeout=2.0)
 
@@ -142,20 +116,17 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
 
     return "unknown"
 
-
-async def get_device_capabilities(
-    entity_id: str, user_creds: dict, redis_client
-) -> dict:
+async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client) -> dict:
     """
     Fetch and cache device capabilities from Home Assistant.
     Parses supported_features bitmask and available attributes.
-
+    
     Returns dict with device capabilities:
     - Light: has_brightness, has_color, has_color_temp, color_modes
     - Media Player: has_next, has_previous, has_volume, has_play_media
     """
     import json
-
+    
     # Check Redis cache first (TTL: 1 hour)
     cache_key = f"capabilities:{entity_id}"
     if redis_client:
@@ -163,184 +134,112 @@ async def get_device_capabilities(
             log.debug(f"[CAPABILITY] Checking Redis cache for {entity_id}")
             cached = redis_client.get(cache_key)
             if cached:
-                cached_str = (
-                    cached.decode("utf-8") if isinstance(cached, bytes) else cached
-                )
+                cached_str = cached.decode('utf-8') if isinstance(cached, bytes) else cached
                 log.info(f"[CAPABILITY] Redis cache HIT for {entity_id}")
-                cached_data = json.loads(cached_str)
-                # Ensure we have the new 'attributes' field, otherwise treat as stale
-                if "attributes" in cached_data:
-                    log.info(f"[CAPABILITY] Redis cache HIT for {entity_id}")
-                    return cached_data
-                else:
-                    log.info(f"[CAPABILITY] Redis cache HIT but STALE (no attributes) for {entity_id}")
+                return json.loads(cached_str)
             log.debug(f"[CAPABILITY] Redis cache MISS for {entity_id}")
         except Exception as e:
             log.warning(f"Redis cache read error for {cache_key}: {e}")
     else:
         log.debug(f"[CAPABILITY] No Redis client, skipping cache for {entity_id}")
-
+    
     # Try ChromaDB next (faster than HA API, no rate limits)
     try:
         from settings import GlobalResources
-
         log.debug(f"[CAPABILITY] Querying ChromaDB for {entity_id}")
-
+        
         # Query by exact entity_id match
         ha_collection = GlobalResources.ha_collection
-        results = await run_blocking(
-            lambda: ha_collection.get(
-                where={"entity_id": entity_id}, include=["metadatas"]
-            )
-        )
-
+        results = await run_blocking(lambda: ha_collection.get(
+            where={"entity_id": entity_id},
+            include=["metadatas"]
+        ))
+        
         if results and results["metadatas"] and len(results["metadatas"]) > 0:
             metadata = results["metadatas"][0]
             log.info(f"[CAPABILITY] ChromaDB HIT for {entity_id}")
-
-            # Parse capabilities from stored metadata
-            # Parse capabilities from stored metadata
-            # Ensure we have 'attributes' in metadata (serialized), otherwise treat as incomplete
-            raw_attrs = metadata.get("attributes", "{}")
-            try:
-                if isinstance(raw_attrs, str):
-                    attrs = json.loads(raw_attrs)
-                else:
-                    attrs = raw_attrs
-            except:
-                attrs = {}
             
-            # If attributes are empty/missing, we might be missing critical data (like mass_player_type)
-            # So if attrs is empty, fallback to HA API
-            if not attrs and "mass_player_type" not in metadata:
-                 log.info(f"[CAPABILITY] ChromaDB HIT but STALE/INCOMPLETE (no attributes) for {entity_id}")
-                 # Intentionally bypass returning here to fall through to HA API
-            else:
-                capabilities = {
-                    "domain": metadata.get("domain", entity_id.split(".")[0]),
-                    "friendly_name": metadata.get(
-                        "friendly_name", entity_id.split(".")[-1].replace("_", " ").title()
-                    ),
-                    "integration": metadata.get("integration", "unknown"),
-                    "attributes": attrs
-                }
-                
-                # If we successfully parsed attrs, proceed to return
-                features = int(attrs.get("supported_features", 0))
-                # ... (Logic continues below, but I need to construct the logic flow cleanly)
-                
-                # Check domain
-                if capabilities["domain"] == "light":
-                     features = int(metadata.get("supported_features", 0)) if metadata.get("supported_features") else 0
-                     capabilities["has_brightness"] = bool(features & 1)
-                     capabilities["has_color_temp"] = bool(features & 2)
-                     capabilities["has_color"] = bool(features & 16)
-                     if "supported_color_modes" in metadata:
-                        try:
-                            color_modes = json.loads(metadata["supported_color_modes"])
-                            capabilities["color_modes"] = color_modes
-                            capabilities["has_color"] = any(m in color_modes for m in ["rgb", "hs", "xy", "rgbw", "rgbww"])
-                            capabilities["has_color_temp"] = "color_temp" in color_modes
-                        except: pass
-                elif capabilities["domain"] == "media_player":
-                     features = int(metadata.get("supported_features", 0)) if metadata.get("supported_features") else 0
-                     capabilities["has_pause"] = bool(features & 1)
-                     capabilities["has_previous"] = bool(features & 16)
-                     capabilities["has_next"] = bool(features & 32)
-                     capabilities["has_volume"] = bool(features & 4)
-                     capabilities["has_play_media"] = bool(features & 512)
-                     capabilities["supported_features"] = features
-
-                return capabilities
-
+            # Parse capabilities from stored metadata
+            capabilities = {
+                "domain": metadata.get("domain", entity_id.split('.')[0]),
+                "friendly_name": metadata.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title()),
+                "integration": metadata.get("integration", "unknown")
+            }
+            
             # Parse supported_features if present
             if "supported_features" in metadata:
                 try:
                     features = int(metadata["supported_features"])
                     capabilities["supported_features"] = features
-
+                    
                     # Parse domain-specific capabilities
                     if capabilities["domain"] == "light":
                         capabilities["has_brightness"] = bool(features & 1)
                         capabilities["has_color_temp"] = bool(features & 2)
                         capabilities["has_color"] = bool(features & 16)
-
+                        
                         # Parse color_modes if present
                         if "supported_color_modes" in metadata:
                             color_modes = json.loads(metadata["supported_color_modes"])
                             capabilities["color_modes"] = color_modes
                             # Override has_color based on color_modes (more authoritative)
-                            capabilities["has_color"] = any(
-                                m in color_modes
-                                for m in ["rgb", "hs", "xy", "rgbw", "rgbww"]
-                            )
+                            capabilities["has_color"] = any(m in color_modes for m in ["rgb", "hs", "xy", "rgbw", "rgbww"])
                             capabilities["has_color_temp"] = "color_temp" in color_modes
-
+                    
                     elif capabilities["domain"] == "media_player":
                         capabilities["has_pause"] = bool(features & 1)
                         capabilities["has_previous"] = bool(features & 16)
                         capabilities["has_next"] = bool(features & 32)
                         capabilities["has_volume"] = bool(features & 4)
                         capabilities["has_play_media"] = bool(features & 512)
-
+                    
                     # Cache in Redis and return
                     if redis_client:
                         try:
-                            redis_client.setex(
-                                cache_key, 3600, json.dumps(capabilities)
-                            )
+                            redis_client.setex(cache_key, 3600, json.dumps(capabilities))
                         except Exception as e:
                             log.warning(f"Redis cache write error: {e}")
-
-                    log.info(
-                        f"[CAPABILITY] Parsed from ChromaDB: {entity_id} → has_color={capabilities.get('has_color', False)}, has_brightness={capabilities.get('has_brightness', False)}"
-                    )
+                    
+                    log.info(f"[CAPABILITY] Parsed from ChromaDB: {entity_id} → has_color={capabilities.get('has_color', False)}, has_brightness={capabilities.get('has_brightness', False)}")
                     return capabilities
-
+                    
                 except (ValueError, KeyError) as e:
-                    log.warning(
-                        f"[CAPABILITY] Error parsing ChromaDB metadata for {entity_id}: {e}"
-                    )
+                    log.warning(f"[CAPABILITY] Error parsing ChromaDB metadata for {entity_id}: {e}")
         else:
             log.debug(f"[CAPABILITY] ChromaDB MISS for {entity_id}")
     except Exception as e:
         log.warning(f"[CAPABILITY] ChromaDB query error for {entity_id}: {e}")
-
+    
     # Fallback to Home Assistant API
     if not HA_URL:
-        return {"domain": entity_id.split(".")[0], "error": "no_ha_url"}
-
+        return {"domain": entity_id.split('.')[0], "error": "no_ha_url"}
+    
     url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
-
+    
     try:
         log.debug(f"[CAPABILITY] Fetching from HA API: {entity_id}")
-
         def _fetch():
             return requests.get(url, headers=headers, timeout=3.0)
-
+        
         r = await run_blocking(_fetch)
         log.debug(f"[CAPABILITY] HA API response: {r.status_code} for {entity_id}")
-
+        
         if r.status_code != 200:
-            log.warning(
-                f"Failed to fetch capabilities for {entity_id}: {r.status_code}"
-            )
-            return {"domain": entity_id.split(".")[0], "error": "unavailable"}
-
+            log.warning(f"Failed to fetch capabilities for {entity_id}: {r.status_code}")
+            return {"domain": entity_id.split('.')[0], "error": "unavailable"}
+        
         data = r.json()
         attrs = data.get("attributes", {})
-
+        
         # Base capabilities
         capabilities = {
-            "domain": entity_id.split(".")[0],
+            "domain": entity_id.split('.')[0],
             "supported_features": attrs.get("supported_features", 0),
             "available_attributes": list(attrs.keys()),
-            "friendly_name": attrs.get(
-                "friendly_name", entity_id.split(".")[-1].replace("_", " ").title()
-            ),
+            "friendly_name": attrs.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title())
         }
-
+        
         # Light-specific capability detection
         if capabilities["domain"] == "light":
             features = capabilities["supported_features"]
@@ -351,17 +250,12 @@ async def get_device_capabilities(
             capabilities["has_color_temp"] = bool(features & 2)
             capabilities["has_color"] = bool(features & 16)
             capabilities["color_modes"] = attrs.get("supported_color_modes", [])
-
+            
             # If color_modes is present, it's more authoritative
             if capabilities["color_modes"]:
-                capabilities["has_color"] = any(
-                    m in capabilities["color_modes"]
-                    for m in ["rgb", "hs", "xy", "rgbw", "rgbww"]
-                )
-                capabilities["has_color_temp"] = (
-                    "color_temp" in capabilities["color_modes"]
-                )
-
+                capabilities["has_color"] = any(m in capabilities["color_modes"] for m in ["rgb", "hs", "xy", "rgbw", "rgbww"])
+                capabilities["has_color_temp"] = "color_temp" in capabilities["color_modes"]
+        
         # Media Player-specific capability detection
         elif capabilities["domain"] == "media_player":
             features = capabilities["supported_features"]
@@ -376,7 +270,7 @@ async def get_device_capabilities(
             capabilities["has_play_media"] = bool(features & 512)
             capabilities["has_turn_on"] = bool(features & 128)
             capabilities["has_turn_off"] = bool(features & 256)
-
+        
         # Cache for 1 hour
         if redis_client:
             try:
@@ -384,27 +278,22 @@ async def get_device_capabilities(
                 log.debug(f"[CAPABILITY] Cached capabilities for {entity_id}")
             except Exception as e:
                 log.warning(f"Cache write error for {cache_key}: {e}")
-
-        log.info(
-            f"[CAPABILITY] Parsed: {entity_id} → domain={capabilities['domain']}, features={capabilities.get('supported_features', 0)}, has_color={capabilities.get('has_color', False)}, has_brightness={capabilities.get('has_brightness', False)}"
-        )
+        
+        log.info(f"[CAPABILITY] Parsed: {entity_id} → domain={capabilities['domain']}, features={capabilities.get('supported_features', 0)}, has_color={capabilities.get('has_color', False)}, has_brightness={capabilities.get('has_brightness', False)}")
         return capabilities
-
+        
     except Exception as e:
         log.error(f"Error fetching capabilities for {entity_id}: {e}")
-        return {"domain": entity_id.split(".")[0], "error": str(e)}
-
+        return {"domain": entity_id.split('.')[0], "error": str(e)}
 
 async def get_active_media_players(user_creds: dict) -> list:
     """Returns a list of entity_ids for media players that are currently playing or paused."""
-    if not HA_URL:
-        return []
+    if not HA_URL: return []
 
     url = f"{HA_URL.rstrip('/')}/api/states"
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
 
     try:
-
         def _fetch_all():
             return requests.get(url, headers=headers, timeout=3.0)
 
@@ -424,20 +313,17 @@ async def get_active_media_players(user_creds: dict) -> list:
         return []
     return []
 
-
 async def get_available_media_players(user_creds: dict) -> list:
     """Returns a list of ALL valid media players (excluding unavailable)."""
-    if not HA_URL:
-        return []
-
+    if not HA_URL: return []
+    
     url = f"{HA_URL.rstrip('/')}/api/states"
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
-
+    
     try:
-
         def _fetch_all():
             return requests.get(url, headers=headers, timeout=3.0)
-
+        
         r = await run_blocking(_fetch_all)
         if r.status_code == 200:
             all_states = r.json()
@@ -454,10 +340,7 @@ async def get_available_media_players(user_creds: dict) -> list:
         return []
     return []
 
-
-async def execute_ha_service(
-    domain, service, entity_id, user_creds, service_data=None, redis_client=None
-):
+async def execute_ha_service(domain, service, entity_id, user_creds, service_data=None, redis_client=None):
     """
     Executes a Home Assistant service and returns a structured dictionary result.
     Includes optimized state verification loop.
@@ -465,12 +348,7 @@ async def execute_ha_service(
     user = user_creds.get("user")
 
     if not HA_URL:
-        return {
-            "status": "FAILURE",
-            "message": "Error: Home Assistant URL not configured.",
-            "entity_id": entity_id,
-            "service": f"{domain}.{service}",
-        }
+        return {"status": "FAILURE", "message": "Error: Home Assistant URL not configured.", "entity_id": entity_id, "service": f"{domain}.{service}"}
 
     # Fetch initial state for pre/post comparison
     initial_state = await get_entity_state(entity_id, user_creds)
@@ -483,9 +361,8 @@ async def execute_ha_service(
 
     last_err = None
 
-    for attempt in range(2):
+    for attempt in range(2): 
         try:
-
             def _post():
                 return requests.post(url, json=payload, headers=headers, timeout=5.0)
 
@@ -501,37 +378,25 @@ async def execute_ha_service(
 
                 # Check up to 5 times, every 0.5 seconds (Total ~2.5s max wait)
                 for state_attempt in range(5):
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.5) 
                     try:
                         state_url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
-
                         def _get_name():
                             return requests.get(state_url, headers=headers, timeout=1.0)
 
                         r_state = await run_blocking(_get_name)
                         if r_state.status_code == 200:
                             state_data = r_state.json()
-                            friendly_name = state_data.get("attributes", {}).get(
-                                "friendly_name", entity_id
-                            )
+                            friendly_name = state_data.get("attributes", {}).get("friendly_name", entity_id)
                             current_state = state_data.get("state", "unknown")
 
                             # Check for expected state change
                             expected_change = False
-                            if service.startswith("turn_off") and current_state in [
-                                "off",
-                                "unavailable",
-                            ]:
+                            if service.startswith("turn_off") and current_state in ["off", "unavailable"]:
                                 expected_change = True
-                            elif service.startswith(
-                                "turn_on"
-                            ) and current_state not in ["off", "unavailable"]:
+                            elif service.startswith("turn_on") and current_state not in ["off", "unavailable"]:
                                 expected_change = True
-                            elif service.startswith("media_play") and current_state in [
-                                "playing",
-                                "paused",
-                                "buffering",
-                            ]:
+                            elif service.startswith("media_play") and current_state in ["playing", "paused", "buffering"]:
                                 expected_change = True
 
                             if expected_change or state_attempt == 4:
@@ -544,12 +409,12 @@ async def execute_ha_service(
 
                 verb = service.replace("_", " ")
                 return {
-                    "status": "SUCCESS",
-                    "message": f"Sent command to {verb} the {friendly_name}.",
+                    "status": "SUCCESS", 
+                    "message": f"Sent command to {verb} the {friendly_name}.", 
                     "entity_id": entity_id,
                     "friendly_name": friendly_name,
                     "service": f"{domain}.{service}",
-                    "new_state": new_state,
+                    "new_state": new_state
                 }
 
             # Error Capture
@@ -572,91 +437,78 @@ async def execute_ha_service(
 
     log.error(f"Failed to execute HA command: {last_err}")
     return {
-        "status": "FAILURE",
-        "message": f"Failed: {last_err}",
+        "status": "FAILURE", 
+        "message": f"Failed: {last_err}", 
         "entity_id": entity_id,
         "friendly_name": entity_id.split(".")[-1].replace("_", " ").title(),
-        "service": f"{domain}.{service}",
+        "service": f"{domain}.{service}"
     }
-
 
 # Insert this before smart_resolve_entity (around line 447)
 
-
 async def resolve_multiple_entities_with_pattern(
-    query: str, intent: str, ha_collection
+    query: str, 
+    intent: str, 
+    ha_collection
 ) -> List[Tuple[str, str]]:
     """
     Resolve entities with pattern matching support.
     Returns list of (entity_id, integration) tuples.
-
+    
     If pattern detected (even/odd/range/list/all), returns all matching entities.
     Otherwise returns single best match.
     """
-    # Detect entity patterns (returns list of type/data tuples)
-    detected_patterns = detect_number_pattern(query)
-
-    if not detected_patterns:
+    # Detect number pattern
+    pattern_type, pattern_data = detect_number_pattern(query)
+    
+    if not pattern_type:
         # No pattern - use single entity resolution
-        result = await smart_resolve_entity(query, intent, ha_collection)
-
-        # Check if smart_resolve_entity returned a list (batch)
-        if isinstance(result, list):
-            return result
-
-        entity_id, integration = result
+        entity_id, integration = await smart_resolve_entity(query, intent, ha_collection)
         if entity_id:
             return [(entity_id, integration)]
         return []
-
-    log.info(f"[PATTERN] Detected patterns: {[p[0] for p in detected_patterns]}")
-
+    
+    log.info(f"[PATTERN] Detected pattern '{pattern_type}' in query")
+    
     # Pattern detected - get all candidates and filter
-    docs = await run_blocking(
-        lambda: safe_similarity_search(ha_collection, query, k=50)
-    )
+    docs = await run_blocking(lambda: safe_similarity_search(ha_collection, query, k=30))
     if not docs:
         return []
-
+    
     # Build candidates list with domain filtering
     candidates = []
-
+    friendly_names = {}
+    
     for d in docs:
         eid = d.metadata.get("entity_id")
         integration = d.metadata.get("integration", "unknown")
-        # Ensure we keep all metadata (like friendly_name, area_name)
-        metadata = d.metadata
-
+        friendly_name = d.metadata.get("friendly_name", eid)
+        
         if not eid:
             continue
-
-        domain = eid.split(".")[0]
-
+            
+        domain = eid.split('.')[0]
+        
         # Domain filtering (same as smart_resolve_entity)
         if intent in ["set_color", "set_brightness", "dim", "brighten"]:
             if domain != "light":
                 continue
-        elif intent in [
-            "play_media",
-            "open_app",
-            "media_next",
-            "media_previous",
-            "stop_media",
-        ]:
+        elif intent in ["play_media", "open_app", "media_next", "media_previous", "stop_media"]:
             if domain not in ["media_player", "group", "script"]:
                 continue
-
-        # Append tuple of (entity_id, integration, metadata_dict)
-        candidates.append((eid, integration, metadata))
-
+        
+        candidates.append((eid, integration))
+        friendly_names[eid] = friendly_name
+    
     # Filter by pattern
-    matching_entities = filter_entities_by_pattern(candidates, detected_patterns)
-
-    # Extract pattern type for logging
-    pattern_type = detected_patterns[0][0] if detected_patterns else "unknown"
-    log.info(
-        f"[PATTERN] Resolved {len(matching_entities)} entities matching pattern '{pattern_type}'"
+    matching_entities = filter_entities_by_pattern(
+        candidates,
+        pattern_type,
+        pattern_data,
+        friendly_names
     )
+    
+    log.info(f"[PATTERN] Resolved {len(matching_entities)} entities matching pattern '{pattern_type}'")
     return matching_entities
 
 
@@ -666,20 +518,20 @@ async def execute_batch_command(
     query: str,
     user_creds: dict,
     ha_collection,
-    redis_client,
+    redis_client
 ) -> dict:
     """
     Execute same command on multiple entities and aggregate results.
     """
     if not entities:
         return {
-            "status": "FAILURE",
-            "message": "No matching devices found for pattern",
-            "service": intent,
+            'status': 'FAILURE',
+            'message': 'No matching devices found for pattern',
+            'service': intent
         }
-
+    
     log.info(f"[BATCH] Executing '{intent}' on {len(entities)} entities")
-
+    
     results = []
     for entity_id, integration in entities:
         try:
@@ -689,78 +541,196 @@ async def execute_batch_command(
             results.append(result)
         except Exception as e:
             log.error(f"[BATCH] Error executing on {entity_id}: {e}")
-            results.append(
-                {
-                    "status": "FAILURE",
-                    "message": str(e),
-                    "entity_id": entity_id,
-                    "service": intent,
-                }
-            )
-
+            results.append({
+                'status': 'FAILURE',
+                'message': str(e),
+                'entity_id': entity_id,
+                'service': intent
+            })
+    
     # Aggregate results
-    success_count = sum(1 for r in results if r.get("status") == "SUCCESS")
+    success_count = sum(1 for r in results if r.get('status') == 'SUCCESS')
     failure_count = len(results) - success_count
-
+    
     # Get list of successful/failed devices
-    successful_devices = [
-        r.get("friendly_name", r.get("entity_id", "?"))
-        for r in results
-        if r.get("status") == "SUCCESS"
-    ]
-    failed_devices = [
-        r.get("friendly_name", r.get("entity_id", "?"))
-        for r in results
-        if r.get("status") != "SUCCESS"
-    ]
-
+    successful_devices = [r.get('friendly_name', r.get('entity_id', '?')) 
+                         for r in results if r.get('status') == 'SUCCESS']
+    failed_devices = [r.get('friendly_name', r.get('entity_id', '?'))
+                     for r in results if r.get('status') != 'SUCCESS']
+    
     if success_count == len(results):
         message = f"Successfully controlled {success_count} devices: {', '.join(successful_devices)}"
-        status = "SUCCESS"
+        status = 'SUCCESS'
     elif success_count > 0:
         message = f"Controlled {success_count}/{len(results)} devices. "
         message += f"Success: {', '.join(successful_devices)}. "
         if failed_devices:
             message += f"Failed: {', '.join(failed_devices)}"
-        status = "SUCCESS"  # Partial success still counts as success
+        status = 'SUCCESS'  # Partial success still counts as success
     else:
-        message = (
-            f"Failed to control all {len(results)} devices: {', '.join(failed_devices)}"
-        )
-        status = "FAILURE"
-
+        message = f"Failed to control all {len(results)} devices: {', '.join(failed_devices)}"
+        status = 'FAILURE'
+    
     return {
-        "status": status,
-        "message": message,
-        "service": intent,
-        "batch_results": results,
-        "success_count": success_count,
-        "failure_count": failure_count,
-        "friendly_name": f"{success_count} devices",  # For LLM context formatting
-        "entity_id": "batch_command",  # Identify as batch in context
+        'status': status,
+        'message': message,
+        'service': intent,
+        'batch_results': results,
+        'success_count': success_count,
+        'failure_count': failure_count
     }
+# Insert this before smart_resolve_entity (around line 447)
+
+async def resolve_multiple_entities_with_pattern(
+    query: str, 
+    intent: str, 
+    ha_collection
+) -> List[Tuple[str, str]]:
+    """
+    Resolve entities with pattern matching support.
+    Returns list of (entity_id, integration) tuples.
+    
+    If pattern detected (even/odd/range/list/all), returns all matching entities.
+    Otherwise returns single best match.
+    """
+    # Detect entity patterns (returns list of type/data tuples)
+    detected_patterns = detect_number_pattern(query)
+    
+    if not detected_patterns:
+        # No pattern - use single entity resolution
+        result = await smart_resolve_entity(query, intent, ha_collection)
+        
+        # Check if smart_resolve_entity returned a list (batch)
+        if isinstance(result, list):
+             return result
+        
+        entity_id, integration = result
+        if entity_id:
+            return [(entity_id, integration)]
+        return []
+    
+    log.info(f"[PATTERN] Detected patterns: {[p[0] for p in detected_patterns]}")
+    
+    # Pattern detected - get all candidates and filter
+    docs = await run_blocking(lambda: safe_similarity_search(ha_collection, query, k=50))
+    if not docs:
+        return []
+    
+    # Build candidates list with domain filtering
+    candidates = []
+    
+    for d in docs:
+        eid = d.metadata.get("entity_id")
+        integration = d.metadata.get("integration", "unknown")
+        # Ensure we keep all metadata (like friendly_name, area_name)
+        metadata = d.metadata
+        
+        if not eid:
+            continue
+            
+        domain = eid.split('.')[0]
+        
+        # Domain filtering (same as smart_resolve_entity)
+        if intent in ["set_color", "set_brightness", "dim", "brighten"]:
+            if domain != "light":
+                continue
+        elif intent in ["play_media", "open_app", "media_next", "media_previous", "stop_media"]:
+            if domain not in ["media_player", "group", "script"]:
+                continue
+        
+        # Append tuple of (entity_id, integration, metadata_dict)
+        candidates.append((eid, integration, metadata))
+    
+    # Filter by pattern
+    matching_entities = filter_entities_by_pattern(
+        candidates,
+        detected_patterns
+    )
+    
+    log.info(f"[PATTERN] Resolved {len(matching_entities)} entities matching pattern '{pattern_type}'")
+    return matching_entities
 
 
-async def smart_resolve_entity(
-    query_name: str,
+async def execute_batch_command(
+    entities: List[Tuple[str, str]],
     intent: str,
+    query: str,
+    user_creds: dict,
     ha_collection,
-    is_music: bool = False,
-    is_video: bool = False,
-    allow_multiple: bool = False,
-) -> list:
+    redis_client
+) -> dict:
+    """
+    Execute same command on multiple entities and aggregate results.
+    """
+    if not entities:
+        return {
+            'status': 'FAILURE',
+            'message': 'No matching devices found for pattern',
+            'service': intent
+        }
+    
+    log.info(f"[BATCH] Executing '{intent}' on {len(entities)} entities")
+    
+    results = []
+    for entity_id, integration in entities:
+        try:
+            result = await handle_media_command(
+                intent, query, entity_id, user_creds, ha_collection, redis_client
+            )
+            results.append(result)
+        except Exception as e:
+            log.error(f"[BATCH] Error executing on {entity_id}: {e}")
+            results.append({
+                'status': 'FAILURE',
+                'message': str(e),
+                'entity_id': entity_id,
+                'service': intent
+            })
+    
+    # Aggregate results
+    success_count = sum(1 for r in results if r.get('status') == 'SUCCESS')
+    failure_count = len(results) - success_count
+    
+    # Get list of successful/failed devices
+    successful_devices = [r.get('friendly_name', r.get('entity_id', '?')) 
+                         for r in results if r.get('status') == 'SUCCESS']
+    failed_devices = [r.get('friendly_name', r.get('entity_id', '?'))
+                     for r in results if r.get('status') != 'SUCCESS']
+    
+    if success_count == len(results):
+        message = f"Successfully controlled {success_count} devices: {', '.join(successful_devices)}"
+        status = 'SUCCESS'
+    elif success_count > 0:
+        message = f"Controlled {success_count}/{len(results)} devices. "
+        message += f"Success: {', '.join(successful_devices)}. "
+        if failed_devices:
+            message += f"Failed: {', '.join(failed_devices)}"
+        status = 'SUCCESS'  # Partial success still counts as success
+    else:
+        message = f"Failed to control all {len(results)} devices: {', '.join(failed_devices)}"
+        status = 'FAILURE'
+    
+    return {
+        'status': status,
+        'message': message,
+        'service': intent,
+        'batch_results': results,
+        'success_count': success_count,
+        'failure_count': failure_count,
+        'friendly_name': f"{success_count} devices",  # For LLM context formatting
+        'entity_id': 'batch_command'  # Identify as batch in context
+    }
+async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False, is_video: bool = False, allow_multiple: bool = False) -> list:
     """
     Resolves the best entity (or entities) based on query and intent.
     When is_music=True, it prioritizes Music Assistant devices.
-
+    
     Returns:
        - If allow_multiple=False: (entity_id, integration) tuple (legacy)
        - If allow_multiple=True: List of (entity_id, integration) tuples
     """
-    log.info(
-        f"DEBUG: Entering smart_resolve_entity. Q='{query_name}' Intent='{intent}' Multiple={allow_multiple}"
-    )
-
+    log.info(f"DEBUG: Entering smart_resolve_entity. Q='{query_name}' Intent='{intent}' Multiple={allow_multiple}")
+    
     # 0. Setup & lazy imports
     try:
         from settings import GlobalResources, run_blocking
@@ -771,7 +741,7 @@ async def smart_resolve_entity(
 
     # 1. Detect Entity Grouping/Pattern (Numbers, Locations, Directions, Plurals)
     # 1. Detect Entity Grouping/Pattern (Numbers, Locations, Directions, Plurals)
-    patterns = detect_number_pattern(query_name)  # Aliased to detect_entity_pattern
+    patterns = detect_number_pattern(query_name) # Aliased to detect_entity_pattern
     if patterns:
         allow_multiple = True
         log.info(f"Detected grouping pattern: {patterns}")
@@ -779,32 +749,9 @@ async def smart_resolve_entity(
     # 2. Similarity Search using Chroma
     # Increase k if looking for a group/pattern to ensure we catch all potential matches
     k = 30 if allow_multiple else 15
-
-    # --- ALIAS OVERRIDE ---
-    # Manually map common generic terms to specific domains/substrings
-    # This helps when vector search gets confused by generic terms like "speaker"
-    aliases = {
-        "speaker": "media_player",
-        "tv": "media_player",
-        "television": "media_player",
-        "lights": "light",
-        "lamp": "light",
-    }
-    
-    # Check if query contains an alias
-    alias_filter = None
-    query_lower = query_name.lower()
-    for alias, domain in aliases.items():
-        if alias in query_lower:
-            # If user asks for "Office Speaker", we prioritize searching only media_players
-            # But we still run the vector search, just maybe we filter the query?
-            pass
-
     try:
         results = await run_blocking(
-            lambda: GlobalResources.ha_collection.similarity_search_with_score(
-                query_name, k=k
-            )
+            lambda: GlobalResources.ha_collection.similarity_search_with_score(query_name, k=k)
         )
         log.info(f"DEBUG: Search returned {len(results)} docs.")
     except Exception as e:
@@ -813,7 +760,7 @@ async def smart_resolve_entity(
 
     # 3. Filter & formatting
     raw_candidates = []
-
+    
     if results:
         # DEBUG: Inspect first result structure
         first_item = results[0]
@@ -826,8 +773,8 @@ async def smart_resolve_entity(
                 doc, score = item
             elif isinstance(item, tuple) and len(item) == 1:
                 doc = item[0]
-                score = 0.0  # Default score if missing
-            elif hasattr(item, "metadata"):  # It's just a Document
+                score = 0.0 # Default score if missing
+            elif hasattr(item, 'metadata'): # It's just a Document
                 doc = item
                 score = 0.0
             else:
@@ -837,41 +784,23 @@ async def smart_resolve_entity(
             eid = doc.metadata.get("entity_id")
             friendly_name = doc.metadata.get("friendly_name")
             integration = doc.metadata.get("integration", "unknown")
-
+            
             # Threshold (Relaxed for distance-based scoring)
-            # Default threshold is 1.4, but we treat it dynamic
-            threshold = 1.4
+            if score > 1.4: continue 
             
-            # Dynamic Threshold: If inquiring about a generic device type, be looser
-            if "speaker" in query_name.lower() and domain == "media_player":
-                threshold = 1.6
-            
-            if score > threshold:
-                continue
-
             # Basic Domain Safety
-            domain = eid.split(".")[0]
-            if (
-                intent in ["set_color", "set_brightness", "dim", "brighten"]
-                and domain != "light"
-            ):
-                continue
-            if intent in ["turn_on", "turn_off", "toggle"] and domain in [
-                "sensor",
-                "binary_sensor",
-                "sun",
-                "weather",
-            ]:
-                continue
-
-            raw_candidates.append(
-                {
-                    "eid": eid,
-                    "integration": integration,
-                    "friendly_name": friendly_name,
-                    "score": score,
-                }
-            )
+            domain = eid.split('.')[0]
+            if intent in ["set_color", "set_brightness", "dim", "brighten"] and domain != "light":
+                 continue
+            if intent in ["turn_on", "turn_off", "toggle"] and domain in ["sensor", "binary_sensor", "sun", "weather"]:
+                 continue
+            
+            raw_candidates.append({
+                "eid": eid, 
+                "integration": integration, 
+                "friendly_name": friendly_name,
+                "score": score
+            })
 
     except Exception as e:
         log.error(f"Error filtering candidates: {e}")
@@ -885,33 +814,31 @@ async def smart_resolve_entity(
         # Prepare entities list with metadata for filtering [(eid, integration, metadata_dict)]
         entities_with_meta = []
         for c in raw_candidates:
-            # Reconstruct metadata dict
-            meta = {
-                "friendly_name": c["friendly_name"],
-                "area_name": "",  # Start empty, would need to fetch if not present.
-                # Optimization: Ideally filter_entities_by_pattern logic shouldn't need re-fetching,
-                # but our current candidates dict lacks area_name explicitly unless we add it in step 3.
-                # For now, let's assume friendly_name/domain is enough for most patterns.
-                "domain": c["eid"].split(".")[0],
-            }
-            entities_with_meta.append((c["eid"], c["integration"], meta))
-
+             # Reconstruct metadata dict
+             meta = {
+                 "friendly_name": c["friendly_name"],
+                 "area_name": "", # Start empty, would need to fetch if not present. 
+                 # Optimization: Ideally filter_entities_by_pattern logic shouldn't need re-fetching, 
+                 # but our current candidates dict lacks area_name explicitly unless we add it in step 3. 
+                 # For now, let's assume friendly_name/domain is enough for most patterns.
+                 "domain": c["eid"].split(".")[0]
+             }
+             entities_with_meta.append((c["eid"], c["integration"], meta))
+        
         filtered_tuples = filter_entities_by_pattern(entities_with_meta, patterns)
-
+        
         if filtered_tuples:
             log.info(f"Patterns {patterns} matched {len(filtered_tuples)} entities.")
             if allow_multiple:
                 return filtered_tuples
-            return [
-                filtered_tuples[0]
-            ]  # Should not happen if allow_multiple forced True
+            return [filtered_tuples[0]] # Should not happen if allow_multiple forced True
 
     # 5. Standard Priority Logic
     # Reconstruct simple candidates list for legacy logic
     candidates = [(c["eid"], c["integration"]) for c in raw_candidates]
 
     # ... [Re-inserting priority logic for Music/Power/Etc] ...
-
+    
     # --- ENFORCED PRIORITY FOR MUSIC ---
     if is_music:
         ma_candidate = None
@@ -919,161 +846,41 @@ async def smart_resolve_entity(
         for eid, integration in candidates:
             if "music_assistant" in integration:
                 ma_candidate = (eid, integration)
-                break
-            if eid.startswith("media_player.") and any(
-                x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv", "speaker", "receiver", "stereo"]
-            ):
+                break 
+            if eid.startswith("media_player.") and any(x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                 if tv_candidate is None:
                     tv_candidate = (eid, integration)
 
-        # --- INTELLIGENT RESOLUTION (Capability Hunting) ---
-        # If we found a generic media player, check if a "Music Assistant" version exists.
-        # This prevents us from returning a limited hardware device when a capable software player exists.
-        
-        # Only do this if NOT looking for power control (usually hardware)
-        if intent not in ["turn_on", "turn_off", "toggle"]:
-            best_match = None
-            
-            # Helper to find full dict from tuple
-            def find_full_candidate(target_tuple, candidates_list):
-                 if not target_tuple: return None
-                 tgt_id = target_tuple[0]
-                 for c in candidates_list:
-                     if c["eid"] == tgt_id: return c
-                 return None
-
-            if ma_candidate: best_match = find_full_candidate(ma_candidate, raw_candidates)
-            elif tv_candidate: best_match = find_full_candidate(tv_candidate, raw_candidates)
-            elif raw_candidates: best_match = raw_candidates[0]
-            
-            if best_match:
-               eid = best_match["eid"] # raw_candidates uses 'eid', not 'entity_id'
-               integ = best_match["integration"]
-               friendly = best_match.get("friendly_name", "")
-               
-               if "media_player" in eid and integ != "music_assistant":
-                   # Check if this device has MA attributes hidden
-                   # (We need capabilities for this, import lazy)
-                   from settings import get_user_creds
-                   redis_client = GlobalResources.redis_client
-                   admin_creds = get_user_creds("admin") # Internal resolution uses admin checks
-                   
-                   try:
-                       caps = await get_device_capabilities(eid, admin_creds, redis_client)
-                       attrs = caps.get("attributes", {})
-                       
-                       # If Generic, hunt for MA
-                       if "mass_player_type" not in attrs and friendly:
-                           log.info(f"[Intelligent Resolve] '{eid}' is Generic. Hunting for MA counterpart: {friendly}")
-                           ma_docs = GlobalResources.ha_collection.similarity_search(f"{friendly} music assistant", k=3)
-                           
-                           for d in ma_docs:
-                                found_integ = d.metadata.get("integration")
-                                found_attrs = d.metadata.get("attributes", "")
-                                if found_integ == "music_assistant" or "mass_player_type" in found_attrs:
-                                    found_id = d.metadata.get("entity_id")
-                                    if found_id != eid:
-                                        # CRITICAL: Validate that this is the SAME device (different integration)
-                                        # Extract base device name from entity_id
-                                        # e.g., "media_player.office_tv" and "media_player.office_tv_chrome" should match
-                                        # but "media_player.office_tv" and "media_player.office_speaker" should NOT
-                                        
-                                        # Strategy: Check if one entity_id is a prefix of the other, or they share a common base
-                                        eid_base = eid.rsplit("_", 1)[0] if "_" in eid else eid  # "media_player.office_tv"
-                                        found_base = found_id.rsplit("_", 1)[0] if "_" in found_id else found_id
-                                        
-                                        # Also check direct prefix relationship
-                                        is_same_device = (
-                                            eid_base == found_base or  # Same base name
-                                            found_id.startswith(eid + "_") or  # found is extension of eid
-                                            eid.startswith(found_id + "_")  # eid is extension of found
-                                        )
-                                        
-                                        if is_same_device:
-                                            log.info(f"[Intelligent Resolve] Found Superior Match: {eid} -> {found_id}")
-                                            # Construct new candidate tuple
-                                            new_candidate = (found_id, "music_assistant")
-                                            
-                                            # Return this IMMEDIATELY as the best single match
-                                            if not allow_multiple:
-                                                return new_candidate
-                                            
-                                            # If multiple allowed, we should probably add it to the list?
-                                            # For now, let's just return it as the single best match since MA supersedes hardware
-                                            return [new_candidate] if allow_multiple else new_candidate
-                                        else:
-                                            log.info(f"[Intelligent Resolve] Rejected {found_id} - not same device as {eid}")
-                   except Exception as e:
-                       log.error(f"[Intelligent Resolve] Error performing lookahead: {e}")
-
-        # Standard Returns
         if ma_candidate:
             return [ma_candidate] if allow_multiple else ma_candidate
         if tv_candidate:
             return [tv_candidate] if allow_multiple else tv_candidate
-        
-        # Fallback for generic
-        if raw_candidates:
-             top = raw_candidates[0]
-             return [(top['eid'], top['integration'])] if allow_multiple else (top['eid'], top['integration'])
-
-        log.warning(
-            f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None."
-        )
+        log.warning(f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None.")
         return [] if allow_multiple else (None, None)
 
     # --- POWER/HARDWARE PRIORITY ---
     if intent in ["turn_on", "turn_off", "toggle"]:
-        HW_INTEGRATIONS_POWER = [
-            "androidtv",
-            "webostv",
-            "braviatv",
-            "roku",
-            "apple_tv",
-            "samsungtv",
-            "esphome",
-            "tasmota",
-            "shelly",
-            "hue",
-            "lutron_caseta",
-            "kodi",
-            "vlc",
-            "denonavr",
-            "yamaha",
-        ]
-
+        HW_INTEGRATIONS_POWER = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc", "denonavr", "yamaha"]
+        
         # Capability Enrichment (Re-added)
         from settings import get_user_creds
-
         redis_client = GlobalResources.redis_client
         admin_creds = get_user_creds("admin")
-
+        
         enriched_candidates = []
         for c in raw_candidates:
-            try:
-                caps = await get_device_capabilities(
-                    c["eid"], admin_creds, redis_client
-                )
-                real_int = caps.get("integration", c["integration"])
-                if real_int == "unknown":
-                    real_int = c["integration"]
-                enriched_candidates.append(
-                    {
-                        "eid": c["eid"],
-                        "integration": real_int,
-                        "supported_features": caps.get("features_breakdown", {}),
-                        "friendly_name": caps.get("friendly_name", c["friendly_name"]),
-                    }
-                )
-            except:
-                enriched_candidates.append(
-                    {
-                        "eid": c["eid"],
-                        "integration": c["integration"],
-                        "supported_features": {},
-                        "friendly_name": c["friendly_name"],
-                    }
-                )
+             try:
+                 caps = await get_device_capabilities(c["eid"], admin_creds, redis_client)
+                 real_int = caps.get("integration", c["integration"])
+                 if real_int == "unknown": real_int = c["integration"]
+                 enriched_candidates.append({
+                     "eid": c["eid"], 
+                     "integration": real_int, 
+                     "supported_features": caps.get("features_breakdown", {}),
+                     "friendly_name": caps.get("friendly_name", c["friendly_name"])
+                 })
+             except:
+                 enriched_candidates.append({"eid": c["eid"], "integration": c["integration"], "supported_features": {}, "friendly_name": c["friendly_name"]})
 
         matches = []
         for c in enriched_candidates:
@@ -1081,22 +888,14 @@ async def smart_resolve_entity(
             integ = c["integration"]
             eid = c["eid"]
             feats = c["supported_features"]
-
-            if integ in HW_INTEGRATIONS_POWER:
-                score += 20
-            if feats.get("turn_off"):
-                score += 10
-            if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]):
-                score += 5
-
-            is_chrome = (
-                "chrome" in integ.lower()
-                or "cast" in integ.lower()
-                or "google_cast" in integ.lower()
-            )
-            if is_chrome:
-                score -= 20
-
+            
+            if integ in HW_INTEGRATIONS_POWER: score += 20
+            if feats.get("turn_off"): score += 10
+            if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]): score += 5
+            
+            is_chrome = "chrome" in integ.lower() or "cast" in integ.lower() or "google_cast" in integ.lower()
+            if is_chrome: score -= 20
+            
             matches.append((score, eid, integ))
 
         if matches:
@@ -1107,167 +906,126 @@ async def smart_resolve_entity(
     # --- FALLBACK / GENERIC ---
     preferred_type = "generic"
     if intent == "play_media":
-        APP_PACKAGES = ["netflix", "youtube", "hulu", "plex", "spotify", "disney"]
-        q_low = query_name.lower()
-        if any(app in q_low for app in APP_PACKAGES) or is_video:
-            preferred_type = "android"
+         APP_PACKAGES = ["netflix", "youtube", "hulu", "plex", "spotify", "disney"] 
+         q_low = query_name.lower()
+         if any(app in q_low for app in APP_PACKAGES) or is_video:
+             preferred_type = "android"
 
     elif intent in ["open_app"]:
         preferred_type = "android"
-
+    
     elif intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
-        preferred_type = (
-            "android"  # Prefer hardware for these if no explicit match above
-        )
+        preferred_type = "android" # Prefer hardware for these if no explicit match above
 
     best_candidate = None
-
+    
     # ---------------------------------------------------------
     # CAPABILITY / GROUP ROUTING (NEW)
     # ---------------------------------------------------------
     # If we found a match, check if it belongs to a Device Group.
     # If so, fetch the whole group and route based on Intent.
-
+    
     top_doc = None
     if results:
-        # Handle (Doc, Score) tuple or just Doc
-        item = results[0]
-        if isinstance(item, tuple):
-            top_doc = item[0]
-        else:
-            top_doc = item
-
+         # Handle (Doc, Score) tuple or just Doc
+         item = results[0]
+         if isinstance(item, tuple): top_doc = item[0]
+         else: top_doc = item
+    
     if top_doc:
         group_id = top_doc.metadata.get("group_id")
-
+        
         if group_id:
-            log.info(
-                f"match found in Group: {group_id} (via {top_doc.page_content[:20]}...)"
-            )
+            log.info(f"match found in Group: {group_id} (via {top_doc.page_content[:20]}...)")
             try:
                 # Fetch all group members from Chroma
-                # Note: ha_collection is Langchain wrapper. Access internal collection if possible,
-                # or rely on metadata from the search result if we indexed enough?
+                # Note: ha_collection is Langchain wrapper. Access internal collection if possible, 
+                # or rely on metadata from the search result if we indexed enough? 
                 # Better to query. keys: "entity_id", "integration", "capabilities", "domain"
-
+                
                 # Access underlying chromadb collection if available
                 if hasattr(ha_collection, "_collection"):
-                    group_res = ha_collection._collection.get(
-                        where={"group_id": group_id}
-                    )
-                    # group_res keys: ids, metadatas, documents...
-
-                    if group_res and group_res.get("metadatas"):
-                        members = group_res["metadatas"]
-                        log.info(f"Group {group_id} has {len(members)} members.")
-
-                        # ROUTING LOGIC
-                        selected = _route_by_intent(intent, members, is_music, is_video)
-                        if selected:
-                            log.info(
-                                f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}"
-                            )
-                            result = (
-                                selected["entity_id"],
-                                selected.get("integration", "unknown"),
-                            )
-                            return [result] if allow_multiple else result
+                     group_res = ha_collection._collection.get(where={"group_id": group_id})
+                     # group_res keys: ids, metadatas, documents...
+                     
+                     if group_res and group_res.get("metadatas"):
+                          members = group_res["metadatas"]
+                          log.info(f"Group {group_id} has {len(members)} members.")
+                          
+                          # ROUTING LOGIC
+                          selected = _route_by_intent(intent, members, is_music, is_video)
+                          if selected:
+                               log.info(f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}")
+                               return (selected["entity_id"], selected.get("integration", "unknown"))
 
             except Exception as e:
                 log.error(f"Group Routing Failed: {e}")
 
     # Fallback to standard selection
     for eid, integration in candidates:
-        if preferred_type == "remote" and (
-            "remote" in eid or "androidtv" in integration
-        ):
-            return [candidates[0]] if allow_multiple else (eid, integration)
+        if preferred_type == "remote" and ("remote" in eid or "androidtv" in integration):
+             return eid, integration
+    
+    return candidates[0]
 
-    return [candidates[0]] if allow_multiple else candidates[0]
-
-
-def _route_by_intent(
-    intent: str, members: list, is_music: bool, is_video: bool
-) -> dict:
+def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool) -> dict:
     """Selects best entity from a group based on intent and capabilities."""
-
+    
     # Score candidates
     scored = []
-
+    
     for m in members:
         score = 0
         eid = m.get("entity_id", "")
         domain = m.get("domain", "")
         integration = m.get("integration", "unknown")
         caps = m.get("capabilities", "").split(",")
-
+        
         friendly_name = m.get("friendly_name", "").lower()
-
+        
         # POWER
         if intent in ["turn_on", "turn_off", "toggle"]:
-            if domain == "remote":
-                score += 100
-            elif "remote" in friendly_name:
-                score += 95  # High priority for "Office TV Remote"
-            elif integration == "androidtv_remote":
-                score += 90
-            elif domain == "switch":
-                score += 50  # Smart plug?
+            if domain == "remote": score += 100
+            elif "remote" in friendly_name: score += 95 # High priority for "Office TV Remote"
+            elif integration == "androidtv_remote": score += 90
+            elif domain == "switch": score += 50 # Smart plug?
             elif domain == "media_player":
                 # Deprioritize cast/chrome for power
-                if "cast" in integration or "_chrome" in eid:
-                    score -= 50
-                if "turn_off" in caps:
-                    score += 10
-
+                if "cast" in integration or "_chrome" in eid: score -= 50
+                if "turn_off" in caps: score += 10
+        
         # MEDIA PLAY
         elif intent == "play_media":
             if is_music:
-                if integration == "music_assistant":
-                    score += 100
-                elif "play_media" in caps:
-                    score += 10
+                if integration == "music_assistant": score += 100
+                elif "play_media" in caps: score += 10
             elif is_video:
-                if "cast" in integration or "androidtv" in integration:
-                    score += 100
+                if "cast" in integration or "androidtv" in integration: score += 100
             else:
                 # Ambiguous
-                if integration == "music_assistant":
-                    score += 50
-                elif "play_media" in caps:
-                    score += 10
-
+                if integration == "music_assistant": score += 50
+                elif "play_media" in caps: score += 10
+        
         # REMOTE CONTROL
         elif intent.startswith("nav_") or intent == "open_app":
-            if domain == "remote":
-                score += 100
-            elif integration == "androidtv_remote":
-                score += 90
-
+            if domain == "remote": score += 100
+            elif integration == "androidtv_remote": score += 90
+        
         scored.append((score, m))
-
+    
     scored.sort(key=lambda x: x[0], reverse=True)
     if scored:
         return scored[0][1]
     return None
 
-
-async def handle_media_command(
-    intent: str,
-    query: str,
-    entity_id: str,
-    user_creds: dict,
-    ha_collection,
-    redis_client,
-    device_name: str = None,  # Optional: Explicit device name from Orchestrator
-):
+async def handle_media_command(intent: str, query: str, entity_id: str, user_creds: dict, ha_collection, redis_client):
     """
     Handles media command and ensures a structured dictionary is returned.
     Supports multi-device pattern matching (even/odd/range/list/all).
     """
     q_low = query.lower()
     integration = "unknown"
-
+    
     # --- PATTERN PREVENTION (Handled downstream) ---
     # Manual pattern checks removed to prevent list unpacking errors.
     # Patterns are now handled within smart_resolve_entity -> resolve_multiple_entities_with_pattern
@@ -1286,18 +1044,6 @@ async def handle_media_command(
             intent = "turn_on"
         elif "turn off" in intent_lower:
             intent = "turn_off"
-        # --- VOLUME NORMALIZATION ---
-        elif "volume" in intent_lower:
-            if "up" in intent_lower or "increase" in intent_lower or "louder" in intent_lower:
-                intent = "volume_up"
-            elif "down" in intent_lower or "decrease" in intent_lower or "lower" in intent_lower:
-                intent = "volume_down"
-            elif "mute" in intent_lower or "silence" in intent_lower:
-                intent = "volume_mute"
-            else:
-                intent = "volume_set"
-        elif "mute" in intent_lower:
-             intent = "volume_mute"
 
         if intent != original_intent:
             log.info(f"Sanitized intent from '{original_intent}' to '{intent}'")
@@ -1308,122 +1054,70 @@ async def handle_media_command(
     # NEW: Audiobooks
     audiobook_keywords = ["read", "book", "chapter", "audiobook"]
     video_keywords = ["movie", "film", "show", "video", "youtube", "netflix", "watch"]
-
+    
     is_music_request = any(x in q_low for x in music_keywords)
     is_audiobook_request = any(x in q_low for x in audiobook_keywords)
     is_video_request = any(x in q_low for x in video_keywords)
-
-    # For play_media intent, default to music mode UNLESS explicitly requesting video
-    # Volume commands should NOT use strict music mode - they work on any media_player
-    is_volume_command = intent in ["volume_up", "volume_down", "volume_set", "volume_mute"]
-    strict_resolution = (is_music_request or is_audiobook_request) or (
-        intent == "play_media" and not is_video_request
-    ) if not is_volume_command else False
-    is_transport = intent in ["media_next", "media_previous", "stop_media"]
     
-    # --- DEVICE_NAME FALLBACK RESOLUTION ---
-    # If Orchestrator provided device_name but entity_id is missing, resolve it now
-    if not entity_id and device_name:
-        log.info(f"[Device Fallback] No entity_id provided. Attempting to resolve device_name: '{device_name}'")
-        resolved_result = await smart_resolve_entity(
-            device_name,
-            intent,
-            ha_collection,
-            is_music=strict_resolution,
-            is_video=is_video_request,
-        )
-        
-        if isinstance(resolved_result, list):
-            if resolved_result:
-                # Got multiple, use first for now (could enhance to handle multiple)
-                entity_id, integration = resolved_result[0]
-                log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
-        elif resolved_result and resolved_result != (None, None):
-            entity_id, integration = resolved_result
-            log.info(f"[Device Fallback] Resolved '{device_name}' to {entity_id}")
-    # --- END DEVICE_NAME FALLBACK ---
+    # For play_media intent, default to music mode UNLESS explicitly requesting video
+    strict_resolution = ((is_music_request or is_audiobook_request) or (intent == "play_media" and not is_video_request))
+    is_transport = intent in ["media_next", "media_previous", "stop_media"]
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---
     if is_transport:
-        device_match = re.search(
-            r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media)\b",
-            q_low,
-        )
+        device_match = re.search(r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media)\b", q_low)
 
         # 2a. Resolve device name from query if present
         if not entity_id and device_match:
-            potential_device_name = q_low.split(device_match.group(1))[-1].strip()
-            if potential_device_name:
-                # Pass strict_resolution=True if we are skipping tracks, to prefer MA entities
-                resolved_result = await smart_resolve_entity(
-                    potential_device_name,
-                    intent,
-                    ha_collection,
-                    is_music=True,
-                    is_video=is_video_request,
-                )
-
-                resolved_id, resolved_int = None, None
-                if isinstance(resolved_result, list):
-                    # If patterns matched (e.g. "Kitchen Lights"), we shouldn't allow this Short Circuit
-                    # to capture it as a single media device, unless there's only one.
-                    # For now, let's skip short circuit if it's a group, so it falls to standard resolution.
-                    log.info(
-                        f"Transport Short Circuit: Ignored group result for '{potential_device_name}' (Size: {len(resolved_result)})"
-                    )
-                else:
-                    resolved_id, resolved_int = resolved_result
-
-                if resolved_id:
-                    log.info(
-                        f"Transport Short Circuit: Found explicit device {resolved_id} from query."
-                    )
+             potential_device_name = q_low.split(device_match.group(1))[-1].strip()
+             if potential_device_name:
+                 # Pass strict_resolution=True if we are skipping tracks, to prefer MA entities
+                 resolved_result = await smart_resolve_entity(potential_device_name, intent, ha_collection, is_music=True, is_video=is_video_request)
+                 
+                 resolved_id, resolved_int = None, None
+                 if isinstance(resolved_result, list):
+                     # If patterns matched (e.g. "Kitchen Lights"), we shouldn't allow this Short Circuit 
+                     # to capture it as a single media device, unless there's only one.
+                     # For now, let's skip short circuit if it's a group, so it falls to standard resolution.
+                     log.info(f"Transport Short Circuit: Ignored group result for '{potential_device_name}' (Size: {len(resolved_result)})")
+                 else:
+                     resolved_id, resolved_int = resolved_result
+                 
+                 if resolved_id:
+                    log.info(f"Transport Short Circuit: Found explicit device {resolved_id} from query.")
                     entity_id = resolved_id
                     integration = resolved_int
 
         # 2b. If we have an entity_id now (from Redis or short circuit), check its state
         if entity_id:
-            # Check if an MA version exists and is active, swap if needed
-            # Check if an MA version exists and is active, swap if needed
-            # FIX: Do not swap for power commands (turn_off checks hardware)
-            if "music_assistant" not in integration and intent not in [
-                "turn_on",
-                "turn_off",
-                "toggle",
-            ]:
-                # Clean Lookup for linked MA player
-                # Try finding a device with same name but 'music_assistant' integration
-                from settings import GlobalResources
+             # Check if an MA version exists and is active, swap if needed
+             # Check if an MA version exists and is active, swap if needed
+             # FIX: Do not swap for power commands (turn_off checks hardware)
+             if "music_assistant" not in integration and intent not in ["turn_on", "turn_off", "toggle"]:
+                 # Clean Lookup for linked MA player
+                 # Try finding a device with same name but 'music_assistant' integration
+                 from settings import GlobalResources
+                 ma_docs = GlobalResources.ha_collection.similarity_search(f"{entity_id} music assistant", k=1)
+                 ma_entity = None
+                 
+                 for d in ma_docs:
+                     if d.metadata.get("integration") == "music_assistant":
+                         # Check strict overlap if possible, or just trust the search
+                         ma_entity = d.metadata.get("entity_id")
+                         break
+                 
+                 if ma_entity:
+                     ma_state = await get_entity_state(ma_entity, user_creds)
+                     if ma_state in ["playing", "paused"]:
+                         log.info(f"Transport Smart Swap: Swapping {entity_id} for active MA player {ma_entity}")
+                         entity_id = ma_entity
+                         integration = "music_assistant"
 
-                ma_docs = GlobalResources.ha_collection.similarity_search(
-                    f"{entity_id} music assistant", k=1
-                )
-                ma_entity = None
-
-                for d in ma_docs:
-                    if d.metadata.get("integration") == "music_assistant":
-                        # Check strict overlap if possible, or just trust the search
-                        ma_entity = d.metadata.get("entity_id")
-                        break
-
-                if ma_entity:
-                    ma_state = await get_entity_state(ma_entity, user_creds)
-                    if ma_state in ["playing", "paused"]:
-                        log.info(
-                            f"Transport Smart Swap: Swapping {entity_id} for active MA player {ma_entity}"
-                        )
-                        entity_id = ma_entity
-                        integration = "music_assistant"
-
-            state = await get_entity_state(entity_id, user_creds)
-            if state in ["playing", "paused", "buffering"]:
-                log.info(
-                    f"Transport Short Circuit: Device {entity_id} is active, proceeding directly."
-                )
-                domain = entity_id.split(".")[0]
-                return await _execute_transport_command(
-                    intent, entity_id, domain, user_creds, integration, redis_client
-                )
+             state = await get_entity_state(entity_id, user_creds)
+             if state in ["playing", "paused", "buffering"]:
+                 log.info(f"Transport Short Circuit: Device {entity_id} is active, proceeding directly.")
+                 domain = entity_id.split('.')[0]
+                 return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client)
 
     # ------------------------------------------------------------------
     # 2. FULL RESOLUTION PATH
@@ -1437,137 +1131,58 @@ async def handle_media_command(
         potential_device = parts[2].strip()
 
         if len(potential_device) > 2:
-            resolved_result = await smart_resolve_entity(
-                potential_device,
-                intent,
-                ha_collection,
-                is_music=strict_resolution,
-                is_video=is_video_request,
-            )
-
+            resolved_result = await smart_resolve_entity(potential_device, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
+            
             # Handle List Return (Batch)
             if isinstance(resolved_result, list):
-                if resolved_result:
-                    log.info(
-                        f"['On' Split] Resolved {len(resolved_result)} entities. Executing Batch."
-                    )
-                    return await execute_batch_command(
-                        resolved_result,
-                        intent,
-                        query,
-                        user_creds,
-                        ha_collection,
-                        redis_client,
-                    )
-                else:
-                    resolved_id, resolved_int = None, None
+                 if resolved_result:
+                     log.info(f"['On' Split] Resolved {len(resolved_result)} entities. Executing Batch.")
+                     return await execute_batch_command(resolved_result, intent, query, user_creds, ha_collection, redis_client)
+                 else:
+                     resolved_id, resolved_int = None, None
             else:
-                resolved_id, resolved_int = resolved_result
+                 resolved_id, resolved_int = resolved_result
 
             if resolved_id:
                 # --- START MASS INTELLIGENCE SWAP ---
-                # , If we resolved a hardware device but assume music (or ambiguous), check if MA player exists.
+                #, If we resolved a hardware device but assume music (or ambiguous), check if MA player exists.
                 # This fixes "Play Brandon Lake on Office TV" -> resolved hardware TV -> failed video play.
-                if (
-                    not is_video_request
-                    and "music_assistant" not in resolved_int
-                    and "media_player" in resolved_id
-                    and intent not in ["turn_on", "turn_off", "toggle"]
-                ):
-                    from settings import GlobalResources
-
-                    # Search for MA alternative in DB
-                    ma_docs = GlobalResources.ha_collection.similarity_search(
-                        f"{potential_device} music assistant", k=3
-                    )
-                    for d in ma_docs:
-                        if d.metadata.get("integration") == "music_assistant":
-                            found_id = d.metadata.get("entity_id")
-                            log.info(
-                                f"Mass Intelligence: Swapping hardware {resolved_id} -> MA Player {found_id}"
-                            )
-                            resolved_id = found_id
-                            resolved_int = "music_assistant"
-                            break
+                if not is_video_request and "music_assistant" not in resolved_int and "media_player" in resolved_id and intent not in ["turn_on", "turn_off", "toggle"]:
+                     from settings import GlobalResources
+                     # Search for MA alternative in DB
+                     ma_docs = GlobalResources.ha_collection.similarity_search(f"{potential_device} music assistant", k=3)
+                     for d in ma_docs:
+                         if d.metadata.get("integration") == "music_assistant":
+                             found_id = d.metadata.get("entity_id")
+                             log.info(f"Mass Intelligence: Swapping hardware {resolved_id} -> MA Player {found_id}")
+                             resolved_id = found_id
+                             resolved_int = "music_assistant"
+                             break
                 # --- END MASS INTELLIGENCE SWAP ---
 
                 # Update Context
                 user = user_creds.get("user")
                 if user and resolved_id:
-                    _set_last_entity(redis_client, user, resolved_id)
+                     _set_last_entity(redis_client, user, resolved_id)
 
-                if (
-                    strict_resolution
-                    and "music_assistant" not in resolved_int
-                    and not any(
-                        x in resolved_id.lower()
-                        for x in ["tv", "chromecast", "shield", "androidtv", "speaker", "receiver", "stereo"]
-                    )
-                ):
-                    log.error(
-                        f"Strict Resolution failure: Resolved {resolved_id} ({resolved_int}) which is not MA/TV."
-                    )
-                    return {
-                        "status": "FAILURE",
-                        "message": f"I couldn't find a Music Assistant device named '{potential_device}'.",
-                        "entity_id": potential_device,
-                        "service": "media_command",
-                    }
+                if strict_resolution and "music_assistant" not in resolved_int and not any(x in resolved_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
+                    log.error(f"Strict Resolution failure: Resolved {resolved_id} ({resolved_int}) which is not MA/TV.")
+                    return {"status": "FAILURE", "message": f"I couldn't find a Music Assistant device named '{potential_device}'.", "entity_id": potential_device, "service": "media_command"}
 
                 entity_id = resolved_id
                 integration = resolved_int
                 clean_title = potential_content
-                log.info(
-                    f"'On' Split Success: Device='{potential_device}' ({entity_id}), Content='{clean_title}'"
-                )
+                log.info(f"'On' Split Success: Device='{potential_device}' ({entity_id}), Content='{clean_title}'")
             else:
-                return {
-                    "status": "FAILURE",
-                    "message": f"I couldn't find a device named '{potential_device}' to play media.",
-                    "entity_id": potential_device,
-                    "service": "media_command",
-                }
+                 return {"status": "FAILURE", "message": f"I couldn't find a device named '{potential_device}' to play media.", "entity_id": potential_device, "service": "media_command"}
 
     # Standard Resolution
     if not entity_id:
         cleaned_for_res = clean_title
         # --- FIXED: Added transport verbs to cleaning list so 'skip' becomes empty string ---
-        for p in [
-            "turn on",
-            "turn off",
-            "toggle",
-            "play",
-            "stop",
-            "open",
-            "launch",
-            "the",
-            " on ",
-            " please ",
-            "skip",
-            "next",
-            "previous",
-            "back",
-            "pause",
-            "resume",
-            "this song",
-            "the song",
-            "current song",
-            "track",
-            "music",
-            "volume",
-            "up",
-            "down",
-            "set",
-            "change",
-            "make",
-            "increase",
-            "decrease",
-            "lower",
-            "louder",
-            "quieter",
-            "mute",
-            "unmute",
-        ]:
+        for p in ["turn on", "turn off", "toggle", "play", "stop", "open", "launch", "the", " on ", " please ",
+                  "skip", "next", "previous", "back", "pause", "resume",
+                  "this song", "the song", "current song", "track", "music"]:
             cleaned_for_res = cleaned_for_res.replace(p, " ")
         cleaned_for_res = cleaned_for_res.strip()
 
@@ -1575,121 +1190,41 @@ async def handle_media_command(
             # THIS triggers the context memory retrieval
             entity_id = get_last_entity(redis_client, user_creds.get("user"))
         else:
-            resolved_result = await smart_resolve_entity(
-                cleaned_for_res,
-                intent,
-                ha_collection,
-                is_music=strict_resolution,
-                is_video=is_video_request,
-            )
+            resolved_result = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
             if isinstance(resolved_result, list):
-                if resolved_result:
-                    log.info(
-                        f"[Standard] Resolved {len(resolved_result)} entities. Executing Batch."
-                    )
-                    return await execute_batch_command(
-                        resolved_result,
-                        intent,
-                        query,
-                        user_creds,
-                        ha_collection,
-                        redis_client,
-                    )
-                else:
-                    entity_id, integration = None, None
+                 if resolved_result:
+                     log.info(f"[Standard] Resolved {len(resolved_result)} entities. Executing Batch.")
+                     return await execute_batch_command(resolved_result, intent, query, user_creds, ha_collection, redis_client)
+                 else:
+                     entity_id, integration = None, None
             else:
-                entity_id, integration = resolved_result
+                 entity_id, integration = resolved_result
 
-            # --- FALLBACK: If resolution failed (e.g. "turn to 60%" found no device), try context ---
-            if not entity_id:
-                potential_context = get_last_entity(redis_client, user_creds.get("user"))
-                if potential_context:
-                    log.info(f"Resolution failed for '{cleaned_for_res}', using context fallback: {potential_context}")
-                    entity_id = potential_context
-
-        # --- START MA SMART SWAP (Global) ---
-        if (
-            entity_id
-            and "media_player" in entity_id
-            and not is_video_request
-            and intent not in ["turn_on", "turn_off", "toggle"]
-        ):
-            # Fetch capabilities to check if we need to swap
-            # Note: We might be fetching caps twice (here and later), but caching handles it.
-            caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-            attributes = caps.get("attributes", {})
-            friendly_name = attributes.get("friendly_name", "")
-            
-            # If generic device (not MA), hunt for MA counterpart
-            if caps.get("integration") != "music_assistant" and "mass_player_type" not in attributes:
-                if friendly_name:
-                    log.info(f"[Global Swap] Target {entity_id} is Generic. Searching for MA counterpart: {friendly_name}")
-                    from settings import GlobalResources
-                    ma_docs = GlobalResources.ha_collection.similarity_search(f"{friendly_name} music assistant", k=3)
-                    for d in ma_docs:
-                        if d.metadata.get("integration") == "music_assistant" or "mass_player_type" in d.metadata.get("attributes", ""):
-                            found_id = d.metadata.get("entity_id")
-                            if found_id != entity_id:
-                                # CRITICAL: Validate that this is the SAME device (different integration)
-                                # e.g., "media_player.office_tv" and "media_player.office_tv_chrome" should match
-                                # but "media_player.office_tv" and "media_player.office_speaker" should NOT
-                                
-                                eid_base = entity_id.rsplit("_", 1)[0] if "_" in entity_id else entity_id
-                                found_base = found_id.rsplit("_", 1)[0] if "_" in found_id else found_id
-                                
-                                is_same_device = (
-                                    eid_base == found_base or
-                                    found_id.startswith(entity_id + "_") or
-                                    entity_id.startswith(found_id + "_")
-                                )
-                                
-                                if is_same_device:
-                                    log.info(f"[Global Swap] Swapping: {entity_id} -> {found_id}")
-                                    entity_id = found_id
-                                    integration = "music_assistant"
-                                    break
-                                else:
-                                    log.info(f"[Global Swap] Rejected {found_id} - not same device as {entity_id}")
-        # --- END MA SMART SWAP ---
+        # --- START MASS INTELLIGENCE SWAP (Standard Path) ---
+        if entity_id and "media_player" in entity_id and not is_video_request and "music_assistant" not in (integration or "") and intent not in ["turn_on", "turn_off", "toggle"]:
+             from settings import GlobalResources
+             # Search for MA alternative in DB
+             clean_name = entity_id.split('.')[-1].replace('_', ' ')
+             ma_docs = GlobalResources.ha_collection.similarity_search(f"{clean_name} music assistant", k=3)
+             for d in ma_docs:
+                 if d.metadata.get("integration") == "music_assistant":
+                     found_id = d.metadata.get("entity_id")
+                     log.info(f"Mass Intelligence: Swapping hardware {entity_id} -> MA Player {found_id}")
+                     entity_id = found_id
+                     integration = "music_assistant"
+                     break
+        # --- END MASS INTELLIGENCE SWAP ---
 
         # Update Context
         user = user_creds.get("user")
         if user and entity_id:
-            _set_last_entity(redis_client, user, entity_id)
+             _set_last_entity(redis_client, user, entity_id)
 
     if entity_id:
-        domain = entity_id.split(".")[0]
+        domain = entity_id.split('.')[0]
 
-        # --- AMBIGUITY RESOLUTION (Dim vs Volume) ---
-        # Fixes "Lower the TV" mapping to 'dim' instead of 'volume_down'
-        if domain == "media_player":
-            if intent == "dim":
-                log.info(
-                    f"Ambiguity Resolved: 'dim' on media_player {entity_id} -> 'volume_down'"
-                )
-                intent = "volume_down"
-            elif intent == "brighten":
-                log.info(
-                    f"Ambiguity Resolved: 'brighten' on media_player {entity_id} -> 'volume_up'"
-                )
-                intent = "volume_up"
-            elif intent == "set_brightness":
-                log.info(
-                    f"Ambiguity Resolved: 'set_brightness' on media_player {entity_id} -> 'volume_set'"
-                )
-                intent = "volume_set"
-
-            # Also handle "Remote" domain if we swapped earlier?
-            # Actually remotes are usually swapped *inside* the power block, but here we haven't reached that.
-            # Good enough for now.
-
-    if not entity_id and intent not in ["turn_on", "turn_off", "toggle"]:
-        return {
-            "status": "FAILURE",
-            "message": "Could not determine which device you mean.",
-            "entity_id": "N/A",
-            "service": "media_command",
-        }
+    if not entity_id and intent not in ["turn_on", "turn_off", "toggle"]: 
+         return {"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}
 
     # 3. TRANSPORT REDIRECTION
     if is_transport:
@@ -1699,9 +1234,7 @@ async def handle_media_command(
         else:
             state = await get_entity_state(entity_id, user_creds)
             if state in ["off", "unavailable"]:
-                log.info(
-                    f"Targeted entity {entity_id} is {state}. Scanning for active players..."
-                )
+                log.info(f"Targeted entity {entity_id} is {state}. Scanning for active players...")
                 should_scan = True
 
         if should_scan:
@@ -1711,33 +1244,20 @@ async def handle_media_command(
                     pass
                 else:
                     new_entity = active_players[0]
-                    log.info(
-                        f"Redirecting {intent} from {entity_id or 'None'} to active device: {new_entity}"
-                    )
+                    log.info(f"Redirecting {intent} from {entity_id or 'None'} to active device: {new_entity}")
                     entity_id = new_entity
             else:
                 if not entity_id:
-                    return {
-                        "status": "FAILURE",
-                        "message": "No active media players found to control.",
-                        "entity_id": "N/A",
-                        "service": "media_command",
-                    }
+                     return {"status": "FAILURE", "message": "No active media players found to control.", "entity_id": "N/A", "service": "media_command"}
 
-        domain = entity_id.split(".")[0]
-        return await _execute_transport_command(
-            intent, entity_id, domain, user_creds, integration, redis_client
-        )
+        domain = entity_id.split('.')[0]
+        return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client)
+
 
     if not entity_id:
-        return {
-            "status": "FAILURE",
-            "message": "Could not determine which device you mean.",
-            "entity_id": "N/A",
-            "service": "media_command",
-        }
+         return {"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}
 
-    domain = entity_id.split(".")[0]
+    domain = entity_id.split('.')[0]
     service = intent
     service_data = {}
 
@@ -1746,33 +1266,26 @@ async def handle_media_command(
     # -------------------------------------------------
     if intent in ["set_color", "set_brightness", "dim", "brighten"]:
         log.debug(f"[COLOR/BRIGHTNESS] Handling intent='{intent}' for {entity_id}")
-
+        
         if domain != "light":
-            return {
-                "status": "FAILURE",
-                "message": f"Color/brightness control only works with lights, not {domain} devices.",
-                "entity_id": entity_id,
-                "service": intent,
-            }
-
+            return {"status": "FAILURE", "message": f"Color/brightness control only works with lights, not {domain} devices.", "entity_id": entity_id, "service": intent}
+        
         # Fetch device capabilities
         log.debug(f"[COLOR/BRIGHTNESS] Fetching capabilities for {entity_id}...")
         caps = await get_device_capabilities(entity_id, user_creds, redis_client)
         log.debug(f"[COLOR/BRIGHTNESS] Capabilities retrieved for {entity_id}")
-        friendly_name = caps.get(
-            "friendly_name", entity_id.split(".")[-1].replace("_", " ").title()
-        )
-
+        friendly_name = caps.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title())
+        
         # Validate color support
         if intent == "set_color":
             if not caps.get("has_color") and not caps.get("has_color_temp"):
                 return {
-                    "status": "FAILURE",
+                    "status": "FAILURE", 
                     "message": f"{friendly_name} doesn't support color control. It's a simple on/off or brightness-only light.",
-                    "entity_id": entity_id,
-                    "service": "set_color",
+                    "entity_id": entity_id, 
+                    "service": "set_color"
                 }
-
+            
             # Parse requested color
             color_found = None
             color_name_found = None
@@ -1781,33 +1294,28 @@ async def handle_media_command(
                     color_found = rgb
                     color_name_found = color_name
                     break
-
+            
             if not color_found:
-                return {
-                    "status": "FAILURE",
-                    "message": "I couldn't determine which color you want. Try: red, blue, green, warm white, etc.",
-                    "entity_id": entity_id,
-                    "service": "set_color",
-                }
-
+                return {"status": "FAILURE", "message": "I couldn't determine which color you want. Try: red, blue, green, warm white, etc.", "entity_id": entity_id, "service": "set_color"}
+            
             # Smart mode selection based on device capabilities
             service = "turn_on"
             color_modes = caps.get("color_modes", [])
-
+            
             # Check for any RGB variant (rgb, rgbw, rgbww)
             has_rgb_mode = any(mode.startswith("rgb") for mode in color_modes)
             if caps.get("has_color") and has_rgb_mode:
                 # Full RGB color support (works for rgb, rgbw, rgbww modes)
                 service_data = {"rgb_color": color_found}
                 log.info(f"Setting {entity_id} to RGB {color_found}")
-
+            
             elif caps.get("has_color") and "hs" in color_modes:
                 # HS color mode (convert RGB to HS)
-                r, g, b = [x / 255.0 for x in color_found]
+                r, g, b = [x/255.0 for x in color_found]
                 max_c = max(r, g, b)
                 min_c = min(r, g, b)
                 diff = max_c - min_c
-
+                
                 # Hue calculation
                 if diff == 0:
                     h = 0
@@ -1817,38 +1325,32 @@ async def handle_media_command(
                     h = (60 * ((b - r) / diff) + 120) % 360
                 else:
                     h = (60 * ((r - g) / diff) + 240) % 360
-
-                # Saturation calculation
+                
+                # Saturation calculation  
                 s = 0 if max_c == 0 else (diff / max_c) * 100
-
+                
                 service_data = {"hs_color": [h, s]}
                 log.info(f"Setting {entity_id} to HS [{h}, {s}]")
-
-            elif caps.get("has_color_temp") and (
-                "warm" in color_name_found or "cool" in color_name_found
-            ):
+            
+            elif caps.get("has_color_temp") and ("warm" in color_name_found or "cool" in color_name_found):
                 # Fallback to color temperature for warm/cool white
-                kelvin = (
-                    370 if "warm" in color_name_found else 200
-                )  # Warm = higher mireds (lower kelvin)
+                kelvin = 370 if "warm" in color_name_found else 200  # Warm = higher mireds (lower kelvin)
                 service_data = {"color_temp": kelvin}
                 log.info(f"Setting {entity_id} to color_temp {kelvin}")
-
+            
             elif caps.get("has_color_temp"):
                 # Device ONLY supports color temp (no RGB/HS), and user didn't request warm/cool
                 return {
                     "status": "FAILURE",
                     "message": f"{friendly_name} doesn't support full color. Try 'set to warm white' or 'set to cool white' instead.",
                     "entity_id": entity_id,
-                    "service": "set_color",
+                    "service": "set_color"
                 }
             else:
                 # Should not reach here, but safety fallback - try RGB anyway
                 service_data = {"rgb_color": color_found}
-                log.warning(
-                    f"No matching color mode for {entity_id}, trying RGB fallback"
-                )
-
+                log.warning(f"No matching color mode for {entity_id}, trying RGB fallback")
+        
         # Validate brightness support
         elif intent in ["set_brightness", "dim", "brighten"]:
             if not caps.get("has_brightness"):
@@ -1856,157 +1358,31 @@ async def handle_media_command(
                     "status": "FAILURE",
                     "message": f"{friendly_name} is an on/off only light and doesn't support brightness control.",
                     "entity_id": entity_id,
-                    "service": "set_brightness",
+                    "service": "set_brightness"
                 }
-
+            
             brightness = None
-
+            
             # Look for percentage (e.g., "50%", "100%")
             pct_match = re.search(r"(\d+)\s*%", query)
             if pct_match:
                 pct = int(pct_match.group(1))
                 brightness = int((pct / 100.0) * 255)
-
+            
             # Relative adjustments
             elif intent == "dim":
                 brightness = 70  # ~30% brightness
             elif intent == "brighten":
                 brightness = 255  # Max brightness
-
+            
             if brightness is None:
                 brightness = 128  # Default to 50%
-
+            
             service = "turn_on"
             service_data = {"brightness": max(1, min(255, brightness))}
             log.info(f"Setting {entity_id} brightness to {brightness}")
-
-        return await execute_ha_service(
-            domain, service, entity_id, user_creds, service_data, redis_client
-        )
-
-    # -------------------------------------------------
-    # VOLUME CONTROL
-    # -------------------------------------------------
-    if intent in ["volume_up", "volume_down", "volume_set", "volume_mute"]:
-        log.debug(f"[VOLUME] Handling intent='{intent}' for {entity_id}")
-
-        if domain != "media_player":
-            # Special case: Remotes often handle volume via IR
-            if domain == "remote":
-                cmd = None
-                if intent == "volume_up":
-                    cmd = "VOLUME_UP"
-                elif intent == "volume_down":
-                    cmd = "VOLUME_DOWN"
-                elif intent == "volume_mute":
-                    cmd = "MUTE"
-
-                if cmd:
-                    return await execute_ha_service(
-                        "remote",
-                        "send_command",
-                        entity_id,
-                        user_creds,
-                        {"command": cmd},
-                        redis_client,
-                    )
-                else:
-                    return {
-                        "status": "FAILURE",
-                        "message": "I can't set a specific volume level on a remote, only Up/Down/Mute.",
-                        "entity_id": entity_id,
-                        "service": intent,
-                    }
-
-            return {
-                "status": "FAILURE",
-                "message": f"Volume control is not supported for {domain} devices.",
-                "entity_id": entity_id,
-                "service": intent,
-            }
-
-        # Check Capabilities
-        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-        features = caps.get("supported_features", 0)
         
-        # Override Integration if Capabilities detected MA (from Attributes)
-        is_ma = False
-        if caps.get("integration") == "music_assistant" or "mass_player_type" in caps.get("attributes", {}):
-            log.info(f"Capability Check: Overriding integration to 'music_assistant' for {entity_id}")
-            integration = "music_assistant"
-            ctype = "music" # Force music type for MA players
-            is_ma = True
-
-        # Bitmasks: 4=Set, 8=Mute
-        # Note: Many devices support Step (Up/Down) even if they don't support Set.
-        
-        can_set_vol = bool(features & 4)
-        can_mute = bool(features & 8)
-
-        service_data = {}
-
-        if intent == "volume_mute":
-            if not can_mute:
-                # Fallback: Try it anyway, some devices misreport
-                log.warning(f"{entity_id} reports no Mute capability, trying anyway.")
-
-            # Toggle mute state if currently muted? Or strictly "mute"?
-            # Intent "mute" usually means "toggle mute" or "silence".
-            # safe assumption: call volume_mute with is_volume_muted=True (silence) or toggle?
-            # Let's assume 'toggle' for 'mute' phrase, or explicit 'true' for 'silence'.
-            # actually HA service usually takes 'is_volume_muted': True/False/toggle.
-            # Let's default to toggle or True. 'mute' -> True. 'unmute' -> False.
-            # Regex usually maps 'mute' to 'volume_mute'.
-            is_mute = True
-            if "unmute" in query.lower():
-                is_mute = False
-
-            service = "volume_mute"
-            service_data = {"is_volume_muted": is_mute}
-
-        elif intent == "volume_set":
-            if not can_set_vol:
-                return {
-                    "status": "FAILURE",
-                    "message": f"{caps.get('friendly_name', entity_id)} doesn't support setting specific volume levels, try Up/Down.",
-                    "entity_id": entity_id,
-                    "service": intent,
-                }
-
-            # Parse percentage
-            # import re (REMOVED: Global import used)
-
-            pct_match = re.search(r"(\d+)\s*%", query)
-            if pct_match:
-                vol_pct = int(pct_match.group(1))
-                service = "volume_set"
-                service_data = {"volume_level": vol_pct / 100.0}
-            else:
-                # Try simple number "Volume 50"
-                num_match = re.search(r"\b(\d+)\b", query)
-                if num_match:
-                    vol_pct = int(num_match.group(1))
-                    if vol_pct > 1:  # "Volume 1" might mean 100% or 1%. Assume >1 is %.
-                        service = "volume_set"
-                        service_data = {"volume_level": vol_pct / 100.0}
-                    else:
-                        # "Volume 0.5"
-                        service = "volume_set"
-                        service_data = {"volume_level": float(num_match.group(1))}
-                else:
-                    return {
-                        "status": "FAILURE",
-                        "message": "I didn't hear a volume level (e.g. '50%').",
-                        "entity_id": entity_id,
-                        "service": intent,
-                    }
-
-        elif intent in ["volume_up", "volume_down"]:
-            service = intent  # matches service name exactly
-
-        return await execute_ha_service(
-            "media_player", service, entity_id, user_creds, service_data, redis_client
-        )
+        return await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)
 
     # -------------------------------------------------
     # POWER, NAVIGATION
@@ -2017,47 +1393,40 @@ async def handle_media_command(
         # This handles Android TV, Roku, etc. where the media_player might be a cast target or less capable.
         if intent in ["turn_on", "turn_off", "toggle"] and domain == "media_player":
             from settings import GlobalResources
-
+            
             # 1. Naive Check: media_player.foo -> remote.foo
             candidates = [entity_id.replace("media_player.", "remote.")]
-
+            
             # 2. Vector Search: Find "remote" entities related to this device
             # e.g. "Office TV Chrome" -> finds "remote.office_tv"
             search_query = entity_id.split(".")[-1].replace("_", " ")
-            docs = GlobalResources.ha_collection.similarity_search(
-                f"{search_query} remote", k=3
-            )
+            docs = GlobalResources.ha_collection.similarity_search(f"{search_query} remote", k=3)
             for d in docs:
                 if d.metadata.get("domain") == "remote":
                     candidates.append(d.metadata.get("entity_id"))
-
+            
             # 3. Validation: Pick the first candidate that actually exists/is effective
             best_remote = None
             for cand in candidates:
-                if cand == entity_id:
-                    continue
-
+                if cand == entity_id: continue
+                
                 # Check state to verify existence
                 st = await get_entity_state(cand, user_creds)
                 if st not in ["unknown", "unavailable", None]:
                     best_remote = cand
                     break
-
+            
             if best_remote:
-                log.info(
-                    f"Smart Power Swap: Switching {entity_id} -> {best_remote} (Remote Integration)"
-                )
+                log.info(f"Smart Power Swap: Switching {entity_id} -> {best_remote} (Remote Integration)")
                 entity_id = best_remote
                 domain = "remote"
 
+
         if intent.startswith("nav_"):
             cmd_map = {
-                "nav_up": "DPAD_UP",
-                "nav_down": "DPAD_DOWN",
-                "nav_left": "DPAD_LEFT",
-                "nav_right": "DPAD_RIGHT",
-                "nav_enter": "DPAD_CENTER",
-                "nav_back": "BACK",
+                "nav_up": "DPAD_UP", "nav_down": "DPAD_DOWN",
+                "nav_left": "DPAD_LEFT", "nav_right": "DPAD_RIGHT",
+                "nav_enter": "DPAD_CENTER", "nav_back": "BACK",
                 "nav_home": "HOME",
             }
             service = "send_command"
@@ -2069,28 +1438,24 @@ async def handle_media_command(
             service = "turn_" + intent.split("_")[1]
         if domain not in ["light", "switch", "remote", "media_player"]:
             domain = "homeassistant"
-        return await execute_ha_service(
-            domain, service, entity_id, user_creds, service_data, redis_client
-        )
+        return await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)
 
     # -------------------------------------------------
     # MEDIA (PLAY / OPEN APP)
     # -------------------------------------------------
     if intent in ["play_media", "open_app"]:
+
         # APP LAUNCH
         for app, pkg in APP_PACKAGES.items():
             if app in q_low:
                 return await execute_ha_service(
-                    "media_player",
-                    "play_media",
-                    entity_id,
-                    user_creds,
+                    "media_player", "play_media", entity_id, user_creds,
                     {"media_content_id": pkg, "media_content_type": "app"},
-                    redis_client,
+                    redis_client
                 )
 
         # --- SMART CONTENT TYPE DETECTION ---
-        ctype = "music"  # Default
+        ctype = "music" # Default
         detected_specific_type = False
 
         if is_music_request:
@@ -2112,16 +1477,14 @@ async def handle_media_command(
             elif re.search(r"\b(podcast)\b", q_low):
                 ctype = "podcast"
                 detected_specific_type = True
-
+        
         if is_audiobook_request:
             ctype = "audiobook"
             detected_specific_type = True
 
         # TV Logic: TVs play video ONLY if explicitly video request
         # Fix: Don't force video for ambiguous music requests like "Play Brandon Lake"
-        is_tv = any(
-            x in entity_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]
-        )
+        is_tv = any(x in entity_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"])
         if is_tv and is_video_request:
             ctype = "video"
         elif not is_video_request and not is_music_request:
@@ -2130,186 +1493,88 @@ async def handle_media_command(
 
         # Fallback Logic for Non-MA Devices:
         if detected_specific_type and "music_assistant" not in integration:
-            log.info(
-                f"Target {entity_id} is not Music Assistant. Downgrading type '{ctype}' to 'music'."
-            )
+            log.info(f"Target {entity_id} is not Music Assistant. Downgrading type '{ctype}' to 'music'.")
             ctype = "music"
 
         # --- CONTENT CLEANING ---
         original_title = clean_title
 
-        # Check for URL first - if URL, skip all cleaning
-        is_url = clean_title.startswith("http://") or clean_title.startswith("https://")
+        # Only remove control/action words
+        clean_title = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean_title)
 
-        if not is_url:
-            # Only remove control/action words
-            clean_title = re.sub(
-                r"\b(play|please|from|on|open|launch|playback|listen to)\b",
-                " ",
-                clean_title,
-            )
+        # Only remove content TYPE keywords IF the request is for MUSIC
+        if is_music_request:
+            clean_title = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean_title)
 
-            # Only remove content TYPE keywords IF the request is for MUSIC
-            if is_music_request:
-                clean_title = re.sub(
-                    r"\b(music|song|album|track|playlist|artist|radio|podcast)\b",
-                    " ",
-                    clean_title,
-                )
+        # Remove filler words
+        clean_title = re.sub(r"\b(by|the|some|a|an)\b", " ", clean_title)
 
-            # Remove filler words
-            clean_title = re.sub(r"\b(by|the|some|a|an)\b", " ", clean_title)
-
-            clean_title = re.sub(r"[^\w\s]", " ", clean_title)
-            clean_title = re.sub(r"\s+", " ", clean_title).strip()
+        clean_title = re.sub(r"[^\w\s]", " ", clean_title) 
+        clean_title = re.sub(r"\s+", " ", clean_title).strip()
 
         if len(clean_title) < 3:
-            clean_title = original_title
-            log.warning(
-                f"Content cleaning resulted in empty string. Using original content: {clean_title}"
-            )
+             clean_title = original_title
+             log.warning(f"Content cleaning resulted in empty string. Using original content: {clean_title}")
 
         if not clean_title:
-            return {
-                "status": "FAILURE",
-                "message": "I understood the device, but not what to play. Please specify content.",
-                "entity_id": entity_id,
-                "service": "media_command",
-            }
+             return {"status": "FAILURE", "message": "I understood the device, but not what to play. Please specify content.", "entity_id": entity_id, "service": "media_command"}
 
         state = await get_entity_state(entity_id, user_creds)
         if state in ["off", "unavailable"]:
-            await execute_ha_service(
-                domain, "turn_on", entity_id, user_creds, redis_client=redis_client
-            )
-            
-        # --- ROBUST MA DETECTION & SWAP ---
-        # Fetch capabilities
-        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-        attributes = caps.get("attributes", {})
-        friendly_name = attributes.get("friendly_name", "")
-        
-        # If we have a generic device (not MA), try to find its MA counterpart using Friendly Name
-        if caps.get("integration") != "music_assistant" and "mass_player_type" not in attributes:
-            if friendly_name:
-                log.info(f"Target {entity_id} is Generic. Searching for MA counterpart via name: {friendly_name}")
-                from settings import GlobalResources
-                ma_docs = GlobalResources.ha_collection.similarity_search(f"{friendly_name} music assistant", k=3)
-                for d in ma_docs:
-                    if d.metadata.get("integration") == "music_assistant":
-                        found_id = d.metadata.get("entity_id")
-                        log.info(f"Mass Smart Swap: {entity_id} -> {found_id}")
-                        entity_id = found_id
-                        # Update caps for new entity
-                        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-                        attributes = caps.get("attributes", {})
-                        integration = "music_assistant"
-                        break
+            await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
 
-        # Check again if we are now MA
-        if caps.get("integration") == "music_assistant" or "mass_player_type" in attributes:
-             log.info(f"[Play Media] Identified Music Assistant Entity: {entity_id}")
-             integration = "music_assistant"
-             # MA specific mapping: 'music' generic type often fails. Use 'search' to let MA find best match.
-             if ctype == "music":
-                 ctype = "search"
-             elif ctype not in ["radio", "track", "album", "artist", "playlist", "search"]:
-                 ctype = "search" # Default fallback for MA is search
-
+        # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices ---
         if "music_assistant" in integration:
-            # Detect if content is a URL
-            if clean_title.startswith("http://") or clean_title.startswith("https://"):
-                ctype = "url"
-                log.info(f"Detected URL content: {clean_title} -> type=url")
-
-            log.info(
-                f"Executing Music Assistant specific Play on {entity_id} Type: {ctype}"
-            )
-            
-            # Use Specific MA Service
-            service_data = {
-                "entity_id": entity_id,
+            log.info(f"Executing Music Assistant specific Play on {entity_id} Type: {ctype}")
+            # MA Service requires: media_id, media_type, enqueue
+            ma_service_data = {
                 "media_id": clean_title,
                 "media_type": ctype,
                 "enqueue": "play" 
             }
-            
-            # Execute MA service
-            result = await execute_ha_service(
-                "music_assistant",
-                "play_media",
-                entity_id,
-                user_creds,
-                service_data,
-                redis_client,
-            )
+            # Attempt MA service first
+            result = await execute_ha_service("music_assistant", "play_media", entity_id, user_creds, ma_service_data, redis_client)
+
+            # Fallback to 'search' if specific type fails (fuzzy search)
+            if result.get("status") == "FAILURE":
+                 log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
+                 ma_service_data["media_type"] = "search"
+                 result = await execute_ha_service("music_assistant", "play_media", entity_id, user_creds, ma_service_data, redis_client)
+
+            return result
+        else:
+            # Standard Media Player Service
+            log.info(f"Executing Standard Play on {entity_id} Type: {ctype}")
+            std_service_data = {
+                "media_content_id": clean_title,
+                "media_content_type": ctype
+            }
+            result = await execute_ha_service(domain, "play_media", entity_id, user_creds, std_service_data, redis_client)
+
+            # Self-Healing for generic players
+            if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
+                new_type = "video" if ctype == "music" else "music"
+                log.info(f"Self-Healing: Retrying '{clean_title}' as '{new_type}' on {entity_id}")
+                service_data = {"media_content_id": clean_title, "media_content_type": new_type}
+                result = await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
+
+            # FINAL FALLBACK: If play_media failed with 500 (Server Error), and it's a TV/Remote, try waking it up or just logging clearly.
+            if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
+                 log.error(f"Persistent 500 Error on {entity_id}. Device might be unresponsive or integration broken.")
+                 # Optional: Try one last ditch 'turn_on' if we suspect sleep?
+                 # await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
+
             return result
 
-        # Standard Media Player Handling
-        # Android TV often triggers 500 on 'music'; default to 'video' or 'url' if needed
-        # but for now, we just ensure we don't send 'track' which is MA specific
-        if ctype == "track" and integration != "music_assistant": 
-             ctype = "music" # Revert back to HA standard if we accidentally mapped it
+    return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
 
-        service_data = {
-            "media_content_id": clean_title,
-            "media_content_type": ctype,
-        }
-        
-        # Youtube/Cast specific overrides could go here
-        if "androidtv" in integration and ctype == "music":
-             # Optional: Fallback to video for Android TV if music fails?
-             # For now, just logging or keeping as is. Code below sends standard service.
-             pass
-
-        # Execute standard service
-        result = await execute_ha_service(
-            "media_player",
-            "play_media",
-            entity_id,
-            user_creds,
-            service_data,
-            redis_client,
-        )
-
-        # Self-Healing for generic players
-        if result.get("status") == "FAILURE":
-             # User requested disabling blind video fallback.
-             # Only log failure.
-             log.warning(f"Media Playback Failed for {entity_id}. Video fallback disabled.")
-
-        # FINAL FALLBACK: If play_media failed with 500 (Server Error), and it's a TV/Remote, try waking it up or just logging clearly.
-        if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
-            log.error(
-                f"Persistent 500 Error on {entity_id}. Device might be unresponsive or integration broken."
-            )
-
-        return result
-
-    return {
-        "status": "FAILURE",
-        "message": f"Media command '{intent}' could not be executed.",
-        "entity_id": entity_id,
-        "service": intent,
-    }
-
-
-async def _execute_transport_command(
-    intent: str,
-    entity_id: str,
-    domain: str,
-    user_creds: dict,
-    integration: str,
-    redis_client,
-):
+async def _execute_transport_command(intent: str, entity_id: str, domain: str, user_creds: dict, integration: str, redis_client):
     """Executes media transport command with self-healing fallback prioritizing remote control. Returns structured dict."""
 
     if intent == "stop_media":
         # Update Context (though stopping usually means we're done, sometimes we want to resume)
         # But 'stop' might imply we shouldn't target it sequentially. Let's keep it for now.
-        return await execute_ha_service(
-            "media_player", "media_stop", entity_id, user_creds, {}, redis_client
-        )
+        return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
 
     is_mass = "music_assistant" in integration
 
@@ -2322,23 +1587,12 @@ async def _execute_transport_command(
         remote_id = entity_id.replace("media_player", "remote")
 
         # --- FIXED: Use service FIRST for everyone. MA stops here. Others fallback. ---
-        result = await execute_ha_service(
-            "media_player", "media_next_track", entity_id, user_creds, {}, redis_client
-        )
+        result = await execute_ha_service("media_player", "media_next_track", entity_id, user_creds, {}, redis_client)
 
         if not is_mass and result.get("status") == "FAILURE":
             if await _has_remote(remote_id):
-                log.info(
-                    f"Next track failed on {entity_id}. Falling back to remote: {remote_id}"
-                )
-                result = await execute_ha_service(
-                    "remote",
-                    "send_command",
-                    remote_id,
-                    user_creds,
-                    {"command": "DPAD_RIGHT"},
-                    redis_client,
-                )
+                log.info(f"Next track failed on {entity_id}. Falling back to remote: {remote_id}")
+                result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "DPAD_RIGHT"}, redis_client)
 
         return result
 
@@ -2346,34 +1600,13 @@ async def _execute_transport_command(
         remote_id = entity_id.replace("media_player", "remote")
 
         # --- FIXED: Use service FIRST for everyone. MA stops here. Others fallback. ---
-        result = await execute_ha_service(
-            "media_player",
-            "media_previous_track",
-            entity_id,
-            user_creds,
-            {},
-            redis_client,
-        )
+        result = await execute_ha_service("media_player", "media_previous_track", entity_id, user_creds, {}, redis_client)
 
         if not is_mass and result.get("status") == "FAILURE":
             if await _has_remote(remote_id):
-                log.info(
-                    f"Previous track failed on {entity_id}. Falling back to remote: {remote_id}"
-                )
-                result = await execute_ha_service(
-                    "remote",
-                    "send_command",
-                    remote_id,
-                    user_creds,
-                    {"command": "DPAD_LEFT"},
-                    redis_client,
-                )
+                log.info(f"Previous track failed on {entity_id}. Falling back to remote: {remote_id}")
+                result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "DPAD_LEFT"}, redis_client)
 
         return result
 
-    return {
-        "status": "FAILURE",
-        "message": f"Transport command '{intent}' could not be executed.",
-        "entity_id": entity_id,
-        "service": intent,
-    }
+    return {"status": "FAILURE", "message": f"Transport command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
