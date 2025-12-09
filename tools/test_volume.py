@@ -119,8 +119,8 @@ async def run_test():
             except: pass
         
         if not is_playing:
-            print(f" [FAIL] Device failed to start playing {song}. Aborting volume test for {name}.")
-            continue
+            print(f" [FAIL] Device failed to start playing {song}. Proceeding to Volume Test anyway (to verify control).")
+            # continue  <-- Commented out to force volume verification
             
         await asyncio.sleep(2)
         
