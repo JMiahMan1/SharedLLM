@@ -2143,8 +2143,11 @@ async def handle_media_command(
         if caps.get("integration") == "music_assistant" or "mass_player_type" in attributes:
              log.info(f"[Play Media] Identified Music Assistant Entity: {entity_id}")
              integration = "music_assistant"
-             if ctype not in ["radio", "track", "album", "artist", "playlist"]:
-                 ctype = "music"
+             # MA specific mapping: 'music' generic type often fails. Use 'search' to let MA find best match.
+             if ctype == "music":
+                 ctype = "search"
+             elif ctype not in ["radio", "track", "album", "artist", "playlist", "search"]:
+                 ctype = "search" # Default fallback for MA is search
 
         if "music_assistant" in integration:
             # Detect if content is a URL
