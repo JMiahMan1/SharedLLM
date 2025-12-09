@@ -78,13 +78,16 @@ async def handle_timer_resume(query: str, **kwargs):
 @ActionDispatcher.register("media_command")
 async def handle_media_tool(query: str, user_creds: dict, params: dict = None, **kwargs):
     intent = params.get("intent", "turn_on") if params else "turn_on"
+    entity_id = params.get("entity_id") if params else None
+    device_name = params.get("device_name") if params else None
     return await handle_media_command(
         intent,
         query,
-        None,
+        entity_id,
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
+        device_name=device_name,
     )
 
 @ActionDispatcher.register("play_media")
