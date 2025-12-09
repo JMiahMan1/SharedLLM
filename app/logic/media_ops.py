@@ -40,6 +40,7 @@ MEDIA_INTENTS = [
     "turn_on", "turn_off", "toggle", 
     "stop_media", "play_media", "open_app",
     "media_next", "media_previous",
+    "volume_up", "volume_down", "volume_set", "volume_mute",  # Volume controls
     "nav_up", "nav_down", "nav_left", "nav_right", 
     "nav_enter", "nav_back", "nav_home",
     "set_color", "set_brightness", "dim", "brighten"
@@ -1071,6 +1072,17 @@ async def handle_media_command(
             intent = "turn_on"
         elif "turn off" in intent_lower:
             intent = "turn_off"
+        # --- Volume Intent Sanitization ---
+        elif "volume" in intent_lower:
+            if "mute" in intent_lower:
+                intent = "volume_mute"
+            elif "up" in intent_lower:
+                intent = "volume_up"
+            elif "down" in intent_lower:
+                intent = "volume_down"
+            else:
+                intent = "volume_set"  # Default to volume_set for specific % commands
+        # ----------------------------------
 
         if intent != original_intent:
             log.info(f"Sanitized intent from '{original_intent}' to '{intent}'")
@@ -1636,4 +1648,57 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
 
         return result
 
-    return {"status": "FAILURE", "message": f"Transport command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
+    # --- Volume Control Commands ---
+    elif intent in ["volume_set", "volume_up", "volume_down", "volume_mute"]:
+        import re
+        # Extract volume level from query (e.g., "30%", "60 percent", "to 50")
+        volume_match = re.search(r'(\d+)\s*%?', query)
+        volume_level = None
+        if volume_match:
+            volume_level = int(volume_match.group(1)) / 100.0  # Convert to 0.0-1.0
+            volume_level = max(0.0, min(1.0, volume_level))  # Clamp
+        
+        if intent == "volume_set":
+            if volume_level is not None:
+                result = await execute_ha_service(
+                    "media_player", "volume_set", entity_id, user_creds, 
+                    {"volume_level": volume_level}, redis_client
+                )
+                return result
+            else:
+                return {"status": "FAILURE", "message": "Could not parse volume level from command.", "entity_id": entity_id, "service": "volume_set"}
+        
+        elif intent == "volume_up":
+            if volume_level is not None:
+                # Set to specific level
+                result = await execute_ha_service(
+                    "media_player", "volume_set", entity_id, user_creds, 
+                    {"volume_level": volume_level}, redis_client
+                )
+            else:
+                # Just bump up by default increment
+                result = await execute_ha_service(
+                    "media_player", "volume_up", entity_id, user_creds, {}, redis_client
+                )
+            return result
+        
+        elif intent == "volume_down":
+            if volume_level is not None:
+                result = await execute_ha_service(
+                    "media_player", "volume_set", entity_id, user_creds, 
+                    {"volume_level": volume_level}, redis_client
+                )
+            else:
+                result = await execute_ha_service(
+                    "media_player", "volume_down", entity_id, user_creds, {}, redis_client
+                )
+            return result
+        
+        elif intent == "volume_mute":
+            result = await execute_ha_service(
+                "media_player", "volume_mute", entity_id, user_creds, 
+                {"is_volume_muted": True}, redis_client
+            )
+            return result
+
+    return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
