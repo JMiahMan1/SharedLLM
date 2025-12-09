@@ -996,7 +996,7 @@ async def smart_resolve_entity(
         # Fallback for generic
         if raw_candidates:
              top = raw_candidates[0]
-             return [(top['entity_id'], top['integration'])] if allow_multiple else (top['entity_id'], top['integration'])
+             return [(top['eid'], top['integration'])] if allow_multiple else (top['eid'], top['integration'])
 
         log.warning(
             f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None."
