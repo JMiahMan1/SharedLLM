@@ -1497,31 +1497,34 @@ async def handle_media_command(
                     log.info(f"Resolution failed for '{cleaned_for_res}', using context fallback: {potential_context}")
                     entity_id = potential_context
 
-        # --- START MASS INTELLIGENCE SWAP (Standard Path) ---
+        # --- START MA SMART SWAP (Global) ---
         if (
             entity_id
             and "media_player" in entity_id
             and not is_video_request
-            and "music_assistant" not in (integration or "")
             and intent not in ["turn_on", "turn_off", "toggle"]
         ):
-            from settings import GlobalResources
-
-            # Search for MA alternative in DB
-            clean_name = entity_id.split(".")[-1].replace("_", " ")
-            ma_docs = GlobalResources.ha_collection.similarity_search(
-                f"{clean_name} music assistant", k=3
-            )
-            for d in ma_docs:
-                if d.metadata.get("integration") == "music_assistant":
-                    found_id = d.metadata.get("entity_id")
-                    log.info(
-                        f"Mass Intelligence: Swapping hardware {entity_id} -> MA Player {found_id}"
-                    )
-                    entity_id = found_id
-                    integration = "music_assistant"
-                    break
-        # --- END MASS INTELLIGENCE SWAP ---
+            # Fetch capabilities to check if we need to swap
+            # Note: We might be fetching caps twice (here and later), but caching handles it.
+            caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+            attributes = caps.get("attributes", {})
+            friendly_name = attributes.get("friendly_name", "")
+            
+            # If generic device (not MA), hunt for MA counterpart
+            if caps.get("integration") != "music_assistant" and "mass_player_type" not in attributes:
+                if friendly_name:
+                    log.info(f"[Global Swap] Target {entity_id} is Generic. Searching for MA counterpart: {friendly_name}")
+                    from settings import GlobalResources
+                    ma_docs = GlobalResources.ha_collection.similarity_search(f"{friendly_name} music assistant", k=3)
+                    for d in ma_docs:
+                        if d.metadata.get("integration") == "music_assistant" or "mass_player_type" in d.metadata.get("attributes", ""):
+                            found_id = d.metadata.get("entity_id")
+                            if found_id != entity_id:
+                                log.info(f"[Global Swap] Swapping: {entity_id} -> {found_id}")
+                                entity_id = found_id
+                                integration = "music_assistant"
+                                break
+        # --- END MA SMART SWAP ---
 
         # Update Context
         user = user_creds.get("user")
