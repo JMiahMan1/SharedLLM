@@ -55,7 +55,7 @@ NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
 NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:latest")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:latest")
 
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
 INGESTION_TEMP_DIR = os.getenv("INGESTION_TEMP_DIR", "/data/nextcloud_temp")

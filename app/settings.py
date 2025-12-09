@@ -47,7 +47,7 @@ NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
 SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "/app/data/system_prompt.txt")
 
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:latest")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:latest")
 EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
