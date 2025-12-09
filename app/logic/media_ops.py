@@ -968,22 +968,41 @@ async def smart_resolve_entity(
                            ma_docs = GlobalResources.ha_collection.similarity_search(f"{friendly} music assistant", k=3)
                            
                            for d in ma_docs:
-                               found_integ = d.metadata.get("integration")
-                               found_attrs = d.metadata.get("attributes", "")
-                               if found_integ == "music_assistant" or "mass_player_type" in found_attrs:
-                                   found_id = d.metadata.get("entity_id")
-                                   if found_id != eid:
-                                       log.info(f"[Intelligent Resolve] Found Superior Match: {eid} -> {found_id}")
-                                       # Construct new candidate tuple
-                                       new_candidate = (found_id, "music_assistant")
-                                       
-                                       # Return this IMMEDIATELY as the best single match
-                                       if not allow_multiple:
-                                           return new_candidate
-                                       
-                                       # If multiple allowed, we should probably add it to the list?
-                                       # For now, let's just return it as the single best match since MA supersedes hardware
-                                       return [new_candidate] if allow_multiple else new_candidate
+                                found_integ = d.metadata.get("integration")
+                                found_attrs = d.metadata.get("attributes", "")
+                                if found_integ == "music_assistant" or "mass_player_type" in found_attrs:
+                                    found_id = d.metadata.get("entity_id")
+                                    if found_id != eid:
+                                        # CRITICAL: Validate that this is the SAME device (different integration)
+                                        # Extract base device name from entity_id
+                                        # e.g., "media_player.office_tv" and "media_player.office_tv_chrome" should match
+                                        # but "media_player.office_tv" and "media_player.office_speaker" should NOT
+                                        
+                                        # Strategy: Check if one entity_id is a prefix of the other, or they share a common base
+                                        eid_base = eid.rsplit("_", 1)[0] if "_" in eid else eid  # "media_player.office_tv"
+                                        found_base = found_id.rsplit("_", 1)[0] if "_" in found_id else found_id
+                                        
+                                        # Also check direct prefix relationship
+                                        is_same_device = (
+                                            eid_base == found_base or  # Same base name
+                                            found_id.startswith(eid + "_") or  # found is extension of eid
+                                            eid.startswith(found_id + "_")  # eid is extension of found
+                                        )
+                                        
+                                        if is_same_device:
+                                            log.info(f"[Intelligent Resolve] Found Superior Match: {eid} -> {found_id}")
+                                            # Construct new candidate tuple
+                                            new_candidate = (found_id, "music_assistant")
+                                            
+                                            # Return this IMMEDIATELY as the best single match
+                                            if not allow_multiple:
+                                                return new_candidate
+                                            
+                                            # If multiple allowed, we should probably add it to the list?
+                                            # For now, let's just return it as the single best match since MA supersedes hardware
+                                            return [new_candidate] if allow_multiple else new_candidate
+                                        else:
+                                            log.info(f"[Intelligent Resolve] Rejected {found_id} - not same device as {eid}")
                    except Exception as e:
                        log.error(f"[Intelligent Resolve] Error performing lookahead: {e}")
 
@@ -1611,10 +1630,26 @@ async def handle_media_command(
                         if d.metadata.get("integration") == "music_assistant" or "mass_player_type" in d.metadata.get("attributes", ""):
                             found_id = d.metadata.get("entity_id")
                             if found_id != entity_id:
-                                log.info(f"[Global Swap] Swapping: {entity_id} -> {found_id}")
-                                entity_id = found_id
-                                integration = "music_assistant"
-                                break
+                                # CRITICAL: Validate that this is the SAME device (different integration)
+                                # e.g., "media_player.office_tv" and "media_player.office_tv_chrome" should match
+                                # but "media_player.office_tv" and "media_player.office_speaker" should NOT
+                                
+                                eid_base = entity_id.rsplit("_", 1)[0] if "_" in entity_id else entity_id
+                                found_base = found_id.rsplit("_", 1)[0] if "_" in found_id else found_id
+                                
+                                is_same_device = (
+                                    eid_base == found_base or
+                                    found_id.startswith(entity_id + "_") or
+                                    entity_id.startswith(found_id + "_")
+                                )
+                                
+                                if is_same_device:
+                                    log.info(f"[Global Swap] Swapping: {entity_id} -> {found_id}")
+                                    entity_id = found_id
+                                    integration = "music_assistant"
+                                    break
+                                else:
+                                    log.info(f"[Global Swap] Rejected {found_id} - not same device as {entity_id}")
         # --- END MA SMART SWAP ---
 
         # Update Context
