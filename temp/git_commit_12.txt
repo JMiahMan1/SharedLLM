@@ -1,0 +1,9 @@
+[timer 41d1da2] Tools: Device Discovery Script
+ 7 files changed, 178 insertions(+)
+ create mode 100644 app/scripts/discover_devices.py
+ create mode 100644 temp/deploy_log_26_1.txt
+ create mode 100644 temp/git_commit_11.txt
+ create mode 100644 temp/git_push_11.txt
+ create mode 100644 temp/ha_media_players.txt
+ create mode 100644 temp/ha_states.json
+ create mode 100644 temp/living_room_tv_state.txt
