@@ -1482,12 +1482,22 @@ async def handle_media_command(
             return result
         else:
             # Standard Media Player Service
-            log.info(f"Executing Standard Play on {entity_id} Type: {ctype}")
-            std_service_data = {
-                "media_content_id": clean_title,
-                "media_content_type": ctype
-            }
-            result = await execute_ha_service(domain, "play_media", entity_id, user_creds, std_service_data, redis_client)
+            
+            # If content is generic/garbage (failed to clean meaningfully) and it's a TV/Generic, 
+            # try RESUME (media_play) instead of play_media with garbage.
+            # "original_title" would be "Play some music", "clean_title" might be "Play some music" if <3 char logic hit.
+            is_generic = clean_title.lower() in ["music", "some music", "anything", "play some music"] or len(clean_title) > 20 and "play" in clean_title.lower()
+            
+            if is_generic or not clean_title:
+                log.info(f"Generic content request on {entity_id}. Attempting RESUME (media_play).")
+                result = await execute_ha_service(domain, "media_play", entity_id, user_creds, {}, redis_client)
+            else:
+                log.info(f"Executing Standard Play on {entity_id} Type: {ctype}")
+                std_service_data = {
+                    "media_content_id": clean_title,
+                    "media_content_type": ctype
+                }
+                result = await execute_ha_service(domain, "play_media", entity_id, user_creds, std_service_data, redis_client)
 
             # Self-Healing for generic players
             if result.get("status") == "FAILURE" and "500" in result.get("message", ""):
@@ -1510,8 +1520,10 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     """Executes media transport command with self-healing fallback prioritizing remote control. Returns structured dict."""
 
     if intent == "stop_media":
-        # Update Context (though stopping usually means we're done, sometimes we want to resume)
-        # But 'stop' might imply we shouldn't target it sequentially. Let's keep it for now.
+        # Check state first to avoid 500 error on off devices
+        state = await get_entity_state(entity_id, user_creds)
+        if state in ["off", "unavailable", "idle"]:
+             return {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
         return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
 
     is_mass = "music_assistant" in integration
