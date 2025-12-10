@@ -1452,13 +1452,24 @@ async def handle_media_command(
     if intent in ["play_media", "open_app"]:
 
         # APP LAUNCH
-        for app, pkg in APP_PACKAGES.items():
-            if app in q_low:
-                return await execute_ha_service(
-                    "media_player", "play_media", entity_id, user_creds,
-                    {"media_content_id": pkg, "media_content_type": "app"},
-                    redis_client
-                )
+        # APP LAUNCH
+        # If integration is Android TV or device has apps, try to resolve app intent
+        if "android" in integration or "app" in q_low or intent == "open_app":
+             # Extract App Name (naive)
+             app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
+             # Or iterate known apps
+             matched_app = None
+             from logic.android_tv_ops import APP_IDS, launch_app as atv_launch
+             
+             for app_key in APP_IDS.keys():
+                 if app_key in q_low:
+                     matched_app = app_key
+                     break
+             
+             if matched_app or intent == "open_app": # If explicit open_app, execute even if not in known list (pass raw)
+                 target_app = matched_app if matched_app else app_name_candidate
+                 log.info(f"Delegating App Launch '{target_app}' on {entity_id} to android_tv_ops")
+                 return await atv_launch(entity_id, target_app, user_creds, redis_client)
 
         # --- SMART CONTENT TYPE DETECTION ---
         ctype = "music" # Default
