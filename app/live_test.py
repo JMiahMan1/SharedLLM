@@ -68,6 +68,20 @@ def discover_entities(domain: str) -> Optional[str]:
         log.error(f"Discovery Error: {e}")
         return None
 
+def discover_all_entities(domain: str) -> list:
+    """Return all entities for a domain."""
+    try:
+        url = f"{HA_URL.rstrip('/')}/api/states"
+        r = requests.get(url, headers=get_ha_headers(), timeout=5)
+        if r.status_code != 200: return []
+        
+        entities = []
+        for entity in r.json():
+            if entity['entity_id'].startswith(f"{domain}."):
+                entities.append(entity)
+        return entities
+    except: return []
+
 async def run_nl_command(query: str):
     log.info(f"TEST ACTION: '{query}'")
     user = "admin"
@@ -138,6 +152,11 @@ async def main():
         log.warning("SKIPPING LIGHT TESTS: No light entity found.")
 
     # --- TEST 2: MEDIA ---
+    log.info("--- DISCOVERY: LISTING ALL MEDIA PLAYERS ---")
+    all_media = discover_all_entities("media_player")
+    for mp in all_media:
+        log.info(f"Found Media Player: {mp['entity_id']} ({mp['attributes'].get('friendly_name')}) State: {mp['state']}")
+
     media_id = discover_entities("media_player")
     if media_id:
         log.info(f"=== TEST GROUP: MEDIA ({media_id}) ===")

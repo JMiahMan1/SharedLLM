@@ -1436,8 +1436,23 @@ async def handle_media_command(
 
         # --- CONTENT CLEANING ---
         original_title = clean_title
-
+        
+        # Aggressively remove the device name from the query if present
+        # logic: remove "on {friendly_name}", "on {entity_id}", "on {device_name}"
+        if entity_id:
+             # Get friendly name
+             caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+             fname = caps.get("friendly_name", "").lower()
+             ename = entity_id.split(".")[-1].replace("_", " ").lower()
+             
+             # Remove "on {name}" patterns
+             import re
+             for name in [fname, ename, "office tv", "master bedroom samsung"]: # Add known aliases if needed
+                 if name and name in clean_title:
+                     clean_title = re.sub(f"\\b(on|in|at)?\\s*{re.escape(name)}\\b", " ", clean_title)
+        
         # Only remove control/action words
+
         clean_title = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean_title)
 
         # Only remove content TYPE keywords IF the request is for MUSIC
