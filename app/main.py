@@ -26,6 +26,7 @@ from logic import (
 from logic.refresh_devices import refresh_db
 from intent_engine import engine as intent_engine
 from logic.timer_storage import storage as timer_storage
+from routers import music_assistant
 
 async def initialize_rag_resources():
     """Reloads RAG resources for hot-reloading."""
@@ -78,6 +79,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# Register Routers
+app.include_router(music_assistant.router)
 
 # --- Models ---
 class ChatMessage(BaseModel):

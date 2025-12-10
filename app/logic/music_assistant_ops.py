@@ -143,3 +143,88 @@ async def tool_music_search(query: str, user_creds: dict, redis_client=None) -> 
         return {"status": "SUCCESS", "message": message, "results": results}
     
     return {"status": "FAILURE", "message": f"No matches found for '{query}' in library."}
+
+async def play_media(entity_id: str, media_id: str, media_type: str, user_creds: dict) -> dict:
+    """
+    Play media on a specific Music Assistant entity.
+    """
+    ha_url = user_creds.get("url")
+    token = user_creds.get("token")
+    
+    if not ha_url or not token:
+        return {"status": "FAILURE", "message": "Missing HA credentials"}
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    service_url = f"{ha_url}/api/services/music_assistant/play_media"
+    
+    payload = {
+        "entity_id": entity_id,
+        "media_content_id": media_id,
+        "media_content_type": media_type
+    }
+    
+    try:
+        log.info(f"[MA PLAY] Playing {media_type}:{media_id} on {entity_id}")
+        response = requests.post(service_url, json=payload, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+             return {
+                "status": "SUCCESS",
+                "message": f"Playing {media_id} on {entity_id}",
+                "entity_id": entity_id
+            }
+        else:
+             log.error(f"[MA PLAY] Failed: {response.text}")
+             return {
+                "status": "FAILURE", 
+                "message": f"Failed to play media: {response.status_code}"
+            }
+    except Exception as e:
+        log.error(f"[MA PLAY] Error: {e}")
+        return {"status": "FAILURE", "message": str(e)}
+
+async def control_player(entity_id: str, command: str, user_creds: dict) -> dict:
+    """
+    Control a MA player (play, pause, stop, next, previous).
+    """
+    ha_url = user_creds.get("url")
+    token = user_creds.get("token")
+    
+    if not ha_url or not token:
+        return {"status": "FAILURE", "message": "Missing HA credentials"}
+        
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    
+    # Map command to service
+    service_map = {
+        "play": "media_play",
+        "pause": "media_pause", 
+        "stop": "media_stop",
+        "next": "media_next_track",
+        "previous": "media_previous_track"
+    }
+    
+    service = service_map.get(command)
+    if not service:
+        return {"status": "FAILURE", "message": f"Unknown command: {command}"}
+
+    service_url = f"{ha_url}/api/services/media_player/{service}"
+    payload = {"entity_id": entity_id}
+    
+    try:
+        log.info(f"[MA CONTROL] {command} on {entity_id}")
+        response = requests.post(service_url, json=payload, headers=headers, timeout=5)
+        
+        if response.status_code == 200:
+            return {"status": "SUCCESS", "message": f"Executed {command} on {entity_id}"}
+        else:
+            return {"status": "FAILURE", "message": f"Failed: {response.status_code}"}
+    except Exception as e:
+        return {"status": "FAILURE", "message": str(e)}
