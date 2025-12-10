@@ -1,0 +1,3 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100    66    0     0  100    66      0    327 --:--:-- --:--:-- --:--:--   326100    66    0     0  100    66      0     54  0:00:01  0:00:01 --:--:--    54100    66    0     0  100    66      0     29  0:00:02  0:00:02 --:--:--    29{"status":"SUCCESS","message":"Sent command to turn on the Living Room TV.","entity_id":"media_player.living_room_tv","friendly_name":"Living Room TV","service":"media_player.turn_on","new_state":"unavailable"}100   276  100   210  100    66     73     23  0:00:02  0:00:02 --:--:--    96
