@@ -966,7 +966,10 @@ async def handle_media_command(
     is_video_request = any(x in q_low for x in video_keywords)
     
     # For play_media intent, default to music mode UNLESS explicitly requesting video
-    strict_resolution = ((is_music_request or is_audiobook_request) or (intent == "play_media" and not is_video_request))
+    # This ensures "Play Brandon Lake" (no "music" keyword) still prefers MA players over generic TVs
+    strict_resolution = (is_music_request or is_audiobook_request) or (
+        (intent == "play_media" or intent == "play") and not is_video_request
+    )
     is_transport = intent in ["media_next", "media_previous", "stop_media"]
 
     # --- Device Name Fallback ---
