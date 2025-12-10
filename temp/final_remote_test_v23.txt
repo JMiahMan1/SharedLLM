@@ -1,0 +1,4 @@
+  File "/app/live_test.py", line 42
+    if notRd GlobalResources.redis_client or not GlobalResources.chroma_client:
+             ^^^^^^^^^^^^^^^
+SyntaxError: invalid syntax
