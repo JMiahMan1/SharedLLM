@@ -192,6 +192,63 @@ async def main():
     ma_entity = "media_player.office_tv_chrome_2" 
     await verify_ha_state(ma_entity, "playing")
 
+    # --- TEST GROUP: OTHER MA-ENABLED TVs (User Request) ---
+    log.info("\n=== TEST GROUP: MASTER BEDROOM TV (MA) ===")
+    
+    # 1. Play Music (Should resolve to media_player.master_bedroom_tv_2)
+    t = "Play Brandon Lake on Master Bedroom TV"
+    log.info(f"TEST ACTION: '{t}'")
+    # intent = "play_media" # Force intent
+    # log.info(f"[INTENT] Regex override: '{t}' -> {intent}")
+    await run_nl_command(t)
+    await asyncio.sleep(10)
+    await verify_ha_state("media_player.master_bedroom_tv_2", ["playing", "buffering"])
+
+    # 2. Next Track
+    t = "Next song on Master Bedroom TV"
+    log.info(f"TEST ACTION: '{t}'")
+    # intent = "media_next"
+    # log.info(f"[INTENT] Regex override: '{t}' -> {intent}")
+    await run_nl_command(t)
+    await asyncio.sleep(3)
+    
+    # 3. Stop
+    t = "Stop music on Master Bedroom TV"
+    log.info(f"TEST ACTION: '{t}'")
+    # intent = "stop_media"
+    # log.info(f"[INTENT] Regex override: '{t}' -> {intent}")
+    await run_nl_command(t)
+    await asyncio.sleep(3)
+    await verify_ha_state("media_player.master_bedroom_tv_2", ["idle", "paused", "off"])
+
+    log.info("\n=== TEST GROUP: LOFT TV (MA) ===")
+    
+    # 1. Play Music (Should resolve to media_player.loft_tv_2)
+    t = "Play Brandon Lake on Loft TV"
+    log.info(f"TEST ACTION: '{t}'")
+    # intent = "play_media" # Force intent
+    # log.info(f"[INTENT] Regex override: '{t}' -> {intent}")
+    await run_nl_command(t)
+    await asyncio.sleep(10)
+    await verify_ha_state("media_player.loft_tv_2", ["playing", "buffering"])
+
+    # 2. Next Track
+    t = "Next song on Loft TV"
+    log.info(f"TEST ACTION: '{t}'")
+    # intent = "media_next"
+    # log.info(f"[INTENT] Regex override: '{t}' -> {intent}")
+    await run_nl_command(t)
+    await asyncio.sleep(3)
+    
+    # 3. Stop
+    t = "Stop music on Loft TV"
+    log.info(f"TEST ACTION: '{t}'")
+    # intent = "stop_media"
+    # log.info(f"[INTENT] Regex override: '{t}' -> {intent}")
+    await run_nl_command(t)
+    await asyncio.sleep(3)
+    await verify_ha_state("media_player.loft_tv_2", ["idle", "paused", "off"])
+    
     # 2. Skip (Next)
     log.info("  Testing SKIP/NEXT...")
     await run_nl_command(f"Next song on {target_tv}")

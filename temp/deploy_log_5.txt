@@ -1,0 +1,31 @@
+Deploying to jeremiah@192.168.2.211:/home/jeremiah/SharedLLM
+Syncing local .env to remote...
+Branch: timer
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+Activate the web console with: systemctl enable --now cockpit.socket
+
+Fetching latest code...
+From github.com:JMiahMan1/SharedLLM
+   cae9868..7980f3b  timer      -> origin/timer
+Already on 'timer'
+Your branch is behind 'origin/timer' by 1 commit, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+HEAD is now at 7980f3b Add debugging and fix regex cleaning
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+Already up to date.
+Recreating Docker container to apply config...
+time="2025-12-09T23:16:48-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+ Container unified_rag_redis  Recreate
+ Container unified_rag_redis  Recreated
+ Container unified_rag_api  Recreate
+time="2025-12-09T23:16:49-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+ Container unified_rag_api  Recreated
+ Container unified_rag_redis  Starting
+ Container unified_rag_redis  Started
+ Container unified_rag_api  Starting
+Waiting for application startup...
+ Container unified_rag_api  Started
+..............[OK] Application started successfully!
+
+[OK] Deployment Verification Successful.
