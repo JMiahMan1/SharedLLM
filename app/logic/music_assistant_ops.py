@@ -25,8 +25,8 @@ async def browse_music_library(entity_id: str, user_creds: dict, media_type: str
     """
     Browse Music Assistant library to list playlists, artists, albums, etc.
     """
-    ha_url = user_creds.get("url")
-    token = user_creds.get("token")
+    ha_url = user_creds.get("ha_url")
+    token = user_creds.get("ha_token")
     
     if not ha_url or not token:
         return {"status": "FAILURE", "message": "Missing HA credentials"}
