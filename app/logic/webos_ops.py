@@ -31,8 +31,28 @@ async def ensure_device_on(entity_id: str, user_creds: dict):
                 # Maybe loop check? For now fixed wait.
                 log.info("[WebOS] Waiting 8s for device to wake...")
                 await asyncio.sleep(8)
+                
+                # 2. Re-check State
+                resp = requests.get(url, headers=headers, timeout=2.0)
+                if resp.status_code == 200:
+                    state = resp.json().get("state")
+                    if state == "unavailable":
+                         log.warning(f"[WebOS] Device {entity_id} still unavailable. Reloading Integration...")
+                         await execute_ha_service("homeassistant", "reload_config_entry", entity_id, user_creds, {}, None)
+                         
+                         # Wait for availability (Polling)
+                         for i in range(15): # Max 30s
+                             log.info(f"[WebOS] Waiting for integration reload... ({i+1}/15)")
+                             await asyncio.sleep(2)
+                             try:
+                                 r2 = requests.get(url, headers=headers, timeout=2.0)
+                                 if r2.status_code == 200 and r2.json().get("state") not in ["unavailable", "unknown"]:
+                                     log.info(f"[WebOS] Device {entity_id} is back online!")
+                                     return
+                             except:
+                                 pass
     except Exception as e:
-        log.warning(f"[WebOS] Failed to check state for {entity_id}: {e}")
+        log.warning(f"[WebOS] Failed to check state/reload for {entity_id}: {e}")
 
 
 async def launch_app(entity_id: str, app_name: str, user_creds: dict, redis_client=None) -> dict:
