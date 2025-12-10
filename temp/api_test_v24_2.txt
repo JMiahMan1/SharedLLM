@@ -1,0 +1,23 @@
+* Host localhost:11435 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying [::1]:11435...
+* Connected to localhost (::1) port 11435
+* using HTTP/1.x
+> GET /api/ma/playlists HTTP/1.1
+> Host: localhost:11435
+> User-Agent: curl/8.15.0
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/1.1 500 Internal Server Error
+< date: Wed, 10 Dec 2025 17:29:42 GMT
+< server: uvicorn
+< content-length: 42
+< content-type: application/json
+< 
+{ [42 bytes data]
+100    42  100    42    0     0    907      0 --:--:-- --:--:-- --:--:-- {"detail":"Failed to browse library: 400"}  913
+* Connection #0 to host localhost left intact

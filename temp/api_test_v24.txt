@@ -1,0 +1,29 @@
+* Host localhost:8000 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying [::1]:8000...
+* Connected to localhost (::1) port 8000
+* using HTTP/1.x
+> GET /api/ma/playlists HTTP/1.1
+> Host: localhost:8000
+> User-Agent: curl/8.15.0
+> Accept: */*
+> 
+* Request completely sent off
+< <!doctype html>
+<html lang=en>
+<title>404 Not Found</title>
+<h1>Not Found</h1>
+<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>
+HTTP/1.1 404 NOT FOUND
+< Server: gunicorn
+< Date: Wed, 10 Dec 2025 17:27:02 GMT
+< Connection: close
+< Content-Type: text/html; charset=utf-8
+< Content-Length: 207
+< 
+{ [207 bytes data]
+100   207  100   207    0     0  82601      0 --:--:-- --:--:-- --:--:--  101k
+* shutting down connection #0

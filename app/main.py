@@ -82,6 +82,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 
 # Register Routers
 app.include_router(music_assistant.router)
+from routers import android_tv
+app.include_router(android_tv.router)
 
 # --- Models ---
 class ChatMessage(BaseModel):

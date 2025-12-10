@@ -1,0 +1,23 @@
+* Host localhost:11435 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying [::1]:11435...
+* Connected to localhost (::1) port 11435
+* using HTTP/1.x
+> GET /api/ma/playlists HTTP/1.1
+> Host: localhost:11435
+> User-Agent: curl/8.15.0
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/1.1 500 Internal Server Error
+< date: Wed, 10 Dec 2025 17:27:29 GMT
+< server: uvicorn
+< content-length: 35
+< content-type: application/json
+< 
+{ [35 bytes data]
+100    35  100    35    0     0   1851      0 --:--:-- --:--:-- --:--:--  1944
+{"detail":"Missing HA credentials"}* Connection #0 to host localhost left intact
