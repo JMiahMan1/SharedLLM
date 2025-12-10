@@ -1,0 +1,169 @@
+--- SETUP: Loading Resources ---
+Loading Global Resources...
+Redis Connected.
+Use pytorch device_name: cpu
+Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+ChromaDB Loaded from /data/chroma_db
+Discovered test entity: light.kauf_plug_d67371_kauf_plug (State: on)
+=== TEST GROUP: LIGHTS (light.kauf_plug_d67371_kauf_plug) ===
+TEST ACTION: 'Turn on light.kauf_plug_d67371_kauf_plug'
+  -> Refined: 'Turn on light.kauf_plug_d67371_kauf_plug', Intent: None (Score: 1.0)
+DEBUG: Entering smart_resolve_entity. Q='light.kauf_plug_d67371_kauf_plug' Intent='turn_on' Multiple=False
+DEBUG: Search returned 15 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='light.kauf_plug_d67371_kauf_plug', metadata={'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'capabilities': '', 'group_name': '', 'state': 'on', 'friendly_name': 'String Lights Kauf Plug', 'source': 'home_assistant', 'attributes': '{"supported_color_modes": ["onoff"], "color_mode": "onoff", "friendly_name": "String Lights Kauf Plug", "supported_features": 0}', 'integration': 'unknown', 'last_updated': '197367.542', 'group_id': 'light.kauf_plug_d67371_kauf_plug', 'domain': 'light'}, page_content="String Lights Kauf Plug (light.kauf_plug_d67371_kauf_plug) is a unknown device in group ''."), 0.4387744665145874)
+[CAPABILITY] Redis cache HIT for light.kauf_plug_d67371_kauf_plug
+[CAPABILITY] Redis cache HIT for switch.string_lights_front
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_769eea
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73a356
+[CAPABILITY] Redis cache HIT for light.kitchen_light_6
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_7398b2
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_76a1c4
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73999c
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea88
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea6a
+[CAPABILITY] Redis cache HIT for light.kitchen_light_1
+[CAPABILITY] Redis cache HIT for light.kitchen_light_4
+[CAPABILITY] Redis cache HIT for light.kitchen_light_2
+[CAPABILITY] Redis cache HIT for light.kitchen_light_3
+Fast HA Path: Resolved 'light.kauf_plug_d67371_kauf_plug' -> light.kauf_plug_d67371_kauf_plug (unknown) via smart_resolve_entity
+EXEC HA: homeassistant.turn_on on light.kauf_plug_d67371_kauf_plug | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to turn on the String Lights Kauf Plug.', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'friendly_name': 'String Lights Kauf Plug', 'service': 'homeassistant.turn_on', 'new_state': 'on'}]
+  VERIFY: light.kauf_plug_d67371_kauf_plug is 'on'
+TEST ACTION: 'Turn off light.kauf_plug_d67371_kauf_plug'
+  -> Refined: 'Turn off light.kauf_plug_d67371_kauf_plug', Intent: None (Score: 1.0)
+DEBUG: Entering smart_resolve_entity. Q='light.kauf_plug_d67371_kauf_plug' Intent='turn_off' Multiple=False
+DEBUG: Search returned 15 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='light.kauf_plug_d67371_kauf_plug', metadata={'last_updated': '197367.542', 'capabilities': '', 'state': 'on', 'group_id': 'light.kauf_plug_d67371_kauf_plug', 'domain': 'light', 'source': 'home_assistant', 'attributes': '{"supported_color_modes": ["onoff"], "color_mode": "onoff", "friendly_name": "String Lights Kauf Plug", "supported_features": 0}', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'group_name': '', 'integration': 'unknown', 'friendly_name': 'String Lights Kauf Plug'}, page_content="String Lights Kauf Plug (light.kauf_plug_d67371_kauf_plug) is a unknown device in group ''."), 0.4387744665145874)
+[CAPABILITY] Redis cache HIT for light.kauf_plug_d67371_kauf_plug
+[CAPABILITY] Redis cache HIT for switch.string_lights_front
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_769eea
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73a356
+[CAPABILITY] Redis cache HIT for light.kitchen_light_6
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_7398b2
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_76a1c4
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73999c
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea88
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea6a
+[CAPABILITY] Redis cache HIT for light.kitchen_light_1
+[CAPABILITY] Redis cache HIT for light.kitchen_light_4
+[CAPABILITY] Redis cache HIT for light.kitchen_light_2
+[CAPABILITY] Redis cache HIT for light.kitchen_light_3
+Fast HA Path: Resolved 'light.kauf_plug_d67371_kauf_plug' -> light.kauf_plug_d67371_kauf_plug (unknown) via smart_resolve_entity
+EXEC HA: homeassistant.turn_off on light.kauf_plug_d67371_kauf_plug | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to turn off the String Lights Kauf Plug.', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'friendly_name': 'String Lights Kauf Plug', 'service': 'homeassistant.turn_off', 'new_state': 'off'}]
+  VERIFY: light.kauf_plug_d67371_kauf_plug is 'off'
+TEST ACTION: 'Turn on light.kauf_plug_d67371_kauf_plug'
+  -> Refined: 'Turn on light.kauf_plug_d67371_kauf_plug', Intent: None (Score: 1.0)
+DEBUG: Entering smart_resolve_entity. Q='light.kauf_plug_d67371_kauf_plug' Intent='turn_on' Multiple=False
+DEBUG: Search returned 15 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='light.kauf_plug_d67371_kauf_plug', metadata={'state': 'on', 'integration': 'unknown', 'group_id': 'light.kauf_plug_d67371_kauf_plug', 'source': 'home_assistant', 'attributes': '{"supported_color_modes": ["onoff"], "color_mode": "onoff", "friendly_name": "String Lights Kauf Plug", "supported_features": 0}', 'domain': 'light', 'friendly_name': 'String Lights Kauf Plug', 'capabilities': '', 'group_name': '', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'last_updated': '197367.542'}, page_content="String Lights Kauf Plug (light.kauf_plug_d67371_kauf_plug) is a unknown device in group ''."), 0.4387744665145874)
+[CAPABILITY] Redis cache HIT for light.kauf_plug_d67371_kauf_plug
+[CAPABILITY] Redis cache HIT for switch.string_lights_front
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_769eea
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73a356
+[CAPABILITY] Redis cache HIT for light.kitchen_light_6
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_7398b2
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_76a1c4
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73999c
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea88
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea6a
+[CAPABILITY] Redis cache HIT for light.kitchen_light_1
+[CAPABILITY] Redis cache HIT for light.kitchen_light_4
+[CAPABILITY] Redis cache HIT for light.kitchen_light_2
+[CAPABILITY] Redis cache HIT for light.kitchen_light_3
+Fast HA Path: Resolved 'light.kauf_plug_d67371_kauf_plug' -> light.kauf_plug_d67371_kauf_plug (unknown) via smart_resolve_entity
+EXEC HA: homeassistant.turn_on on light.kauf_plug_d67371_kauf_plug | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to turn on the String Lights Kauf Plug.', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'friendly_name': 'String Lights Kauf Plug', 'service': 'homeassistant.turn_on', 'new_state': 'on'}]
+TEST ACTION: 'Make light.kauf_plug_d67371_kauf_plug red'
+[INTENT] Regex override: 'Make light.kauf_plug_d67371_kauf_plug red' -> set_color
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8946
+  -> Refined: 'Change the color of the kauf_plug_d67371_kauf_plug to red.', Intent: set_color (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: set_color (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2173
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'CONVERSE'}
+  -> Result: None
+  VERIFY: light.kauf_plug_d67371_kauf_plug is 'on'
+Discovered test entity: media_player.master_bedroom_samsung (State: off)
+=== TEST GROUP: MEDIA (media_player.master_bedroom_samsung) ===
+TEST ACTION: 'Play some music on media_player.master_bedroom_samsung'
+[INTENT] Regex override: 'Play some music on media_player.master_bedroom_samsung' -> play_media
+  -> Refined: 'Play some music on media_player.master_bedroom_samsung', Intent: play_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2170
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play_media', 'device_name': 'media_player.master_bedroom_samsung'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'media_player.master_bedroom_samsung'
+DEBUG: Entering smart_resolve_entity. Q='media_player.master_bedroom_samsung' Intent='play_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.master_bedroom_samsung', metadata={'domain': 'media_player', 'state': 'off', 'integration': 'tv', 'friendly_name': 'Master Bedroom Samsung', 'group_id': 'media_player.master_bedroom_samsung', 'attributes': '{"source_list": ["TV", "HDMI"], "device_class": "tv", "friendly_name": "Master Bedroom Samsung", "supported_features": 24509}', 'last_updated': '197367.542', 'entity_id': 'media_player.master_bedroom_samsung', 'capabilities': 'turn_on,turn_off,play_media', 'group_name': '', 'source': 'home_assistant'}, page_content="Master Bedroom Samsung (media_player.master_bedroom_samsung) is a tv device in group ''. Can turn off. Can play media."), 0.4899407625198364)
+match found in Group: media_player.master_bedroom_samsung (via Master Bedroom Samsu...)
+Group media_player.master_bedroom_samsung has 1 members.
+Capability Routing used media_player.master_bedroom_samsung (tv) for intent play_media
+[Device Fallback] Resolved 'media_player.master_bedroom_samsung' to media_player.master_bedroom_samsung
+EXEC HA: media_player.turn_on on media_player.master_bedroom_samsung | Data: None
+Executing Standard Play on media_player.master_bedroom_samsung Type: music
+EXEC HA: media_player.play_media on media_player.master_bedroom_samsung | Data: {'media_content_id': 'media_player master_bedroom_samsung', 'media_content_type': 'music'}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to play media the Master Bedroom Samsung.', 'entity_id': 'media_player.master_bedroom_samsung', 'friendly_name': 'Master Bedroom Samsung', 'service': 'media_player.play_media', 'new_state': 'off'}]
+  VERIFY: media_player.master_bedroom_samsung is 'off'
+  FAILURE: Expected 'playing', got 'off'
+TEST ACTION: 'Pause media_player.master_bedroom_samsung'
+[INTENT] Regex override: 'Pause media_player.master_bedroom_samsung' -> stop_media
+  -> Refined: 'Pause media_player.master_bedroom_samsung', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2157
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': 'media_player.master_bedroom_samsung'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'media_player.master_bedroom_samsung'
+DEBUG: Entering smart_resolve_entity. Q='media_player.master_bedroom_samsung' Intent='stop_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.master_bedroom_samsung', metadata={'attributes': '{"source_list": ["TV", "HDMI"], "device_class": "tv", "friendly_name": "Master Bedroom Samsung", "supported_features": 24509}', 'domain': 'media_player', 'source': 'home_assistant', 'group_name': '', 'last_updated': '197367.542', 'integration': 'tv', 'capabilities': 'turn_on,turn_off,play_media', 'state': 'off', 'group_id': 'media_player.master_bedroom_samsung', 'entity_id': 'media_player.master_bedroom_samsung', 'friendly_name': 'Master Bedroom Samsung'}, page_content="Master Bedroom Samsung (media_player.master_bedroom_samsung) is a tv device in group ''. Can turn off. Can play media."), 0.4899407625198364)
+match found in Group: media_player.master_bedroom_samsung (via Master Bedroom Samsu...)
+Group media_player.master_bedroom_samsung has 1 members.
+Capability Routing used media_player.master_bedroom_samsung (tv) for intent stop_media
+[Device Fallback] Resolved 'media_player.master_bedroom_samsung' to media_player.master_bedroom_samsung
+Targeted entity media_player.master_bedroom_samsung is off. Scanning for active players...
+EXEC HA: media_player.media_stop on media_player.master_bedroom_samsung | Data: {}
+HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+  -> Result: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.master_bedroom_samsung', 'friendly_name': 'Master Bedroom Samsung', 'service': 'media_player.media_stop'}]
+  VERIFY: media_player.master_bedroom_samsung is 'off'
+  FAILURE: Expected 'paused', got 'off'
+=== TEST GROUP: NOTES ===
+/opt/conda/lib/python3.11/site-packages/urllib3/connectionpool.py:2329: InsecureRequestWarning: Unverified HTTPS request is being made to host 'cloud.sumemail.com'. Adding certificate verification is strongly advised. See: https://urllib3future.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+TEST ACTION: 'Create a note called LiveTest Note saying This is a test content.'
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8970
+  -> Refined: 'Create a note called LiveTest Note saying This is a test content.', Intent: None (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2178
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'note_add', 'parameters': {'title': 'LiveTest Note', 'content': 'This is a test content'}}
+/opt/conda/lib/python3.11/site-packages/urllib3/connectionpool.py:2329: InsecureRequestWarning: Unverified HTTPS request is being made to host 'cloud.sumemail.com'. Adding certificate verification is strongly advised. See: https://urllib3future.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/opt/conda/lib/python3.11/site-packages/urllib3/connectionpool.py:2329: InsecureRequestWarning: Unverified HTTPS request is being made to host 'cloud.sumemail.com'. Adding certificate verification is strongly advised. See: https://urllib3future.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  -> Result: [{'status': 'SUCCESS', 'message': "Note 'LiveTest Note' created.", 'service': 'note_add'}]
+/opt/conda/lib/python3.11/site-packages/urllib3/connectionpool.py:2329: InsecureRequestWarning: Unverified HTTPS request is being made to host 'cloud.sumemail.com'. Adding certificate verification is strongly advised. See: https://urllib3future.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  FAILURE: Note content mismatch. Got: {'status': 'SUCCESS', 'message': 'Note Content (LiveTest Note):\n# LiveTest Note\nCategory: General\nCreated: 2025-12-09 23:10\n\nThis is a test content', 'service': 'note_read'}
+TEST ACTION: 'Delete the note called LiveTest Note'
+  -> Refined: 'Delete the note called LiveTest Note', Intent: None (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2149
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'note_delete', 'parameters': {'title': 'LiveTest Note'}}
+/opt/conda/lib/python3.11/site-packages/urllib3/connectionpool.py:2329: InsecureRequestWarning: Unverified HTTPS request is being made to host 'cloud.sumemail.com'. Adding certificate verification is strongly advised. See: https://urllib3future.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  -> Result: [{'status': 'SUCCESS', 'message': "Note 'LiveTest Note' deleted.", 'service': 'note_delete'}]
+/opt/conda/lib/python3.11/site-packages/urllib3/connectionpool.py:2329: InsecureRequestWarning: Unverified HTTPS request is being made to host 'cloud.sumemail.com'. Adding certificate verification is strongly advised. See: https://urllib3future.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  VERIFY: Note deleted.
+=== TEST GROUP: TIMERS ===
+TEST ACTION: 'Set a timer for 5 minutes'
+  -> Refined: 'Set a timer for 5 minutes', Intent: None (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2138
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'timer_add', 'parameters': {'time_expression': '5 minutes', 'is_alarm': False}}
+TimerAdd: Normalized query: 'set a timer for 5 minutes'
+  -> Result: [{'status': 'SUCCESS', 'message': "Set timer 'Timer' for 11:15 PM.", 'service': 'timer_add', 'timer_id': '9307d189-4135-4bda-87da-6bbe299c38d7'}]
+  VERIFY: 1 timers found. Active.
+--- ALL TESTS COMPLETED ---

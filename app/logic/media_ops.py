@@ -747,21 +747,36 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     # Priority Logic for Music/Power/Etc
     
     # --- ENFORCED PRIORITY FOR MUSIC ---
+    # --- MUSIC PRIORITY (Boost MA devices) ---
     if is_music:
         ma_candidate = None
+        # First pass: Look for exact Music Assistant match
+        for eid, integration in candidates:
+             if "music_assistant" in integration:
+                 ma_candidate = (eid, integration)
+                 break
+        
+        # Second pass: If no MA match, look for "speaker" type devices that aren't strict TVs
+        if not ma_candidate:
+             for eid, integration in candidates:
+                  if "speaker" in eid or "audio" in integration:
+                       ma_candidate = (eid, integration)
+                       break
+        
+        if ma_candidate:
+            return [ma_candidate] if allow_multiple else ma_candidate
+
+        # Fallback: If no MA device found, we return the best TV candidate (if exists), 
+        # but we log a warning because we expected music.
         tv_candidate = None
         for eid, integration in candidates:
-            if "music_assistant" in integration:
-                ma_candidate = (eid, integration)
-                break 
             if eid.startswith("media_player.") and any(x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                 if tv_candidate is None:
                     tv_candidate = (eid, integration)
-
-        if ma_candidate:
-            return [ma_candidate] if allow_multiple else ma_candidate
+        
         if tv_candidate:
-            return [tv_candidate] if allow_multiple else tv_candidate
+             return [tv_candidate] if allow_multiple else tv_candidate
+             
         log.warning(f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None.")
         return [] if allow_multiple else (None, None)
 
@@ -941,18 +956,30 @@ async def handle_media_command(
     q_low = query.lower()
     integration = "unknown"
     
+    # 1. EARLY MUSIC/CONTENT DETECTION (Moved Up)
+    music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
+    audiobook_keywords = ["read", "book", "chapter", "audiobook"]
+    video_keywords = ["movie", "film", "show", "video", "youtube", "netflix", "watch"]
+    
+    is_music_request = any(x in q_low for x in music_keywords)
+    is_audiobook_request = any(x in q_low for x in audiobook_keywords)
+    is_video_request = any(x in q_low for x in video_keywords)
+    
+    # For play_media intent, default to music mode UNLESS explicitly requesting video
+    strict_resolution = ((is_music_request or is_audiobook_request) or (intent == "play_media" and not is_video_request))
+    is_transport = intent in ["media_next", "media_previous", "stop_media"]
+
     # --- Device Name Fallback ---
     # If Orchestrator provides device_name but no entity_id, resolve it
-    # If Orchestrator provides device_name but no entity_id, resolve it
     if not entity_id and device_name:
-        log.info(f"[Device Fallback] No entity_id provided. Attempting to resolve device_name: '{device_name}'")
+        log.info(f"[Device Fallback] No entity_id provided. Attempting to resolve device_name: '{device_name}' (Music Mode: {strict_resolution})")
         try:
             resolved = await smart_resolve_entity(
                 device_name,
                 intent,
                 ha_collection, 
-                is_music=False,
-                is_video=False,
+                is_music=strict_resolution,
+                is_video=is_video_request,
                 allow_multiple=True
             )
             
@@ -1005,20 +1032,6 @@ async def handle_media_command(
         if intent != original_intent:
             log.info(f"Sanitized intent from '{original_intent}' to '{intent}'")
     # ------------------------------------------------------------------------
-
-    # 1. EARLY MUSIC DETECTION
-    music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
-    # NEW: Audiobooks
-    audiobook_keywords = ["read", "book", "chapter", "audiobook"]
-    video_keywords = ["movie", "film", "show", "video", "youtube", "netflix", "watch"]
-    
-    is_music_request = any(x in q_low for x in music_keywords)
-    is_audiobook_request = any(x in q_low for x in audiobook_keywords)
-    is_video_request = any(x in q_low for x in video_keywords)
-    
-    # For play_media intent, default to music mode UNLESS explicitly requesting video
-    strict_resolution = ((is_music_request or is_audiobook_request) or (intent == "play_media" and not is_video_request))
-    is_transport = intent in ["media_next", "media_previous", "stop_media"]
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---
     if is_transport:
