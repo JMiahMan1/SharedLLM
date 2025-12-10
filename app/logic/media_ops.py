@@ -479,9 +479,14 @@ async def resolve_multiple_entities_with_pattern(
     other_players = []
     
     try:
+        log.info(f"Scan: Checking {len(entities)} players for active state.")
         for entity in entities:
              state = entity.get("state")
              eid = entity.get("entity_id")
+             # Log potentially active devices to debug state mismatches
+             if state in ["playing", "buffering", "paused"]:
+                 log.info(f"Scan: Inspecting {eid} (State: {state})")
+                 
              if state == "playing":
                   # Check for MA attributes
                   attrs = entity.get("attributes") or {}
@@ -491,10 +496,10 @@ async def resolve_multiple_entities_with_pattern(
                   mass_type = attrs.get("mass_player_type")
                   
                   if aid == "music_assistant" or mass_type:
-                       log.info(f"Scan: Found MA Player {eid} (app_id={aid})")
+                       log.info(f"Scan: MATCH MA Player {eid} (app_id={aid})")
                        ma_players.append(eid)
                   else:
-                       log.info(f"Scan: Found Generic Player {eid} (app_id={aid})")
+                       log.info(f"Scan: MATCH Generic Player {eid} (app_id={aid})")
                        other_players.append(eid)
     except Exception as e:
         log.error(f"Error in scan_for_active_players: {e}")
