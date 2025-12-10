@@ -143,15 +143,21 @@ async def main():
         log.info(f"=== TEST GROUP: MEDIA ({media_id}) ===")
         # 1. Play (Generic)
         await run_nl_command(f"Play some music on {media_id}")
-        await asyncio.sleep(3)
+        await asyncio.sleep(5) # Increased wait for TV
         await verify_ha_state(media_id, "playing")
         
         # 2. Pause
         await run_nl_command(f"Pause {media_id}")
         await asyncio.sleep(2)
         await verify_ha_state(media_id, "paused")
-    else:
-        log.warning("SKIPPING MEDIA TESTS: No media_player found.")
+    
+    # --- TEST 2b: OFFICE TV SPECIFIC (User Request) ---
+    log.info("=== TEST GROUP: OFFICE TV MUSIC ASSISTANT ===")
+    # Targeted test for MA integration
+    await run_nl_command("Play Brandon Lake on Office TV")
+    # Verify by checking if *any* Office TV entity starts playing
+    # We might need to discover the specific ID, but for now we observe logs.
+    await asyncio.sleep(5)
 
     # --- TEST 3: NOTES ---
     log.info("=== TEST GROUP: NOTES ===")
