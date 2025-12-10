@@ -148,8 +148,8 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
     """
     Play media on a specific Music Assistant entity.
     """
-    ha_url = user_creds.get("url")
-    token = user_creds.get("token")
+    ha_url = user_creds.get("ha_url")
+    token = user_creds.get("ha_token")
     
     if not ha_url or not token:
         return {"status": "FAILURE", "message": "Missing HA credentials"}
@@ -191,8 +191,8 @@ async def control_player(entity_id: str, command: str, user_creds: dict) -> dict
     """
     Control a MA player (play, pause, stop, next, previous).
     """
-    ha_url = user_creds.get("url")
-    token = user_creds.get("token")
+    ha_url = user_creds.get("ha_url")
+    token = user_creds.get("ha_token")
     
     if not ha_url or not token:
         return {"status": "FAILURE", "message": "Missing HA credentials"}
