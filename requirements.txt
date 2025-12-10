@@ -60,3 +60,4 @@ transformers
 tzdata
 xlrd
 xmltodict
+playwright
