@@ -34,9 +34,23 @@ async def launch_app(entity_id: str, app_name: str, user_creds: dict, redis_clie
     # OR androidtv.adb_command.
     # The standard HA Android TV integration uses play_media(media_content_id=app_id, media_content_type='app')
     
-    return await execute_ha_service(
+    # Attempt 1: Standard play_media (works for some integrations)
+    result = await execute_ha_service(
         "media_player", "play_media", entity_id, user_creds,
         {"media_content_id": app_id, "media_content_type": "app"},
+        redis_client
+    )
+    
+    if result.get("status") == "SUCCESS":
+        return result
+        
+    log.info(f"[Android TV] play_media failed/unsupported. Retrying with ADB 'monkey' command for {app_id}")
+    
+    # Attempt 2: ADB Monkey Command (Launch by package)
+    adb_cmd = f"monkey -p {app_id} -c android.intent.category.LAUNCHER 1"
+    return await execute_ha_service(
+        "androidtv", "adb_command", entity_id, user_creds,
+        {"command": adb_cmd},
         redis_client
     )
 
@@ -44,22 +58,29 @@ async def play_video(entity_id: str, video_url: str, user_creds: dict, redis_cli
     """Plays a specific video URL (Deep Linking)."""
     log.info(f"[Android TV] Playing video '{video_url}' on {entity_id}")
     
-    # YouTube Deep Linking
-    # Format: https://www.youtube.com/watch?v=VIDEO_ID -> android-app://com.google.android.youtube.tv/https/www.youtube.com/watch?v=VIDEO_ID
-    # Actually, simpler: just passing the URL as media_content_id with type 'url' or 'video' often works with the integration
-    # BUT for YouTube specifically, the command often used is:
-    # service: androidtv.adb_command
-    # command: "am start -a android.intent.action.VIEW -d {url} -n com.google.android.youtube.tv/com.google.android.apps.youtube.tv.activity.ShellActivity"
-    
-    # However, HA Android TV integration documentation says:
-    # "You can play a specific video in an app by sending the deep link as the media_content_id and setting media_content_type to url"
-    # Let's try the standard way first.
-    
-    return await execute_ha_service(
+    # Attempt 1: Standard play_media with type 'url'
+    result = await execute_ha_service(
         "media_player", "play_media", entity_id, user_creds,
         {"media_content_id": video_url, "media_content_type": "url"},
         redis_client
     )
+
+    if result.get("status") == "SUCCESS":
+        return result
+
+    log.info(f"[Android TV] play_media failed. Retrying with ADB deep link...")
+
+    # Attempt 2: ADB AM Start (YouTube specific optimization)
+    # This is highly specific to YouTube but that's the primary use case requested.
+    if "youtube.com" in video_url or "youtu.be" in video_url:
+         adb_cmd = f"am start -a android.intent.action.VIEW -d \"{video_url}\" -n com.google.android.youtube.tv/com.google.android.apps.youtube.tv.activity.ShellActivity"
+         return await execute_ha_service(
+            "androidtv", "adb_command", entity_id, user_creds,
+            {"command": adb_cmd},
+            redis_client
+        )
+    
+    return result # Return original failure if not YouTube
 
 async def search_and_play(entity_id: str, query: str, user_creds: dict, redis_client=None) -> dict:
     """
