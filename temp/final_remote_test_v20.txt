@@ -1,0 +1,5 @@
+--- SETUP: Loading Resources ---
+Loading Global Resources...
+Redis Connected.
+Failed to load embedding model: No module named 'langchain_huggingface'
+CRITICAL: Resources failed to load.
