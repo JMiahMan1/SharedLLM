@@ -1,0 +1,11 @@
+[timer 4df5211] Feat v27: WebOS Smart Wake-on-Demand
+ 10 files changed, 257 insertions(+), 1 deletion(-)
+ create mode 100644 temp/deploy_log_tools_fix.txt
+ create mode 100644 temp/discovery_output_v4.txt
+ create mode 100644 temp/discovery_output_v5.txt
+ create mode 100644 temp/git_commit_13.txt
+ create mode 100644 temp/git_push_13.txt
+ create mode 100644 temp/webos_batch_wake.txt
+ create mode 100644 temp/webos_launch_verify.txt
+ create mode 100644 temp/webos_notify_verify.txt
+ create mode 100644 temp/webos_turn_on.txt
