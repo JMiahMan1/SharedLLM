@@ -1,0 +1,4 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100   160  100    88  100    72   1488   1217 --:--:-- --:--:-- --:--:--  2711
+{"detail":"Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble"}
