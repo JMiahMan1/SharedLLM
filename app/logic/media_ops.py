@@ -1446,7 +1446,6 @@ async def handle_media_command(
              ename = entity_id.split(".")[-1].replace("_", " ").lower()
              
              # Remove "on {name}" patterns
-             import re
              for name in [fname, ename, "office tv", "master bedroom samsung"]: # Add known aliases if needed
                  if name and name in clean_title:
                      clean_title = re.sub(f"\\b(on|in|at)?\\s*{re.escape(name)}\\b", " ", clean_title)
