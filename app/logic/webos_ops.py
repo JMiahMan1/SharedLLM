@@ -76,15 +76,26 @@ async def launch_app(entity_id: str, app_name: str, user_creds: dict, redis_clie
 async def send_notification(entity_id: str, message: str, user_creds: dict, redis_client=None, icon: str = None) -> dict:
     """
     Sends a toast notification to the WebOS TV.
-    Requires the 'notify' service corresponding to the TV.
-    Usually 'notify.entity_name_slug'.
+    Per HA docs, notify service uses friendly_name (e.g., notify.livingroom_tv).
     """
     await ensure_device_on(entity_id, user_creds)
     
-    # Derive notify service from entity_id
-    # e.g. media_player.living_room_tv -> notify.living_room_tv
+    # Get friendly name from entity state
+    headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
+    url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
     
-    service_name = entity_id.replace("media_player.", "")
+    try:
+        resp = requests.get(url, headers=headers, timeout=2.0)
+        if resp.status_code == 200:
+            friendly_name = resp.json().get("attributes", {}).get("friendly_name", "")
+            # Convert to slug format: "Living Room TV" -> "livingroom_tv"
+            service_name = friendly_name.lower().replace(" ", "_")
+        else:
+            # Fallback to entity_id slug
+            service_name = entity_id.replace("media_player.", "")
+    except:
+        service_name = entity_id.replace("media_player.", "")
+    
     domain = "notify"
     
     log.info(f"[WebOS] Notify {service_name}: {message}")
@@ -94,10 +105,11 @@ async def send_notification(entity_id: str, message: str, user_creds: dict, redi
         data["data"] = {"icon": icon}
         
     return await execute_ha_service(
-        domain, service_name, None, user_creds, # Entity ID is None for notify domain usually, but strict service call needs checking
+        domain, service_name, None, user_creds,
         data,
         redis_client
     )
+
 
 async def play_channel(entity_id: str, channel: str, user_creds: dict, redis_client=None) -> dict:
     """

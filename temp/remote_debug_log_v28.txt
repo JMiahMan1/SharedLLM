@@ -1,0 +1,50 @@
+2025-12-10 11:40:05,388 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 436
+2025-12-10 11:40:05,389 [INFO] EXEC HA: media_player.turn_on on media_player.living_room_tv | Data: {}
+2025-12-10 11:40:05,391 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:05,417 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/turn_on HTTP/1.1" 200 10
+2025-12-10 11:40:05,921 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:06,030 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 436
+2025-12-10 11:40:06,534 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:06,571 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 436
+2025-12-10 11:40:07,077 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:07,154 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 436
+2025-12-10 11:40:07,659 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:07,693 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 436
+2025-12-10 11:40:08,196 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:08,226 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 436
+2025-12-10 11:40:08,228 [INFO] [WebOS] Waiting 8s for device to wake...
+2025-12-10 11:40:16,231 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:16,270 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 436
+2025-12-10 11:40:16,271 [WARNING] [WebOS] Device media_player.living_room_tv still unavailable. Reloading Integration...
+2025-12-10 11:40:16,273 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:16,304 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 436
+2025-12-10 11:40:16,305 [INFO] EXEC HA: homeassistant.reload_config_entry on media_player.living_room_tv | Data: {}
+2025-12-10 11:40:16,307 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:18,503 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/homeassistant/reload_config_entry HTTP/1.1" 200 10
+INFO:     172.24.0.1:58790 - "POST /api/webos/launch HTTP/1.1" 500 Internal Server Error
+2025-12-10 11:40:19,007 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:19,048 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 428
+2025-12-10 11:40:19,553 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:19,589 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 428
+2025-12-10 11:40:20,093 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:20,157 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 428
+2025-12-10 11:40:20,663 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:20,698 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 428
+2025-12-10 11:40:21,202 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:21,248 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 428
+2025-12-10 11:40:21,250 [INFO] [WebOS] Waiting for integration reload... (1/15)
+2025-12-10 11:40:23,253 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:23,298 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 428
+2025-12-10 11:40:23,300 [INFO] [WebOS] Device media_player.living_room_tv is back online!
+2025-12-10 11:40:23,300 [INFO] [WebOS] Launching app/source 'YouTube' on media_player.living_room_tv
+2025-12-10 11:40:23,302 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:23,335 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.living_room_tv HTTP/1.1" 200 428
+2025-12-10 11:40:23,336 [INFO] EXEC HA: media_player.select_source on media_player.living_room_tv | Data: {'source': 'YouTube'}
+2025-12-10 11:40:23,338 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:40:23,377 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/select_source HTTP/1.1" 500 55
+2025-12-10 11:40:23,379 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-10 11:40:23,379 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
