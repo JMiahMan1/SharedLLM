@@ -26,10 +26,10 @@ console = logging.StreamHandler() # Also print to stdout (which is captured by t
 logging.getLogger().addHandler(console)
 log = logging.getLogger("LiveTest")
 
-from app.settings import load_resources, GlobalResources, HA_URL, get_user_creds
-from app.logic import contextualize_query, try_handle_compound_command
-from app.logic.execution.handlers import handle_note_read, handle_note_delete
-from app.logic.timer_storage import storage as timer_storage
+from settings import load_resources, GlobalResources, HA_URL, get_user_creds
+from logic import contextualize_query, try_handle_compound_command
+from logic.execution.handlers import handle_note_read, handle_note_delete
+from logic.timer_storage import storage as timer_storage
 
 async def setup():
     log.info("--- SETUP: Loading Resources ---")
