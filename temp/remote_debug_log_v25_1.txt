@@ -1,0 +1,50 @@
+2025-12-10 11:03:22,787 [DEBUG] Starting new HTTPS connection (1): us.i.posthog.com:443
+2025-12-10 11:03:22,824 [INFO] Timer Scheduler Started.
+INFO:     Application startup complete.
+2025-12-10 11:03:23,269 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-10 11:03:24,614 [INFO] Upsert OK.
+2025-12-10 11:03:24,614 [INFO] Device DB Refresh Complete.
+2025-12-10 11:03:33,330 [INFO] [Android TV] Launching app 'youtube' (com.google.android.youtube.tv) on media_player.office_tv_chrome_2
+2025-12-10 11:03:33,331 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:33,375 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-10 11:03:33,376 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'com.google.android.youtube.tv', 'media_content_type': 'app'}
+2025-12-10 11:03:33,378 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:34,325 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+2025-12-10 11:03:34,327 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-10 11:03:34,328 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-10 11:03:34,328 [INFO] [Android TV] play_media failed/unsupported. Retrying with ADB 'monkey' command for com.google.android.youtube.tv
+INFO:     172.24.0.1:38236 - "POST /api/androidtv/launch HTTP/1.1" 500 Internal Server Error
+2025-12-10 11:03:34,330 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:34,371 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-10 11:03:34,373 [INFO] EXEC HA: androidtv.adb_command on media_player.office_tv_chrome_2 | Data: {'command': 'monkey -p com.google.android.youtube.tv -c android.intent.category.LAUNCHER 1'}
+2025-12-10 11:03:34,375 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:34,395 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/androidtv/adb_command HTTP/1.1" 400 16
+2025-12-10 11:03:34,900 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:34,922 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/androidtv/adb_command HTTP/1.1" 400 16
+2025-12-10 11:03:35,423 [ERROR] Failed to execute HA command: HTTP 400: 400: Bad Request
+2025-12-10 11:03:43,582 [INFO] [Android TV] Playing video 'https://www.youtube.com/watch?v=2ZrWHtvSog4' on media_player.office_tv_chrome_2
+2025-12-10 11:03:43,583 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:43,607 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-10 11:03:43,609 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'https://www.youtube.com/watch?v=2ZrWHtvSog4', 'media_content_type': 'url'}
+2025-12-10 11:03:43,611 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:44,457 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+2025-12-10 11:03:44,460 [WARNING] HA 500 Error: 500 Internal Server Error
+
+INFO:     172.24.0.1:42794 - "POST /api/androidtv/play HTTP/1.1" 500 Internal Server Error
+Server got itself in trouble
+2025-12-10 11:03:44,460 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-10 11:03:44,460 [INFO] [Android TV] play_media failed. Retrying with ADB deep link...
+2025-12-10 11:03:44,463 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:44,486 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-10 11:03:44,488 [INFO] EXEC HA: androidtv.adb_command on media_player.office_tv_chrome_2 | Data: {'command': 'am start -a android.intent.action.VIEW -d "https://www.youtube.com/watch?v=2ZrWHtvSog4" -n com.google.android.youtube.tv/com.google.android.apps.youtube.tv.activity.ShellActivity'}
+2025-12-10 11:03:44,490 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:44,513 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/androidtv/adb_command HTTP/1.1" 400 16
+2025-12-10 11:03:45,018 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 11:03:45,046 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/androidtv/adb_command HTTP/1.1" 400 16
+2025-12-10 11:03:45,548 [ERROR] Failed to execute HA command: HTTP 400: 400: Bad Request
