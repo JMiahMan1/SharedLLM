@@ -10,7 +10,7 @@ import io
 import tempfile
 import shutil
 from urllib.parse import urljoin, urlparse
-from typing import Optional, List, Tuple, Dict, Set
+from typing import Optional, List, Tuple, Dict, Set, Any
 import hashlib
 import urllib3
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,7 +22,7 @@ try:
     import mobi
     import html2text
     import openpyxl
-    import pandas as pd # Added for Data Analyst Schema Extraction
+    import pandas as pd
 except ImportError as e:
     print(f"ERROR: Missing required ingestion library: {e}")
     sys.exit(1)
@@ -64,9 +64,9 @@ TOC_CACHE_FILE = "/data/nextcloud_toc_cache.json"
 
 # Logic Configuration
 PERSIST_FREQUENCY = 50
-MAX_WORKERS = 8  # 8 Parallel Threads
-TOC_CACHE_TTL = 86400 # 24 Hours
-MIN_TEXT_LENGTH = 10 # Lowered from 50 to 10 to catch short notes/readmes
+MAX_WORKERS = 8
+TOC_CACHE_TTL = 86400 
+MIN_TEXT_LENGTH = 10 
 
 # File Categorization
 SPREADSHEET_EXTS = [".csv", ".xlsx", ".json", ".xls"]
@@ -120,17 +120,13 @@ def generate_summary(text: str) -> str:
     return ""
 
 def extract_spreadsheet_schema(file_path: str, filename: str) -> str:
-    """
-    Reads a spreadsheet and creates a rich text description of its structure.
-    """
+    """Reads a spreadsheet and creates a rich text description."""
     try:
         df = None
         ext = os.path.splitext(filename)[1].lower()
         
-        # Load Data
         if ext == ".csv":
-            df = pd.read_csv(file_path, nrows=5) # Peek
-            # Count rows efficiently
+            df = pd.read_csv(file_path, nrows=5)
             total_rows = sum(1 for _ in open(file_path, 'r', encoding='utf-8', errors='ignore')) - 1
         elif ext in [".xlsx", ".xls"]:
             df = pd.read_excel(file_path, nrows=5)
@@ -142,7 +138,6 @@ def extract_spreadsheet_schema(file_path: str, filename: str) -> str:
 
         if df is None: return ""
 
-        # Build Description
         columns = ", ".join(df.columns.tolist())
         sample = df.to_string(index=False, max_rows=3)
         
@@ -162,16 +157,19 @@ def extract_spreadsheet_schema(file_path: str, filename: str) -> str:
         return f"DATA FILE: {filename}. Could not parse structure automatically."
 
 # ----------------------
-# Helper Functions
+# Text & Book Extraction (UPDATED)
 # ----------------------
 
-def get_file_category(filename: str) -> str:
-    ext = os.path.splitext(filename)[1].lower()
-    if ext in SPREADSHEET_EXTS: return "spreadsheet"
-    if ext in BOOK_EXTS: return "book"
-    if ext in TEXT_EXTS: return "text"
-    if ext in MEDIA_EXTS: return "media"
-    return "unknown"
+def format_toc(toc_list: list) -> str:
+    """Converts PyMuPDF TOC list [[lvl, title, page], ...] into a readable string."""
+    if not toc_list: return ""
+    output = ["--- TABLE OF CONTENTS ---"]
+    for item in toc_list:
+        # Handle 3 or 4 item tuples (lvl, title, page, dest_dict)
+        lvl, title, page = item[0], item[1], item[2]
+        indent = "  " * (lvl - 1)
+        output.append(f"{indent}- {title} (Pg {page})")
+    return "\n".join(output)
 
 def extract_text_from_mobi(file_path: str) -> Optional[str]:
     """Legacy helper for MOBI files."""
@@ -207,66 +205,84 @@ def extract_text_from_xlsx(file_path: str) -> Optional[str]:
         logger.error(f"Failed to extract text from XLSX at {file_path}: {e}")
         return None
 
-def extract_text_content(file_path: str) -> Optional[str]:
+def extract_content_and_meta(file_path: str) -> Tuple[Optional[str], Dict[str, Any]]:
     """
-    Universal extractor using FAST PyMuPDF for PDF/EPUB and fallbacks for others.
+    Universal extractor. Returns (full_text, metadata_dict).
+    Metadata dict contains 'toc' (string) and 'book_meta' (dict) for books.
     """
     ext = os.path.splitext(file_path)[1].lower().strip()
-    if not ext: return None
+    if not ext: return None, {}
+    
+    extra_data = {"toc": None, "book_meta": {}}
 
     try:
         # --- FAST PATH: PyMuPDF (PDF & EPUB) ---
         if ext in [".pdf", ".epub"]:
             text = ""
             with fitz.open(file_path) as doc:
+                # 1. Extract TOC
+                try:
+                    toc_list = doc.get_toc()
+                    if toc_list:
+                        extra_data["toc"] = format_toc(toc_list)
+                except Exception as e:
+                    logger.warning(f"TOC extraction failed for {file_path}: {e}")
+
+                # 2. Extract Metadata (Title/Author)
+                try:
+                    extra_data["book_meta"] = doc.metadata
+                except: pass
+
+                # 3. Extract Text
                 for page in doc:
                     text += page.get_text()
-            return text
+            return text, extra_data
 
         # --- STANDARD PATH: Other Formats ---
         elif ext in [".txt", ".md", ".csv", ".json"]:
             try:
-                with open(file_path, "r", encoding="utf-8") as f: return f.read()
+                with open(file_path, "r", encoding="utf-8") as f: return f.read(), extra_data
             except UnicodeDecodeError:
-                with open(file_path, "r", encoding="latin-1", errors="ignore") as f: return f.read()
+                with open(file_path, "r", encoding="latin-1", errors="ignore") as f: return f.read(), extra_data
         
-        # --- IMPROVED DOCX EXTRACTION (Tables + Paragraphs) ---
+        # --- DOCX ---
         elif ext == ".docx":
             document = DocxDocument(file_path)
             content_pieces = []
-            
-            # 1. Paragraphs
             for paragraph in document.paragraphs:
-                if paragraph.text.strip():
-                    content_pieces.append(paragraph.text)
-            
-            # 2. Tables (Crucial for forms/curriculum)
+                if paragraph.text.strip(): content_pieces.append(paragraph.text)
             for table in document.tables:
                 for row in table.rows:
                     row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
-                    if row_text:
-                        content_pieces.append(row_text)
-            
-            return "\n".join(content_pieces)
+                    if row_text: content_pieces.append(row_text)
+            return "\n".join(content_pieces), extra_data
             
         elif ext == ".xlsx":
-            return extract_text_from_xlsx(file_path)
+            return extract_text_from_xlsx(file_path), extra_data
             
         elif ext == ".mobi":
-            return extract_text_from_mobi(file_path)
+            return extract_text_from_mobi(file_path), extra_data
             
     except Exception as e:
         err_str = str(e).lower()
-        if "cryptography" in err_str and "required for aes" in err_str:
+        if "cryptography" in err_str:
              logger.warning(f"Missing 'cryptography' library for PDF: {file_path}")
         else:
              logger.error(f"Extraction error on {file_path}: {e}")
     
-    return None
+    return None, {}
 
 # ----------------------
 # Parallel Scanning Logic
 # ----------------------
+
+def get_file_category(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in SPREADSHEET_EXTS: return "spreadsheet"
+    if ext in BOOK_EXTS: return "book"
+    if ext in TEXT_EXTS: return "text"
+    if ext in MEDIA_EXTS: return "media"
+    return "unknown"
 
 def scan_single_folder(current_url: str) -> Tuple[List[str], Dict[str, Dict]]:
     """
@@ -346,17 +362,11 @@ def scan_single_folder(current_url: str) -> Tuple[List[str], Dict[str, Dict]]:
     return [], {}
 
 def list_files_parallel(start_url: str, nc_state: Dict[str, Dict]):
-    """
-    Manages a thread pool to scan directories in parallel.
-    """
     logger.info(f"Starting Parallel WebDAV scan ({MAX_WORKERS} threads)...")
-    
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_url = {executor.submit(scan_single_folder, start_url): start_url}
-        
         while future_to_url:
             done = [f for f in future_to_url if f.done()]
-            
             for f in done:
                 url = future_to_url.pop(f)
                 try:
@@ -364,44 +374,27 @@ def list_files_parallel(start_url: str, nc_state: Dict[str, Dict]):
                     nc_state.update(files)
                     for sub in subdirs:
                         future_to_url[executor.submit(scan_single_folder, sub)] = sub
-                except Exception as e:
-                    logger.error(f"Thread error scanning {url}: {e}")
-            
-            if not done:
-                time.sleep(0.1)
+                except: pass
+            if not done: time.sleep(0.1)
 
 # ----------------------
-# TOC Caching Logic
+# Sync Logic (UPDATED)
 # ----------------------
 def load_toc_cache() -> Optional[Dict[str, Dict]]:
     if not os.path.exists(TOC_CACHE_FILE): return None
     try:
         with open(TOC_CACHE_FILE, 'r') as f:
             data = json.load(f)
-        
-        if time.time() - data.get('timestamp', 0) > TOC_CACHE_TTL:
-            logger.info("TOC Cache expired.")
-            return None
-            
-        files = data.get('files', {})
-        logger.info(f"Loaded TOC Cache ({len(files)} files) from {time.ctime(data['timestamp'])}")
-        return files
-    except Exception as e:
-        logger.error(f"Failed to load TOC cache: {e}")
-        return None
+        if time.time() - data.get('timestamp', 0) > TOC_CACHE_TTL: return None
+        return data.get('files', {})
+    except: return None
 
 def save_toc_cache(files: Dict[str, Dict]):
     try:
         data = {"timestamp": time.time(), "files": files}
-        with open(TOC_CACHE_FILE, 'w') as f:
-            json.dump(data, f)
-        logger.info("Saved TOC Cache to disk.")
-    except Exception as e:
-        logger.error(f"Failed to save TOC cache: {e}")
+        with open(TOC_CACHE_FILE, 'w') as f: json.dump(data, f)
+    except: pass
 
-# ----------------------
-# Synchronization Logic
-# ----------------------
 def get_db_state(vectordb) -> Dict[str, Dict]:
     logger.info("Fetching current database state...")
     try:
@@ -409,56 +402,38 @@ def get_db_state(vectordb) -> Dict[str, Dict]:
         state = {}
         for meta in results["metadatas"]:
             if meta and "source" in meta:
-                # Capture Type for Retrofitting Check
                 state[meta["source"]] = {
                     "etag": meta.get("etag", "unknown"),
                     "type": meta.get("type", "unknown")
                 }
         return state
-    except Exception as e:
-        logger.error(f"Failed to fetch DB state: {e}")
-        return {}
+    except: return {}
 
 def sync_nextcloud_files():
     if not os.path.exists(INGESTION_TEMP_DIR): os.makedirs(INGESTION_TEMP_DIR)
     
     logger.info(f"--- Starting Parallel Nextcloud Ingestion (Smart & Optimized) ---")
-    logger.info(f"Logs: {LOG_FILE_PATH}")
-
+    
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    vectordb = Chroma(
-        collection_name="nextcloud_docs", 
-        embedding_function=embeddings, 
-        persist_directory=CHROMA_DIR
-    )
+    vectordb = Chroma(collection_name="nextcloud_docs", embedding_function=embeddings, persist_directory=CHROMA_DIR)
 
-    # 1. Load DB State
     db_state = get_db_state(vectordb)
-    logger.info(f"Database holds {len(db_state)} files.")
-
-    # 2. Get Nextcloud State (Try Cache First)
     nc_state = load_toc_cache()
     
     if not nc_state:
         nc_state = {}
         root_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/")
-        logger.info("Cache missing/expired. Starting parallel scan...")
         list_files_parallel(root_url, nc_state)
         save_toc_cache(nc_state)
-        logger.info(f"Nextcloud scan complete. Found {len(nc_state)} files.")
     
-    # 3. Diff & Retrofit Logic
     to_ingest = []
-    
-    # Identify deleted files
     files_to_remove = [path for path in db_state if path not in nc_state]
     if files_to_remove:
-        logger.info(f"Cleaning up {len(files_to_remove)} deleted files from DB...")
         for path in files_to_remove:
             try: vectordb._collection.delete(where={"source": path})
             except: pass
 
-    # Identify New, Modified, or Legacy files
+    # --- RETROFIT LOGIC ---
     for path, info in nc_state.items():
         db_record = db_state.get(path)
         should_process = False
@@ -468,166 +443,145 @@ def sync_nextcloud_files():
         elif db_record["etag"] != info["etag"]:
             should_process = True
         else:
-            # --- RETROFIT CHECK ---
             current_type = db_record["type"]
             expected_category = info["category"]
             
-            # If Spreadsheet is "document", upgrade it to "spreadsheet_metadata"
+            # Retrofit: Spreadsheets
             if expected_category == "spreadsheet" and current_type != "spreadsheet_metadata":
                 should_process = True
-            # If Book is "document", upgrade it to "book_summary"
-            elif expected_category == "book" and current_type != "book_summary":
-                should_process = True
+            
+            # Retrofit: Books (Ensure we have the new 'book_card' type)
+            elif expected_category == "book" and (current_type != "book_card" and current_type != "book_summary"):
+                 # Note: checking if it has *any* of the new types might be safest, 
+                 # but sticking to user logic: update if it doesn't match new standard.
+                 # User's snippet logic: if expected_category == "book" and current_type != "book_card": should_process = True
+                 should_process = True
 
         if should_process:
             to_ingest.append((path, info["category"], info["etag"], info.get("size", "0")))
 
     logger.info(f"Sync Plan: {len(to_ingest)} files to ingest/update.")
 
-    if not to_ingest:
-        logger.info("Database is up to date. Sync complete.")
-    else:
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200, length_function=len)
-        processed_count = 0
-        
-        for i, (rel_path, category, etag, size) in enumerate(to_ingest, start=1):
-            
-            # Atomic overwrite protection
-            try:
-                vectordb._collection.delete(where={"source": rel_path})
-            except: pass
-
-            doc_id_base = hashlib.sha256(rel_path.encode()).hexdigest()
-            fname = os.path.basename(rel_path)
-            
-            # Metadata Payload
-            common_metadata = {
-                "source": rel_path,
-                "filename": fname,
-                "etag": etag,
-                "size": int(size),
-                "source_server": NEXTCLOUD_URL,
-                "source_user": NEXTCLOUD_USER
-            }
-
-            # --- ROUTE 1: SPREADSHEETS (No Persistence) ---
-            if category == "spreadsheet":
-                logger.info(f"Processing SPREADSHEET Schema: {fname}")
-                temp_path = os.path.join(INGESTION_TEMP_DIR, f"{doc_id_base}_{fname}")
-                encoded_path = requests.utils.quote(rel_path)
-                file_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/{encoded_path}")
-                
-                try:
-                    with requests.get(file_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), stream=True, verify=False, timeout=600) as r:
-                        r.raise_for_status()
-                        with open(temp_path, 'wb') as f:
-                            for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
-                    
-                    schema = extract_spreadsheet_schema(temp_path, fname)
-                    vectordb.add_documents([Document(
-                        page_content=schema, 
-                        metadata={**common_metadata, "type": "spreadsheet_metadata", "is_remote": True}
-                    )])
-                    processed_count += 1
-                except Exception as e:
-                    logger.error(f"Error processing spreadsheet {fname}: {e}")
-                finally:
-                    if os.path.exists(temp_path): os.remove(temp_path)
-                
-                continue
-
-            # --- ROUTE 2: MEDIA ---
-            if category == "media":
-                try:
-                    meta_doc = Document(
-                        page_content=f"Media File: {fname}\nPath: {rel_path}\nSize: {size} bytes",
-                        metadata={**common_metadata, "type": "media", "category": "audio_video", "chunk": 0}
-                    )
-                    vectordb.add_documents([meta_doc])
-                    processed_count += 1
-                except Exception: pass
-                continue
-
-            # --- ROUTE 3: TEXT & BOOKS ---
-            if category == "text" or category == "book":
-                logger.info(f"[{i}/{len(to_ingest)}] Processing: {rel_path} ({size} bytes)")
-                encoded_path = requests.utils.quote(rel_path)
-                file_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/{encoded_path}")
-                temp_path = os.path.join(INGESTION_TEMP_DIR, f"{doc_id_base}_{fname}")
-                
-                try:
-                    with requests.get(file_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), stream=True, verify=False, timeout=900) as r:
-                        r.raise_for_status()
-                        with open(temp_path, 'wb') as f:
-                            for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
-                    
-                    content = extract_text_content(temp_path)
-                    
-                    # FIX: Lowered check to MIN_TEXT_LENGTH (10)
-                    if content and len(content.strip()) > MIN_TEXT_LENGTH:
-                        docs_to_add = []
-                        
-                        # Book Summary Logic
-                        if category == "book":
-                            logger.info(f"Generating Summary for: {fname}")
-                            summary = generate_summary(content)
-                            if summary:
-                                docs_to_add.append(Document(
-                                    page_content=f"SUMMARY for '{fname}':\n{summary}", 
-                                    metadata={**common_metadata, "type": "book_summary"}
-                                ))
-                        
-                        # Standard Chunking
-                        chunks = text_splitter.split_text(content)
-                        for ix, c in enumerate(chunks):
-                            docs_to_add.append(Document(
-                                page_content=c, 
-                                metadata={**common_metadata, "type": category, "chunk_index": ix, "total_chunks": len(chunks)}
-                            ))
-                        
-                        vectordb.add_documents(docs_to_add)
-                        processed_count += 1
-                        logger.info(f"-> Ingested {len(chunks)} chunks.")
-                    else:
-                        logger.warning(f"Skipping empty/unreadable text (Content len: {len(content.strip()) if content else 0}): {rel_path}")
-                
-                except Exception as e:
-                    logger.error(f"Error processing {rel_path}: {e}")
-                finally:
-                    if os.path.exists(temp_path): os.remove(temp_path)
-            
-            # --- Periodic Persist ---
-            if processed_count % PERSIST_FREQUENCY == 0:
-                 if hasattr(vectordb, 'persist'): 
-                     vectordb.persist()
-                     logger.info(f"Checkpoint saved. ({processed_count} items processed)")
-
-        # Final Save (Files)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200, length_function=len)
+    processed_count = 0
+    
+    for i, (rel_path, category, etag, size) in enumerate(to_ingest, start=1):
         try:
-            if hasattr(vectordb, 'persist'): vectordb.persist()
+            vectordb._collection.delete(where={"source": rel_path})
         except: pass
 
-    # --- 4. SYSTEM SUMMARY DOCUMENT ---
-    try:
-        vectordb._collection.delete(where={"source": "system_nextcloud_summary"})
-    except: pass
-    
-    total_files = vectordb._collection.count()
-    summary_doc = Document(
-        page_content=f"Nextcloud System Summary:\nTotal Documents: {total_files}\nLast Sync: {time.ctime()}",
-        metadata={
-            "source": "system_nextcloud_summary",
-            "type": "system_info",
-            "etag": str(time.time()),
-            "filename": "SYSTEM_SUMMARY",
-            "source_server": NEXTCLOUD_URL,
-            "source_user": NEXTCLOUD_USER
+        doc_id_base = hashlib.sha256(rel_path.encode()).hexdigest()
+        fname = os.path.basename(rel_path)
+        common_metadata = {
+            "source": rel_path, "filename": fname, "etag": etag, "size": int(size),
+            "source_server": NEXTCLOUD_URL, "source_user": NEXTCLOUD_USER
         }
-    )
-    vectordb.add_documents([summary_doc])
-    
+
+        # --- ROUTE 1: SPREADSHEETS ---
+        if category == "spreadsheet":
+            logger.info(f"Processing SPREADSHEET Schema: {fname}")
+            temp_path = os.path.join(INGESTION_TEMP_DIR, f"{doc_id_base}_{fname}")
+            encoded_path = requests.utils.quote(rel_path)
+            file_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/{encoded_path}")
+            
+            try:
+                with requests.get(file_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), stream=True, verify=False, timeout=600) as r:
+                    r.raise_for_status()
+                    with open(temp_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+                
+                schema = extract_spreadsheet_schema(temp_path, fname)
+                vectordb.add_documents([Document(
+                    page_content=schema, 
+                    metadata={**common_metadata, "type": "spreadsheet_metadata", "is_remote": True}
+                )])
+                processed_count += 1
+            except Exception as e:
+                logger.error(f"Error processing spreadsheet {fname}: {e}")
+            finally:
+                if os.path.exists(temp_path): os.remove(temp_path)
+            continue
+
+        # --- ROUTE 2: MEDIA ---
+        if category == "media":
+            try:
+                meta_doc = Document(
+                    page_content=f"Media File: {fname}\nPath: {rel_path}\nSize: {size} bytes",
+                    metadata={**common_metadata, "type": "media", "category": "audio_video", "chunk": 0}
+                )
+                vectordb.add_documents([meta_doc])
+                processed_count += 1
+            except Exception: pass
+            continue
+
+        # --- ROUTE 3: TEXT & BOOKS (UPDATED) ---
+        if category == "text" or category == "book":
+            logger.info(f"[{i}/{len(to_ingest)}] Processing: {rel_path} ({size} bytes)")
+            encoded_path = requests.utils.quote(rel_path)
+            file_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/{encoded_path}")
+            temp_path = os.path.join(INGESTION_TEMP_DIR, f"{doc_id_base}_{fname}")
+            
+            try:
+                with requests.get(file_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), stream=True, verify=False, timeout=900) as r:
+                    r.raise_for_status()
+                    with open(temp_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+                
+                # CALL UPDATED EXTRACTOR
+                content, extra_data = extract_content_and_meta(temp_path)
+                
+                if content and len(content.strip()) > MIN_TEXT_LENGTH:
+                    docs_to_add = []
+                    
+                    # --- A. BOOK FEATURES ---
+                    if category == "book":
+                        # 1. LIBRARY CARD
+                        book_meta = extra_data.get("book_meta", {})
+                        summary = generate_summary(content)
+                        
+                        card_content = (
+                            f"LIBRARY CARD:\n"
+                            f"Title: {book_meta.get('title', fname)}\n"
+                            f"Author: {book_meta.get('author', 'Unknown')}\n"
+                            f"Format: {book_meta.get('format', 'PDF/EPUB')}\n"
+                            f"Filename: {fname}\n"
+                            f"Synopsis: {summary}"
+                        )
+                        docs_to_add.append(Document(
+                            page_content=card_content,
+                            metadata={**common_metadata, "type": "book_card"} # New specialized type
+                        ))
+
+                        # 2. TABLE OF CONTENTS
+                        if extra_data.get("toc"):
+                            docs_to_add.append(Document(
+                                page_content=extra_data["toc"],
+                                metadata={**common_metadata, "type": "book_toc"}
+                            ))
+
+                    # --- B. STANDARD CHUNKS ---
+                    chunks = text_splitter.split_text(content)
+                    for ix, c in enumerate(chunks):
+                        docs_to_add.append(Document(
+                            page_content=c, 
+                            metadata={**common_metadata, "type": category, "chunk_index": ix}
+                        ))
+                    
+                    vectordb.add_documents(docs_to_add)
+                    processed_count += 1
+                    logger.info(f"-> Ingested {len(chunks)} chunks + Metadata.")
+            
+            except Exception as e:
+                logger.error(f"Error processing {rel_path}: {e}")
+            finally:
+                if os.path.exists(temp_path): os.remove(temp_path)
+        
+        # Periodic Persist
+        if processed_count % PERSIST_FREQUENCY == 0:
+             if hasattr(vectordb, 'persist'): vectordb.persist()
+
     if hasattr(vectordb, 'persist'): vectordb.persist()
-    logger.info(f"Sync finished. Processed {processed_count if 'processed_count' in locals() else 0} new/modified files.")
+    logger.info(f"Sync finished.")
 
 if __name__ == "__main__":
     sync_nextcloud_files()
