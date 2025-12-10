@@ -193,12 +193,9 @@ async def main():
     await verify_ha_state(ma_entity, "playing")
 
     # --- DYNAMIC DISCOVERY & TESTING (User Request) ---
-    log.info("\n=== DYNAMIC DISCOVERY: Scanning for TV/Music Players ===")
+    log.info("\n=== DYNAMIC DISCOVERY: Scanning for Music Assistant Players ===")
     
     # 1. Fetch current states to find candidate devices
-    # We look for devices that appear to be TVs or Speakers and have an MA equivalent or ARE an MA player
-    
-    # Refresh states mapping
     all_states = {}
     try:
         req = requests.get(f"{HASS_URL}/api/states", headers=HEADERS)
@@ -208,94 +205,69 @@ async def main():
     except Exception as e:
         log.error(f"Failed to fetch states for discovery: {e}")
 
-    # Build list of targets (Friendly Name -> Entity ID)
-    targets_to_test = []
+    # Build list of MA targets (Friendly Name -> Entity ID)
+    ma_targets = []
     
     for eid, state_obj in all_states.items():
         if not eid.startswith("media_player."):
             continue
             
-        fname = state_obj.get("attributes", {}).get("friendly_name", eid)
-        integration = "unknown" # We'd need to cross ref with similarity search or attributes if available
+        attrs = state_obj.get("attributes", {})
         
-        # Heuristic: Identify "TVs" or "Speakers" that we want to test MA playback on.
-        # We specifically want to test the "User faced" name.
-        # If we see "Office TV" (generic) and "Office TV" (MA), we want to test "Office TV" and ensure it routes to MA.
+        # Robust Detection: Look for Music Assistant specific attributes
+        is_ma = False
+        if attrs.get("app_id") == "music_assistant":
+            is_ma = True
+        elif "mass_player_type" in attrs:
+            is_ma = True
         
-        # We'll filter for Generic looking devices that likely have an MA shadow
-        if "tv" in eid.lower() or "speaker" in eid.lower():
-             # Avoid testing the _2 devices directly with their explicit name, we want to test the ambiguous Friendly Name
-             # But we need to know WHICH friendly name is the 'common' one.
-             # Usually the generic device has the clean name "Office TV" and the MA device might also have "Office TV" or be hidden.
-             
-             # Let's test using the Friendly Name of any device that IS NOT the MA player, 
-             # but has a partner MA player.
-             
-             clean_name = fname.replace(" Chrome", "").strip() # Clean up cast names
-             
-             # Avoid duplicates in our test list
-             if clean_name not in [x['name'] for x in targets_to_test]:
-                 # Check if there is a corresponding MA player in the system (ending in _2 or integration check)
-                 # Simple check: Does an entity with "_2" exist?
-                 expected_ma_id = f"{eid}_2"
-                 # Or check if any other entity has same friendly name but is MA?
-                 
-                 has_ma_variant = False
-                 for check_eid in all_states:
-                     if check_eid == expected_ma_id:
-                         has_ma_variant = True
-                         break
-                     # Check attributes for app_id: music_assistant if we could (not always in state)
-                 
-                 if has_ma_variant or "_2" in eid: 
-                     # If it is the _2 device, use its base name? No, users say "Office TV", which equates to the generic device usually.
-                     # So we target the generic device's friendly name.
-                     if "_2" not in eid: 
-                         targets_to_test.append({"name": clean_name, "generic_id": eid, "ma_id": expected_ma_id})
+        # If it's an MA player, we test it using its FRIENDLY NAME.
+        # This tests the "Resolution" logic: ensure the system maps that name back to THIS entity,
+        # (even if a generic TV shares the same name).
+        if is_ma:
+            fname = attrs.get("friendly_name", eid)
+            # Skip if it's unavailable? Ideally we test anyway, but if it's offline it might fail play.
+            if state_obj.get("state") == "unavailable":
+                log.warning(f"Skipping unavailable MA player: {fname} ({eid})")
+                continue
+                
+            ma_targets.append({"name": fname, "entity_id": eid})
 
-    log.info(f"Discovered {len(targets_to_test)} Test Targets: {[t['name'] for t in targets_to_test]}")
+    log.info(f"Discovered {len(ma_targets)} Music Assistant Players: {json.dumps(ma_targets, indent=2)}")
 
-    for target in targets_to_test:
+    for target in ma_targets:
         fname = target['name']
-        ma_target = target['ma_id']
+        entity_id = target['entity_id']
         
-        log.info(f"\n--- TESTING TARGET: '{fname}' (Expect -> {ma_target}) ---")
+        log.info(f"\n--- TESTING TARGET: '{fname}' (ID: {entity_id}) ---")
         
-        # Test 1: Play Music (Ambiguous "Play [Artist]")
-        # We use a real artist to test the 'is_music' inference logic we just fixed
+        # Test 1: Play Music
+        # "Play Brandon Lake on [Friendly Name]"
+        # This mimics human usage and forces the resolver to disambiguate if multiple devices share the name.
         query = f"Play Brandon Lake on {fname}"
         log.info(f"TEST ACTION: '{query}'")
         
-        # Trigger Pipeline
-        # We do NOT force intent here, we rely on the pipeline to classify PLAY -> play_media
-        # But for this test harness, we call handle_media_command directly to skip whisper/transcription layer if desired,
-        # OR we simulate the full flow. live_test usually calls handle_media_command directly or resolves manually?
-        # The existing code called handle_media_command.
-        
-        # We let the system infer intent from "Play ..."
-        # Note: intent classification might need "music" keyword if strict. 
-        # But 'Play Brandon Lake' should trigger play_media.
+        # Determine intent (simulated pipeline)
         intent = "play_media" 
         
+        # Run Command
         await handle_media_command(intent, query, None, admin_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
         
-        # Verification: Check MA entity state
-        log.info(f"  VERIFYING: {ma_target} should be PLAYING")
-        await asyncio.sleep(8) # Wait for buffer
-        await verify_ha_state(ma_target, ["playing", "buffering"], user_creds)
+        # Verification
+        log.info(f"  VERIFYING: {entity_id} should be PLAYING")
+        await asyncio.sleep(8) 
+        await verify_ha_state(entity_id, ["playing", "buffering"], user_creds)
         
-        # Test 2: Next Track
-        query = f"Next song on {fname}"
-        log.info(f"TEST ACTION: '{query}'")
-        await handle_media_command("media_next", query, None, admin_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
-        await asyncio.sleep(2)
-        
-        # Test 3: Stop
+        # Test 2: Stop (Cleanup)
         query = f"Stop music on {fname}"
         log.info(f"TEST ACTION: '{query}'")
         await handle_media_command("stop_media", query, None, admin_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
+        
+        # Verify Cleanup
         await asyncio.sleep(2)
-        await verify_ha_state(ma_target, ["idle", "paused", "off"], user_creds)
+        await verify_ha_state(entity_id, ["idle", "paused", "off"], user_creds)
+        log.info(f"  CLEANUP: Audio stopped on {fname}")
+
 
     
     # 2. Skip (Next)
