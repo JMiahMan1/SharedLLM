@@ -61,3 +61,4 @@ tzdata
 xlrd
 xmltodict
 playwright
+langchain-huggingface
