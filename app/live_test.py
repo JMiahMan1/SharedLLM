@@ -26,7 +26,7 @@ console = logging.StreamHandler() # Also print to stdout (which is captured by t
 logging.getLogger().addHandler(console)
 log = logging.getLogger("LiveTest")
 
-from settings import load_resources, GlobalResources, HA_URL, get_user_creds
+from settings import load_resources, GlobalResources, HA_URL, get_user_creds, DEFAULT_MODEL
 from logic import contextualize_query, try_handle_compound_command
 from logic.execution.handlers import handle_note_read, handle_note_delete
 from logic.timer_storage import storage as timer_storage
@@ -74,13 +74,13 @@ async def run_nl_command(query: str):
     creds = get_user_creds(user)
     
     # Simulate the pipeline
-    refined, intent, score, is_high_confidence = await contextualize_query(query, user, "test_model")
+    refined, intent, score, is_high_confidence = await contextualize_query(query, user, DEFAULT_MODEL)
     log.info(f"  -> Refined: '{refined}', Intent: {intent} (Score: {score})")
     
     if not is_high_confidence and score < 75:
        log.warning(f"  -> Low confidence for '{query}'")
     
-    result = await try_handle_compound_command(refined, creds, "test_model", intent, score, is_high_confidence)
+    result = await try_handle_compound_command(refined, creds, DEFAULT_MODEL, intent, score, is_high_confidence)
     log.info(f"  -> Result: {result}")
     return result
 
