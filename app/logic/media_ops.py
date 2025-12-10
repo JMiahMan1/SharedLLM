@@ -706,8 +706,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 "eid": eid, 
                 "integration": integration, 
                 "friendly_name": friendly_name,
-                "score": score
-            })
+                "eid": eid, 
+                "integration": integration, 
+                "friendly_name": friendly_name,
+                "score": score,
+                "metadata": doc.metadata # Preserve for advanced filtered
 
     except Exception as e:
         log.error(f"Error filtering candidates: {e}")
@@ -751,9 +754,18 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     if is_music:
         ma_candidate = None
         # First pass: Look for exact Music Assistant match
-        for eid, integration in candidates:
-             if "music_assistant" in integration:
-                 ma_candidate = (eid, integration)
+
+        for c in raw_candidates:
+             eid = c["eid"]
+             integ = c["integration"]
+             meta = c.get("metadata", {})
+             attrs = meta.get("attributes", "")
+             
+             # Check for explicit integration OR metadata signature
+             is_ma = "music_assistant" in integ or "music_assistant" in str(attrs) or "mass_player" in str(attrs)
+             
+             if is_ma:
+                 ma_candidate = (eid, integ)
                  break
         
         # Second pass: If no MA match, look for "speaker" type devices that aren't strict TVs
