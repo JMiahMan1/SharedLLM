@@ -26,7 +26,7 @@ DEBUG = os.getenv("DEBUG", "0") in ("1", "true", "True")
 logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(os.getenv("LOG_FILE", "./temp/app.log"))],
+    handlers=[logging.StreamHandler(), logging.FileHandler(os.getenv("LOG_FILE", "/data/app.log"))],
 )
 log = logging.getLogger("unified-rag")
 
