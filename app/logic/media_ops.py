@@ -1544,24 +1544,32 @@ async def handle_media_command(
             await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
 
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices ---
+        # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices (Delegated) ---
         if "music_assistant" in integration:
-            log.info(f"Executing Music Assistant specific Play on {entity_id} Type: {ctype}")
-            # MA Service requires: media_id, media_type, enqueue
-            ma_service_data = {
-                "media_id": clean_title,
-                "media_type": ctype,
-                "enqueue": "play" 
-            }
-            # Attempt MA service first
-            result = await execute_ha_service("music_assistant", "play_media", entity_id, user_creds, ma_service_data, redis_client)
-
-            # Fallback to 'search' if specific type fails (fuzzy search)
-            if result.get("status") == "FAILURE":
-                 log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
-                 ma_service_data["media_type"] = "search"
-                 result = await execute_ha_service("music_assistant", "play_media", entity_id, user_creds, ma_service_data, redis_client)
-
-            return result
+            try:
+                from logic.music_assistant_ops import play_media as ma_play_media
+                log.info(f"Delegating Music Assistant Play on {entity_id} to music_assistant_ops")
+                
+                # Attempt specific type
+                result = await ma_play_media(entity_id, clean_title, ctype, user_creds)
+                
+                # Fallback to 'search' 
+                if result.get("status") == "FAILURE":
+                     log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
+                     result = await ma_play_media(entity_id, clean_title, "search", user_creds)
+                
+                # Maintain compatibility with existing result structure
+                # The existing code expects a certain dict shape for logging, though the core execution is done.
+                if result["status"] == "SUCCESS":
+                    # Mocking the HA service result format for consistency
+                    return [{"status": "SUCCESS", "message": result["message"], "service": "ma_play", "entity_id": entity_id}]
+                else: 
+                     return {"status": "FAILURE", "message": result["message"], "entity_id": entity_id}
+            
+            except ImportError:
+                 log.error("Failed to import music_assistant_ops. Falling back to inline logic.")
+                 # Fallback inline logic would go here if we were paranoid, but for now we trust the import.
+                 return {"status": "FAILURE", "message": "Internal Logic Error (MA Import)", "entity_id": entity_id}
         else:
             # Standard Media Player Service
             

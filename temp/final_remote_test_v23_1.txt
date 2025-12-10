@@ -1,0 +1,302 @@
+--- SETUP: Loading Resources ---
+Loading Global Resources...
+Redis Connected.
+Use pytorch device_name: cpu
+Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+ChromaDB Loaded from /data/chroma_db
+
+=== DYNAMIC DISCOVERY: Scanning for Music Assistant Players ===
+Discovered 5 Music Assistant Players: [
+  {
+    "name": "[TV]Master",
+    "entity_id": "media_player.tv_master_2",
+    "state": "idle"
+  },
+  {
+    "name": "Office TV",
+    "entity_id": "media_player.office_tv_chrome_2",
+    "state": "off"
+  },
+  {
+    "name": "Master Bedroom TV",
+    "entity_id": "media_player.master_bedroom_tv_2",
+    "state": "off"
+  },
+  {
+    "name": "Office Speaker",
+    "entity_id": "media_player.office_speaker",
+    "state": "playing"
+  },
+  {
+    "name": "Loft TV",
+    "entity_id": "media_player.loft_tv_2",
+    "state": "idle"
+  }
+]
+
+--- TESTING TARGET: '[TV]Master' (ID: media_player.tv_master_2) ---
+TEST ACTION: 'Play Brandon Lake on [TV]Master'
+[INTENT] Regex override: 'Play Brandon Lake on [TV]Master' -> play_media
+  -> Refined: 'Play Brandon Lake on [TV]Master', Intent: play_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2147
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': '[TV]Master'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: '[TV]Master' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='[TV]Master' Intent='play' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.tv_master_2', metadata={'friendly_name': '[TV]Master', 'group_id': 'media_player.tv_master_2', 'last_updated': '234776.402', 'source': 'home_assistant', 'group_name': '', 'entity_id': 'media_player.tv_master_2', 'capabilities': 'play_media', 'state': 'idle', 'domain': 'media_player', 'attributes': '{"volume_level": 0.85, "is_volume_muted": false, "media_content_id": "library://track/233", "media_content_type": "music", "media_duration": 329, "media_position": 0, "media_position_updated_at": "2025-12-10T16:20:04.620181+00:00", "media_title": "Brandon Lake - Hard Fought Hallelujah", "media_artist": "Brandon Lake", "media_album_name": "Singles", "media_album_artist": "Brandon Lake", "app_id": "music_assistant", "shuffle": false, "repeat": "off", "mass_player_type": "player", "active_queue": "uuid:0b532b80-00be-1000-8ad6-f47b5e72fe9c", "device_class": "speaker", "entity_picture": "/api/media_player_proxy/media_player.tv_master_2?token=2fe8f80c0191c32877599f4c798efa2f11f5c4bb8d3031bf837b9aeadfc1a178&cache=518503240ff650fd", "icon": "mdi:speaker", "friendly_name": "[TV]Master", "supported_features": 7796287}', 'integration': 'cast'}, page_content="[TV]Master (media_player.tv_master_2) is a cast device in group ''. Can play media."), 0.7108096480369568)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'play' on 1 entities
+Sanitized intent from 'play' to 'play_media'
+[CAPABILITY] Redis cache HIT for media_player.tv_master_2
+Executing Standard Play on media_player.tv_master_2 Type: music
+EXEC HA: media_player.play_media on media_player.tv_master_2 | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: [TV]Master', 'service': 'play', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the [TV]Master.', 'entity_id': 'media_player.tv_master_2', 'friendly_name': '[TV]Master', 'service': 'media_player.play_media', 'new_state': 'playing'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.tv_master_2 should be PLAYING
+  VERIFY: media_player.tv_master_2 is 'playing' (Expected)
+TEST ACTION: 'Stop music on [TV]Master'
+[INTENT] Regex override: 'Stop music on [TV]Master' -> stop_media
+  -> Refined: 'Stop music on [TV]Master', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2140
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': '[TV]'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: '[TV]' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='[TV]' Intent='stop_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.tv_master_2', metadata={'source': 'home_assistant', 'group_id': 'media_player.tv_master_2', 'entity_id': 'media_player.tv_master_2', 'last_updated': '234776.402', 'group_name': '', 'capabilities': 'play_media', 'attributes': '{"volume_level": 0.85, "is_volume_muted": false, "media_content_id": "library://track/233", "media_content_type": "music", "media_duration": 329, "media_position": 0, "media_position_updated_at": "2025-12-10T16:20:04.620181+00:00", "media_title": "Brandon Lake - Hard Fought Hallelujah", "media_artist": "Brandon Lake", "media_album_name": "Singles", "media_album_artist": "Brandon Lake", "app_id": "music_assistant", "shuffle": false, "repeat": "off", "mass_player_type": "player", "active_queue": "uuid:0b532b80-00be-1000-8ad6-f47b5e72fe9c", "device_class": "speaker", "entity_picture": "/api/media_player_proxy/media_player.tv_master_2?token=2fe8f80c0191c32877599f4c798efa2f11f5c4bb8d3031bf837b9aeadfc1a178&cache=518503240ff650fd", "icon": "mdi:speaker", "friendly_name": "[TV]Master", "supported_features": 7796287}', 'domain': 'media_player', 'state': 'idle', 'friendly_name': '[TV]Master', 'integration': 'cast'}, page_content="[TV]Master (media_player.tv_master_2) is a cast device in group ''. Can play media."), 1.0114063024520874)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'stop_media' on 1 entities
+[_execute_transport_command] Intent='stop_media' Entity='media_player.tv_master_2'
+  -> Result: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.tv_master_2', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.tv_master_2 is already stopped.', 'entity_id': 'media_player.tv_master_2', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.tv_master_2 should be IDLE/PAUSED
+  VERIFY: media_player.tv_master_2 is 'idle' (Expected)
+
+--- TESTING TARGET: 'Office TV' (ID: media_player.office_tv_chrome_2) ---
+TEST ACTION: 'Play Brandon Lake on Office TV'
+[INTENT] Regex override: 'Play Brandon Lake on Office TV' -> play_media
+  -> Refined: 'Play Brandon Lake on Office TV', Intent: play_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2146
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'Office TV'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='play' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv', metadata={'state': 'on', 'last_updated': '234776.402', 'entity_id': 'media_player.office_tv', 'source': 'home_assistant', 'attributes': '{"volume_level": 0.32, "is_volume_muted": false, "app_id": "com.google.android.tvlauncher", "app_name": "com.google.android.tvlauncher", "assumed_state": true, "device_class": "tv", "friendly_name": "Office TV Remote", "supported_features": 153529}', 'capabilities': 'turn_on,turn_off,play_media', 'friendly_name': 'Office TV Remote', 'group_id': 'media_player.office_tv', 'integration': 'androidtv', 'group_name': '', 'domain': 'media_player'}, page_content="Office TV Remote (media_player.office_tv) is a androidtv device in group ''. Can turn off. Can play media."), 0.920613169670105)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'play' on 1 entities
+Sanitized intent from 'play' to 'play_media'
+[CAPABILITY] ChromaDB HIT for media_player.office_tv_chrome_2
+[CAPABILITY] Parsed: media_player.office_tv_chrome_2 → domain=media_player, features=7796671, has_color=False, has_brightness=False
+EXEC HA: media_player.turn_on on media_player.office_tv_chrome_2 | Data: None
+Executing Standard Play on media_player.office_tv_chrome_2 Type: music
+EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV', 'service': 'play', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.play_media', 'new_state': 'playing'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.office_tv_chrome_2 should be PLAYING
+  VERIFY: media_player.office_tv_chrome_2 is 'playing' (Expected)
+TEST ACTION: 'Stop music on Office TV'
+[INTENT] Regex override: 'Stop music on Office TV' -> stop_media
+  -> Refined: 'Stop music on Office TV', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2139
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop', 'device_name': 'Office TV'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='stop' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv', metadata={'state': 'on', 'domain': 'media_player', 'attributes': '{"volume_level": 0.32, "is_volume_muted": false, "app_id": "com.google.android.tvlauncher", "app_name": "com.google.android.tvlauncher", "assumed_state": true, "device_class": "tv", "friendly_name": "Office TV Remote", "supported_features": 153529}', 'last_updated': '234776.402', 'group_name': '', 'friendly_name': 'Office TV Remote', 'entity_id': 'media_player.office_tv', 'integration': 'androidtv', 'source': 'home_assistant', 'capabilities': 'turn_on,turn_off,play_media', 'group_id': 'media_player.office_tv'}, page_content="Office TV Remote (media_player.office_tv) is a androidtv device in group ''. Can turn off. Can play media."), 0.920613169670105)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'stop' on 1 entities
+Sanitized intent from 'stop' to 'stop_media'
+  -> Result: [{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: media_player.office_tv_chrome_2', 'service': 'stop', 'batch_results': [{'status': 'FAILURE', 'message': "Media command 'stop_media' could not be executed.", 'entity_id': 'media_player.office_tv_chrome_2', 'service': 'stop_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.office_tv_chrome_2 should be IDLE/PAUSED
+  FAILURE: Expected ['idle', 'paused', 'off'], got 'playing'
+
+--- TESTING TARGET: 'Master Bedroom TV' (ID: media_player.master_bedroom_tv_2) ---
+TEST ACTION: 'Play Brandon Lake on Master Bedroom TV'
+[INTENT] Regex override: 'Play Brandon Lake on Master Bedroom TV' -> play_media
+  -> Refined: 'Play Brandon Lake on Master Bedroom TV', Intent: play_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2154
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'Master Bedroom TV', 'media_name': 'Brandon Lake'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Master Bedroom TV' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='Master Bedroom TV' Intent='play' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.master_bedroom_tv_3', metadata={'friendly_name': 'Master Bedroom TV', 'entity_id': 'media_player.master_bedroom_tv_3', 'source': 'home_assistant', 'capabilities': 'turn_on,turn_off,play_media', 'domain': 'media_player', 'last_updated': '234776.402', 'group_name': '', 'state': 'on', 'integration': 'androidtv', 'attributes': '{"volume_level": 0.8, "is_volume_muted": false, "app_id": "com.google.android.apps.tv.dreamx", "app_name": "com.google.android.apps.tv.dreamx", "assumed_state": true, "device_class": "tv", "friendly_name": "Master Bedroom TV", "supported_features": 153529}', 'group_id': 'media_player.master_bedroom_tv_3'}, page_content="Master Bedroom TV (media_player.master_bedroom_tv_3) is a androidtv device in group ''. Can turn off. Can play media."), 0.788152277469635)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'play' on 1 entities
+Sanitized intent from 'play' to 'play_media'
+[CAPABILITY] Redis cache HIT for media_player.master_bedroom_tv_2
+EXEC HA: media_player.turn_on on media_player.master_bedroom_tv_2 | Data: None
+Executing Standard Play on media_player.master_bedroom_tv_2 Type: music
+EXEC HA: media_player.play_media on media_player.master_bedroom_tv_2 | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Master Bedroom TV', 'service': 'play', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Master Bedroom TV.', 'entity_id': 'media_player.master_bedroom_tv_2', 'friendly_name': 'Master Bedroom TV', 'service': 'media_player.play_media', 'new_state': 'playing'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.master_bedroom_tv_2 should be PLAYING
+  VERIFY: media_player.master_bedroom_tv_2 is 'playing' (Expected)
+TEST ACTION: 'Stop music on Master Bedroom TV'
+[INTENT] Regex override: 'Stop music on Master Bedroom TV' -> stop_media
+  -> Refined: 'Stop music on Master Bedroom TV', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2147
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': 'Master Bedroom TV'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Master Bedroom TV' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='Master Bedroom TV' Intent='stop_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.master_bedroom_tv_3', metadata={'capabilities': 'turn_on,turn_off,play_media', 'group_id': 'media_player.master_bedroom_tv_3', 'integration': 'androidtv', 'group_name': '', 'last_updated': '234776.402', 'attributes': '{"volume_level": 0.8, "is_volume_muted": false, "app_id": "com.google.android.apps.tv.dreamx", "app_name": "com.google.android.apps.tv.dreamx", "assumed_state": true, "device_class": "tv", "friendly_name": "Master Bedroom TV", "supported_features": 153529}', 'friendly_name': 'Master Bedroom TV', 'source': 'home_assistant', 'domain': 'media_player', 'entity_id': 'media_player.master_bedroom_tv_3', 'state': 'on'}, page_content="Master Bedroom TV (media_player.master_bedroom_tv_3) is a androidtv device in group ''. Can turn off. Can play media."), 0.788152277469635)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'stop_media' on 1 entities
+Transport Short Circuit: Device media_player.master_bedroom_tv_2 is active, proceeding directly.
+[_execute_transport_command] Intent='stop_media' Entity='media_player.master_bedroom_tv_2'
+EXEC HA: media_player.media_stop on media_player.master_bedroom_tv_2 | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Master Bedroom TV', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Master Bedroom TV.', 'entity_id': 'media_player.master_bedroom_tv_2', 'friendly_name': 'Master Bedroom TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.master_bedroom_tv_2 should be IDLE/PAUSED
+  VERIFY: media_player.master_bedroom_tv_2 is 'idle' (Expected)
+
+--- TESTING TARGET: 'Office Speaker' (ID: media_player.office_speaker) ---
+TEST ACTION: 'Play Brandon Lake on Office Speaker'
+[INTENT] Regex override: 'Play Brandon Lake on Office Speaker' -> play_media
+  -> Refined: 'Play Brandon Lake on Office Speaker', Intent: play_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2151
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'Office Speaker'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office Speaker' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='Office Speaker' Intent='play' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_jarvis', metadata={'attributes': '{"volume_level": 0.0, "is_volume_muted": false, "device_class": "speaker", "icon": "mdi:music-circle-outline", "friendly_name": "Office Speaker", "supported_features": 1184268}', 'source': 'home_assistant', 'last_updated': '234776.403', 'state': 'playing', 'friendly_name': 'Office Speaker', 'group_id': 'media_player.office_jarvis', 'group_name': '', 'domain': 'media_player', 'integration': 'speaker', 'entity_id': 'media_player.office_jarvis', 'capabilities': 'play_media'}, page_content="Office Speaker (media_player.office_jarvis) is a speaker device in group ''. Can play media."), 0.7898263931274414)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'play' on 1 entities
+Sanitized intent from 'play' to 'play_media'
+[CAPABILITY] Redis cache HIT for media_player.office_speaker
+Executing Standard Play on media_player.office_speaker Type: music
+EXEC HA: media_player.play_media on media_player.office_speaker | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office Speaker', 'service': 'play', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office Speaker.', 'entity_id': 'media_player.office_speaker', 'friendly_name': 'Office Speaker', 'service': 'media_player.play_media', 'new_state': 'playing'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.office_speaker should be PLAYING
+  VERIFY: media_player.office_speaker is 'playing' (Expected)
+TEST ACTION: 'Stop music on Office Speaker'
+[INTENT] Regex override: 'Stop music on Office Speaker' -> stop_media
+  -> Refined: 'Stop music on Office Speaker', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2144
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop', 'device_name': 'Office Speaker'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office Speaker' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='Office Speaker' Intent='stop' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_jarvis', metadata={'entity_id': 'media_player.office_jarvis', 'group_id': 'media_player.office_jarvis', 'group_name': '', 'domain': 'media_player', 'attributes': '{"volume_level": 0.0, "is_volume_muted": false, "device_class": "speaker", "icon": "mdi:music-circle-outline", "friendly_name": "Office Speaker", "supported_features": 1184268}', 'integration': 'speaker', 'friendly_name': 'Office Speaker', 'source': 'home_assistant', 'state': 'playing', 'capabilities': 'play_media', 'last_updated': '234776.403'}, page_content="Office Speaker (media_player.office_jarvis) is a speaker device in group ''. Can play media."), 0.7898263931274414)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'stop' on 1 entities
+Sanitized intent from 'stop' to 'stop_media'
+  -> Result: [{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: media_player.office_speaker', 'service': 'stop', 'batch_results': [{'status': 'FAILURE', 'message': "Media command 'stop_media' could not be executed.", 'entity_id': 'media_player.office_speaker', 'service': 'stop_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.office_speaker should be IDLE/PAUSED
+  FAILURE: Expected ['idle', 'paused', 'off'], got 'playing'
+
+--- TESTING TARGET: 'Loft TV' (ID: media_player.loft_tv_2) ---
+TEST ACTION: 'Play Brandon Lake on Loft TV'
+[INTENT] Regex override: 'Play Brandon Lake on Loft TV' -> play_media
+  -> Refined: 'Play Brandon Lake on Loft TV', Intent: play_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2144
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'Loft TV'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Loft TV' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='Loft TV' Intent='play' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.loft_tv', metadata={'state': 'off', 'entity_id': 'media_player.loft_tv', 'source': 'home_assistant', 'group_name': '', 'group_id': 'media_player.loft_tv', 'integration': 'tv', 'friendly_name': 'Loft TV', 'domain': 'media_player', 'attributes': '{"source_list": ["TV", "HDMI"], "device_class": "tv", "friendly_name": "Loft TV", "supported_features": 24509}', 'capabilities': 'turn_on,turn_off,play_media', 'last_updated': '234776.402'}, page_content="Loft TV (media_player.loft_tv) is a tv device in group ''. Can turn off. Can play media."), 0.711772620677948)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'play' on 1 entities
+Sanitized intent from 'play' to 'play_media'
+[CAPABILITY] Redis cache HIT for media_player.loft_tv_2
+Executing Standard Play on media_player.loft_tv_2 Type: music
+EXEC HA: media_player.play_media on media_player.loft_tv_2 | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Loft TV', 'service': 'play', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Loft TV.', 'entity_id': 'media_player.loft_tv_2', 'friendly_name': 'Loft TV', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.loft_tv_2 should be PLAYING
+  FAILURE: Expected ['playing', 'buffering'], got 'idle'
+TEST ACTION: 'Stop music on Loft TV'
+[INTENT] Regex override: 'Stop music on Loft TV' -> stop_media
+  -> Refined: 'Stop music on Loft TV', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2137
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': 'Loft TV'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Loft TV' (Music Mode: True)
+DEBUG: Entering smart_resolve_entity. Q='Loft TV' Intent='stop_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.loft_tv', metadata={'source': 'home_assistant', 'group_name': '', 'friendly_name': 'Loft TV', 'capabilities': 'turn_on,turn_off,play_media', 'group_id': 'media_player.loft_tv', 'last_updated': '234776.402', 'state': 'off', 'entity_id': 'media_player.loft_tv', 'attributes': '{"source_list": ["TV", "HDMI"], "device_class": "tv", "friendly_name": "Loft TV", "supported_features": 24509}', 'domain': 'media_player', 'integration': 'tv'}, page_content="Loft TV (media_player.loft_tv) is a tv device in group ''. Can turn off. Can play media."), 0.711772620677948)
+[Device Fallback] Resolved 1 entities. Executing Batch.
+[BATCH] Executing 'stop_media' on 1 entities
+[_execute_transport_command] Intent='stop_media' Entity='media_player.loft_tv_2'
+  -> Result: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.loft_tv_2', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.loft_tv_2 is already stopped.', 'entity_id': 'media_player.loft_tv_2', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+  VERIFYING: media_player.loft_tv_2 should be IDLE/PAUSED
+  VERIFY: media_player.loft_tv_2 is 'idle' (Expected)
+
+=== FINAL CLEANUP: STOPPING ALL MEDIA ===
+Cleanup: Stopping media_player.office_tv_chrome (State: playing)...
+TEST ACTION: 'Stop media on media_player.office_tv_chrome'
+[INTENT] Regex override: 'Stop media on media_player.office_tv_chrome' -> stop_media
+  -> Refined: 'Stop media on media_player.office_tv_chrome', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2159
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': 'media_player.office_tv_chrome'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'media_player.office_tv_chrome' (Music Mode: False)
+DEBUG: Entering smart_resolve_entity. Q='media_player.office_tv_chrome' Intent='stop_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome', metadata={'source': 'home_assistant', 'state': 'off', 'group_name': '', 'domain': 'media_player', 'capabilities': 'turn_on,turn_off,play_media', 'attributes': '{"friendly_name": "Office TV Chrome", "supported_features": 152461}', 'entity_id': 'media_player.office_tv_chrome', 'last_updated': '234776.402', 'group_id': 'media_player.office_tv_chrome', 'integration': 'unknown', 'friendly_name': 'Office TV Chrome'}, page_content="Office TV Chrome (media_player.office_tv_chrome) is a unknown device in group ''. Can turn off. Can play media."), 0.43123960494995117)
+match found in Group: media_player.office_tv_chrome (via Office TV Chrome (me...)
+Group media_player.office_tv_chrome has 1 members.
+Capability Routing used media_player.office_tv_chrome (unknown) for intent stop_media
+[Device Fallback] Resolved 'media_player.office_tv_chrome' to media_player.office_tv_chrome
+Transport Short Circuit: Device media_player.office_tv_chrome is active, proceeding directly.
+[_execute_transport_command] Intent='stop_media' Entity='media_player.office_tv_chrome'
+EXEC HA: media_player.media_stop on media_player.office_tv_chrome | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.media_stop', 'new_state': 'idle'}]
+Cleanup: Stopping media_player.office_tv_chrome_2 (State: playing)...
+TEST ACTION: 'Stop media on media_player.office_tv_chrome_2'
+[INTENT] Regex override: 'Stop media on media_player.office_tv_chrome_2' -> stop_media
+  -> Refined: 'Stop media on media_player.office_tv_chrome_2', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2161
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': 'media_player.office_tv_chrome_2'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'media_player.office_tv_chrome_2' (Music Mode: False)
+DEBUG: Entering smart_resolve_entity. Q='media_player.office_tv_chrome_2' Intent='stop_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome', metadata={'entity_id': 'media_player.office_tv_chrome', 'attributes': '{"friendly_name": "Office TV Chrome", "supported_features": 152461}', 'group_id': 'media_player.office_tv_chrome', 'group_name': '', 'domain': 'media_player', 'capabilities': 'turn_on,turn_off,play_media', 'friendly_name': 'Office TV Chrome', 'source': 'home_assistant', 'integration': 'unknown', 'last_updated': '234776.402', 'state': 'off'}, page_content="Office TV Chrome (media_player.office_tv_chrome) is a unknown device in group ''. Can turn off. Can play media."), 0.4674376845359802)
+match found in Group: media_player.office_tv_chrome (via Office TV Chrome (me...)
+Group media_player.office_tv_chrome has 1 members.
+Capability Routing used media_player.office_tv_chrome (unknown) for intent stop_media
+[Device Fallback] Resolved 'media_player.office_tv_chrome_2' to media_player.office_tv_chrome
+[_execute_transport_command] Intent='stop_media' Entity='media_player.office_tv_chrome'
+  -> Result: [{'status': 'SUCCESS', 'message': 'media_player.office_tv_chrome is already stopped.', 'entity_id': 'media_player.office_tv_chrome', 'service': 'media_stop', 'new_state': 'idle'}]
+Cleanup: Stopping media_player.office_speaker (State: playing)...
+TEST ACTION: 'Stop media on media_player.office_speaker'
+[INTENT] Regex override: 'Stop media on media_player.office_speaker' -> stop_media
+  -> Refined: 'Stop media on media_player.office_speaker', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2157
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': 'media_player.office_speaker'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'media_player.office_speaker' (Music Mode: False)
+DEBUG: Entering smart_resolve_entity. Q='media_player.office_speaker' Intent='stop_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_jarvis', metadata={'state': 'playing', 'friendly_name': 'Office Speaker', 'entity_id': 'media_player.office_jarvis', 'last_updated': '234776.403', 'source': 'home_assistant', 'group_name': '', 'integration': 'speaker', 'attributes': '{"volume_level": 0.0, "is_volume_muted": false, "device_class": "speaker", "icon": "mdi:music-circle-outline", "friendly_name": "Office Speaker", "supported_features": 1184268}', 'domain': 'media_player', 'group_id': 'media_player.office_jarvis', 'capabilities': 'play_media'}, page_content="Office Speaker (media_player.office_jarvis) is a speaker device in group ''. Can play media."), 0.3053938150405884)
+match found in Group: media_player.office_jarvis (via Office Speaker (medi...)
+Group media_player.office_jarvis has 1 members.
+Capability Routing used media_player.office_jarvis (speaker) for intent stop_media
+[Device Fallback] Resolved 'media_player.office_speaker' to media_player.office_jarvis
+Transport Short Circuit: Device media_player.office_jarvis is active, proceeding directly.
+[_execute_transport_command] Intent='stop_media' Entity='media_player.office_jarvis'
+EXEC HA: media_player.media_stop on media_player.office_jarvis | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office Speaker.', 'entity_id': 'media_player.office_jarvis', 'friendly_name': 'Office Speaker', 'service': 'media_player.media_stop', 'new_state': 'idle'}]
+Cleanup: Stopping media_player.office_jarvis (State: playing)...
+TEST ACTION: 'Stop media on media_player.office_jarvis'
+[INTENT] Regex override: 'Stop media on media_player.office_jarvis' -> stop_media
+  -> Refined: 'Stop media on media_player.office_jarvis', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2156
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': 'media_player.office_jarvis'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'media_player.office_jarvis' (Music Mode: False)
+DEBUG: Entering smart_resolve_entity. Q='media_player.office_jarvis' Intent='stop_media' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_jarvis', metadata={'capabilities': 'play_media', 'attributes': '{"volume_level": 0.0, "is_volume_muted": false, "device_class": "speaker", "icon": "mdi:music-circle-outline", "friendly_name": "Office Speaker", "supported_features": 1184268}', 'group_name': '', 'state': 'playing', 'entity_id': 'media_player.office_jarvis', 'integration': 'speaker', 'friendly_name': 'Office Speaker', 'domain': 'media_player', 'last_updated': '234776.403', 'source': 'home_assistant', 'group_id': 'media_player.office_jarvis'}, page_content="Office Speaker (media_player.office_jarvis) is a speaker device in group ''. Can play media."), 0.43183013796806335)
+match found in Group: media_player.office_jarvis (via Office Speaker (medi...)
+Group media_player.office_jarvis has 1 members.
+Capability Routing used media_player.office_jarvis (speaker) for intent stop_media
+[Device Fallback] Resolved 'media_player.office_jarvis' to media_player.office_jarvis
+[_execute_transport_command] Intent='stop_media' Entity='media_player.office_jarvis'
+  -> Result: [{'status': 'SUCCESS', 'message': 'media_player.office_jarvis is already stopped.', 'entity_id': 'media_player.office_jarvis', 'service': 'media_stop', 'new_state': 'idle'}]
+--- ALL TESTS COMPLETED ---
