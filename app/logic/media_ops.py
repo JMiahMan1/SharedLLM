@@ -706,11 +706,9 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 "eid": eid, 
                 "integration": integration, 
                 "friendly_name": friendly_name,
-                "eid": eid, 
-                "integration": integration, 
-                "friendly_name": friendly_name,
                 "score": score,
-                "metadata": doc.metadata # Preserve for advanced filtered
+                "metadata": doc.metadata 
+            })
 
     except Exception as e:
         log.error(f"Error filtering candidates: {e}")
