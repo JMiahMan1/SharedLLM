@@ -1470,6 +1470,18 @@ async def handle_media_command(
                  target_app = matched_app if matched_app else app_name_candidate
                  log.info(f"Delegating App Launch '{target_app}' on {entity_id} to android_tv_ops")
                  return await atv_launch(entity_id, target_app, user_creds, redis_client)
+        
+        # WebOS App Launch
+        if "webostv" in integration or intent == "open_app":
+             from logic.webos_ops import launch_app as webos_launch
+             # Naive extraction again if not already done
+             if not app_name_candidate:
+                  app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
+             
+             # WebOS sources are usually case sensitive or specific names like "YouTube", "Netflix"
+             # Ideally we'd have a mapping or fuzzy search the source list, but simple pass-through is a start.
+             log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to webos_ops")
+             return await webos_launch(entity_id, app_name_candidate, user_creds, redis_client)
 
         # --- SMART CONTENT TYPE DETECTION ---
         ctype = "music" # Default

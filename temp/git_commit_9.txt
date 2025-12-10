@@ -1,0 +1,8 @@
+[timer 94feace] Fix v25.1: ADB Fallback for Android TV
+ 7 files changed, 194 insertions(+), 13 deletions(-)
+ create mode 100644 temp/atv_launch_test.txt
+ create mode 100644 temp/atv_play_test.txt
+ create mode 100644 temp/deploy_log_25.txt
+ create mode 100644 temp/git_commit_8.txt
+ create mode 100644 temp/git_push_8.txt
+ create mode 100644 temp/remote_debug_log.txt
