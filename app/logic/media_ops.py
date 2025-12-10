@@ -1234,7 +1234,7 @@ async def handle_media_command(
                      return {"status": "FAILURE", "message": "No active media players found to control.", "entity_id": "N/A", "service": "media_command"}
 
         domain = entity_id.split('.')[0]
-        return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client)
+        return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query)
 
 
     if not entity_id:
@@ -1598,8 +1598,9 @@ async def handle_media_command(
 
     return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
 
-async def _execute_transport_command(intent: str, entity_id: str, domain: str, user_creds: dict, integration: str, redis_client):
+async def _execute_transport_command(intent: str, entity_id: str, domain: str, user_creds: dict, integration: str, redis_client, query: str = ""):
     """Executes media transport command with self-healing fallback prioritizing remote control. Returns structured dict."""
+    log.info(f"[_execute_transport_command] Intent='{intent}' Entity='{entity_id}'")
 
     if intent == "stop_media":
         # Check state first to avoid 500 error on off devices

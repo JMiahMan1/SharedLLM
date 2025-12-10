@@ -1,0 +1,81 @@
+Deploying to jeremiah@192.168.2.211:/home/jeremiah/SharedLLM
+Syncing local .env to remote...
+Branch: timer
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+Activate the web console with: systemctl enable --now cockpit.socket
+
+Fetching latest code...
+From github.com:JMiahMan1/SharedLLM
+   acccd26..a5394ba  timer      -> origin/timer
+Already on 'timer'
+Your branch is behind 'origin/timer' by 1 commit, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+HEAD is now at a5394ba Update media_ops for strict music mode and live_test for dynamic discovery
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+Already up to date.
+Recreating Docker container to apply config...
+time="2025-12-10T08:39:10-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+#1 [internal] load local bake definitions
+#1 reading from stdin 509B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.15kB done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+#3 DONE 6.4s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 455B done
+#4 DONE 0.1s
+
+#5 [1/8] FROM docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime@sha256:f0ca81b440e252399d9954a45b616ee2540959466aacf3dfc3f856691eee66e8
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 6.54MB 0.1s done
+#6 DONE 0.2s
+
+#7 [2/8] WORKDIR /app
+#7 CACHED
+
+#8 [3/8] COPY requirements.txt .
+#8 CACHED
+
+#9 [4/8] RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y     curl     iputils-ping     tesseract-ocr     poppler-utils     ffmpeg     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libdrm2     libxkbcommon0     libxcomposite1     libxdamage1     libxfixes3     libxrandr2     libgbm1     libasound2     libpango-1.0-0     libcairo2     tzdata     && rm -rf /var/lib/apt/lists/*
+#9 CACHED
+
+#10 [5/8] RUN pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [6/8] RUN playwright install chromium
+#11 0.481 /bin/sh: 1: playwright: not found
+#11 ERROR: process "/bin/sh -c playwright install chromium" did not complete successfully: exit code: 127
+------
+ > [6/8] RUN playwright install chromium:
+0.481 /bin/sh: 1: playwright: not found
+------
+Dockerfile:37
+
+--------------------
+
+  35 |     
+
+  36 |     RUN pip install --no-cache-dir -r requirements.txt
+
+  37 | >>> RUN playwright install chromium
+
+  38 |     
+
+  39 |     # Copy the app and data
+
+--------------------
+
+failed to solve: process "/bin/sh -c playwright install chromium" did not complete successfully: exit code: 127
+
+Waiting for application startup...
+[OK] Application started successfully!
+
+[OK] Deployment Verification Successful.
