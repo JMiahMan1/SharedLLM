@@ -1,13 +1,47 @@
 
 import logging
-from settings import log
+import asyncio
+import requests
+from settings import log, HA_URL
 from logic.media_ops import execute_ha_service
+
+async def ensure_device_on(entity_id: str, user_creds: dict):
+    """
+    Checks if device is off/unavailable and attempts to turn it on involved commands.
+    """
+    if not entity_id:
+        return
+
+    headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
+    
+    # 1. Fetch State
+    try:
+        url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
+        # Use sync request in blocking (simplification for now, ideal to use async client)
+        # But since execute_ha_service uses requests internally via wrappers, we mimic that.
+        # Ideally we should use run_blocking but for simplicity in this module:
+        resp = requests.get(url, headers=headers, timeout=2.0)
+        if resp.status_code == 200:
+            state = resp.json().get("state")
+            if state in ["off", "unavailable"]:
+                log.info(f"[WebOS] Device {entity_id} is {state}. Attempting to Turn On...")
+                # Call Turn On
+                await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, None)
+                # Wait for boot (WebOS takes time ~5-10s, but we'll wait a bit)
+                # Maybe loop check? For now fixed wait.
+                log.info("[WebOS] Waiting 8s for device to wake...")
+                await asyncio.sleep(8)
+    except Exception as e:
+        log.warning(f"[WebOS] Failed to check state for {entity_id}: {e}")
+
 
 async def launch_app(entity_id: str, app_name: str, user_creds: dict, redis_client=None) -> dict:
     """
     Launches an app/source on WebOS TV.
     On WebOS, apps are treated as 'Sources'.
     """
+    await ensure_device_on(entity_id, user_creds)
+    
     log.info(f"[WebOS] Launching app/source '{app_name}' on {entity_id}")
     
     # We use select_source. The source name must match exactly or close enough?
@@ -25,6 +59,8 @@ async def send_notification(entity_id: str, message: str, user_creds: dict, redi
     Requires the 'notify' service corresponding to the TV.
     Usually 'notify.entity_name_slug'.
     """
+    await ensure_device_on(entity_id, user_creds)
+    
     # Derive notify service from entity_id
     # e.g. media_player.living_room_tv -> notify.living_room_tv
     
@@ -48,6 +84,8 @@ async def play_channel(entity_id: str, channel: str, user_creds: dict, redis_cli
     Switches TV channel.
     Channel can be number or name.
     """
+    await ensure_device_on(entity_id, user_creds)
+    
     log.info(f"[WebOS] Switching to channel '{channel}' on {entity_id}")
     
     return await execute_ha_service(
