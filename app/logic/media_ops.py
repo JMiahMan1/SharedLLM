@@ -478,16 +478,23 @@ async def resolve_multiple_entities_with_pattern(
     ma_players = []
     other_players = []
     
-    for entity in entities:
-         state = entity.get("state")
-         eid = entity.get("entity_id")
-         if state == "playing":
-              # Check for MA attributes
-              attrs = entity.get("attributes", {})
-              if attrs.get("app_id") == "music_assistant" or "mass_player_type" in attrs:
-                   ma_players.append(eid)
-              else:
-                   other_players.append(eid)
+    try:
+        for entity in entities:
+             state = entity.get("state")
+             eid = entity.get("entity_id")
+             if state == "playing":
+                  # Check for MA attributes
+                  attrs = entity.get("attributes") or {}
+                  if attrs.get("app_id") == "music_assistant" or "mass_player_type" in attrs:
+                       ma_players.append(eid)
+                  else:
+                       other_players.append(eid)
+    except Exception as e:
+        log.error(f"Error in scan_for_active_players: {e}")
+        # Fallback to simple scan if complex one fails
+        for entity in entities:
+            if entity.get("state") == "playing":
+                return entity.get("entity_id")
 
     # Return MA player if exists, else first other player
     if ma_players:
@@ -495,7 +502,7 @@ async def resolve_multiple_entities_with_pattern(
     if other_players:
          return other_players[0]
          
-    return []
+    return None
     
     log.info(f"[PATTERN] Detected patterns: {[p[0] for p in detected_patterns]}")
     
