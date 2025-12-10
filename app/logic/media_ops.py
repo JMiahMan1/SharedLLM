@@ -474,6 +474,29 @@ async def resolve_multiple_entities_with_pattern(
             return [(entity_id, integration)]
         return []
     
+    # Prioritize Music Assistant entities if multiple are active
+    ma_players = []
+    other_players = []
+    
+    for entity in entities:
+         state = entity.get("state")
+         eid = entity.get("entity_id")
+         if state == "playing":
+              # Check for MA attributes
+              attrs = entity.get("attributes", {})
+              if attrs.get("app_id") == "music_assistant" or "mass_player_type" in attrs:
+                   ma_players.append(eid)
+              else:
+                   other_players.append(eid)
+
+    # Return MA player if exists, else first other player
+    if ma_players:
+         return ma_players[0]
+    if other_players:
+         return other_players[0]
+         
+    return []
+    
     log.info(f"[PATTERN] Detected patterns: {[p[0] for p in detected_patterns]}")
     
     # Pattern detected - get all candidates and filter
