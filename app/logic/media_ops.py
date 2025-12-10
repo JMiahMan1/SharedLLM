@@ -441,7 +441,7 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
         "status": "FAILURE", 
         "message": f"Failed: {last_err}", 
         "entity_id": entity_id,
-        "friendly_name": entity_id.split(".")[-1].replace("_", " ").title(),
+        "friendly_name": entity_id.split(".")[-1].replace("_", " ").title() if entity_id else "System",
         "service": f"{domain}.{service}"
     }
 
