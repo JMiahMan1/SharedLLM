@@ -1,0 +1,647 @@
+Deploying to jeremiah@192.168.2.211:/home/jeremiah/SharedLLM
+Syncing local .env to remote...
+Branch: timer
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+Activate the web console with: systemctl enable --now cockpit.socket
+
+Fetching latest code...
+Your branch is up to date with 'origin/timer'.
+Already on 'timer'
+HEAD is now at 778ef7b Enhance logging in active player scanner
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+Already up to date.
+Recreating Docker container to apply config...
+time="2025-12-10T08:12:59-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+#1 [internal] load local bake definitions
+#1 reading from stdin 509B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.15kB done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+#3 DONE 0.9s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 455B done
+#4 DONE 0.1s
+
+#5 [1/8] FROM docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime@sha256:f0ca81b440e252399d9954a45b616ee2540959466aacf3dfc3f856691eee66e8
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 6.43MB 0.1s done
+#6 DONE 0.2s
+
+#7 [2/8] WORKDIR /app
+#7 CACHED
+
+#8 [3/8] COPY requirements.txt .
+#8 CACHED
+
+#9 [4/8] RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y     curl     iputils-ping     tesseract-ocr     poppler-utils     ffmpeg     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libdrm2     libxkbcommon0     libxcomposite1     libxdamage1     libxfixes3     libxrandr2     libgbm1     libasound2     libpango-1.0-0     libcairo2     tzdata     && rm -rf /var/lib/apt/lists/*
+#9 CACHED
+
+#10 [5/8] RUN pip install --no-cache-dir -r requirements.txt
+#10 0.949 Requirement already satisfied: PyYAML>=6.0.2 in /opt/conda/lib/python3.11/site-packages (from -r requirements.txt (line 2)) (6.0.3)
+#10 1.160 Collecting fastapi (from -r requirements.txt (line 3))
+#10 1.287   Downloading fastapi-0.124.2-py3-none-any.whl.metadata (30 kB)
+#10 1.307 Requirement already satisfied: requests in /opt/conda/lib/python3.11/site-packages (from -r requirements.txt (line 5)) (2.32.4)
+#10 1.350 Collecting python-dotenv (from -r requirements.txt (line 6))
+#10 1.392   Downloading python_dotenv-1.2.1-py3-none-any.whl.metadata (25 kB)
+#10 1.631 Collecting pydantic (from -r requirements.txt (line 7))
+#10 1.659   Downloading pydantic-2.12.5-py3-none-any.whl.metadata (90 kB)
+#10 1.742 Collecting python-multipart (from -r requirements.txt (line 8))
+#10 1.771   Downloading python_multipart-0.0.20-py3-none-any.whl.metadata (1.8 kB)
+#10 1.839 Collecting chromadb>=0.5.0 (from -r requirements.txt (line 11))
+#10 1.877   Downloading chromadb-1.3.6-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.2 kB)
+#10 2.005 Collecting langchain (from -r requirements.txt (line 12))
+#10 2.030   Downloading langchain-1.1.3-py3-none-any.whl.metadata (4.9 kB)
+#10 2.139 Collecting langchain-huggingface (from -r requirements.txt (line 13))
+#10 2.170   Downloading langchain_huggingface-1.1.0-py3-none-any.whl.metadata (2.8 kB)
+#10 2.269 Collecting langchain-chroma (from -r requirements.txt (line 14))
+#10 2.300   Downloading langchain_chroma-1.0.0-py3-none-any.whl.metadata (1.9 kB)
+#10 2.367 Collecting langchain-community (from -r requirements.txt (line 15))
+#10 2.397   Downloading langchain_community-0.4.1-py3-none-any.whl.metadata (3.0 kB)
+#10 2.475 Collecting transformers (from -r requirements.txt (line 16))
+#10 2.505   Downloading transformers-4.57.3-py3-none-any.whl.metadata (43 kB)
+#10 2.685 Requirement already satisfied: torch in /opt/conda/lib/python3.11/site-packages (from -r requirements.txt (line 17)) (2.9.0+cu128)
+#10 2.783 Collecting sentence-transformers (from -r requirements.txt (line 18))
+#10 2.821   Downloading sentence_transformers-5.1.2-py3-none-any.whl.metadata (16 kB)
+#10 3.070 Collecting pymupdf (from -r requirements.txt (line 19))
+#10 3.101   Downloading pymupdf-1.26.6-cp310-abi3-manylinux_2_28_x86_64.whl.metadata (3.4 kB)
+#10 3.134 Collecting python-docx (from -r requirements.txt (line 20))
+#10 3.162   Downloading python_docx-1.2.0-py3-none-any.whl.metadata (2.0 kB)
+#10 3.248 Collecting mobi (from -r requirements.txt (line 21))
+#10 3.281   Downloading mobi-0.4.1-py3-none-any.whl.metadata (4.6 kB)
+#10 3.330 Collecting html2text (from -r requirements.txt (line 22))
+#10 3.357   Downloading html2text-2025.4.15-py3-none-any.whl.metadata (4.1 kB)
+#10 3.361 Requirement already satisfied: beautifulsoup4 in /opt/conda/lib/python3.11/site-packages (from -r requirements.txt (line 23)) (4.14.2)
+#10 3.453 Collecting playwright (from -r requirements.txt (line 24))
+#10 3.486   Downloading playwright-1.57.0-py3-none-manylinux1_x86_64.whl.metadata (3.5 kB)
+#10 3.491 Requirement already satisfied: numpy in /opt/conda/lib/python3.11/site-packages (from -r requirements.txt (line 25)) (2.3.3)
+#10 3.586 Collecting openai (from -r requirements.txt (line 26))
+#10 3.612   Downloading openai-2.9.0-py3-none-any.whl.metadata (29 kB)
+#10 3.717 Collecting caldav (from -r requirements.txt (line 29))
+#10 3.749   Downloading caldav-2.2.3-py2.py3-none-any.whl.metadata (2.4 kB)
+#10 3.846 Collecting vobject (from -r requirements.txt (line 30))
+#10 3.875   Downloading vobject-0.9.9-py2.py3-none-any.whl.metadata (1.8 kB)
+#10 3.978 Collecting icalendar (from -r requirements.txt (line 31))
+#10 4.007   Downloading icalendar-6.3.2-py3-none-any.whl.metadata (9.0 kB)
+#10 4.078 Collecting redis (from -r requirements.txt (line 32))
+#10 4.103   Downloading redis-7.1.0-py3-none-any.whl.metadata (12 kB)
+#10 4.149 Collecting dateparser (from -r requirements.txt (line 33))
+#10 4.218   Downloading dateparser-1.2.2-py3-none-any.whl.metadata (29 kB)
+#10 4.272 Collecting python-dateutil (from -r requirements.txt (line 34))
+#10 4.311   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+#10 4.573 Collecting lxml (from -r requirements.txt (line 37))
+#10 4.600   Downloading lxml-6.0.2-cp311-cp311-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (3.6 kB)
+#10 4.652 Collecting openpyxl (from -r requirements.txt (line 38))
+#10 4.681   Downloading openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)
+#10 4.974 Collecting cryptography (from -r requirements.txt (line 39))
+#10 5.005   Downloading cryptography-46.0.3-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (5.7 kB)
+#10 5.049 Collecting parsedatetime (from -r requirements.txt (line 40))
+#10 5.077   Downloading parsedatetime-2.6-py3-none-any.whl.metadata (4.7 kB)
+#10 5.170 Collecting word2number (from -r requirements.txt (line 41))
+#10 5.203   Downloading word2number-1.1.zip (9.7 kB)
+#10 5.213   Preparing metadata (setup.py): started
+#10 5.437   Preparing metadata (setup.py): finished with status 'done'
+#10 5.604 Collecting pandas (from -r requirements.txt (line 42))
+#10 5.630   Downloading pandas-2.3.3-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (91 kB)
+#10 5.738 Collecting uvicorn[standard] (from -r requirements.txt (line 4))
+#10 5.764   Downloading uvicorn-0.38.0-py3-none-any.whl.metadata (6.8 kB)
+#10 5.844 Collecting starlette<0.51.0,>=0.40.0 (from fastapi->-r requirements.txt (line 3))
+#10 5.879   Downloading starlette-0.50.0-py3-none-any.whl.metadata (6.3 kB)
+#10 5.940 Requirement already satisfied: typing-extensions>=4.8.0 in /opt/conda/lib/python3.11/site-packages (from fastapi->-r requirements.txt (line 3)) (4.15.0)
+#10 5.971 Collecting annotated-doc>=0.0.2 (from fastapi->-r requirements.txt (line 3))
+#10 6.001   Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+#10 6.039 Collecting annotated-types>=0.6.0 (from pydantic->-r requirements.txt (line 7))
+#10 6.068   Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+#10 7.030 Collecting pydantic-core==2.41.5 (from pydantic->-r requirements.txt (line 7))
+#10 7.065   Downloading pydantic_core-2.41.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+#10 7.101 Collecting typing-inspection>=0.4.2 (from pydantic->-r requirements.txt (line 7))
+#10 7.129   Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+#10 7.188 Collecting anyio<5,>=3.6.2 (from starlette<0.51.0,>=0.40.0->fastapi->-r requirements.txt (line 3))
+#10 7.215   Downloading anyio-4.12.0-py3-none-any.whl.metadata (4.3 kB)
+#10 7.222 Requirement already satisfied: idna>=2.8 in /opt/conda/lib/python3.11/site-packages (from anyio<5,>=3.6.2->starlette<0.51.0,>=0.40.0->fastapi->-r requirements.txt (line 3)) (3.10)
+#10 7.224 Requirement already satisfied: click>=7.0 in /opt/conda/lib/python3.11/site-packages (from uvicorn[standard]->-r requirements.txt (line 4)) (8.3.0)
+#10 7.258 Collecting h11>=0.8 (from uvicorn[standard]->-r requirements.txt (line 4))
+#10 7.283   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+#10 7.353 Collecting httptools>=0.6.3 (from uvicorn[standard]->-r requirements.txt (line 4))
+#10 7.381   Downloading httptools-0.7.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (3.5 kB)
+#10 7.463 Collecting uvloop>=0.15.1 (from uvicorn[standard]->-r requirements.txt (line 4))
+#10 7.498   Downloading uvloop-0.22.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (4.9 kB)
+#10 7.620 Collecting watchfiles>=0.13 (from uvicorn[standard]->-r requirements.txt (line 4))
+#10 7.646   Downloading watchfiles-1.1.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+#10 7.785 Collecting websockets>=10.4 (from uvicorn[standard]->-r requirements.txt (line 4))
+#10 7.823   Downloading websockets-15.0.1-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.8 kB)
+#10 7.871 Requirement already satisfied: charset_normalizer<4,>=2 in /opt/conda/lib/python3.11/site-packages (from requests->-r requirements.txt (line 5)) (3.4.2)
+#10 7.873 Requirement already satisfied: urllib3<3,>=1.21.1 in /opt/conda/lib/python3.11/site-packages (from requests->-r requirements.txt (line 5)) (2.5.0)
+#10 7.874 Requirement already satisfied: certifi>=2017.4.17 in /opt/conda/lib/python3.11/site-packages (from requests->-r requirements.txt (line 5)) (2025.10.5)
+#10 7.916 Requirement already satisfied: build>=1.0.3 in /opt/conda/lib/python3.11/site-packages (from chromadb>=0.5.0->-r requirements.txt (line 11)) (1.3.0)
+#10 8.122 Collecting pybase64>=1.4.1 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 8.151   Downloading pybase64-1.4.3-cp311-cp311-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl.metadata (8.7 kB)
+#10 8.221 Collecting posthog<6.0.0,>=2.4.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 8.255   Downloading posthog-5.4.0-py3-none-any.whl.metadata (5.7 kB)
+#10 8.417 Collecting onnxruntime>=1.14.1 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 8.446   Downloading onnxruntime-1.23.2-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (5.1 kB)
+#10 8.501 Collecting opentelemetry-api>=1.2.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 8.531   Downloading opentelemetry_api-1.39.0-py3-none-any.whl.metadata (1.5 kB)
+#10 8.585 Collecting opentelemetry-exporter-otlp-proto-grpc>=1.2.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 8.617   Downloading opentelemetry_exporter_otlp_proto_grpc-1.39.0-py3-none-any.whl.metadata (2.5 kB)
+#10 8.670 Collecting opentelemetry-sdk>=1.2.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 8.697   Downloading opentelemetry_sdk-1.39.0-py3-none-any.whl.metadata (1.5 kB)
+#10 8.924 Collecting tokenizers>=0.13.2 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 8.950   Downloading tokenizers-0.22.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.8 kB)
+#10 9.003 Collecting pypika>=0.48.9 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 9.030   Downloading PyPika-0.48.9.tar.gz (67 kB)
+#10 9.061   Installing build dependencies: started
+#10 10.45   Installing build dependencies: finished with status 'done'
+#10 10.45   Getting requirements to build wheel: started
+#10 10.72   Getting requirements to build wheel: finished with status 'done'
+#10 10.72   Preparing metadata (pyproject.toml): started
+#10 10.88   Preparing metadata (pyproject.toml): finished with status 'done'
+#10 10.88 Requirement already satisfied: tqdm>=4.65.0 in /opt/conda/lib/python3.11/site-packages (from chromadb>=0.5.0->-r requirements.txt (line 11)) (4.67.1)
+#10 10.93 Collecting overrides>=7.3.1 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 10.96   Downloading overrides-7.7.0-py3-none-any.whl.metadata (5.8 kB)
+#10 11.02 Collecting importlib-resources (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 11.04   Downloading importlib_resources-6.5.2-py3-none-any.whl.metadata (3.9 kB)
+#10 11.78 Collecting grpcio>=1.58.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 11.80   Downloading grpcio-1.76.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (3.7 kB)
+#10 11.89 Collecting bcrypt>=4.0.1 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 11.92   Downloading bcrypt-5.0.0-cp39-abi3-manylinux_2_34_x86_64.whl.metadata (10 kB)
+#10 11.97 Collecting typer>=0.9.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 12.00   Downloading typer-0.20.0-py3-none-any.whl.metadata (16 kB)
+#10 12.06 Collecting kubernetes>=28.1.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 12.09   Downloading kubernetes-34.1.0-py2.py3-none-any.whl.metadata (1.7 kB)
+#10 12.14 Collecting tenacity>=8.2.3 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 12.16   Downloading tenacity-9.1.2-py3-none-any.whl.metadata (1.2 kB)
+#10 12.24 Collecting mmh3>=4.0.1 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 12.27   Downloading mmh3-5.2.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (14 kB)
+#10 12.61 Collecting orjson>=3.9.12 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 12.64   Downloading orjson-3.11.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (41 kB)
+#10 12.71 Collecting httpx>=0.27.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 12.74   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+#10 12.82 Collecting rich>=10.11.0 (from chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 12.84   Downloading rich-14.2.0-py3-none-any.whl.metadata (18 kB)
+#10 12.85 Requirement already satisfied: jsonschema>=4.19.0 in /opt/conda/lib/python3.11/site-packages (from chromadb>=0.5.0->-r requirements.txt (line 11)) (4.25.1)
+#10 12.85 Requirement already satisfied: six>=1.5 in /opt/conda/lib/python3.11/site-packages (from posthog<6.0.0,>=2.4.0->chromadb>=0.5.0->-r requirements.txt (line 11)) (1.17.0)
+#10 12.89 Collecting backoff>=1.10.0 (from posthog<6.0.0,>=2.4.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 12.93   Downloading backoff-2.2.1-py3-none-any.whl.metadata (14 kB)
+#10 12.93 Requirement already satisfied: distro>=1.5.0 in /opt/conda/lib/python3.11/site-packages (from posthog<6.0.0,>=2.4.0->chromadb>=0.5.0->-r requirements.txt (line 11)) (1.9.0)
+#10 13.01 Collecting langchain-core<2.0.0,>=1.1.2 (from langchain->-r requirements.txt (line 12))
+#10 13.04   Downloading langchain_core-1.1.3-py3-none-any.whl.metadata (3.7 kB)
+#10 13.11 Collecting langgraph<1.1.0,>=1.0.2 (from langchain->-r requirements.txt (line 12))
+#10 13.14   Downloading langgraph-1.0.4-py3-none-any.whl.metadata (7.8 kB)
+#10 13.18 Requirement already satisfied: jsonpatch<2.0.0,>=1.33.0 in /opt/conda/lib/python3.11/site-packages (from langchain-core<2.0.0,>=1.1.2->langchain->-r requirements.txt (line 12)) (1.33)
+#10 13.29 Collecting langsmith<1.0.0,>=0.3.45 (from langchain-core<2.0.0,>=1.1.2->langchain->-r requirements.txt (line 12))
+#10 13.32   Downloading langsmith-0.4.58-py3-none-any.whl.metadata (15 kB)
+#10 13.33 Requirement already satisfied: packaging<26.0.0,>=23.2.0 in /opt/conda/lib/python3.11/site-packages (from langchain-core<2.0.0,>=1.1.2->langchain->-r requirements.txt (line 12)) (25.0)
+#10 13.52 Collecting uuid-utils<1.0,>=0.12.0 (from langchain-core<2.0.0,>=1.1.2->langchain->-r requirements.txt (line 12))
+#10 13.55   Downloading uuid_utils-0.12.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.1 kB)
+#10 13.55 Requirement already satisfied: jsonpointer>=1.9 in /opt/conda/lib/python3.11/site-packages (from jsonpatch<2.0.0,>=1.33.0->langchain-core<2.0.0,>=1.1.2->langchain->-r requirements.txt (line 12)) (3.0.0)
+#10 13.61 Collecting langgraph-checkpoint<4.0.0,>=2.1.0 (from langgraph<1.1.0,>=1.0.2->langchain->-r requirements.txt (line 12))
+#10 13.63   Downloading langgraph_checkpoint-3.0.1-py3-none-any.whl.metadata (4.7 kB)
+#10 13.68 Collecting langgraph-prebuilt<1.1.0,>=1.0.2 (from langgraph<1.1.0,>=1.0.2->langchain->-r requirements.txt (line 12))
+#10 13.72   Downloading langgraph_prebuilt-1.0.5-py3-none-any.whl.metadata (5.2 kB)
+#10 13.77 Collecting langgraph-sdk<0.3.0,>=0.2.2 (from langgraph<1.1.0,>=1.0.2->langchain->-r requirements.txt (line 12))
+#10 13.80   Downloading langgraph_sdk-0.2.15-py3-none-any.whl.metadata (1.6 kB)
+#10 13.94 Collecting xxhash>=3.5.0 (from langgraph<1.1.0,>=1.0.2->langchain->-r requirements.txt (line 12))
+#10 13.97   Downloading xxhash-3.6.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+#10 14.07 Collecting ormsgpack>=1.12.0 (from langgraph-checkpoint<4.0.0,>=2.1.0->langgraph<1.1.0,>=1.0.2->langchain->-r requirements.txt (line 12))
+#10 14.10   Downloading ormsgpack-1.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.2 kB)
+#10 14.21 Collecting requests-toolbelt>=1.0.0 (from langsmith<1.0.0,>=0.3.45->langchain-core<2.0.0,>=1.1.2->langchain->-r requirements.txt (line 12))
+#10 14.24   Downloading requests_toolbelt-1.0.0-py2.py3-none-any.whl.metadata (14 kB)
+#10 14.24 Requirement already satisfied: zstandard>=0.23.0 in /opt/conda/lib/python3.11/site-packages (from langsmith<1.0.0,>=0.3.45->langchain-core<2.0.0,>=1.1.2->langchain->-r requirements.txt (line 12)) (0.25.0)
+#10 14.29 Collecting httpcore==1.* (from httpx>=0.27.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 14.32   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+#10 14.41 Collecting huggingface-hub<1.0.0,>=0.33.4 (from langchain-huggingface->-r requirements.txt (line 13))
+#10 14.44   Downloading huggingface_hub-0.36.0-py3-none-any.whl.metadata (14 kB)
+#10 14.48 Requirement already satisfied: filelock in /opt/conda/lib/python3.11/site-packages (from huggingface-hub<1.0.0,>=0.33.4->langchain-huggingface->-r requirements.txt (line 13)) (3.20.0)
+#10 14.48 Requirement already satisfied: fsspec>=2023.5.0 in /opt/conda/lib/python3.11/site-packages (from huggingface-hub<1.0.0,>=0.33.4->langchain-huggingface->-r requirements.txt (line 13)) (2025.9.0)
+#10 14.55 Collecting hf-xet<2.0.0,>=1.1.3 (from huggingface-hub<1.0.0,>=0.33.4->langchain-huggingface->-r requirements.txt (line 13))
+#10 14.58   Downloading hf_xet-1.2.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+#10 14.64 Collecting langchain-classic<2.0.0,>=1.0.0 (from langchain-community->-r requirements.txt (line 15))
+#10 14.67   Downloading langchain_classic-1.0.0-py3-none-any.whl.metadata (3.9 kB)
+#10 15.05 Collecting SQLAlchemy<3.0.0,>=1.4.0 (from langchain-community->-r requirements.txt (line 15))
+#10 15.08   Downloading sqlalchemy-2.0.45-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.5 kB)
+#10 15.15 Collecting requests (from -r requirements.txt (line 5))
+#10 15.17   Downloading requests-2.32.5-py3-none-any.whl.metadata (4.9 kB)
+#10 15.94 Collecting aiohttp<4.0.0,>=3.8.3 (from langchain-community->-r requirements.txt (line 15))
+#10 15.97   Downloading aiohttp-3.13.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+#10 16.03 Collecting dataclasses-json<0.7.0,>=0.6.7 (from langchain-community->-r requirements.txt (line 15))
+#10 16.06   Downloading dataclasses_json-0.6.7-py3-none-any.whl.metadata (25 kB)
+#10 16.11 Collecting pydantic-settings<3.0.0,>=2.10.1 (from langchain-community->-r requirements.txt (line 15))
+#10 16.14   Downloading pydantic_settings-2.12.0-py3-none-any.whl.metadata (3.4 kB)
+#10 16.21 Collecting httpx-sse<1.0.0,>=0.4.0 (from langchain-community->-r requirements.txt (line 15))
+#10 16.24   Downloading httpx_sse-0.4.3-py3-none-any.whl.metadata (9.7 kB)
+#10 16.30 Collecting aiohappyeyeballs>=2.5.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community->-r requirements.txt (line 15))
+#10 16.33   Downloading aiohappyeyeballs-2.6.1-py3-none-any.whl.metadata (5.9 kB)
+#10 16.37 Collecting aiosignal>=1.4.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community->-r requirements.txt (line 15))
+#10 16.40   Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+#10 16.40 Requirement already satisfied: attrs>=17.3.0 in /opt/conda/lib/python3.11/site-packages (from aiohttp<4.0.0,>=3.8.3->langchain-community->-r requirements.txt (line 15)) (25.4.0)
+#10 16.51 Collecting frozenlist>=1.1.1 (from aiohttp<4.0.0,>=3.8.3->langchain-community->-r requirements.txt (line 15))
+#10 16.54   Downloading frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+#10 16.87 Collecting multidict<7.0,>=4.5 (from aiohttp<4.0.0,>=3.8.3->langchain-community->-r requirements.txt (line 15))
+#10 16.90   Downloading multidict-6.7.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+#10 17.00 Collecting propcache>=0.2.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community->-r requirements.txt (line 15))
+#10 17.02   Downloading propcache-0.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+#10 17.37 Collecting yarl<2.0,>=1.17.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community->-r requirements.txt (line 15))
+#10 17.40   Downloading yarl-1.22.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (75 kB)
+#10 17.50 Collecting marshmallow<4.0.0,>=3.18.0 (from dataclasses-json<0.7.0,>=0.6.7->langchain-community->-r requirements.txt (line 15))
+#10 17.53   Downloading marshmallow-3.26.1-py3-none-any.whl.metadata (7.3 kB)
+#10 17.57 Collecting typing-inspect<1,>=0.4.0 (from dataclasses-json<0.7.0,>=0.6.7->langchain-community->-r requirements.txt (line 15))
+#10 17.60   Downloading typing_inspect-0.9.0-py3-none-any.whl.metadata (1.5 kB)
+#10 17.66 Collecting langchain-text-splitters<2.0.0,>=1.0.0 (from langchain-classic<2.0.0,>=1.0.0->langchain-community->-r requirements.txt (line 15))
+#10 17.69   Downloading langchain_text_splitters-1.0.0-py3-none-any.whl.metadata (2.6 kB)
+#10 17.95 Collecting greenlet>=1 (from SQLAlchemy<3.0.0,>=1.4.0->langchain-community->-r requirements.txt (line 15))
+#10 17.98   Downloading greenlet-3.3.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (4.1 kB)
+#10 18.02 Collecting mypy-extensions>=0.3.0 (from typing-inspect<1,>=0.4.0->dataclasses-json<0.7.0,>=0.6.7->langchain-community->-r requirements.txt (line 15))
+#10 18.05   Downloading mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+#10 18.69 Collecting regex!=2019.12.17 (from transformers->-r requirements.txt (line 16))
+#10 18.72   Downloading regex-2025.11.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+#10 18.91 Collecting safetensors>=0.4.3 (from transformers->-r requirements.txt (line 16))
+#10 18.94   Downloading safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+#10 18.95 Requirement already satisfied: sympy>=1.13.3 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (1.14.0)
+#10 18.95 Requirement already satisfied: networkx>=2.5.1 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (3.5)
+#10 18.95 Requirement already satisfied: jinja2 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (3.1.6)
+#10 18.96 Requirement already satisfied: nvidia-cuda-nvrtc-cu12==12.8.93 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (12.8.93)
+#10 18.96 Requirement already satisfied: nvidia-cuda-runtime-cu12==12.8.90 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (12.8.90)
+#10 18.96 Requirement already satisfied: nvidia-cuda-cupti-cu12==12.8.90 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (12.8.90)
+#10 18.96 Requirement already satisfied: nvidia-cudnn-cu12==9.10.2.21 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (9.10.2.21)
+#10 18.96 Requirement already satisfied: nvidia-cublas-cu12==12.8.4.1 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (12.8.4.1)
+#10 18.96 Requirement already satisfied: nvidia-cufft-cu12==11.3.3.83 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (11.3.3.83)
+#10 18.96 Requirement already satisfied: nvidia-curand-cu12==10.3.9.90 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (10.3.9.90)
+#10 18.96 Requirement already satisfied: nvidia-cusolver-cu12==11.7.3.90 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (11.7.3.90)
+#10 18.96 Requirement already satisfied: nvidia-cusparse-cu12==12.5.8.93 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (12.5.8.93)
+#10 18.96 Requirement already satisfied: nvidia-cusparselt-cu12==0.7.1 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (0.7.1)
+#10 18.96 Requirement already satisfied: nvidia-nccl-cu12==2.27.5 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (2.27.5)
+#10 18.96 Requirement already satisfied: nvidia-nvshmem-cu12==3.3.20 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (3.3.20)
+#10 18.96 Requirement already satisfied: nvidia-nvtx-cu12==12.8.90 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (12.8.90)
+#10 18.97 Requirement already satisfied: nvidia-nvjitlink-cu12==12.8.93 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (12.8.93)
+#10 18.97 Requirement already satisfied: nvidia-cufile-cu12==1.13.1.3 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (1.13.1.3)
+#10 18.97 Requirement already satisfied: triton==3.5.0 in /opt/conda/lib/python3.11/site-packages (from torch->-r requirements.txt (line 17)) (3.5.0)
+#10 19.15 Collecting scikit-learn (from sentence-transformers->-r requirements.txt (line 18))
+#10 19.18   Downloading scikit_learn-1.8.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (11 kB)
+#10 19.38 Collecting scipy (from sentence-transformers->-r requirements.txt (line 18))
+#10 19.41   Downloading scipy-1.16.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (62 kB)
+#10 19.47 Requirement already satisfied: Pillow in /opt/conda/lib/python3.11/site-packages (from sentence-transformers->-r requirements.txt (line 18)) (11.3.0)
+#10 19.52 Collecting loguru>=0.6 (from mobi->-r requirements.txt (line 21))
+#10 19.55   Downloading loguru-0.7.3-py3-none-any.whl.metadata (22 kB)
+#10 19.65 Collecting standard-imghdr>=3.13.0 (from mobi->-r requirements.txt (line 21))
+#10 19.73   Downloading standard_imghdr-3.13.0-py3-none-any.whl.metadata (862 bytes)
+#10 19.74 Requirement already satisfied: soupsieve>1.2 in /opt/conda/lib/python3.11/site-packages (from beautifulsoup4->-r requirements.txt (line 23)) (2.8)
+#10 19.79 Collecting pyee<14,>=13 (from playwright->-r requirements.txt (line 24))
+#10 19.82   Downloading pyee-13.0.0-py3-none-any.whl.metadata (2.9 kB)
+#10 19.97 Collecting jiter<1,>=0.10.0 (from openai->-r requirements.txt (line 26))
+#10 20.00   Downloading jiter-0.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+#10 20.04 Collecting sniffio (from openai->-r requirements.txt (line 26))
+#10 20.07   Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+#10 20.08 Requirement already satisfied: dnspython in /opt/conda/lib/python3.11/site-packages (from caldav->-r requirements.txt (line 29)) (2.8.0)
+#10 20.18 Collecting icalendar-searcher<2,>=1.0.0 (from caldav->-r requirements.txt (line 29))
+#10 20.22   Downloading icalendar_searcher-1.0.3-py3-none-any.whl.metadata (8.9 kB)
+#10 20.33 Collecting niquests (from caldav->-r requirements.txt (line 29))
+#10 20.42   Downloading niquests-3.15.2-py3-none-any.whl.metadata (16 kB)
+#10 20.52 Collecting recurring-ical-events>=2.0.0 (from caldav->-r requirements.txt (line 29))
+#10 20.55   Downloading recurring_ical_events-3.8.0-py3-none-any.whl.metadata (4.5 kB)
+#10 20.57 Requirement already satisfied: pytz in /opt/conda/lib/python3.11/site-packages (from vobject->-r requirements.txt (line 30)) (2025.2)
+#10 20.62 Collecting tzdata (from icalendar->-r requirements.txt (line 31))
+#10 20.65   Downloading tzdata-2025.2-py2.py3-none-any.whl.metadata (1.4 kB)
+#10 20.71 Collecting tzlocal>=0.2 (from dateparser->-r requirements.txt (line 33))
+#10 20.74   Downloading tzlocal-5.3.1-py3-none-any.whl.metadata (7.6 kB)
+#10 20.84 Collecting et-xmlfile (from openpyxl->-r requirements.txt (line 38))
+#10 20.86   Downloading et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)
+#10 20.87 Requirement already satisfied: cffi>=2.0.0 in /opt/conda/lib/python3.11/site-packages (from cryptography->-r requirements.txt (line 39)) (2.0.0)
+#10 20.91 Requirement already satisfied: pyproject_hooks in /opt/conda/lib/python3.11/site-packages (from build>=1.0.3->chromadb>=0.5.0->-r requirements.txt (line 11)) (1.2.0)
+#10 20.91 Requirement already satisfied: pycparser in /opt/conda/lib/python3.11/site-packages (from cffi>=2.0.0->cryptography->-r requirements.txt (line 39)) (2.22)
+#10 20.94 Requirement already satisfied: jsonschema-specifications>=2023.03.6 in /opt/conda/lib/python3.11/site-packages (from jsonschema>=4.19.0->chromadb>=0.5.0->-r requirements.txt (line 11)) (2025.9.1)
+#10 20.94 Requirement already satisfied: referencing>=0.28.4 in /opt/conda/lib/python3.11/site-packages (from jsonschema>=4.19.0->chromadb>=0.5.0->-r requirements.txt (line 11)) (0.37.0)
+#10 20.94 Requirement already satisfied: rpds-py>=0.7.1 in /opt/conda/lib/python3.11/site-packages (from jsonschema>=4.19.0->chromadb>=0.5.0->-r requirements.txt (line 11)) (0.27.1)
+#10 21.02 Collecting google-auth>=1.0.1 (from kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.05   Downloading google_auth-2.43.0-py2.py3-none-any.whl.metadata (6.6 kB)
+#10 21.12 Collecting websocket-client!=0.40.0,!=0.41.*,!=0.42.*,>=0.32.0 (from kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.15   Downloading websocket_client-1.9.0-py3-none-any.whl.metadata (8.3 kB)
+#10 21.20 Collecting requests-oauthlib (from kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.23   Downloading requests_oauthlib-2.0.0-py2.py3-none-any.whl.metadata (11 kB)
+#10 21.29 Collecting urllib3<3,>=1.21.1 (from requests->-r requirements.txt (line 5))
+#10 21.32   Downloading urllib3-2.3.0-py3-none-any.whl.metadata (6.5 kB)
+#10 21.36 Collecting durationpy>=0.7 (from kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.39   Downloading durationpy-0.10-py3-none-any.whl.metadata (340 bytes)
+#10 21.45 Collecting cachetools<7.0,>=2.0.0 (from google-auth>=1.0.1->kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.48   Downloading cachetools-6.2.2-py3-none-any.whl.metadata (5.6 kB)
+#10 21.53 Collecting pyasn1-modules>=0.2.1 (from google-auth>=1.0.1->kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.56   Downloading pyasn1_modules-0.4.2-py3-none-any.whl.metadata (3.5 kB)
+#10 21.60 Collecting rsa<5,>=3.1.4 (from google-auth>=1.0.1->kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.63   Downloading rsa-4.9.1-py3-none-any.whl.metadata (5.6 kB)
+#10 21.69 Collecting pyasn1>=0.1.3 (from rsa<5,>=3.1.4->google-auth>=1.0.1->kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.72   Downloading pyasn1-0.6.1-py3-none-any.whl.metadata (8.4 kB)
+#10 21.79 Collecting coloredlogs (from onnxruntime>=1.14.1->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.83   Downloading coloredlogs-15.0.1-py2.py3-none-any.whl.metadata (12 kB)
+#10 21.88 Collecting flatbuffers (from onnxruntime>=1.14.1->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 21.92   Downloading flatbuffers-25.9.23-py2.py3-none-any.whl.metadata (875 bytes)
+#10 22.15 Collecting protobuf (from onnxruntime>=1.14.1->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 22.18   Downloading protobuf-6.33.2-cp39-abi3-manylinux2014_x86_64.whl.metadata (593 bytes)
+#10 22.25 Collecting importlib-metadata<8.8.0,>=6.0 (from opentelemetry-api>=1.2.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 22.28   Downloading importlib_metadata-8.7.0-py3-none-any.whl.metadata (4.8 kB)
+#10 22.33 Collecting zipp>=3.20 (from importlib-metadata<8.8.0,>=6.0->opentelemetry-api>=1.2.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 22.37   Downloading zipp-3.23.0-py3-none-any.whl.metadata (3.6 kB)
+#10 22.42 Collecting googleapis-common-protos~=1.57 (from opentelemetry-exporter-otlp-proto-grpc>=1.2.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 22.45   Downloading googleapis_common_protos-1.72.0-py3-none-any.whl.metadata (9.4 kB)
+#10 22.52 Collecting opentelemetry-exporter-otlp-proto-common==1.39.0 (from opentelemetry-exporter-otlp-proto-grpc>=1.2.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 22.55   Downloading opentelemetry_exporter_otlp_proto_common-1.39.0-py3-none-any.whl.metadata (1.8 kB)
+#10 22.60 Collecting opentelemetry-proto==1.39.0 (from opentelemetry-exporter-otlp-proto-grpc>=1.2.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 22.63   Downloading opentelemetry_proto-1.39.0-py3-none-any.whl.metadata (2.3 kB)
+#10 22.75 Collecting opentelemetry-semantic-conventions==0.60b0 (from opentelemetry-sdk>=1.2.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 22.78   Downloading opentelemetry_semantic_conventions-0.60b0-py3-none-any.whl.metadata (2.4 kB)
+#10 22.92 Collecting x-wr-timezone<3.0.0,>=1.0.0 (from recurring-ical-events>=2.0.0->caldav->-r requirements.txt (line 29))
+#10 22.95   Downloading x_wr_timezone-2.0.1-py3-none-any.whl.metadata (10 kB)
+#10 23.02 Collecting markdown-it-py>=2.2.0 (from rich>=10.11.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 23.05   Downloading markdown_it_py-4.0.0-py3-none-any.whl.metadata (7.3 kB)
+#10 23.06 Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /opt/conda/lib/python3.11/site-packages (from rich>=10.11.0->chromadb>=0.5.0->-r requirements.txt (line 11)) (2.19.2)
+#10 23.10 Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=10.11.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 23.13   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+#10 23.16 Requirement already satisfied: mpmath<1.4,>=1.1.0 in /opt/conda/lib/python3.11/site-packages (from sympy>=1.13.3->torch->-r requirements.txt (line 17)) (1.3.0)
+#10 23.20 Collecting shellingham>=1.3.0 (from typer>=0.9.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 23.23   Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+#10 23.34 Collecting humanfriendly>=9.1 (from coloredlogs->onnxruntime>=1.14.1->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 23.36   Downloading humanfriendly-10.0-py2.py3-none-any.whl.metadata (9.2 kB)
+#10 23.40 Requirement already satisfied: MarkupSafe>=2.0 in /opt/conda/lib/python3.11/site-packages (from jinja2->torch->-r requirements.txt (line 17)) (3.0.3)
+#10 23.51 Collecting urllib3-future<3,>=2.13.903 (from niquests->caldav->-r requirements.txt (line 29))
+#10 23.55   Downloading urllib3_future-2.14.908-py3-none-any.whl.metadata (16 kB)
+#10 23.71 Collecting wassima<3,>=1.0.1 (from niquests->caldav->-r requirements.txt (line 29))
+#10 23.73   Downloading wassima-2.0.2-py3-none-any.whl.metadata (3.7 kB)
+#10 23.89 Collecting jh2<6.0.0,>=5.0.3 (from urllib3-future<3,>=2.13.903->niquests->caldav->-r requirements.txt (line 29))
+#10 23.92   Downloading jh2-5.0.10-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.0 kB)
+#10 24.33 Collecting qh3<2.0.0,>=1.5.4 (from urllib3-future<3,>=2.13.903->niquests->caldav->-r requirements.txt (line 29))
+#10 24.35   Downloading qh3-1.5.6-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.8 kB)
+#10 24.42 Collecting oauthlib>=3.0.0 (from requests-oauthlib->kubernetes>=28.1.0->chromadb>=0.5.0->-r requirements.txt (line 11))
+#10 24.45   Downloading oauthlib-3.3.1-py3-none-any.whl.metadata (7.9 kB)
+#10 24.52 Collecting joblib>=1.3.0 (from scikit-learn->sentence-transformers->-r requirements.txt (line 18))
+#10 24.55   Downloading joblib-1.5.2-py3-none-any.whl.metadata (5.6 kB)
+#10 24.59 Collecting threadpoolctl>=3.2.0 (from scikit-learn->sentence-transformers->-r requirements.txt (line 18))
+#10 24.62   Downloading threadpoolctl-3.6.0-py3-none-any.whl.metadata (13 kB)
+#10 24.68 Downloading fastapi-0.124.2-py3-none-any.whl (112 kB)
+#10 24.74 Downloading pydantic-2.12.5-py3-none-any.whl (463 kB)
+#10 24.89 Downloading pydantic_core-2.41.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+#10 25.30    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 5.3 MB/s eta 0:00:00
+#10 25.33 Downloading starlette-0.50.0-py3-none-any.whl (74 kB)
+#10 25.37 Downloading anyio-4.12.0-py3-none-any.whl (113 kB)
+#10 25.42 Downloading uvicorn-0.38.0-py3-none-any.whl (68 kB)
+#10 25.46 Downloading python_dotenv-1.2.1-py3-none-any.whl (21 kB)
+#10 25.50 Downloading python_multipart-0.0.20-py3-none-any.whl (24 kB)
+#10 25.54 Downloading chromadb-1.3.6-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (21.6 MB)
+#10 29.14    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 21.6/21.6 MB 6.0 MB/s eta 0:00:00
+#10 29.18 Downloading posthog-5.4.0-py3-none-any.whl (105 kB)
+#10 29.23 Downloading langchain-1.1.3-py3-none-any.whl (102 kB)
+#10 29.30 Downloading langchain_core-1.1.3-py3-none-any.whl (475 kB)
+#10 29.42 Downloading langgraph-1.0.4-py3-none-any.whl (157 kB)
+#10 29.49 Downloading langgraph_checkpoint-3.0.1-py3-none-any.whl (46 kB)
+#10 29.52 Downloading langgraph_prebuilt-1.0.5-py3-none-any.whl (35 kB)
+#10 29.56 Downloading langgraph_sdk-0.2.15-py3-none-any.whl (66 kB)
+#10 29.60 Downloading langsmith-0.4.58-py3-none-any.whl (412 kB)
+#10 29.71 Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+#10 29.76 Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+#10 29.80 Downloading tenacity-9.1.2-py3-none-any.whl (28 kB)
+#10 29.83 Downloading uuid_utils-0.12.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (343 kB)
+#10 29.91 Downloading langchain_huggingface-1.1.0-py3-none-any.whl (29 kB)
+#10 29.95 Downloading huggingface_hub-0.36.0-py3-none-any.whl (566 kB)
+#10 30.03    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 566.1/566.1 kB 7.4 MB/s eta 0:00:00
+#10 30.07 Downloading hf_xet-1.2.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+#10 30.60    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 6.3 MB/s eta 0:00:00
+#10 30.76 Downloading tokenizers-0.22.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+#10 31.30    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 6.1 MB/s eta 0:00:00
+#10 31.33 Downloading langchain_chroma-1.0.0-py3-none-any.whl (12 kB)
+#10 31.38 Downloading langchain_community-0.4.1-py3-none-any.whl (2.5 MB)
+#10 31.79    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.5/2.5 MB 6.1 MB/s eta 0:00:00
+#10 31.82 Downloading requests-2.32.5-py3-none-any.whl (64 kB)
+#10 31.86 Downloading aiohttp-3.13.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+#10 32.14    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 6.9 MB/s eta 0:00:00
+#10 32.17 Downloading dataclasses_json-0.6.7-py3-none-any.whl (28 kB)
+#10 32.19 Downloading httpx_sse-0.4.3-py3-none-any.whl (9.0 kB)
+#10 32.23 Downloading langchain_classic-1.0.0-py3-none-any.whl (1.0 MB)
+#10 32.38    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 MB 6.6 MB/s eta 0:00:00
+#10 32.41 Downloading langchain_text_splitters-1.0.0-py3-none-any.whl (33 kB)
+#10 32.45 Downloading marshmallow-3.26.1-py3-none-any.whl (50 kB)
+#10 32.48 Downloading multidict-6.7.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (246 kB)
+#10 32.55 Downloading pydantic_settings-2.12.0-py3-none-any.whl (51 kB)
+#10 32.58 Downloading sqlalchemy-2.0.45-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.3 MB)
+#10 33.10    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 6.7 MB/s eta 0:00:00
+#10 33.13 Downloading typing_inspect-0.9.0-py3-none-any.whl (8.8 kB)
+#10 33.16 Downloading yarl-1.22.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (365 kB)
+#10 33.24 Downloading transformers-4.57.3-py3-none-any.whl (12.0 MB)
+#10 35.24    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.0/12.0 MB 6.0 MB/s eta 0:00:00
+#10 35.27 Downloading sentence_transformers-5.1.2-py3-none-any.whl (488 kB)
+#10 35.39 Downloading pymupdf-1.26.6-cp310-abi3-manylinux_2_28_x86_64.whl (24.1 MB)
+#10 39.33    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 24.1/24.1 MB 6.1 MB/s eta 0:00:00
+#10 39.36 Downloading python_docx-1.2.0-py3-none-any.whl (252 kB)
+#10 39.43 Downloading mobi-0.4.1-py3-none-any.whl (99 kB)
+#10 39.48 Downloading html2text-2025.4.15-py3-none-any.whl (34 kB)
+#10 39.52 Downloading playwright-1.57.0-py3-none-manylinux1_x86_64.whl (46.0 MB)
+#10 47.15    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 46.0/46.0 MB 6.0 MB/s eta 0:00:00
+#10 47.19 Downloading greenlet-3.3.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (590 kB)
+#10 47.28    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 590.2/590.2 kB 6.3 MB/s eta 0:00:00
+#10 47.31 Downloading pyee-13.0.0-py3-none-any.whl (15 kB)
+#10 47.35 Downloading openai-2.9.0-py3-none-any.whl (1.0 MB)
+#10 47.49    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 MB 7.0 MB/s eta 0:00:00
+#10 47.53 Downloading jiter-0.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (364 kB)
+#10 47.68 Downloading caldav-2.2.3-py2.py3-none-any.whl (121 kB)
+#10 47.73 Downloading icalendar_searcher-1.0.3-py3-none-any.whl (36 kB)
+#10 47.76 Downloading vobject-0.9.9-py2.py3-none-any.whl (47 kB)
+#10 47.79 Downloading icalendar-6.3.2-py3-none-any.whl (242 kB)
+#10 47.85 Downloading redis-7.1.0-py3-none-any.whl (354 kB)
+#10 47.97 Downloading dateparser-1.2.2-py3-none-any.whl (315 kB)
+#10 48.07 Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#10 48.14 Downloading lxml-6.0.2-cp311-cp311-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (5.2 MB)
+#10 49.09    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.2/5.2 MB 5.5 MB/s eta 0:00:00
+#10 49.12 Downloading openpyxl-3.1.5-py2.py3-none-any.whl (250 kB)
+#10 49.19 Downloading cryptography-46.0.3-cp311-abi3-manylinux_2_34_x86_64.whl (4.5 MB)
+#10 49.95    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 5.9 MB/s eta 0:00:00
+#10 49.98 Downloading parsedatetime-2.6-py3-none-any.whl (42 kB)
+#10 50.01 Downloading pandas-2.3.3-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+#10 52.07    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 6.2 MB/s eta 0:00:00
+#10 52.10 Downloading aiohappyeyeballs-2.6.1-py3-none-any.whl (15 kB)
+#10 52.13 Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+#10 52.15 Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+#10 52.19 Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+#10 52.22 Downloading backoff-2.2.1-py3-none-any.whl (15 kB)
+#10 52.25 Downloading bcrypt-5.0.0-cp39-abi3-manylinux_2_34_x86_64.whl (278 kB)
+#10 52.32 Downloading frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (231 kB)
+#10 52.41 Downloading grpcio-1.76.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (6.6 MB)
+#10 53.48    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.6/6.6 MB 6.2 MB/s eta 0:00:00
+#10 53.50 Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+#10 53.54 Downloading httptools-0.7.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (456 kB)
+#10 53.67 Downloading kubernetes-34.1.0-py2.py3-none-any.whl (2.0 MB)
+#10 53.98    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 6.8 MB/s eta 0:00:00
+#10 54.01 Downloading urllib3-2.3.0-py3-none-any.whl (128 kB)
+#10 54.07 Downloading durationpy-0.10-py3-none-any.whl (3.9 kB)
+#10 54.10 Downloading google_auth-2.43.0-py2.py3-none-any.whl (223 kB)
+#10 54.17 Downloading cachetools-6.2.2-py3-none-any.whl (11 kB)
+#10 54.20 Downloading rsa-4.9.1-py3-none-any.whl (34 kB)
+#10 54.23 Downloading loguru-0.7.3-py3-none-any.whl (61 kB)
+#10 54.27 Downloading mmh3-5.2.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (103 kB)
+#10 54.32 Downloading mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+#10 54.35 Downloading onnxruntime-1.23.2-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (17.4 MB)
+#10 57.26    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 17.4/17.4 MB 6.0 MB/s eta 0:00:00
+#10 57.29 Downloading opentelemetry_api-1.39.0-py3-none-any.whl (66 kB)
+#10 57.33 Downloading importlib_metadata-8.7.0-py3-none-any.whl (27 kB)
+#10 57.36 Downloading opentelemetry_exporter_otlp_proto_grpc-1.39.0-py3-none-any.whl (19 kB)
+#10 57.39 Downloading opentelemetry_exporter_otlp_proto_common-1.39.0-py3-none-any.whl (18 kB)
+#10 57.43 Downloading opentelemetry_proto-1.39.0-py3-none-any.whl (72 kB)
+#10 57.47 Downloading googleapis_common_protos-1.72.0-py3-none-any.whl (297 kB)
+#10 57.55 Downloading opentelemetry_sdk-1.39.0-py3-none-any.whl (132 kB)
+#10 57.60 Downloading opentelemetry_semantic_conventions-0.60b0-py3-none-any.whl (219 kB)
+#10 57.66 Downloading protobuf-6.33.2-cp39-abi3-manylinux2014_x86_64.whl (323 kB)
+#10 57.74 Downloading orjson-3.11.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (138 kB)
+#10 57.79 Downloading ormsgpack-1.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (207 kB)
+#10 57.86 Downloading overrides-7.7.0-py3-none-any.whl (17 kB)
+#10 57.89 Downloading propcache-0.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (210 kB)
+#10 57.97 Downloading pyasn1-0.6.1-py3-none-any.whl (83 kB)
+#10 58.04 Downloading pyasn1_modules-0.4.2-py3-none-any.whl (181 kB)
+#10 58.10 Downloading pybase64-1.4.3-cp311-cp311-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl (71 kB)
+#10 58.13 Downloading recurring_ical_events-3.8.0-py3-none-any.whl (238 kB)
+#10 58.20 Downloading x_wr_timezone-2.0.1-py3-none-any.whl (11 kB)
+#10 58.23 Downloading regex-2025.11.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (800 kB)
+#10 58.37    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 800.4/800.4 kB 5.7 MB/s eta 0:00:00
+#10 58.40 Downloading requests_toolbelt-1.0.0-py2.py3-none-any.whl (54 kB)
+#10 58.46 Downloading rich-14.2.0-py3-none-any.whl (243 kB)
+#10 58.52 Downloading markdown_it_py-4.0.0-py3-none-any.whl (87 kB)
+#10 58.56 Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+#10 58.59 Downloading safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (507 kB)
+#10 58.71 Downloading standard_imghdr-3.13.0-py3-none-any.whl (4.6 kB)
+#10 58.74 Downloading typer-0.20.0-py3-none-any.whl (47 kB)
+#10 58.78 Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+#10 58.81 Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+#10 58.85 Downloading tzdata-2025.2-py2.py3-none-any.whl (347 kB)
+#10 58.94 Downloading tzlocal-5.3.1-py3-none-any.whl (18 kB)
+#10 58.98 Downloading uvloop-0.22.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.8 MB)
+#10 59.64    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.8/3.8 MB 5.9 MB/s eta 0:00:00
+#10 59.67 Downloading watchfiles-1.1.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (456 kB)
+#10 59.83 Downloading websocket_client-1.9.0-py3-none-any.whl (82 kB)
+#10 59.88 Downloading websockets-15.0.1-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (182 kB)
+#10 59.93 Downloading xxhash-3.6.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (193 kB)
+#10 59.99 Downloading zipp-3.23.0-py3-none-any.whl (10 kB)
+#10 60.03 Downloading coloredlogs-15.0.1-py2.py3-none-any.whl (46 kB)
+#10 60.06 Downloading humanfriendly-10.0-py2.py3-none-any.whl (86 kB)
+#10 60.10 Downloading et_xmlfile-2.0.0-py3-none-any.whl (18 kB)
+#10 60.14 Downloading flatbuffers-25.9.23-py2.py3-none-any.whl (30 kB)
+#10 60.20 Downloading importlib_resources-6.5.2-py3-none-any.whl (37 kB)
+#10 60.25 Downloading niquests-3.15.2-py3-none-any.whl (167 kB)
+#10 60.32 Downloading urllib3_future-2.14.908-py3-none-any.whl (683 kB)
+#10 60.44    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 683.2/683.2 kB 5.3 MB/s eta 0:00:00
+#10 60.47 Downloading jh2-5.0.10-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (394 kB)
+#10 60.58 Downloading qh3-1.5.6-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.4 MB)
+#10 61.02    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.4/2.4 MB 5.3 MB/s eta 0:00:00
+#10 61.06 Downloading wassima-2.0.2-py3-none-any.whl (145 kB)
+#10 61.12 Downloading requests_oauthlib-2.0.0-py2.py3-none-any.whl (24 kB)
+#10 61.17 Downloading oauthlib-3.3.1-py3-none-any.whl (160 kB)
+#10 61.22 Downloading scikit_learn-1.8.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (9.1 MB)
+#10 62.85    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.1/9.1 MB 5.6 MB/s eta 0:00:00
+#10 62.88 Downloading joblib-1.5.2-py3-none-any.whl (308 kB)
+#10 62.97 Downloading scipy-1.16.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (35.9 MB)
+#10 69.76    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 35.9/35.9 MB 5.3 MB/s eta 0:00:00
+#10 69.80 Downloading threadpoolctl-3.6.0-py3-none-any.whl (18 kB)
+#10 69.83 Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+#10 70.10 Building wheels for collected packages: word2number, pypika
+#10 70.10   DEPRECATION: Building 'word2number' using the legacy setup.py bdist_wheel mechanism, which will be removed in a future version. pip 25.3 will enforce this behaviour change. A possible replacement is to use the standardized build interface by setting the `--use-pep517` option, (possibly combined with `--no-build-isolation`), or adding a `pyproject.toml` file to the source tree of 'word2number'. Discussion can be found at https://github.com/pypa/pip/issues/6334
+#10 70.11   Building wheel for word2number (setup.py): started
+#10 70.38   Building wheel for word2number (setup.py): finished with status 'done'
+#10 70.38   Created wheel for word2number: filename=word2number-1.1-py3-none-any.whl size=5658 sha256=af704418f50c58827fb2c5cbfa3e1d58ff18dfcdd80e68e36663dfaf94afc8de
+#10 70.38   Stored in directory: /tmp/pip-ephem-wheel-cache-cf1s6tce/wheels/cd/ef/ae/073b491b14d25e2efafcffca9e16b2ee6d114ec5c643ba4f06
+#10 70.38   Building wheel for pypika (pyproject.toml): started
+#10 70.63   Building wheel for pypika (pyproject.toml): finished with status 'done'
+#10 70.63   Created wheel for pypika: filename=pypika-0.48.9-py2.py3-none-any.whl size=53803 sha256=1d0791e5832f97e989d6ce9990716f4d523dcb8b24c7a5a70ce266cadf6825be
+#10 70.63   Stored in directory: /tmp/pip-ephem-wheel-cache-cf1s6tce/wheels/a3/01/bd/4c40ceb9d5354160cb186dcc153360f4ab7eb23e2b24daf96d
+#10 70.64 Successfully built word2number pypika
+#10 70.98 Installing collected packages: word2number, standard-imghdr, pypika, parsedatetime, flatbuffers, durationpy, zipp, xxhash, websockets, websocket-client, wassima, uvloop, uuid-utils, urllib3, tzlocal, tzdata, typing-inspection, threadpoolctl, tenacity, sniffio, shellingham, scipy, safetensors, regex, redis, qh3, python-multipart, python-dotenv, python-dateutil, pymupdf, pyee, pydantic-core, pybase64, pyasn1, protobuf, propcache, overrides, ormsgpack, orjson, oauthlib, mypy-extensions, multidict, mmh3, mdurl, marshmallow, lxml, loguru, joblib, jiter, jh2, importlib-resources, humanfriendly, httpx-sse, httptools, html2text, hf-xet, h11, grpcio, greenlet, frozenlist, et-xmlfile, cachetools, bcrypt, backoff, anyio, annotated-types, annotated-doc, aiohappyeyeballs, yarl, watchfiles, vobject, uvicorn, urllib3-future, typing-inspect, starlette, SQLAlchemy, scikit-learn, rsa, requests, python-docx, pydantic, pyasn1-modules, playwright, pandas, opentelemetry-proto, openpyxl, mobi, markdown-it-py, importlib-metadata, icalendar, httpcore, googleapis-common-protos, dateparser, cryptography, coloredlogs, aiosignal, x-wr-timezone, rich, requests-toolbelt, requests-oauthlib, pydantic-settings, posthog, opentelemetry-exporter-otlp-proto-common, opentelemetry-api, onnxruntime, niquests, huggingface-hub, httpx, google-auth, fastapi, dataclasses-json, aiohttp, typer, tokenizers, recurring-ical-events, opentelemetry-semantic-conventions, openai, langsmith, langgraph-sdk, kubernetes, transformers, opentelemetry-sdk, langchain-core, icalendar-searcher, sentence-transformers, opentelemetry-exporter-otlp-proto-grpc, langgraph-checkpoint, langchain-text-splitters, langchain-huggingface, caldav, langgraph-prebuilt, langchain-classic, chromadb, langgraph, langchain-community, langchain-chroma, langchain
+#10 71.67   Attempting uninstall: urllib3
+#10 71.68     Found existing installation: urllib3 2.5.0
+#10 71.69     Uninstalling urllib3-2.5.0:
+#10 71.86       Successfully uninstalled urllib3-2.5.0
+#10 82.52   Attempting uninstall: requests
+#10 82.53     Found existing installation: requests 2.32.4
+#10 82.53     Uninstalling requests-2.32.4:
+#10 82.63       Successfully uninstalled requests-2.32.4
+#10 102.6 
+#10 102.6 Successfully installed SQLAlchemy-2.0.45 aiohappyeyeballs-2.6.1 aiohttp-3.13.2 aiosignal-1.4.0 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.12.0 backoff-2.2.1 bcrypt-5.0.0 cachetools-6.2.2 caldav-2.2.3 chromadb-1.3.6 coloredlogs-15.0.1 cryptography-46.0.3 dataclasses-json-0.6.7 dateparser-1.2.2 durationpy-0.10 et-xmlfile-2.0.0 fastapi-0.124.2 flatbuffers-25.9.23 frozenlist-1.8.0 google-auth-2.43.0 googleapis-common-protos-1.72.0 greenlet-3.3.0 grpcio-1.76.0 h11-0.16.0 hf-xet-1.2.0 html2text-2025.4.15 httpcore-1.0.9 httptools-0.7.1 httpx-0.28.1 httpx-sse-0.4.3 huggingface-hub-0.36.0 humanfriendly-10.0 icalendar-6.3.2 icalendar-searcher-1.0.3 importlib-metadata-8.7.0 importlib-resources-6.5.2 jh2-5.0.10 jiter-0.12.0 joblib-1.5.2 kubernetes-34.1.0 langchain-1.1.3 langchain-chroma-1.0.0 langchain-classic-1.0.0 langchain-community-0.4.1 langchain-core-1.1.3 langchain-huggingface-1.1.0 langchain-text-splitters-1.0.0 langgraph-1.0.4 langgraph-checkpoint-3.0.1 langgraph-prebuilt-1.0.5 langgraph-sdk-0.2.15 langsmith-0.4.58 loguru-0.7.3 lxml-6.0.2 markdown-it-py-4.0.0 marshmallow-3.26.1 mdurl-0.1.2 mmh3-5.2.0 mobi-0.4.1 multidict-6.7.0 mypy-extensions-1.1.0 niquests-3.15.2 oauthlib-3.3.1 onnxruntime-1.23.2 openai-2.9.0 openpyxl-3.1.5 opentelemetry-api-1.39.0 opentelemetry-exporter-otlp-proto-common-1.39.0 opentelemetry-exporter-otlp-proto-grpc-1.39.0 opentelemetry-proto-1.39.0 opentelemetry-sdk-1.39.0 opentelemetry-semantic-conventions-0.60b0 orjson-3.11.5 ormsgpack-1.12.0 overrides-7.7.0 pandas-2.3.3 parsedatetime-2.6 playwright-1.57.0 posthog-5.4.0 propcache-0.4.1 protobuf-6.33.2 pyasn1-0.6.1 pyasn1-modules-0.4.2 pybase64-1.4.3 pydantic-2.12.5 pydantic-core-2.41.5 pydantic-settings-2.12.0 pyee-13.0.0 pymupdf-1.26.6 pypika-0.48.9 python-dateutil-2.9.0.post0 python-docx-1.2.0 python-dotenv-1.2.1 python-multipart-0.0.20 qh3-1.5.6 recurring-ical-events-3.8.0 redis-7.1.0 regex-2025.11.3 requests-2.32.5 requests-oauthlib-2.0.0 requests-toolbelt-1.0.0 rich-14.2.0 rsa-4.9.1 safetensors-0.7.0 scikit-learn-1.8.0 scipy-1.16.3 sentence-transformers-5.1.2 shellingham-1.5.4 sniffio-1.3.1 standard-imghdr-3.13.0 starlette-0.50.0 tenacity-9.1.2 threadpoolctl-3.6.0 tokenizers-0.22.1 transformers-4.57.3 typer-0.20.0 typing-inspect-0.9.0 typing-inspection-0.4.2 tzdata-2025.2 tzlocal-5.3.1 urllib3-2.3.0 urllib3-future-2.14.908 uuid-utils-0.12.0 uvicorn-0.38.0 uvloop-0.22.1 vobject-0.9.9 wassima-2.0.2 watchfiles-1.1.1 websocket-client-1.9.0 websockets-15.0.1 word2number-1.1 x-wr-timezone-2.0.1 xxhash-3.6.0 yarl-1.22.0 zipp-3.23.0
+#10 102.6 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+#10 DONE 105.6s
+
+#11 [6/8] RUN playwright install chromium
+#11 2.668 Downloading Chromium 143.0.7499.4 (playwright build v1200) from https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1200/chromium-linux.zip
+#11 2.769 (node:19) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+#11 2.769 (Use `node --trace-deprecation ...` to show where the warning was created)
+#11 3.193 |                                                                                |   0% of 164.7 MiB
+#11 6.035 |■■■■■■■■                                                                        |  10% of 164.7 MiB
+#11 8.929 |■■■■■■■■■■■■■■■■                                                                |  20% of 164.7 MiB
+#11 11.66 |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 164.7 MiB
+#11 14.57 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 164.7 MiB
+#11 17.28 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 164.7 MiB
+#11 20.15 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 164.7 MiB
+#11 22.86 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 164.7 MiB
+#11 25.65 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 164.7 MiB
+#11 28.46 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 164.7 MiB
+#11 31.80 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 164.7 MiB
+#11 34.29 Chromium 143.0.7499.4 (playwright build v1200) downloaded to /root/.cache/ms-playwright/chromium-1200
+#11 34.29 Downloading FFMPEG playwright build v1011 from https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip
+#11 34.39 (node:30) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+#11 34.39 (Use `node --trace-deprecation ...` to show where the warning was created)
+#11 34.72 |                                                                                |   0% of 2.3 MiB
+#11 34.81 |■■■■■■■■                                                                        |  10% of 2.3 MiB
+#11 34.86 |■■■■■■■■■■■■■■■■                                                                |  20% of 2.3 MiB
+#11 34.90 |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 2.3 MiB
+#11 34.95 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 2.3 MiB
+#11 34.99 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 2.3 MiB
+#11 35.02 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 2.3 MiB
+#11 35.05 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 2.3 MiB
+#11 35.09 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 2.3 MiB
+#11 35.13 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 2.3 MiB
+#11 35.17 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 2.3 MiB
+#11 35.24 FFMPEG playwright build v1011 downloaded to /root/.cache/ms-playwright/ffmpeg-1011
+#11 35.24 Downloading Chromium Headless Shell 143.0.7499.4 (playwright build v1200) from https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1200/chromium-headless-shell-linux.zip
+#11 35.33 (node:41) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+#11 35.33 (Use `node --trace-deprecation ...` to show where the warning was created)
+#11 35.64 |                                                                                |   0% of 109.7 MiB
+#11 37.48 |■■■■■■■■                                                                        |  10% of 109.7 MiB
+#11 39.38 |■■■■■■■■■■■■■■■■                                                                |  20% of 109.7 MiB
+#11 41.09 |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 109.7 MiB
+#11 42.96 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 109.7 MiB
+#11 45.00 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 109.7 MiB
+#11 47.01 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 109.7 MiB
+#11 48.83 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 109.7 MiB
+#11 50.64 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 109.7 MiB
+#11 52.38 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 109.7 MiB
+#11 54.21 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 109.7 MiB
+#11 56.03 Chromium Headless Shell 143.0.7499.4 (playwright build v1200) downloaded to /root/.cache/ms-playwright/chromium_headless_shell-1200
+#11 DONE 58.3s
+
+#12 [7/8] COPY app/ ./app
+#12 DONE 0.5s
+
+#13 [8/8] COPY data/ ./data
+#13 DONE 0.5s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 16.6s done
+#14 writing image sha256:9dbaa1631a25a8af072ea019cf9a94493c6f945d171479f5e81df660eaeae6fb 0.0s done
+#14 naming to docker.io/library/sharedllm-rag-api 0.0s done
+#14 DONE 16.7s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ sharedllm-rag-api  Built
+ Container unified_rag_redis  Recreate
+ Container unified_rag_redis  Recreated
+ Container unified_rag_api  Recreate
+time="2025-12-10T08:16:04-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+ Container unified_rag_api  Recreated
+ Container unified_rag_redis  Starting
+ Container unified_rag_redis  Started
+ Container unified_rag_api  Starting
+Waiting for application startup...
+ Container unified_rag_api  Started
+..............[OK] Application started successfully!
+
+[OK] Deployment Verification Successful.

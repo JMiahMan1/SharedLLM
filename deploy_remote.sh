@@ -40,7 +40,7 @@ ssh "$HOST" << EOF
     find app -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
 
     echo "Recreating Docker container to apply config..."
-    docker compose up -d --force-recreate
+    docker compose up -d --build --force-recreate
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure

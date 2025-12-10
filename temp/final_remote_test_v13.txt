@@ -1,0 +1,275 @@
+--- SETUP: Loading Resources ---
+Loading Global Resources...
+Redis Connected.
+Use pytorch device_name: cpu
+Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+ChromaDB Loaded from /data/chroma_db
+Discovered test entity: light.kauf_plug_d67371_kauf_plug (State: off)
+=== TEST GROUP: LIGHTS (light.kauf_plug_d67371_kauf_plug) ===
+TEST ACTION: 'Turn on light.kauf_plug_d67371_kauf_plug'
+  -> Refined: 'Turn on light.kauf_plug_d67371_kauf_plug', Intent: None (Score: 1.0)
+DEBUG: Entering smart_resolve_entity. Q='light.kauf_plug_d67371_kauf_plug' Intent='turn_on' Multiple=False
+DEBUG: Search returned 15 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='light.kauf_plug_d67371_kauf_plug', metadata={'domain': 'light', 'integration': 'unknown', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'last_updated': '230590.973', 'capabilities': '', 'friendly_name': 'String Lights Kauf Plug', 'group_id': 'light.kauf_plug_d67371_kauf_plug', 'state': 'off', 'source': 'home_assistant', 'attributes': '{"supported_color_modes": ["onoff"], "color_mode": null, "friendly_name": "String Lights Kauf Plug", "supported_features": 0}', 'group_name': ''}, page_content="String Lights Kauf Plug (light.kauf_plug_d67371_kauf_plug) is a unknown device in group ''."), 0.4387744665145874)
+[CAPABILITY] Redis cache HIT for light.kauf_plug_d67371_kauf_plug
+[CAPABILITY] Redis cache HIT for switch.string_lights_front
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_769eea
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73a356
+[CAPABILITY] Redis cache HIT for light.kitchen_light_6
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_7398b2
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_76a1c4
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73999c
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea88
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea6a
+[CAPABILITY] Redis cache HIT for light.kitchen_light_1
+[CAPABILITY] Redis cache HIT for light.kitchen_light_4
+[CAPABILITY] Redis cache HIT for light.kitchen_light_2
+[CAPABILITY] Redis cache HIT for light.kitchen_light_3
+Fast HA Path: Resolved 'light.kauf_plug_d67371_kauf_plug' -> light.kauf_plug_d67371_kauf_plug (unknown) via smart_resolve_entity
+EXEC HA: homeassistant.turn_on on light.kauf_plug_d67371_kauf_plug | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to turn on the String Lights Kauf Plug.', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'friendly_name': 'String Lights Kauf Plug', 'service': 'homeassistant.turn_on', 'new_state': 'on'}]
+  VERIFY: light.kauf_plug_d67371_kauf_plug is 'on'
+TEST ACTION: 'Turn off light.kauf_plug_d67371_kauf_plug'
+  -> Refined: 'Turn off light.kauf_plug_d67371_kauf_plug', Intent: None (Score: 1.0)
+DEBUG: Entering smart_resolve_entity. Q='light.kauf_plug_d67371_kauf_plug' Intent='turn_off' Multiple=False
+DEBUG: Search returned 15 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='light.kauf_plug_d67371_kauf_plug', metadata={'capabilities': '', 'last_updated': '230590.973', 'state': 'off', 'friendly_name': 'String Lights Kauf Plug', 'source': 'home_assistant', 'group_id': 'light.kauf_plug_d67371_kauf_plug', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'domain': 'light', 'integration': 'unknown', 'attributes': '{"supported_color_modes": ["onoff"], "color_mode": null, "friendly_name": "String Lights Kauf Plug", "supported_features": 0}', 'group_name': ''}, page_content="String Lights Kauf Plug (light.kauf_plug_d67371_kauf_plug) is a unknown device in group ''."), 0.4387744665145874)
+[CAPABILITY] Redis cache HIT for light.kauf_plug_d67371_kauf_plug
+[CAPABILITY] Redis cache HIT for switch.string_lights_front
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_769eea
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73a356
+[CAPABILITY] Redis cache HIT for light.kitchen_light_6
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_7398b2
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_76a1c4
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73999c
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea88
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea6a
+[CAPABILITY] Redis cache HIT for light.kitchen_light_1
+[CAPABILITY] Redis cache HIT for light.kitchen_light_4
+[CAPABILITY] Redis cache HIT for light.kitchen_light_2
+[CAPABILITY] Redis cache HIT for light.kitchen_light_3
+Fast HA Path: Resolved 'light.kauf_plug_d67371_kauf_plug' -> light.kauf_plug_d67371_kauf_plug (unknown) via smart_resolve_entity
+EXEC HA: homeassistant.turn_off on light.kauf_plug_d67371_kauf_plug | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to turn off the String Lights Kauf Plug.', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'friendly_name': 'String Lights Kauf Plug', 'service': 'homeassistant.turn_off', 'new_state': 'off'}]
+  VERIFY: light.kauf_plug_d67371_kauf_plug is 'off'
+TEST ACTION: 'Turn on light.kauf_plug_d67371_kauf_plug'
+  -> Refined: 'Turn on light.kauf_plug_d67371_kauf_plug', Intent: None (Score: 1.0)
+DEBUG: Entering smart_resolve_entity. Q='light.kauf_plug_d67371_kauf_plug' Intent='turn_on' Multiple=False
+DEBUG: Search returned 15 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='light.kauf_plug_d67371_kauf_plug', metadata={'state': 'off', 'domain': 'light', 'source': 'home_assistant', 'capabilities': '', 'attributes': '{"supported_color_modes": ["onoff"], "color_mode": null, "friendly_name": "String Lights Kauf Plug", "supported_features": 0}', 'last_updated': '230590.973', 'friendly_name': 'String Lights Kauf Plug', 'integration': 'unknown', 'group_name': '', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'group_id': 'light.kauf_plug_d67371_kauf_plug'}, page_content="String Lights Kauf Plug (light.kauf_plug_d67371_kauf_plug) is a unknown device in group ''."), 0.4387744665145874)
+[CAPABILITY] Redis cache HIT for light.kauf_plug_d67371_kauf_plug
+[CAPABILITY] Redis cache HIT for switch.string_lights_front
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_769eea
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73a356
+[CAPABILITY] Redis cache HIT for light.kitchen_light_6
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_7398b2
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_76a1c4
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_73999c
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea88
+[CAPABILITY] Redis cache HIT for light.wiz_rgbw_tunable_75ea6a
+[CAPABILITY] Redis cache HIT for light.kitchen_light_1
+[CAPABILITY] Redis cache HIT for light.kitchen_light_4
+[CAPABILITY] Redis cache HIT for light.kitchen_light_2
+[CAPABILITY] Redis cache HIT for light.kitchen_light_3
+Fast HA Path: Resolved 'light.kauf_plug_d67371_kauf_plug' -> light.kauf_plug_d67371_kauf_plug (unknown) via smart_resolve_entity
+EXEC HA: homeassistant.turn_on on light.kauf_plug_d67371_kauf_plug | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to turn on the String Lights Kauf Plug.', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'friendly_name': 'String Lights Kauf Plug', 'service': 'homeassistant.turn_on', 'new_state': 'on'}]
+TEST ACTION: 'Make light.kauf_plug_d67371_kauf_plug red'
+[INTENT] Regex override: 'Make light.kauf_plug_d67371_kauf_plug red' -> set_color
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=19156
+  -> Refined: 'Make light.kauf_plug_d67371_kauf_plug red', Intent: set_color (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: set_color (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2156
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'set_color', 'device_name': 'kauf_plug_d67371_kauf_plug'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'kauf_plug_d67371_kauf_plug'
+DEBUG: Entering smart_resolve_entity. Q='kauf_plug_d67371_kauf_plug' Intent='set_color' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='light.kauf_plug_d67371_kauf_plug', metadata={'group_name': '', 'group_id': 'light.kauf_plug_d67371_kauf_plug', 'domain': 'light', 'friendly_name': 'String Lights Kauf Plug', 'attributes': '{"supported_color_modes": ["onoff"], "color_mode": null, "friendly_name": "String Lights Kauf Plug", "supported_features": 0}', 'last_updated': '230590.973', 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'state': 'off', 'integration': 'unknown', 'capabilities': '', 'source': 'home_assistant'}, page_content="String Lights Kauf Plug (light.kauf_plug_d67371_kauf_plug) is a unknown device in group ''."), 0.6868302226066589)
+match found in Group: light.kauf_plug_d67371_kauf_plug (via String Lights Kauf P...)
+Group light.kauf_plug_d67371_kauf_plug has 1 members.
+Capability Routing used light.kauf_plug_d67371_kauf_plug (unknown) for intent set_color
+[Device Fallback] Resolved 'kauf_plug_d67371_kauf_plug' to light.kauf_plug_d67371_kauf_plug
+[CAPABILITY] Redis cache HIT for light.kauf_plug_d67371_kauf_plug
+  -> Result: [{'status': 'FAILURE', 'message': "String Lights Kauf Plug doesn't support color control. It's a simple on/off or brightness-only light.", 'entity_id': 'light.kauf_plug_d67371_kauf_plug', 'service': 'set_color'}]
+  VERIFY: light.kauf_plug_d67371_kauf_plug is 'on'
+--- DISCOVERY: LISTING ALL MEDIA PLAYERS ---
+Found Media Player: media_player.master_bedroom_samsung (Master Bedroom Samsung) State: off
+Found Media Player: media_player.loft_tv (Loft TV) State: off
+Found Media Player: media_player.living_room_tv (Living Room TV) State: unavailable
+Found Media Player: media_player.office_tv_chrome (Office TV Chrome) State: playing
+Found Media Player: media_player.master_bedroom_tv (Master Bedroom TV) State: off
+Found Media Player: media_player.living_room_tv_2 (Living Room TV) State: unavailable
+Found Media Player: media_player.tv_master_2 ([TV]Master) State: unavailable
+Found Media Player: media_player.lg_webos_tv_un6955zuf ([LG] webOS TV UN6955ZUF) State: unavailable
+Found Media Player: media_player.a25_27jns_macbook_pro_airplay (A25-27JN’s MacBook Pro (AirPlay)) State: unavailable
+Found Media Player: media_player.office_tv_chrome_2 (Office TV) State: playing
+Found Media Player: media_player.master_bedroom_tv_2 (Master Bedroom TV) State: off
+Found Media Player: media_player.office_speaker (Office Speaker) State: idle
+Found Media Player: media_player.loft_tv_2 (Loft TV) State: idle
+Found Media Player: media_player.tv_loft_samsung_q900 ([TV] Loft Samsung Q900) State: unavailable
+Found Media Player: media_player.tv_master ([TV]Master) State: unavailable
+Found Media Player: media_player.office_tv (Office TV Remote) State: on
+Found Media Player: media_player.master_bedroom_tv_3 (Master Bedroom TV) State: off
+Found Media Player: media_player.jarvis_master_bedroom_s3_box_media_player (Jarvis Master Bedroom s3-box_media_player) State: idle
+Found Media Player: media_player.office_jarvis (Office Speaker) State: idle
+Found Media Player: media_player.lg_webos_tv_6b29 (LG webOS TV 6B29) State: unavailable
+Found Media Player: media_player.everywhere (None) State: unavailable
+Found Media Player: media_player.bedrooms (None) State: unavailable
+Found Media Player: media_player.not_office (None) State: unavailable
+Found Media Player: media_player.upstairs_lights (None) State: unavailable
+Found Media Player: media_player.summer_s_echo_show (None) State: unavailable
+Found Media Player: media_player.madelyn_s_echo_dot_bedroom (None) State: unavailable
+Found Media Player: media_player.jeremiah_s_echo_dot_garage (None) State: unavailable
+Found Media Player: media_player.tv (None) State: unavailable
+Found Media Player: media_player.kids_rooms (None) State: unavailable
+Found Media Player: media_player.dad_mom_s_echo_dot_bedroom (None) State: unavailable
+Found Media Player: media_player.gracie_s_echo_dot_bedroom (None) State: unavailable
+Found Media Player: media_player.kaleb_s_echo_dot_bedroom (None) State: unavailable
+Found Media Player: media_player.jeremiah_s_echo_dot_loft (None) State: unavailable
+Found Media Player: media_player.jeremiah_s_echo_dot_office (None) State: unavailable
+Found Media Player: media_player.boys_room (None) State: unavailable
+Found Media Player: media_player.tv_loft_samsung_q900_2 (None) State: unavailable
+=== TEST GROUP: MEDIA GENERIC (media_player.office_tv_chrome_2) ===
+TEST ACTION: 'Play some music on media_player.office_tv_chrome_2'
+[INTENT] Regex override: 'Play some music on media_player.office_tv_chrome_2' -> play_media
+  -> Refined: 'Play some music on media_player.office_tv_chrome_2', Intent: play_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2166
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'media_player.office_tv_chrome_2'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'media_player.office_tv_chrome_2'
+DEBUG: Entering smart_resolve_entity. Q='media_player.office_tv_chrome_2' Intent='play' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome', metadata={'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'domain': 'media_player', 'capabilities': 'turn_off,play_media,turn_on', 'attributes': '{"volume_level": 0.3199999928474426, "is_volume_muted": false, "media_content_id": "https://www.home-assistant.io/images/cast/splash.png", "media_content_type": "video", "media_duration": 0, "media_position": 0, "media_position_updated_at": "2025-12-10T15:17:57.435728+00:00", "app_id": "CC1AD845", "app_name": "Default Media Receiver", "entity_picture_local": null, "friendly_name": "Office TV Chrome", "supported_features": 152463}', 'group_name': '', 'source': 'home_assistant', 'state': 'idle', 'group_id': 'media_player.office_tv_chrome', 'last_updated': '230590.973', 'integration': 'cast'}, page_content="Office TV Chrome (media_player.office_tv_chrome) is a cast device in group ''. Can turn off. Can play media."), 0.4762783348560333)
+match found in Group: media_player.office_tv_chrome (via Office TV Chrome (me...)
+Group media_player.office_tv_chrome has 1 members.
+Capability Routing used media_player.office_tv_chrome (cast) for intent play
+[Device Fallback] Resolved 'media_player.office_tv_chrome_2' to media_player.office_tv_chrome
+Sanitized intent from 'play' to 'play_media'
+[CAPABILITY] Redis cache HIT for media_player.office_tv_chrome
+Generic content request on media_player.office_tv_chrome. Attempting RESUME (media_play).
+EXEC HA: media_player.media_play on media_player.office_tv_chrome | Data: {}
+HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+Self-Healing: Retrying 'media_player office_tv_chrome_2' as 'video' on media_player.office_tv_chrome
+EXEC HA: media_player.play_media on media_player.office_tv_chrome | Data: {'media_content_id': 'media_player office_tv_chrome_2', 'media_content_type': 'video'}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}]
+  VERIFY: media_player.office_tv_chrome_2 is 'idle'
+  FAILURE: Expected ['playing'], got 'idle'
+TEST ACTION: 'Pause media_player.office_tv_chrome_2'
+[INTENT] Regex override: 'Pause media_player.office_tv_chrome_2' -> stop_media
+  -> Refined: 'Pause media_player.office_tv_chrome_2', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2153
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop', 'device_name': 'media_player.office_tv_chrome_2'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'media_player.office_tv_chrome_2'
+DEBUG: Entering smart_resolve_entity. Q='media_player.office_tv_chrome_2' Intent='stop' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome', metadata={'attributes': '{"volume_level": 0.3199999928474426, "is_volume_muted": false, "media_content_id": "https://www.home-assistant.io/images/cast/splash.png", "media_content_type": "video", "media_duration": 0, "media_position": 0, "media_position_updated_at": "2025-12-10T15:17:57.435728+00:00", "app_id": "CC1AD845", "app_name": "Default Media Receiver", "entity_picture_local": null, "friendly_name": "Office TV Chrome", "supported_features": 152463}', 'state': 'idle', 'group_id': 'media_player.office_tv_chrome', 'last_updated': '230590.973', 'source': 'home_assistant', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'group_name': '', 'domain': 'media_player', 'integration': 'cast', 'capabilities': 'turn_off,play_media,turn_on'}, page_content="Office TV Chrome (media_player.office_tv_chrome) is a cast device in group ''. Can turn off. Can play media."), 0.4762783348560333)
+match found in Group: media_player.office_tv_chrome (via Office TV Chrome (me...)
+Group media_player.office_tv_chrome has 1 members.
+Capability Routing used media_player.office_tv_chrome (cast) for intent stop
+[Device Fallback] Resolved 'media_player.office_tv_chrome_2' to media_player.office_tv_chrome
+Sanitized intent from 'stop' to 'stop_media'
+  -> Result: [{'status': 'SUCCESS', 'message': 'media_player.office_tv_chrome is already stopped.', 'entity_id': 'media_player.office_tv_chrome', 'service': 'media_stop', 'new_state': 'idle'}]
+  VERIFY: media_player.office_tv_chrome_2 is 'idle'
+=== TEST GROUP: OFFICE TV MUSIC ASSISTANT (Play/Skip/Stop) ===
+TEST ACTION: 'Play Brandon Lake on Office TV'
+[INTENT] Regex override: 'Play Brandon Lake on Office TV' -> play_media
+  -> Refined: 'Play Brandon Lake on Office TV', Intent: play_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2146
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'Office TV'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV'
+DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='play' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome_2', metadata={'source': 'home_assistant', 'friendly_name': 'Office TV', 'attributes': '{"volume_level": 0.31, "media_content_id": "library://track/233", "media_content_type": "music", "media_duration": 329, "media_position": 23, "media_position_updated_at": "2025-12-10T15:17:37.897081+00:00", "media_title": "Brandon Lake - Hard Fought Hallelujah", "media_artist": "Brandon Lake", "media_album_name": "Singles", "media_album_artist": "Brandon Lake", "app_id": "music_assistant", "shuffle": false, "repeat": "off", "mass_player_type": "player", "active_queue": "media_player.office_tv_chrome", "device_class": "speaker", "entity_picture": "/api/media_player_proxy/media_player.office_tv_chrome_2?token=61167d8a0dc6efb28ec5f45f21998c6abd8921dfddffaa7d53311b8ae3e21c1b&cache=518503240ff650fd", "icon": "mdi:speaker", "friendly_name": "Office TV", "supported_features": 7796671}', 'capabilities': 'turn_off,play_media,turn_on', 'group_name': '', 'last_updated': '230590.973', 'group_id': 'media_player.office_tv_chrome_2', 'domain': 'media_player', 'state': 'idle', 'entity_id': 'media_player.office_tv_chrome_2', 'integration': 'cast'}, page_content="Office TV (media_player.office_tv_chrome_2) is a cast device in group ''. Can turn off. Can play media."), 0.8801791071891785)
+match found in Group: media_player.office_tv_chrome_2 (via Office TV (media_pla...)
+Group media_player.office_tv_chrome_2 has 1 members.
+Capability Routing used media_player.office_tv_chrome_2 (cast) for intent play
+[Device Fallback] Resolved 'Office TV' to media_player.office_tv_chrome_2
+Sanitized intent from 'play' to 'play_media'
+[CAPABILITY] ChromaDB HIT for media_player.office_tv_chrome_2
+[CAPABILITY] Parsed: media_player.office_tv_chrome_2 → domain=media_player, features=7796671, has_color=False, has_brightness=False
+Executing Standard Play on media_player.office_tv_chrome_2 Type: music
+EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.play_media', 'new_state': 'playing'}]
+  VERIFY: media_player.office_tv_chrome_2 is 'playing'
+  Testing SKIP/NEXT...
+TEST ACTION: 'Next song on Office TV'
+[INTENT] Regex override: 'Next song on Office TV' -> media_next
+  -> Refined: 'Next song on Office TV', Intent: media_next (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: media_next (Score: 1.0)
+[FAST ORCHESTRA] Bypassing LLM for media_next
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Next song on Office TV'
+DEBUG: Entering smart_resolve_entity. Q='Next song on Office TV' Intent='media_next' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='switch.jeremiah_s_echo_dot_office_do_not_disturb', metadata={'last_updated': '230590.974', 'domain': 'switch', 'entity_id': 'switch.jeremiah_s_echo_dot_office_do_not_disturb', 'group_name': '', 'friendly_name': "Jeremiah's Echo Dot - Office Do not disturb", 'group_id': 'switch.jeremiah_s_echo_dot_office_do_not_disturb', 'capabilities': '', 'attributes': '{"friendly_name": "Jeremiah\'s Echo Dot - Office Do not disturb"}', 'source': 'home_assistant', 'integration': 'unknown', 'state': 'off'}, page_content="Jeremiah's Echo Dot - Office Do not disturb (switch.jeremiah_s_echo_dot_office_do_not_disturb) is a unknown device in group ''."), 1.3326523303985596)
+match found in Group: switch.jeremiah_s_echo_dot_office_do_not_disturb (via Jeremiah's Echo Dot ...)
+Group switch.jeremiah_s_echo_dot_office_do_not_disturb has 1 members.
+Capability Routing used switch.jeremiah_s_echo_dot_office_do_not_disturb (unknown) for intent media_next
+[Device Fallback] Resolved 'Next song on Office TV' to switch.jeremiah_s_echo_dot_office_do_not_disturb
+Targeted entity switch.jeremiah_s_echo_dot_office_do_not_disturb is off. Scanning for active players...
+Redirecting media_next from switch.jeremiah_s_echo_dot_office_do_not_disturb to active device: media_player.office_tv_chrome
+EXEC HA: media_player.media_next_track on media_player.office_tv_chrome | Data: {}
+HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+  -> Result: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office Tv Chrome', 'service': 'media_player.media_next_track'}]
+  VERIFY: media_player.office_tv_chrome_2 is 'playing'
+  Testing PREVIOUS...
+TEST ACTION: 'Previous song on Office TV'
+[INTENT] Regex override: 'Previous song on Office TV' -> media_previous
+  -> Refined: 'Previous song on Office TV', Intent: media_previous (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: media_previous (Score: 1.0)
+[FAST ORCHESTRA] Bypassing LLM for media_previous
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Previous song on Office TV'
+DEBUG: Entering smart_resolve_entity. Q='Previous song on Office TV' Intent='media_previous' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='switch.jeremiah_s_echo_dot_office_do_not_disturb', metadata={'source': 'home_assistant', 'capabilities': '', 'group_id': 'switch.jeremiah_s_echo_dot_office_do_not_disturb', 'domain': 'switch', 'state': 'off', 'entity_id': 'switch.jeremiah_s_echo_dot_office_do_not_disturb', 'friendly_name': "Jeremiah's Echo Dot - Office Do not disturb", 'group_name': '', 'attributes': '{"friendly_name": "Jeremiah\'s Echo Dot - Office Do not disturb"}', 'last_updated': '230590.974', 'integration': 'unknown'}, page_content="Jeremiah's Echo Dot - Office Do not disturb (switch.jeremiah_s_echo_dot_office_do_not_disturb) is a unknown device in group ''."), 1.3520536422729492)
+match found in Group: switch.jeremiah_s_echo_dot_office_do_not_disturb (via Jeremiah's Echo Dot ...)
+Group switch.jeremiah_s_echo_dot_office_do_not_disturb has 1 members.
+Capability Routing used switch.jeremiah_s_echo_dot_office_do_not_disturb (unknown) for intent media_previous
+[Device Fallback] Resolved 'Previous song on Office TV' to switch.jeremiah_s_echo_dot_office_do_not_disturb
+Targeted entity switch.jeremiah_s_echo_dot_office_do_not_disturb is off. Scanning for active players...
+Redirecting media_previous from switch.jeremiah_s_echo_dot_office_do_not_disturb to active device: media_player.office_tv_chrome
+EXEC HA: media_player.media_previous_track on media_player.office_tv_chrome | Data: {}
+HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+  -> Result: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office Tv Chrome', 'service': 'media_player.media_previous_track'}]
+  VERIFY: media_player.office_tv_chrome_2 is 'playing'
+  Testing STOP...
+TEST ACTION: 'Stop music on Office TV'
+[INTENT] Regex override: 'Stop music on Office TV' -> stop_media
+  -> Refined: 'Stop music on Office TV', Intent: stop_media (Score: 1.0)
+[PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2139
+[PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop', 'device_name': 'Office TV'}}
+[Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV'
+DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='stop' Multiple=True
+DEBUG: Search returned 30 docs.
+DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome_2', metadata={'state': 'idle', 'friendly_name': 'Office TV', 'domain': 'media_player', 'group_id': 'media_player.office_tv_chrome_2', 'last_updated': '230590.973', 'capabilities': 'turn_off,play_media,turn_on', 'entity_id': 'media_player.office_tv_chrome_2', 'integration': 'cast', 'attributes': '{"volume_level": 0.31, "media_content_id": "library://track/233", "media_content_type": "music", "media_duration": 329, "media_position": 23, "media_position_updated_at": "2025-12-10T15:17:37.897081+00:00", "media_title": "Brandon Lake - Hard Fought Hallelujah", "media_artist": "Brandon Lake", "media_album_name": "Singles", "media_album_artist": "Brandon Lake", "app_id": "music_assistant", "shuffle": false, "repeat": "off", "mass_player_type": "player", "active_queue": "media_player.office_tv_chrome", "device_class": "speaker", "entity_picture": "/api/media_player_proxy/media_player.office_tv_chrome_2?token=61167d8a0dc6efb28ec5f45f21998c6abd8921dfddffaa7d53311b8ae3e21c1b&cache=518503240ff650fd", "icon": "mdi:speaker", "friendly_name": "Office TV", "supported_features": 7796671}', 'source': 'home_assistant', 'group_name': ''}, page_content="Office TV (media_player.office_tv_chrome_2) is a cast device in group ''. Can turn off. Can play media."), 0.8801791071891785)
+match found in Group: media_player.office_tv_chrome_2 (via Office TV (media_pla...)
+Group media_player.office_tv_chrome_2 has 1 members.
+Capability Routing used media_player.office_tv_chrome_2 (cast) for intent stop
+[Device Fallback] Resolved 'Office TV' to media_player.office_tv_chrome_2
+Sanitized intent from 'stop' to 'stop_media'
+Transport Short Circuit: Device media_player.office_tv_chrome_2 is active, proceeding directly.
+EXEC HA: media_player.media_stop on media_player.office_tv_chrome_2 | Data: {}
+  -> Result: [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}]
+  VERIFY: media_player.office_tv_chrome_2 is 'idle'
+=== TEST GROUP: NOTES ===
+/opt/conda/lib/python3.11/site-packages/urllib3/connectionpool.py:2329: InsecureRequestWarning: Unverified HTTPS request is being made to host 'cloud.sumemail.com'. Adding certificate verification is strongly advised. See: https://urllib3future.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
