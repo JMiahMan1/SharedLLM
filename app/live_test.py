@@ -39,7 +39,7 @@ def get_ha_headers():
 async def setup():
     log.info("--- SETUP: Loading Resources ---")
     await load_resources()
-    if notRd GlobalResources.redis_client or not GlobalResources.chroma_client:
+    if not GlobalResources.redis_client or not GlobalResources.chroma_client:
         log.error("CRITICAL: Resources failed to load.")
         sys.exit(1)
 
