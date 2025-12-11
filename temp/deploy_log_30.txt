@@ -6,16 +6,16 @@ Activate the web console with: systemctl enable --now cockpit.socket
 
 Fetching latest code...
 From github.com:JMiahMan1/SharedLLM
-   46494fc..ca79fd5  timer      -> origin/timer
+   ca79fd5..68e2263  timer      -> origin/timer
+Already on 'timer'
 Your branch is behind 'origin/timer' by 1 commit, and can be fast-forwarded.
   (use "git pull" to update your local branch)
-HEAD is now at ca79fd5 Feat: WebOS play_url for direct video playback
-Already on 'timer'
+HEAD is now at 68e2263 Feat v30: Modular Roku Integration
 From github.com:JMiahMan1/SharedLLM
  * branch            timer      -> FETCH_HEAD
 Already up to date.
 Recreating Docker container to apply config...
-time="2025-12-10T21:00:50-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+time="2025-12-11T08:49:28-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
 #1 [internal] load local bake definitions
 #1 reading from stdin 509B done
 #1 DONE 0.0s
@@ -25,7 +25,7 @@ time="2025-12-10T21:00:50-07:00" level=warning msg="The \"OPENAI_API_KEY\" varia
 #2 DONE 0.1s
 
 #3 [internal] load metadata for docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
-#3 DONE 1.2s
+#3 DONE 0.9s
 
 #4 [internal] load .dockerignore
 #4 transferring context: 455B done
@@ -35,8 +35,8 @@ time="2025-12-10T21:00:50-07:00" level=warning msg="The \"OPENAI_API_KEY\" varia
 #5 DONE 0.0s
 
 #6 [internal] load build context
-#6 transferring context: 6.32MB 0.1s done
-#6 DONE 0.4s
+#6 transferring context: 6.71MB 0.1s done
+#6 DONE 0.2s
 
 #7 [5/8] RUN pip install --no-cache-dir -r requirements.txt
 #7 CACHED
@@ -54,19 +54,19 @@ time="2025-12-10T21:00:50-07:00" level=warning msg="The \"OPENAI_API_KEY\" varia
 #11 CACHED
 
 #12 [7/8] COPY app/ ./app
-#12 DONE 0.3s
+#12 DONE 0.6s
 
 #13 [8/8] COPY data/ ./data
-#13 DONE 0.4s
+#13 DONE 0.6s
 
 #14 exporting to image
 #14 exporting layers
 #14 exporting layers 0.3s done
-#14 writing image sha256:dcb67b8c17e75da45fbf29ef5e22e6e31bc161f654a701d872e95af16777db0c
-#14 writing image sha256:dcb67b8c17e75da45fbf29ef5e22e6e31bc161f654a701d872e95af16777db0c 0.2s done
+#14 writing image sha256:dc2b5b8cbea37992299c3bcbe344cd3d04b3b54ffd8bd1dfa8665e57836717f6
+#14 writing image sha256:dc2b5b8cbea37992299c3bcbe344cd3d04b3b54ffd8bd1dfa8665e57836717f6 0.3s done
 #14 naming to docker.io/library/sharedllm-rag-api
 #14 naming to docker.io/library/sharedllm-rag-api 0.0s done
-#14 DONE 1.4s
+#14 DONE 0.7s
 
 #15 resolving provenance for metadata file
 #15 DONE 0.0s
@@ -74,13 +74,13 @@ time="2025-12-10T21:00:50-07:00" level=warning msg="The \"OPENAI_API_KEY\" varia
  Container unified_rag_redis  Recreate
  Container unified_rag_redis  Recreated
  Container unified_rag_api  Recreate
-time="2025-12-10T21:00:55-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+time="2025-12-11T08:49:33-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
  Container unified_rag_api  Recreated
  Container unified_rag_redis  Starting
  Container unified_rag_redis  Started
  Container unified_rag_api  Starting
  Container unified_rag_api  Started
 Waiting for application startup...
-...............[OK] Application started successfully!
+.............[OK] Application started successfully!
 
 [OK] Deployment Verification Successful.
