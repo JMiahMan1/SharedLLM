@@ -42,7 +42,7 @@ async def tool_web_search(query: str) -> str:
                 data = r.json()
                 results = data.get("results", data.get("hits", []))
                 if results:
-                    formatted = [f"Title: {res.get('title')}\nSnippet: {res.get('content', '')}" for res in results[:4]]
+                    formatted = [f"Title: {res.get('title')}\nURL: {res.get('url', res.get('link', ''))}\nSnippet: {res.get('content', '')}" for res in results[:4]]
                     return "### Real-time Web Search Results (JSON):\n" + "\n\n".join(formatted)
             except: pass 
     except Exception as e:
@@ -71,7 +71,8 @@ async def tool_web_search(query: str) -> str:
                             t_text = title.get_text(strip=True)
                             b_text = body.get_text(strip=True)
                             if t_text and b_text:
-                                results.append(f"Title: {t_text}\nSnippet: {b_text}")
+                                link = title.get("href") or ""
+                                results.append(f"Title: {t_text}\nURL: {link}\nSnippet: {b_text}")
                     if len(results) >= 2: break
             
             if results:
@@ -127,7 +128,8 @@ async def _scrape_with_playwright(url):
                             title = res.select_one("h3, a, h2")
                             body = res.select_one(".content, .st, p, .result-body")
                             if title and body:
-                                results.append(f"Title: {title.get_text(strip=True)}\nSnippet: {body.get_text(strip=True)}")
+                                link = title.get("href") or ""
+                                results.append(f"Title: {title.get_text(strip=True)}\nURL: {link}\nSnippet: {body.get_text(strip=True)}")
                         if len(results) >= 2: break
                 
                 # Fallback: If no structured results found, grab the body text
