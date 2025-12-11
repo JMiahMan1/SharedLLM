@@ -1495,16 +1495,50 @@ async def handle_media_command(
              return await roku_launch(entity_id, app_name_candidate, user_creds, redis_client)
 
         # ------------------------------------------------------------------------
-        # UNIVERSAL VIDEO DEEP LINKING (YouTube, Rumble, etc.)
+        # UNIVERSAL VIDEO INTENT ("WATCH" / "VIEW")
         # ------------------------------------------------------------------------
-        # Check for video URLs to route to TV integrations instead of Music Assistant
-        import re
-        video_pattern = r"(youtube\.com|youtu\.be|rumble\.com|\.mp4|\.mkv)"
-        is_video = bool(re.search(video_pattern, q_low))
+        # Strict separation: "Watch X" -> Video Search. "Play X" -> Music.
         
-        if is_video:
-            log.info(f"[DeepLink] Video URL detected: {q_low}")
-            target_url = q_low.strip()
+        # Check explicit video intent
+        import re
+        is_watch_intent = bool(re.search(r"^\b(watch|view)\b", q_low))
+        
+        target_url = None
+        
+        # If user says "Watch...", we try to find a video URL if one isn't provided
+        if is_watch_intent:
+             # Remove trigger word
+             video_query = re.sub(r"^\b(watch|view)\b", "", q_low).strip()
+             
+             # Check if it's already a URL
+             if re.search(r"(youtube\.com|youtu\.be|rumble\.com|\.mp4|\.mkv)", video_query):
+                 target_url = video_query
+             else:
+                 # SEARCH: Use existing web search tool
+                 log.info(f"[Search-Play] 'Watch' intent detected. Searching for video: {video_query}")
+                 from logic.web_search import tool_web_search
+                 
+                 # Search for YouTube specifically (most reliable deep linking)
+                 search_q = f"site:youtube.com {video_query}"
+                 search_result = await tool_web_search(search_q)
+                 
+                 # Extract first URL
+                 match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=[^"\s]+|youtu\.be/[^"\s]+))', search_result)
+                 if match:
+                      target_url = match.group(1)
+                      log.info(f"[Search-Play] Found video URL: {target_url}")
+                 else:
+                      return {"status": "FAILURE", "message": f"Could not find any video results for '{video_query}'"}
+
+        # Fallback: Check if it's a raw video URL even without "watch" (existing logic)
+        elif re.search(r"(youtube\.com|youtu\.be|rumble\.com|\.mp4|\.mkv)", q_low):
+             target_url = q_low.strip()
+
+        # ------------------------------------------------------------------------
+        # EXECUTE VIDEO PLAYBACK
+        # ------------------------------------------------------------------------
+        if target_url:
+            log.info(f"[DeepLink] Routing Video URL: {target_url}")
             
             # 1. Android TV Deep Link
             if "android" in integration:
@@ -1520,6 +1554,12 @@ async def handle_media_command(
             elif "roku" in integration:
                 from logic.roku_ops import play_media_url as roku_play
                 return await roku_play(entity_id, target_url, user_creds, redis_client)
+
+        # ------------------------------------------------------------------------
+        # UNIVERSAL VIDEO DEEP LINKING (YouTube, Rumble, etc.)
+        # ------------------------------------------------------------------------
+        # Check for video URLs to route to TV integrations instead of Music Assistant
+
 
         # --- SMART CONTENT TYPE DETECTION (Music Assistant Fallback) ---
         ctype = "music" # Default
