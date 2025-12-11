@@ -1,0 +1,4 @@
+Status: 200
+[]
+2025-12-10 22:39:52,005 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-10 22:39:52,047 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/webostv/command HTTP/1.1" 200 10

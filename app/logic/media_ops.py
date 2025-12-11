@@ -1483,6 +1483,17 @@ async def handle_media_command(
              log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to webos_ops")
              return await webos_launch(entity_id, app_name_candidate, user_creds, redis_client)
 
+        # Roku App Launch
+        if "roku" in integration or intent == "open_app":
+             from logic.roku_ops import launch_app as roku_launch
+             # Naive extraction if not done yet
+             if not app_name_candidate:
+                  app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
+             
+             # Roku supports app names or app IDs
+             log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to roku_ops")
+             return await roku_launch(entity_id, app_name_candidate, user_creds, redis_client)
+
         # --- SMART CONTENT TYPE DETECTION ---
         ctype = "music" # Default
         detected_specific_type = False
