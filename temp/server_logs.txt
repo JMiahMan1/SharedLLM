@@ -1,0 +1,20 @@
+INFO:     172.24.0.1:49212 - "POST /api/chat HTTP/1.1" 200 OK
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/logic/execution/handlers.py", line 83, in handle_media_tool
+    return await handle_media_command(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/logic/media_ops.py", line 1490, in handle_media_command
+    if not app_name_candidate:
+           ^^^^^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'app_name_candidate' where it is not associated with a value
+2025-12-11 09:15:34,909 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': "Tool execution failed: cannot access local variable 'app_name_candidate' where it is not associated with a value", 'service': 'media_command'}]
+2025-12-11 09:15:34,910 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_command' on 'N/A' failed. Reason: Tool execution failed: cannot access local variable 'app_name_candidate' where it is not associated with a value
+
+2025-12-11 09:15:34,910 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2695
+2025-12-11 09:15:34,913 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-11 09:15:35,208 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-11 09:15:35,431 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-11 09:15:44,309 [DEBUG] [RESPONSE] Final response to user (175 chars): The Roku device is currently unavailable or the app isn't recognized. Would you like me to attempt the action again, check the device status, or explore an alternative method?
+2025-12-11 09:15:44,310 [DEBUG] [RESPONSE] Returning to client: The Roku device is currently unavailable or the app isn't recognized. Would you like me to attempt the action again, check the device status, or explore an alternative method?
