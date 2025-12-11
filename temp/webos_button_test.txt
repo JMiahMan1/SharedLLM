@@ -1,0 +1,1 @@
+{"status":"SUCCESS","message":"Sent command to button the Living Room TV.","entity_id":"media_player.living_room_tv","friendly_name":"Living Room TV","service":"webostv.button","new_state":"on"}
