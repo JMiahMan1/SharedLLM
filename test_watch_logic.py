@@ -1,7 +1,9 @@
 import asyncio
 import logging
 from logic import media_ops
+from logic.web_search import tool_web_search
 from settings import GlobalResources, HA_ENV_TOKEN
+import re
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -12,34 +14,31 @@ async def test_watch():
     
     # Mock Creds
     user_creds = {"ha_token": HA_ENV_TOKEN}
-    
-    # Mock Redis (Optional, might be skipped by ops if None)
-    # GlobalResources.redis_client is usually None in standalone script unless initialized
-    
-    # Test Command
     entity_id = "media_player.28_tcl_roku_tv"
     command = "Watch trending cat videos"
+
+    print("\n--- DIRECT SEARCH TEST ---")
+    search_res = await tool_web_search("site:youtube.com trending cat videos")
+    print("RAW SEARCH RESULT START:")
+    print(search_res[:1000]) # Print first 1000 chars
+    print("RAW SEARCH RESULT END")
     
-    print(f"Testing command: '{command}' on '{entity_id}'")
-    
+    match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=[^"\s]+|youtu\.be/[^"\s]+))', search_res)
+    print(f"Regex Match: {match}")
+
+    print("\n--- MEDIA OPS RESULT ---")
     try:
-        # Call the function directly
         result = await media_ops.handle_media_command(
             intent="play_media",
             query=command,
             entity_id=entity_id,
             user_creds=user_creds,
-            ha_collection=None, # pass None for collection if safe, else we might crash
+            ha_collection=None,
             redis_client=None
         )
-        
-        print("\n--- RESULT ---")
         print(result)
-        
     except Exception as e:
-        print(f"\nCRITICAL ERROR: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"ERROR: {e}")
 
 if __name__ == "__main__":
     asyncio.run(test_watch())
