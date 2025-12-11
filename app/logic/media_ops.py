@@ -1494,7 +1494,34 @@ async def handle_media_command(
              log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to roku_ops")
              return await roku_launch(entity_id, app_name_candidate, user_creds, redis_client)
 
-        # --- SMART CONTENT TYPE DETECTION ---
+        # ------------------------------------------------------------------------
+        # UNIVERSAL VIDEO DEEP LINKING (YouTube, Rumble, etc.)
+        # ------------------------------------------------------------------------
+        # Check for video URLs to route to TV integrations instead of Music Assistant
+        import re
+        video_pattern = r"(youtube\.com|youtu\.be|rumble\.com|\.mp4|\.mkv)"
+        is_video = bool(re.search(video_pattern, q_low))
+        
+        if is_video:
+            log.info(f"[DeepLink] Video URL detected: {q_low}")
+            target_url = q_low.strip()
+            
+            # 1. Android TV Deep Link
+            if "android" in integration:
+                from logic.android_tv_ops import play_video as atv_play
+                return await atv_play(entity_id, target_url, user_creds)
+                
+            # 2. WebOS Deep Link
+            elif "webostv" in integration:
+                from logic.webos_ops import play_url as webos_play
+                return await webos_play(entity_id, target_url, user_creds, redis_client)
+                
+            # 3. Roku Deep Link
+            elif "roku" in integration:
+                from logic.roku_ops import play_media_url as roku_play
+                return await roku_play(entity_id, target_url, user_creds, redis_client)
+
+        # --- SMART CONTENT TYPE DETECTION (Music Assistant Fallback) ---
         ctype = "music" # Default
         detected_specific_type = False
 
