@@ -110,7 +110,6 @@ async def send_notification(entity_id: str, message: str, user_creds: dict, redi
         redis_client
     )
 
-
 async def play_channel(entity_id: str, channel: str, user_creds: dict, redis_client=None) -> dict:
     """
     Switches TV channel.
