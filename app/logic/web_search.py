@@ -42,9 +42,19 @@ async def tool_web_search(query: str) -> str:
                 data = r.json()
                 results = data.get("results", data.get("hits", []))
                 if results:
+                    # Validate that we actually have URLs
+                    has_urls = any(r.get('url') or r.get('link') for r in results)
+                    if not has_urls:
+                        log.warning("Web Search Tier 1 (JSON) returned results but NO URLs. Falling back to Tier 2.")
+                        # Raise exception or pass to trigger fallback? 
+                        # 'pass' allows exiting the try/except block naturally? No, we are in a function. 
+                        # We need to NOT return here.
+                        raise ValueError("No URLs in JSON response")
+
                     formatted = [f"Title: {res.get('title')}\nURL: {res.get('url', res.get('link', ''))}\nSnippet: {res.get('content', '')}" for res in results[:4]]
                     return "### Real-time Web Search Results (JSON):\n" + "\n\n".join(formatted)
-            except: pass 
+            except Exception as e:
+                log.warning(f"Web Search Tier 1 (JSON) Skipped: {e}") 
     except Exception as e:
         log.warning(f"Web Search Tier 1 (JSON) Error: {e}")
 
