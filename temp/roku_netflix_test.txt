@@ -1,0 +1,1 @@
+{"detail":"type object 'GlobalResources' has no attribute 'ha_token'"}
