@@ -1,0 +1,35 @@
+--- STARTING WATCH TEST ---
+
+--- DIRECT SEARCH TEST ---
+2025-12-11 09:22:46,363 [DEBUG] Using selector: EpollSelector
+2025-12-11 09:22:46,363 [INFO] Executing Web Search for: site:youtube.com trending cat videos
+2025-12-11 09:22:46,365 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-11 09:22:49,837 [DEBUG] https://search.sumemail.com:443 "GET /search?q=site%3Ayoutube.com+trending+cat+videos&format=json HTTP/2.0" 200 6023
+2025-12-11 09:22:49,841 [WARNING] Web Search Tier 1 (JSON) returned results but NO URLs. Falling back to Tier 2.
+2025-12-11 09:22:49,841 [WARNING] Web Search Tier 1 (JSON) Skipped: No URLs in JSON response
+2025-12-11 09:22:49,844 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-11 09:22:52,992 [DEBUG] https://search.sumemail.com:443 "GET /search?q=site%3Ayoutube.com+trending+cat+videos HTTP/2.0" 200 None
+2025-12-11 09:22:53,037 [INFO] Engaging Tier 3 (Playwright) for web search...
+2025-12-11 09:22:53,037 [INFO] Launching Playwright for URL: https://search.sumemail.com/search?q=site:youtube.com trending cat videos
+2025-12-11 09:23:03,310 [INFO] Playwright fetched page content length: 46525
+2025-12-11 09:23:03,348 [INFO] Playwright: Specific selectors failed, grabbing generalized body text.
+RAW SEARCH RESULT START:
+### Real-time Web Search Results (Playwright):
+Page Text: All Images Maps Videos News ⚙ Country: ------- Afghanistan Albania Algeria American Samoa Andorra Angola Anguilla Antarctica Antigua and Barbuda Argentina Armenia Aruba Australia Austria Azerbaijan Bahamas Bahrain Bangladesh Barbados Belarus Belgium Belize Benin Bermuda Bhutan Bolivia Bosnia and Herzegovina Botswana Bouvet Island Brazil British Indian Ocean Territory Brunei Darussalam Bulgaria Burkina Faso Burundi Cambodia Cameroon Canada Cape Verde Cayman Islands Central African Republic Chad Chile China Christmas Island Cocos (Keeling) Islands Colombia Comoros Congo Congo, Democratic Republic of the Cook Islands Costa Rica Cote D'ivoire Croatia (Hrvatska) Cuba Cyprus Czech Republic Denmark Djibouti Dominica Dominican Republic East Timor Ecuador Egypt El Salvador Equatorial Guinea Eritrea Estonia Ethiopia European Union Falkland Islands (Malvinas) Faroe Islands Fiji Finland France France, Metropolitan French Guiana French Polyn
+RAW SEARCH RESULT END
+Regex Match: None
+
+--- MEDIA OPS RESULT ---
+2025-12-11 09:23:03,379 [INFO] [Search-Play] 'Watch' intent detected. Searching for video: trending cat videos
+2025-12-11 09:23:03,379 [INFO] Executing Web Search for: site:youtube.com trending cat videos
+2025-12-11 09:23:03,380 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-11 09:23:06,703 [DEBUG] https://search.sumemail.com:443 "GET /search?q=site%3Ayoutube.com+trending+cat+videos&format=json HTTP/2.0" 200 5706
+2025-12-11 09:23:06,707 [WARNING] Web Search Tier 1 (JSON) returned results but NO URLs. Falling back to Tier 2.
+2025-12-11 09:23:06,707 [WARNING] Web Search Tier 1 (JSON) Skipped: No URLs in JSON response
+2025-12-11 09:23:06,710 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-11 09:23:09,888 [DEBUG] https://search.sumemail.com:443 "GET /search?q=site%3Ayoutube.com+trending+cat+videos HTTP/2.0" 200 None
+2025-12-11 09:23:09,937 [INFO] Engaging Tier 3 (Playwright) for web search...
+2025-12-11 09:23:09,937 [INFO] Launching Playwright for URL: https://search.sumemail.com/search?q=site:youtube.com trending cat videos
+{'status': 'FAILURE', 'message': "Could not find any video results for 'trending cat videos'"}
+2025-12-11 09:23:18,803 [INFO] Playwright fetched page content length: 46525
+2025-12-11 09:23:18,839 [INFO] Playwright: Specific selectors failed, grabbing generalized body text.
