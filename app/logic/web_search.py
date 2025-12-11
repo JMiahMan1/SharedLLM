@@ -54,9 +54,11 @@ async def tool_web_search(query: str) -> str:
                     formatted = [f"Title: {res.get('title')}\nURL: {res.get('url', res.get('link', ''))}\nSnippet: {res.get('content', '')}" for res in results[:4]]
                     return "### Real-time Web Search Results (JSON):\n" + "\n\n".join(formatted)
             except Exception as e:
-                log.warning(f"Web Search Tier 1 (JSON) Skipped: {e}") 
+                log.warning(f"Web Search Tier 1 (JSON) Processing Error: {e}. Switching to Tier 2.") 
+    except requests.exceptions.ConnectionError:
+        log.error(f"Whoogle (Tier 1) Unreachable at {WHOOGLE_URL}. Service might be down. Switching to Tier 2.")
     except Exception as e:
-        log.warning(f"Web Search Tier 1 (JSON) Error: {e}")
+        log.warning(f"Web Search Tier 1 (JSON) Failed: {e}. Switching to Tier 2.")
 
     # --- Tier 2: HTML Scraping ---
     # Useful if the JSON endpoint is disabled or blocked, but the frontend works.
@@ -87,8 +89,10 @@ async def tool_web_search(query: str) -> str:
             
             if results:
                 return "### Real-time Web Search Results (HTML):\n" + "\n\n".join(results)
+    except requests.exceptions.ConnectionError:
+        log.error(f"Whoogle (Tier 2) Unreachable. Entire Whoogle instance appears DOWN. Switching to DuckDuckGo/Playwright.")
     except Exception as e:
-        log.warning(f"Web Search Tier 2 (HTML) Error: {e}")
+        log.warning(f"Web Search Tier 2 (HTML) Error: {e}. Switching to Fallback Provider.")
 
     # --- Tier 3: DuckDuckGo (Fallback) ---
     # Public, reliable, no self-hosting required.
