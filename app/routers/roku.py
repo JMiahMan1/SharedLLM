@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from settings import GlobalResources
+from settings import GlobalResources, HA_ENV_TOKEN
 from logic import roku_ops
 
 router = APIRouter(prefix="/api/roku", tags=["roku"])
@@ -39,7 +39,7 @@ class SearchRequest(BaseModel):
 async def launch_app(req: LaunchRequest):
     """Launch a Roku app by name or ID"""
     try:
-        user_creds = {"ha_token": GlobalResources.ha_token}
+        user_creds = {"ha_token": HA_ENV_TOKEN}
         result = await roku_ops.launch_app(
             req.entity_id,
             req.app_name,
@@ -54,7 +54,7 @@ async def launch_app(req: LaunchRequest):
 async def tune_channel(req: ChannelRequest):
     """Tune to a TV channel (Roku TV with antenna only)"""
     try:
-        user_creds = {"ha_token": GlobalResources.ha_token}
+        user_creds = {"ha_token": HA_ENV_TOKEN}
         result = await roku_ops.play_channel(
             req.entity_id,
             req.channel,
@@ -69,7 +69,7 @@ async def tune_channel(req: ChannelRequest):
 async def play_url(req: PlayURLRequest):
     """Play a direct media URL"""
     try:
-        user_creds = {"ha_token": GlobalResources.ha_token}
+        user_creds = {"ha_token": HA_ENV_TOKEN}
         result = await roku_ops.play_media_url(
             req.entity_id,
             req.url,
@@ -87,7 +87,7 @@ async def play_url(req: PlayURLRequest):
 async def deeplink_content(req: DeepLinkRequest):
     """Deep-link to specific content within an app"""
     try:
-        user_creds = {"ha_token": GlobalResources.ha_token}
+        user_creds = {"ha_token": HA_ENV_TOKEN}
         result = await roku_ops.deep_link(
             req.entity_id,
             req.app_id,
@@ -104,7 +104,7 @@ async def deeplink_content(req: DeepLinkRequest):
 async def send_button(req: ButtonRequest):
     """Send a remote button command"""
     try:
-        user_creds = {"ha_token": GlobalResources.ha_token}
+        user_creds = {"ha_token": HA_ENV_TOKEN}
         result = await roku_ops.send_button(
             req.entity_id,
             req.button,
@@ -119,7 +119,7 @@ async def send_button(req: ButtonRequest):
 async def search_content(req: SearchRequest):
     """Search for content on Roku"""
     try:
-        user_creds = {"ha_token": GlobalResources.ha_token}
+        user_creds = {"ha_token": HA_ENV_TOKEN}
         result = await roku_ops.search(
             req.entity_id,
             req.keyword,
