@@ -1454,6 +1454,8 @@ async def handle_media_command(
         # APP LAUNCH
         # APP LAUNCH
         # If integration is Android TV or device has apps, try to resolve app intent
+        app_name_candidate = None
+        
         if "android" in integration or "app" in q_low or intent == "open_app":
              # Extract App Name (naive)
              app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
