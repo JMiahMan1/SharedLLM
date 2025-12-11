@@ -1,0 +1,1 @@
+{"status":"SUCCESS","message":"Sent command to send command the 28\" TCL Roku TV.","entity_id":"remote.28_tcl_roku_tv","friendly_name":"28\" TCL Roku TV","service":"remote.send_command","new_state":"on"}
