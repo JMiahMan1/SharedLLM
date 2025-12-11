@@ -62,3 +62,4 @@ xlrd
 xmltodict
 playwright
 langchain-huggingface
+duckduckgo-search
