@@ -110,6 +110,26 @@ async def send_notification(entity_id: str, message: str, user_creds: dict, redi
         redis_client
     )
 
+async def play_url(entity_id: str, url: str, user_creds: dict, redis_client=None) -> dict:
+    """
+    Opens a URL directly on the TV (useful for YouTube videos).
+    Uses the webostv.command service with system.launcher/open.
+    """
+    await ensure_device_on(entity_id, user_creds)
+    
+    log.info(f"[WebOS] Opening URL {url} on {entity_id}")
+    
+    # WebOS system.launcher/open handles browser and YouTube links natively.
+    # No special parsing needed for YouTube as the system intent handles it.
+    if "youtube.com" in url or "youtu.be" in url:
+        log.info(f"[WebOS] Detected YouTube URL. WebOS will handle opening it in the YouTube app.")
+    
+    return await execute_ha_service(
+        "webostv", "command", entity_id, user_creds,
+        {"command": "system.launcher/open", "payload": {"target": url}},
+        redis_client
+    )
+
 async def play_channel(entity_id: str, channel: str, user_creds: dict, redis_client=None) -> dict:
     """
     Switches TV channel.
