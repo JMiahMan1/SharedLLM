@@ -90,10 +90,37 @@ async def tool_web_search(query: str) -> str:
     except Exception as e:
         log.warning(f"Web Search Tier 2 (HTML) Error: {e}")
 
-    # --- Tier 3: Playwright ---
+    # --- Tier 3: DuckDuckGo (Fallback) ---
+    # Public, reliable, no self-hosting required.
+    try:
+        from duckduckgo_search import DDGS
+        
+        def do_ddg_search():
+            log.info("Engaging Tier 3 (DuckDuckGo) for web search...")
+            with DDGS() as ddgs:
+                return list(ddgs.text(query, max_results=4))
+        
+        ddg_results = await run_blocking(do_ddg_search)
+        if ddg_results:
+            formatted = []
+            for res in ddg_results:
+                title = res.get('title')
+                link = res.get('href')
+                snippet = res.get('body')
+                if title and link:
+                    formatted.append(f"Title: {title}\nURL: {link}\nSnippet: {snippet}")
+            
+            if formatted:
+                return "### Real-time Web Search Results (DuckDuckGo):\n" + "\n\n".join(formatted)
+    except ImportError:
+        log.warning("DuckDuckGo Search library not installed.")
+    except Exception as e:
+        log.warning(f"Web Search Tier 3 (DuckDuckGo) Error: {e}")
+
+    # --- Tier 4: Playwright ---
     # Heavyweight browser automation for JS-heavy results or CAPTCHA avoidance.
     if PLAYWRIGHT_AVAILABLE:
-        log.info("Engaging Tier 3 (Playwright) for web search...")
+        log.info("Engaging Tier 4 (Playwright) for web search...")
         browser_url = f"{WHOOGLE_URL.rstrip('/')}/search?q={query}"
         results = await _scrape_with_playwright(browser_url)
         if results:
