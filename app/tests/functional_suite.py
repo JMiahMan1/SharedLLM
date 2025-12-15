@@ -92,42 +92,64 @@ async def run_test():
          # Accept 'on' or 'idle'
          pass 
 
-    # 5. Test: Mute
-    log.info("Step 3: TEST - Mute")
-    res = await handle_media_command("volume_mute", "mute office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
+    # 5. Test: App Launch (YouTube)
+    log.info("Step 3: TEST - Launch YouTube")
+    res = await handle_media_command("open_app", "open youtube on office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
     if res[0]["status"] != "SUCCESS":
-        raise FunctionalTestFailure(f"Mute Failed: {res}")
+        raise FunctionalTestFailure(f"App Launch Failed: {res}")
+    await asyncio.sleep(5)
+    # Verify by checking source or app_id if available, or just state 'playing'/'idle'
+    # Many TVs show 'YouTube' as source
+    if not await verify_state(entity_id, None, "source", "YouTube") and not await verify_state(entity_id, None, "app_id", "com.google.android.youtube.tv"):
+         log.warning("Could not verify App Launch via state attributes (normal for some TVs).")
+
+    # 6. Test: Volume Control (Set, Up, Down, Mute)
+    log.info("Step 4: TEST - Volume Controls")
     
+    # Set 15%
+    await handle_media_command("volume_set", "set volume to 15%", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
+    await asyncio.sleep(2)
+    
+    # Mute
+    await handle_media_command("volume_mute", "mute office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
     await asyncio.sleep(2)
     if not await verify_state(entity_id, None, "is_volume_muted", True):
-        raise FunctionalTestFailure("Device state does not show MUTED=True")
+        raise FunctionalTestFailure("Mute failed")
 
-    # 6. Test: Unmute (Set Volume)
-    log.info("Step 4: TEST - Unmute (via Set Volume 10%)")
-    res = await handle_media_command("volume_set", "set volume to 10%", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
-    if res[0]["status"] != "SUCCESS":
-        # volume_set might fail on some TVs, try volume_up
-        log.warning("Volume Set failed, trying Volume Up/Unmute explicit")
-        res = await handle_media_command("volume_mute", "unmute office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client, {"is_volume_muted": False})
-    
+    # Unmute
+    await handle_media_command("volume_mute", "unmute office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client, {"is_volume_muted": False})
     await asyncio.sleep(2)
     if not await verify_state(entity_id, None, "is_volume_muted", False):
-        raise FunctionalTestFailure("Device still MUTED after unmute/volume command")
+        raise FunctionalTestFailure("Unmute failed")
+        
+    # Volume Up
+    log.info("Step 4b: TEST - Volume Up")
+    await handle_media_command("volume_up", "turn volume up on office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
+    await asyncio.sleep(1)
+    
+    # Volume Down
+    log.info("Step 4c: TEST - Volume Down")
+    await handle_media_command("volume_down", "turn volume down on office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
+    await asyncio.sleep(1)
 
-    # 7. Test: Timer Targeting
-    log.info("Step 5: TEST - Timer Targeting")
-    # We call the tool directly as the pipeline would
+    # 7. Test: Timers & Alarms
+    log.info("Step 5: TEST - Timers & Alarms")
+    
+    # Timer
     timer_res = await tool_timer_add("set a timer for 1 minute on office tv", user_creds, "test-model", GlobalResources.redis_client, GlobalResources.ha_collection)
-    
-    if timer_res["status"] != "SUCCESS":
-        raise FunctionalTestFailure(f"Timer creation failed: {timer_res}")
-    
-    if "Office TV" not in timer_res["message"] and entity_id not in timer_res.get("message", ""):
-        # Check if the timer entry has the right target
-        log.warning(f"Timer message might not be explicit: {timer_res['message']}")
-        # In a real test we'd check the DB, but this is a good first pass proxy.
-        if "on Office TV" not in timer_res["message"]:
-             raise FunctionalTestFailure(f"Timer Target Verification Failed. Msg: {timer_res['message']}")
+    if timer_res["status"] != "SUCCESS" or ("Office TV" not in timer_res["message"] and entity_id not in timer_res.get("message", "")):
+        raise FunctionalTestFailure(f"Timer Creation Failed: {timer_res}")
+        
+    # Alarm
+    from logic.timer_ops import tool_alarm_add
+    alarm_res = await tool_alarm_add("set an alarm for 8am on office tv", user_creds, "test-model", GlobalResources.redis_client, GlobalResources.ha_collection)
+    if alarm_res["status"] != "SUCCESS" or ("Office TV" not in alarm_res["message"] and entity_id not in alarm_res.get("message", "")):
+         raise FunctionalTestFailure(f"Alarm Creation Failed: {alarm_res}")
+
+    # Cleanup Timers
+    from logic.timer_ops import tool_timer_delete
+    await tool_timer_delete("timer", user_creds, GlobalResources.redis_client)
+    await tool_timer_delete("alarm", user_creds, GlobalResources.redis_client)
 
     # 8. Teardown: Turn Off
     log.info("Step 6: TEARDOWN - Turn Off")
