@@ -1443,7 +1443,7 @@ async def handle_media_command(
                         s = await get_entity_state(rid, user_creds)
                         return s and s != "unknown"
                     if await _has_remote(remote_id):
-                        return await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": remote_cmd}, redis_client)
+                        return [await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": remote_cmd}, redis_client)]
             
             cmd_map = {
                 "nav_up": "DPAD_UP", "nav_down": "DPAD_DOWN",
@@ -1460,7 +1460,7 @@ async def handle_media_command(
             service = "turn_" + intent.split("_")[1]
         if domain not in ["light", "switch", "remote", "media_player"]:
             domain = "homeassistant"
-        return await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)
+        return [await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)]
 
     # -------------------------------------------------
     # MEDIA (PLAY / OPEN APP)
@@ -1487,7 +1487,7 @@ async def handle_media_command(
              if matched_app or intent == "open_app": # If explicit open_app, execute even if not in known list (pass raw)
                  target_app = matched_app if matched_app else app_name_candidate
                  log.info(f"Delegating App Launch '{target_app}' on {entity_id} to android_tv_ops")
-                 return await atv_launch(entity_id, target_app, user_creds, redis_client)
+                 return [await atv_launch(entity_id, target_app, user_creds, redis_client)]
         
         # WebOS App Launch
         if "webostv" in integration or intent == "open_app":
