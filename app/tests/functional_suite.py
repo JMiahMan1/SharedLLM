@@ -83,7 +83,14 @@ async def run_test():
     # 4. Test: Turn On
     log.info("Step 2: TEST - Turn On")
     res = await handle_media_command("turn_on", "turn on office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
-    if res[0]["status"] != "SUCCESS":
+    if isinstance(res, dict):
+        log.error(f"Handle Command returned DICT not LIST: {res}")
+        res = [res] 
+    
+    if not res or not isinstance(res, list):
+         raise FunctionalTestFailure(f"Invalid return from handle_media_command: {type(res)} -> {res}")
+
+    if res[0].get("status") != "SUCCESS":
         raise FunctionalTestFailure(f"Turn On Failed: {res}")
     
     await asyncio.sleep(5) # TVs take time
@@ -200,5 +207,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(run_test())
     except Exception as e:
+        import traceback
         log.error(f"TEST FAILED: {e}")
+        traceback.print_exc()
         sys.exit(1)
