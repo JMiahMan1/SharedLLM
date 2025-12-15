@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Force log file to avoiding settings.py crash if env missing (though in container it should be fine)
 os.environ["LOG_FILE"] = "/data/functional_test.log"
 
-from settings import load_resources, GlobalResources, HA_URL, HA_ENV_TOKEN as HA_TOKEN
+from settings import load_resources, GlobalResources, HA_URL, HA_ENV_TOKEN as HA_TOKEN, get_user_creds
 from logic.media_ops import handle_media_command, smart_resolve_entity, get_entity_state
 from logic.timer_ops import tool_timer_add
 import aiohttp
@@ -61,7 +61,7 @@ async def run_test():
     
     # 1. Initialize
     await load_resources()
-    user_creds = {"user": "Jeremiah"} # Mock user
+    user_creds = get_user_creds("Jeremiah")
     
     # 2. Resolve Entity
     log.info(f"Step 0: Resolving '{OFFICE_TV_NAME}'...")
