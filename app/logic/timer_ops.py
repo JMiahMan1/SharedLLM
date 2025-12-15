@@ -271,18 +271,32 @@ async def tool_alarm_add(query: str, user_creds: Dict[str, str], model: str, red
 async def _extract_target_device(query: str, ha_collection):
     target_device = None
     target_device_name = None
-    device_match = re.search(r'\b(?:on|in)\s+(the\s+)?(.+?)$', query)
+    # Improved regex: Handle trailing punctuation
+    device_match = re.search(r'\b(?:on|in)\s+(the\s+)?(.+?)[.?!]?$', query)
     
     if device_match:
-        potential_name = device_match.group(2).strip()
+        potential_name = device_match.group(2).strip().strip("!?.")
         time_keywords = ['minute', 'second', 'hour', 'tomorrow', 'tonight', 'morning', 'evening', 'afternoon', 'day', 'week', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        
+        # Avoid capturing time phrases as devices
         if not any(w in potential_name for w in time_keywords):
             target_device_name = potential_name
+            log.info(f"Timer Extraction: Identified potential device name: '{target_device_name}'")
             
     if target_device_name and ha_collection:
+        # Try 'play_media' first (covers TVs/Speakers)
         tid, _ = await smart_resolve_entity(target_device_name, "play_media", ha_collection)
         if tid:
             target_device = tid
+            log.info(f"Timer Extraction: Resolved '{target_device_name}' -> {target_device}")
+        else:
+            # Fallback: Try generic 'turn_on' if media resolve fails (e.g. for switches/lights used as alarms)
+            log.info(f"Timer Extraction: No media device found for '{target_device_name}', trying generic resolution.")
+            tid, _ = await smart_resolve_entity(target_device_name, "turn_on", ha_collection)
+            if tid:
+                target_device = tid
+                log.info(f"Timer Extraction: Resolved generic '{target_device_name}' -> {target_device}")
+
     return target_device, target_device_name
 
 def _extract_title(query: str, ignore_words: List[str]) -> str:

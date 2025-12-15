@@ -192,7 +192,9 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
                         capabilities["has_previous"] = bool(features & 16)
                         capabilities["has_next"] = bool(features & 32)
                         capabilities["has_volume"] = bool(features & 4)
+                        capabilities["has_volume_mute"] = bool(features & 8)
                         capabilities["has_play_media"] = bool(features & 512)
+                        capabilities["has_volume_step"] = bool(features & 1024)
                     
                     # Cache in Redis and return
                     if redis_client:
@@ -268,7 +270,9 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
             capabilities["has_previous"] = bool(features & 16)
             capabilities["has_next"] = bool(features & 32)
             capabilities["has_volume"] = bool(features & 4)
+            capabilities["has_volume_mute"] = bool(features & 8)
             capabilities["has_play_media"] = bool(features & 512)
+            capabilities["has_volume_step"] = bool(features & 1024)
             capabilities["has_turn_on"] = bool(features & 128)
             capabilities["has_turn_off"] = bool(features & 256)
         
@@ -964,6 +968,18 @@ async def handle_media_command(
     Supports multi-device pattern matching (even/odd/range/list/all).
     """
     q_low = query.lower()
+    
+    # [IntentOverride] Force upgrade for ambiguous "Watch" commands (e.g. "Watch on Roku" classified as turn_on)
+    if re.search(r"\b(watch|view)\b", q_low) and intent not in ["watch_video", "view_content", "play_media"]:
+         # Note: We exclude 'play_media' from forced upgrade here if we want to let play_media logic handle it?
+         # No, 'play_media' logic below (lines 1500+) ALREADY handles 'watch' detection.
+         # The issue is 'turn_on' or generic intents.
+         # So we force upgrade only if it's NOT already media-related?
+         # Actually, force it for EVERYTHING except maybe 'stop', 'volume', etc.
+         if intent not in ["stop_media", "volume_up", "volume_down", "volume_mute", "volume_set"]:
+             log.info(f"[IntentOverride] Detected 'watch' keyword. Upgrading intent '{intent}' -> 'watch_video'")
+             intent = "watch_video"
+    
     integration = "unknown"
     
     # 1. EARLY MUSIC/CONTENT DETECTION (Moved Up)
@@ -980,7 +996,7 @@ async def handle_media_command(
     strict_resolution = (is_music_request or is_audiobook_request) or (
         (intent == "play_media" or intent == "play") and not is_video_request
     )
-    is_transport = intent in ["media_next", "media_previous", "stop_media"]
+    is_transport = intent in ["media_next", "media_previous", "stop_media", "volume_set", "volume_up", "volume_down", "volume_mute"]
 
     # --- Device Name Fallback ---
     # If Orchestrator provides device_name but no entity_id, resolve it
@@ -1030,11 +1046,11 @@ async def handle_media_command(
             intent = "turn_on"
         elif "turn off" in intent_lower:
             intent = "turn_off"
+        elif "mute" in intent_lower:
+            intent = "volume_mute"
         # --- Volume Intent Sanitization ---
         elif "volume" in intent_lower:
-            if "mute" in intent_lower:
-                intent = "volume_mute"
-            elif "up" in intent_lower:
+            if "up" in intent_lower:
                 intent = "volume_up"
             elif "down" in intent_lower:
                 intent = "volume_down"
@@ -1449,7 +1465,7 @@ async def handle_media_command(
     # -------------------------------------------------
     # MEDIA (PLAY / OPEN APP)
     # -------------------------------------------------
-    if intent in ["play_media", "open_app"]:
+    if intent in ["play_media", "open_app", "watch_video", "view_content"]:
 
         # APP LAUNCH
         # APP LAUNCH
@@ -1502,7 +1518,7 @@ async def handle_media_command(
         # Strict separation: "Watch X" -> Video Search. "Play X" -> Music.
         
         # Check explicit video intent
-        import re
+
         is_watch_intent = bool(re.search(r"^\b(watch|view)\b", q_low))
         
         target_url = None
@@ -1520,8 +1536,27 @@ async def handle_media_command(
                  log.info(f"[Search-Play] 'Watch' intent detected. Searching for video: {video_query}")
                  from logic.web_search import tool_web_search
                  
+                 # Clean Query: Remove device name from search string to avoid "video on office tv" noise
+                 # Aggressive regex to remove "on [device/room]" patterns
+                 clean_q = re.sub(r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media|living|room|den|basement|roku|chromecast|shield|monitor|display)\b.*", "", video_query, flags=re.IGNORECASE).strip()
+                 
+                 # Basic fallback
+                 clean_q = clean_q.replace(" on ", " ").strip()
+                 if device_name:
+                     clean_q = re.sub(re.escape(device_name), "", clean_q, flags=re.IGNORECASE).strip()
+                 
+                 # Also try to strip friendly_name if available
+                 try:
+                      # Determine friendly name from entity_id lookup (cached/local)
+                      # We don't have easy access to state here without an async call, but we can try simple heuristics
+                      # or rely on the general " on " removal.
+                      pass
+                 except:
+                      pass
+
                  # Search for YouTube specifically (most reliable deep linking)
-                 search_q = f"site:youtube.com {video_query}"
+                 # We use site:youtube.com to force video results
+                 search_q = f"site:youtube.com {clean_q}"
                  search_result = await tool_web_search(search_q)
                  
                  # Extract first URL
