@@ -1835,9 +1835,13 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
             return result
         
         elif intent == "volume_mute":
+            should_mute = True
+            if "unmute" in query.lower() or "mute off" in query.lower():
+                 should_mute = False
+            
             result = await execute_ha_service(
                 "media_player", "volume_mute", entity_id, user_creds, 
-                {"is_volume_muted": True}, redis_client
+                {"is_volume_muted": should_mute}, redis_client
             )
             return result
 
