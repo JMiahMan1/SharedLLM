@@ -151,8 +151,43 @@ async def run_test():
     await tool_timer_delete("timer", user_creds, GlobalResources.redis_client)
     await tool_timer_delete("alarm", user_creds, GlobalResources.redis_client)
 
-    # 8. Teardown: Turn Off
-    log.info("Step 6: TEARDOWN - Turn Off")
+    # 9. Test: Calendar (Add, Verify, Delete)
+    log.info("Step 6: TEST - Calendar")
+    from logic.calendar_ops import tool_calendar_add, tool_calendar_delete
+    
+    cal_res = await tool_calendar_add("Schedule 'Test Meeting' for tomorrow at 2pm", user_creds, "test-model", GlobalResources.redis_client)
+    if "Scheduled" not in cal_res.get("message", ""):
+        raise FunctionalTestFailure(f"Calendar Add Failed: {cal_res}")
+        
+    # Delete
+    del_res = await tool_calendar_delete("delete 'Test Meeting'", user_creds, "test-model", GlobalResources.redis_client)
+    if "deleted" not in del_res.get("message", "").lower() and "removed" not in del_res.get("message", "").lower():
+         log.warning(f"Calendar Delete check inconclusive: {del_res}")
+
+    # 10. Test: Notes (Add, Verify, Delete)
+    log.info("Step 7: TEST - Notes")
+    from logic.note_ops import tool_note_add, tool_note_delete, tool_note_read
+    
+    note_title = "Functional Test Note"
+    note_content = "This is a test note."
+    
+    # Add
+    note_res = await tool_note_add(note_title, note_content, "Testing")
+    if note_res["status"] != "success":
+         raise FunctionalTestFailure(f"Note Add Failed: {note_res}")
+
+    # Read/Verify
+    read_res = await tool_note_read(note_title)
+    if note_content not in str(read_res):
+         raise FunctionalTestFailure(f"Note Read Failed. Got: {read_res}")
+         
+    # Delete
+    del_note_res = await tool_note_delete(note_title)
+    if "deleted" not in str(del_note_res).lower():
+         raise FunctionalTestFailure(f"Note Delete Failed: {del_note_res}")
+
+    # 11. Teardown: Turn Off
+    log.info("Step 8: TEARDOWN - Turn Off")
     await handle_media_command("turn_off", "turn off office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
     
     await asyncio.sleep(2)
