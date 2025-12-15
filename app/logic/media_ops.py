@@ -1116,7 +1116,7 @@ async def handle_media_command(
              if state in ["playing", "paused", "buffering"]:
                  log.info(f"Transport Short Circuit: Device {entity_id} is active, proceeding directly.")
                  domain = entity_id.split('.')[0]
-                 return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client)
+                 return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client)]
 
     # ------------------------------------------------------------------
     # 2. FULL RESOLUTION PATH
@@ -1166,14 +1166,14 @@ async def handle_media_command(
 
                 if strict_resolution and "music_assistant" not in resolved_int and not any(x in resolved_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                     log.error(f"Strict Resolution failure: Resolved {resolved_id} ({resolved_int}) which is not MA/TV.")
-                    return {"status": "FAILURE", "message": f"I couldn't find a Music Assistant device named '{potential_device}'.", "entity_id": potential_device, "service": "media_command"}
+                    return [{"status": "FAILURE", "message": f"I couldn't find a Music Assistant device named '{potential_device}'.", "entity_id": potential_device, "service": "media_command"}]
 
                 entity_id = resolved_id
                 integration = resolved_int
                 clean_title = potential_content
                 log.info(f"'On' Split Success: Device='{potential_device}' ({entity_id}), Content='{clean_title}'")
             else:
-                 return {"status": "FAILURE", "message": f"I couldn't find a device named '{potential_device}' to play media.", "entity_id": potential_device, "service": "media_command"}
+                 return [{"status": "FAILURE", "message": f"I couldn't find a device named '{potential_device}' to play media.", "entity_id": potential_device, "service": "media_command"}]
 
     # Standard Resolution
     if not entity_id:
@@ -1247,14 +1247,14 @@ async def handle_media_command(
                     entity_id = new_entity
             else:
                 if not entity_id:
-                     return {"status": "FAILURE", "message": "No active media players found to control.", "entity_id": "N/A", "service": "media_command"}
+                     return [{"status": "FAILURE", "message": "No active media players found to control.", "entity_id": "N/A", "service": "media_command"}]
 
         domain = entity_id.split('.')[0]
-        return await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query)
+        return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query)]
 
 
     if not entity_id:
-         return {"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}
+         return [{"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}]
 
     domain = entity_id.split('.')[0]
     service = intent
@@ -1267,7 +1267,7 @@ async def handle_media_command(
         log.debug(f"[COLOR/BRIGHTNESS] Handling intent='{intent}' for {entity_id}")
         
         if domain != "light":
-            return {"status": "FAILURE", "message": f"Color/brightness control only works with lights, not {domain} devices.", "entity_id": entity_id, "service": intent}
+            return [{"status": "FAILURE", "message": f"Color/brightness control only works with lights, not {domain} devices.", "entity_id": entity_id, "service": intent}]
         
         # Fetch device capabilities
         log.debug(f"[COLOR/BRIGHTNESS] Fetching capabilities for {entity_id}...")
@@ -1278,12 +1278,12 @@ async def handle_media_command(
         # Validate color support
         if intent == "set_color":
             if not caps.get("has_color") and not caps.get("has_color_temp"):
-                return {
+                return [{
                     "status": "FAILURE", 
                     "message": f"{friendly_name} doesn't support color control. It's a simple on/off or brightness-only light.",
                     "entity_id": entity_id, 
                     "service": "set_color"
-                }
+                }]
             
             # Parse requested color
             color_found = None
@@ -1295,7 +1295,7 @@ async def handle_media_command(
                     break
             
             if not color_found:
-                return {"status": "FAILURE", "message": "I couldn't determine which color you want. Try: red, blue, green, warm white, etc.", "entity_id": entity_id, "service": "set_color"}
+                return [{"status": "FAILURE", "message": "I couldn't determine which color you want. Try: red, blue, green, warm white, etc.", "entity_id": entity_id, "service": "set_color"}]
             
             # Smart mode selection based on device capabilities
             service = "turn_on"
@@ -1339,12 +1339,12 @@ async def handle_media_command(
             
             elif caps.get("has_color_temp"):
                 # Device ONLY supports color temp (no RGB/HS), and user didn't request warm/cool
-                return {
+                return [{
                     "status": "FAILURE",
                     "message": f"{friendly_name} doesn't support full color. Try 'set to warm white' or 'set to cool white' instead.",
                     "entity_id": entity_id,
                     "service": "set_color"
-                }
+                }]
             else:
                 # Should not reach here, but safety fallback - try RGB anyway
                 service_data = {"rgb_color": color_found}
@@ -1353,12 +1353,12 @@ async def handle_media_command(
         # Validate brightness support
         elif intent in ["set_brightness", "dim", "brighten"]:
             if not caps.get("has_brightness"):
-                return {
+                return [{
                     "status": "FAILURE",
                     "message": f"{friendly_name} is an on/off only light and doesn't support brightness control.",
                     "entity_id": entity_id,
                     "service": "set_brightness"
-                }
+                }]
             
             brightness = None
             
@@ -1381,7 +1381,7 @@ async def handle_media_command(
             service_data = {"brightness": max(1, min(255, brightness))}
             log.info(f"Setting {entity_id} brightness to {brightness}")
         
-        return await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)
+        return [await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)]
 
     # -------------------------------------------------
     # POWER, NAVIGATION
