@@ -1432,8 +1432,13 @@ async def handle_media_command(
             
             # 2. Vector Search: Find "remote" entities related to this device
             # e.g. "Office TV Chrome" -> finds "remote.office_tv"
-            search_query = entity_id.split(".")[-1].replace("_", " ")
-            docs = GlobalResources.ha_collection.similarity_search(f"{search_query} remote", k=3)
+            raw_id = entity_id.split(".")[-1]
+            # Improve matching by removing specific suffixes like _chrome, _cast
+            clean_id = re.sub(r"_(chrome|cast|google|assistant)(_\d+)?", "", raw_id)
+            search_query = clean_id.replace("_", " ")
+            
+            log.info(f"Smart Power Swap: Searching for remotes for '{entity_id}' using query '{search_query}' (raw: {raw_id})")
+            docs = GlobalResources.ha_collection.similarity_search(f"{search_query} remote", k=5)
             for d in docs:
                 if d.metadata.get("domain") == "remote":
                     candidates.append(d.metadata.get("entity_id"))
