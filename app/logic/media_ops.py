@@ -1536,7 +1536,20 @@ async def handle_media_command(
         if intent == "open_app":
              log.warning(f"Unknown integration '{integration}' for app launch on {entity_id}. Attempting Android TV fallback.")
              from app.logic.android_tv_ops import APP_IDS, launch_app as atv_launch
-             target_app = app_name_candidate if app_name_candidate else "unknown"
+             
+             # Extract just the app name from the query
+             # Remove common trigger words and device names
+             if not app_name_candidate:
+                  app_name_candidate = q_low
+             
+             # Strip common prefixes and device references
+             clean_app = app_name_candidate
+             clean_app = re.sub(r'^(open|launch|start|play)\s+', '', clean_app)
+             clean_app = re.sub(r'\s+on\s+.*$', '', clean_app)  # Remove "on Office TV" etc
+             clean_app = clean_app.strip()
+             
+             target_app = clean_app if clean_app else "unknown"
+             log.info(f"[Android TV] Launching app '{q}' ({target_app}) on {entity_id}")
              return [await atv_launch(entity_id, target_app, user_creds, redis_client)]
 
         # ------------------------------------------------------------------------
