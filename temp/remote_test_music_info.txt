@@ -1,0 +1,80 @@
+[MusicInfoTest] Starting Music Info Test...
+[MusicInfoTest] TEST 1: List Playlists
+Traceback (most recent call last):
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 225, in _new_conn
+    sock = self._resolver.create_connection(
+        (self._dns_host, self.port or self.default_port),
+    ...<8 lines>...
+        default_socket_family=self._socket_family,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/contrib/resolver/protocols.py", line 299, in create_connection
+    raise err
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/contrib/resolver/protocols.py", line 269, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+OSError: [Errno 113] No route to host
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1733, in urlopen
+    response = self._make_request(  # type: ignore[call-overload,misc]
+        conn,
+    ...<15 lines>...
+        extension=extension,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1256, in _make_request
+    raise new_e
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1232, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 787, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 274, in connect
+    self.sock = self._new_conn()
+                ~~~~~~~~~~~~~~^^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 245, in _new_conn
+    raise NewConnectionError(
+        self, f"Failed to establish a new connection: {e}"
+    ) from e
+urllib3.exceptions.NewConnectionError: <urllib3.connection.HTTPConnection object at 0x7f4c323bf4d0>: Failed to establish a new connection: [Errno 113] No route to host
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1811, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/util/retry.py", line 544, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f4c323bf4d0>: Failed to establish a new connection: [Errno 113] No route to host'))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/integration/test_music_info.py", line 32, in <module>
+    test_music_info()
+    ~~~~~~~~~~~~~~~^^
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/integration/test_music_info.py", line 21, in test_music_info
+    r = requests.post(f"{API_URL}/api/chat", json={"messages":[{"role":"user","content":"List my playlists"}]}, headers=HEADERS)
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 115, in post
+    return request("post", url, data=data, json=json, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 677, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f4c323bf4d0>: Failed to establish a new connection: [Errno 113] No route to host'))

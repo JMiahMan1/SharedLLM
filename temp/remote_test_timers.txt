@@ -1,0 +1,3 @@
+[94m[INFO][0m --- Starting Timer & Alarm Service Tests ---
+[94m[INFO][0m TEST 0: Cleanup (Deleting old timers/alarms)...
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=60)

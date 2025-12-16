@@ -1,0 +1,18 @@
+
+>>> RUNNING test_media_api.py <<<
+
+Starting Media Routing Tests on http://192.168.2.211:11435...
+[94m[INFO][0m TEST 1: Power Control
+------------------------------------------------------------
+Query: 'Turn on Office TV'
+Response (1.41s): Done.
+[92m[PASS][0m Turn on Office TV passed.
+[94m[INFO][0m TEST 2: Music Playback
+------------------------------------------------------------
+Query: 'Play Brandon Lake on Office TV'
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=90)
+❌ FAIL (91.75s)
+
+>>> RUNNING test_timers.py <<<
+[94m[INFO][0m --- Starting Timer & Alarm Service Tests ---
+[94m[INFO][0m TEST 0: Cleanup (Deleting old timers/alarms)...

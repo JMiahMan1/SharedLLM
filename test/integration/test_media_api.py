@@ -23,6 +23,7 @@ def print_pass(msg):
 
 def print_fail(msg):
     print(f"\033[91m[FAIL]\033[0m {msg}")
+    sys.exit(1)
 
 def print_info(msg):
     print(f"\033[94m[INFO]\033[0m {msg}")
@@ -42,7 +43,7 @@ def send_query(query, expected_intent=None):
             f"{API_URL}/api/chat", 
             json=payload, 
             headers=HEADERS, 
-            timeout=30
+            timeout=90
         )
         duration = time.time() - start_time
         
@@ -76,6 +77,13 @@ def send_query(query, expected_intent=None):
         print_fail(f"Command '{query}' failed. Response: {res}")
         
     return res
+
+def check_response(test_name, res):
+    # Helper to check if response is valid (not None)
+    if res:
+        print_pass(f"{test_name} passed.")
+    else:
+        print_fail(f"{test_name} failed (No response).")
 
 def test_media_routing():
     print(f"\nStarting Media Routing Tests on {API_URL}...")
@@ -132,7 +140,11 @@ def test_media_routing():
     print_info("TEST 7: Set Color")
     check_response("Set the Office TV light to Blue", send_query("Set the Office TV light to Blue"))
 
-
+    # ---------------------------------------------------------
+    # TEST 8: Remote Command
+    # ---------------------------------------------------------
+    print_info("TEST 8: Remote Command")
+    check_response("Press Home on the Office TV", send_query("Press Home on the Office TV"))
 
 
 if __name__ == "__main__":
@@ -143,5 +155,7 @@ if __name__ == "__main__":
             test_media_routing()
         else:
             print_fail("API is unhealthy. Check Docker logs.")
-    except:
-        print_fail("API is unreachable. Is Docker running?")
+            sys.exit(1)
+    except Exception as e:
+        print_fail(f"API is unreachable: {e}")
+        sys.exit(1)

@@ -357,10 +357,22 @@ async def rag_delete(id: str):
 async def rag_list(limit: int = 100):
     if not GlobalResources.chroma_client: raise HTTPException(503)
     def sync():
-        c = GlobalResources.chroma_client._collection
-        cnt = c.count()
-        s = c.peek(min(limit, cnt)) if cnt else {}
-        return {"count": cnt, "docs": [{"id": id, "preview": s["documents"][i][:200]} for i, id in enumerate(s.get("ids", []))]}
+        results = {"count": 0, "docs": []}
+        for name in ["nextcloud_docs", "home_assistant"]:
+            try:
+                c = GlobalResources.chroma_client.get_collection(name)
+                cnt = c.count()
+                results["count"] += cnt
+                s = c.peek(min(limit, cnt)) if cnt else {}
+                for i, id in enumerate(s.get("ids", [])):
+                    results["docs"].append({
+                        "id": id, 
+                        "collection": name,
+                        "preview": s["documents"][i][:200]
+                    })
+            except Exception:
+                pass # Collection might not exist yet
+        return results
     return await run_blocking(sync)
 
 @app.get("/api/rag/search")

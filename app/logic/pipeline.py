@@ -505,10 +505,28 @@ async def generate_rag_stream(
             tasks.append(asyncio.sleep(0))
 
         # Optimized: Only run Web Search if no other tools were executed
+        # AND if the intent is not a simple action that already succeeded
         already_searched = any(
             r.get("service") == "web_search" for r in (action_results or [])
         )
-        should_search = not action_results and not already_searched
+        
+        # Define intents that should NOT trigger web search after success
+        no_search_intents = [
+            "turn_on", "turn_off", "toggle", "play_media", "stop_media",
+            "media_next", "media_previous", "open_app", "volume_up",
+            "volume_down", "volume_set", "volume_mute", "timer_add",
+            "alarm_add", "timer_delete", "timer_pause", "timer_resume",
+            "calendar_add", "calendar_delete", "calendar_update",
+            "note_add", "note_append", "note_delete"
+        ]
+        
+        # Skip web search if:
+        # 1. Already searched in action results
+        # 2. OR action succeeded and intent is a simple command
+        action_succeeded = action_results and all(r.get("status") == "SUCCESS" for r in action_results)
+        is_no_search_intent = intent in no_search_intents
+        
+        should_search = not already_searched and not (action_succeeded and is_no_search_intent)
 
         if should_search:
             tasks.append(tool_web_search(refined))
