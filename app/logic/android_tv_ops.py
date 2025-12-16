@@ -30,6 +30,27 @@ async def launch_app(entity_id: str, app_name: str, user_creds: dict, redis_clie
     
     log.info(f"[Android TV] Launching app '{app_name}' ({app_id}) on {entity_id}")
     
+    # AUTO-POWER-ON: Check if device is off and turn it on first
+    try:
+        from app.logic.media_ops import get_entity_state
+        state_data = await get_entity_state(entity_id, user_creds, redis_client)
+        
+        if state_data and state_data.get('state') == 'off':
+            log.info(f"[Auto-Power-On] Device {entity_id} is OFF. Turning on before app launch...")
+            turn_on_result = await execute_ha_service(
+                "media_player", "turn_on", entity_id, user_creds, {}, redis_client
+            )
+            
+            if turn_on_result.get("status") == "SUCCESS":
+                # Wait for device to boot (3 seconds)
+                import asyncio
+                await asyncio.sleep(3)
+                log.info(f"[Auto-Power-On] Device {entity_id} turned on. Proceeding with app launch.")
+            else:
+                log.warning(f"[Auto-Power-On] Failed to turn on {entity_id}: {turn_on_result}")
+    except Exception as e:
+        log.warning(f"[Auto-Power-On] Error checking/turning on device: {e}. Proceeding anyway...")
+    
     # Use media_player.play_media with content_type='app' if supported, 
     # OR androidtv.adb_command.
     # The standard HA Android TV integration uses play_media(media_content_id=app_id, media_content_type='app')
