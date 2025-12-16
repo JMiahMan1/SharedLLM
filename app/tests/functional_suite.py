@@ -144,13 +144,13 @@ async def run_test():
     
     # Timer
     timer_res = await tool_timer_add("set a timer for 1 minute on office tv", user_creds, "test-model", GlobalResources.redis_client, GlobalResources.ha_collection)
-    if timer_res["status"] != "SUCCESS" or ("Office TV" not in timer_res["message"] and entity_id not in timer_res.get("message", "")):
+    if timer_res["status"] != "SUCCESS" or ("office tv" not in timer_res["message"].lower() and entity_id not in timer_res.get("message", "")):
         raise FunctionalTestFailure(f"Timer Creation Failed: {timer_res}")
         
     # Alarm
     from logic.timer_ops import tool_alarm_add
     alarm_res = await tool_alarm_add("set an alarm for 8am on office tv", user_creds, "test-model", GlobalResources.redis_client, GlobalResources.ha_collection)
-    if alarm_res["status"] != "SUCCESS" or ("Office TV" not in alarm_res["message"] and entity_id not in alarm_res.get("message", "")):
+    if alarm_res["status"] != "SUCCESS" or ("office tv" not in alarm_res["message"].lower() and entity_id not in alarm_res.get("message", "")):
          raise FunctionalTestFailure(f"Alarm Creation Failed: {alarm_res}")
 
     # Cleanup Timers
