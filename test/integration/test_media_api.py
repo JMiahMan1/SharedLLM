@@ -114,6 +114,69 @@ def test_media_routing():
     else:
         print_fail("Failed to route Navigation command.")
 
+    # ---------------------------------------------------------
+    # TEST 5: Media Control (Pause, Resume, Stop, Next)
+    # ---------------------------------------------------------
+    print_info("TEST 5: Media Control (Expect: 'media_pause', 'media_play', 'media_stop', 'media_next_track')")
+    
+    # Pause
+    res = send_query("Pause the Office TV")
+    if res and ("paused" in res.lower() or "stopping" in res.lower() or "sent command" in res.lower()):
+        print_pass("Correctly routed Pause command.")
+    else:
+        print_fail(f"Failed to route Pause command. Response: {res}")
+
+    time.sleep(1)
+
+    # Resume
+    res = send_query("Resume on Office TV")
+    if res and ("resumed" in res.lower() or "playing" in res.lower() or "sent command" in res.lower()):
+        print_pass("Correctly routed Resume command.")
+    else:
+        print_fail(f"Failed to route Resume command. Response: {res}")
+
+    time.sleep(1)
+
+    # Skip
+    res = send_query("Skip this song on Office TV")
+    if res and ("next" in res.lower() or "skipped" in res.lower() or "sent command" in res.lower()):
+        print_pass("Correctly routed Skip command.")
+    else:
+        print_fail(f"Failed to route Skip command. Response: {res}")
+
+    time.sleep(1)
+
+    # Stop
+    res = send_query("Stop the music on Office TV")
+    if res and ("stopped" in res.lower() or "sent command" in res.lower()):
+        print_pass("Correctly routed Stop command.")
+    else:
+        print_fail(f"Failed to route Stop command. Response: {res}")
+
+    # ---------------------------------------------------------
+    # TEST 6: Power Off (Should prefer Remote or Switch)
+    # ---------------------------------------------------------
+    print_info("TEST 6: Power Off (Expect: 'turn_off' on Remote/Switch)")
+    res = send_query("Turn off Office TV")
+    
+    if res and ("turning off" in res.lower() or "sent command to turn off" in res.lower()):
+        print_pass("Correctly identified Power Off command.")
+    else:
+        print_fail(f"Failed to route Power Off command. Response: {res}")
+
+    # ---------------------------------------------------------
+    # TEST 7: Color Control
+    # ---------------------------------------------------------
+    print_info("TEST 7: Set Color (Expect: 'set_color')")
+    res = send_query("Set the Office TV light to Blue")
+    
+    if res and ("blue" in res.lower() or "color" in res.lower() or "sent command" in res.lower()):
+        print_pass("Correctly routed Set Color command.")
+    else:
+        print_fail(f"Failed to route Set Color command. Response: {res}")
+
+
+
 if __name__ == "__main__":
     # Fast Health Check
     try:
