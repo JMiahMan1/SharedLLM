@@ -1837,7 +1837,8 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
         elif intent == "volume_mute":
             should_mute = True
             log.info(f"[DEBUG_MUTE] Raw Query: '{query}'")
-            if "unmute" in query.lower() or "mute off" in query.lower():
+            # Fix: 'mute office' contains 'mute off', so we need word boundaries
+            if "unmute" in query.lower() or re.search(r"\bmute\s+off\b", query.lower()):
                  should_mute = False
             log.info(f"[DEBUG_MUTE] Determined should_mute: {should_mute}")
             
