@@ -63,9 +63,9 @@ def test_timer_flow():
     resp = send_chat(f"Set a 60-second timer for {timer_name}")
     content = resp.get("message", {}).get("content", "")
     
-    # FIX: More flexible assertion
-    success_keywords = ["set", "started", "created", "success", "tickin", "seconds", "minutes", "go"]
-    if any(x in content.lower() for x in success_keywords) and ("timer" in content.lower() or "tickin" in content.lower()):
+    # FIX: More flexible assertion supporting Silent Mode ("Done.")
+    success_keywords = ["set", "started", "created", "success", "tickin", "seconds", "minutes", "go", "done"]
+    if any(x in content.lower() for x in success_keywords):
         print_pass(f"Timer created: {content}")
     else:
         print_fail(f"Failed to create timer. Response: {content}")
