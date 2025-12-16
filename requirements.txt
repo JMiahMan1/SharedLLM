@@ -3,6 +3,7 @@ uvicorn
 redis
 chromadb
 langchain
+langchain-core
 langchain-chroma
 langchain-community
 requests
