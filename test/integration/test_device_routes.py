@@ -43,8 +43,8 @@ def test_device_routes():
 
     # 3. Android TV Routes (Direct)
     print_info("TEST 3: Android TV Direct Routes")
-    payload = {"ip": "192.168.1.99", "app_link": "netflix://"}
-    r = requests.post(f"{API_URL}/api/android/launch", json=payload, timeout=TIMEOUT)
+    payload = {" entity_id": "media_player.test", "app_name": "netflix"}
+    r = requests.post(f"{API_URL}/api/androidtv/launch", json=payload, timeout=TIMEOUT)
     if r.status_code != 404:
         print_pass(f"Android launch route exists (Status: {r.status_code})")
     else:
