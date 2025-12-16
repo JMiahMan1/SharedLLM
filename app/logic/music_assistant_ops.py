@@ -5,7 +5,7 @@ Music Assistant browsing tools for playlists, podcasts, and media library.
 import logging
 import requests
 from typing import Dict, List, Optional
-from settings import GlobalResources, log
+from app.settings import GlobalResources, log
 
 async def _get_ma_player() -> str:
     """Finds a valid Music Assistant player from the DB."""

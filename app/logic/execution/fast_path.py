@@ -1,6 +1,6 @@
 from typing import Dict, Union, Optional
-from settings import log, GlobalResources
-from logic.media_ops import smart_resolve_entity, execute_ha_service, APP_PACKAGES
+from app.settings import log, GlobalResources
+from app.logic.media_ops import smart_resolve_entity, execute_ha_service, APP_PACKAGES
 
 class FastPathExecutor:
     """

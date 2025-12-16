@@ -1,9 +1,9 @@
 
 import logging
 import urllib.parse
-from settings import GlobalResources, log
-from logic.media_ops import execute_ha_service
-from logic.web_search import tool_web_search
+from app.settings import GlobalResources, log
+from app.logic.media_ops import execute_ha_service
+from app.logic.web_search import tool_web_search
 import re
 
 # App ID Mapping

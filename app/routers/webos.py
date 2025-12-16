@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from logic import webos_ops
-from settings import get_user_creds
+from app.logic import webos_ops
+from app.settings import get_user_creds
 
 router = APIRouter(
     prefix="/api/webos",

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from urllib3.exceptions import InsecureRequestWarning
 
 # Internal imports for direct access when possible, though strictly tests should use API
-from settings import HA_URL, HA_ENV_TOKEN, NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+from app.settings import HA_URL, HA_ENV_TOKEN, NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
 
 warnings.simplefilter('ignore', InsecureRequestWarning)
 

@@ -1,22 +1,24 @@
-from settings import GlobalResources, log
+from app.settings import GlobalResources, log
 from .registry import ActionDispatcher
 
-from logic.calendar_ops import (
+# Local logic imports
+# Note: Since we are inside logic.execution, we can import absolute from 'app.logic...'
+from app.logic.calendar_ops import (
     tool_calendar_list, tool_calendar_add, tool_calendar_delete, 
     tool_calendar_update, tool_calendar_read
 )
-from logic.timer_ops import (
+from app.logic.timer_ops import (
     tool_timer_add, tool_timer_list, tool_timer_delete, 
     tool_timer_pause, tool_timer_resume, tool_alarm_add
 )
-from logic.note_ops import (
+from app.logic.note_ops import (
     tool_note_add, tool_note_append, tool_note_read, tool_note_delete
 )
-from logic.web_search import tool_web_search
+from app.logic.web_search import tool_web_search
 
-from logic.media_ops import handle_media_command
-from logic.music_assistant_ops import tool_list_playlists, tool_list_radio, tool_music_search
-from logic.android_remote_ops import tool_remote_command, tool_launch_app_android
+from app.logic.media_ops import handle_media_command
+from app.logic.music_assistant_ops import tool_list_playlists, tool_list_radio, tool_music_search
+from app.logic.android_remote_ops import tool_remote_command, tool_launch_app_android
 
 # --- CALENDAR TOOLS ---
 @ActionDispatcher.register("calendar_add")

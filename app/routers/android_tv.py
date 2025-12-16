@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from logic import android_tv_ops
-from settings import get_user_creds
+from app.logic import android_tv_ops
+from app.settings import get_user_creds
 
 router = APIRouter(
     prefix="/api/androidtv",

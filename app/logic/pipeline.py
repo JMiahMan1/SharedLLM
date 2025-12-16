@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import AsyncGenerator, List, Union, Dict, Optional, Any
 
 # Import Settings
-from settings import (
+from app.settings import (
     log,
     run_blocking,
     get_user_creds,
@@ -42,8 +42,8 @@ from .intents.classifier import IntentClassifier
 from .web_search import tool_web_search
 
 # Ensure handlers are registered
-import logic.execution.handlers
-from logic.calendar_ops import tool_calendar_read
+import app.logic.execution.handlers
+from app.logic.calendar_ops import tool_calendar_read
 
 
 class StreamResponseBuilder:
@@ -528,7 +528,7 @@ async def generate_rag_stream(
             if not action_results:
                 cal_ctx = await tool_calendar_read(creds, GlobalResources.redis_client)
 
-    from settings import load_system_prompt
+    from app.settings import load_system_prompt
 
     base_sys_prompt = load_system_prompt()
     now = datetime.now()

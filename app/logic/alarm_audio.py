@@ -4,7 +4,7 @@ import json
 import asyncio
 import time
 from typing import Dict, List, Optional
-from settings import ALARM_KEYWORDS_PATH, ALARM_SOUNDS_DIR, log, run_blocking, HA_URL
+from app.settings import ALARM_KEYWORDS_PATH, ALARM_SOUNDS_DIR, log, run_blocking, HA_URL
 from .media_ops import execute_ha_service, get_active_media_players, get_available_media_players, get_last_entity
 
 class AlarmAudioManager:

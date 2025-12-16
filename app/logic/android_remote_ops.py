@@ -1,6 +1,6 @@
 
-from settings import log, GlobalResources
-from logic.media_ops import execute_ha_service
+from app.settings import log, GlobalResources
+from app.logic.media_ops import execute_ha_service
 
 async def tool_remote_command(command: str, entity_id: str, user_creds: dict, redis_client=None) -> dict:
     """

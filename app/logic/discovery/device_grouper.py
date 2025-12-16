@@ -2,7 +2,7 @@
 import re
 import difflib
 from collections import defaultdict
-from settings import log
+from app.settings import log
 
 SUFFIX_CLEANERS = [
     r"\s+remote", r"\s+tv", r"\s+chrome", r"\s+chromecast", r"\s+cast", 

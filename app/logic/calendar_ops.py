@@ -11,8 +11,11 @@ from typing import Dict, Optional, Union
 from dateutil import tz 
 
 # Import settings and utils
-from settings import (
-    log, run_blocking, NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS,
+from app.settings import (
+    GlobalResources,
+    get_user_creds,
+    log,
+    run_blocking, NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS,
     CALENDAR_EXTRACT_PROMPT
 )
 from .utils import clean_llm_output, call_ollama_generate

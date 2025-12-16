@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException, Request, Body
 from typing import Optional
 from pydantic import BaseModel
 
-from logic import music_assistant_ops
-from settings import get_user_creds
+from app.logic import music_assistant_ops
+from app.settings import get_user_creds
 
 router = APIRouter(
     prefix="/api/ma",

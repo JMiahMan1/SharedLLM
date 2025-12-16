@@ -3,7 +3,7 @@ import json
 import uuid
 import time
 from typing import List, Dict, Optional
-from settings import GlobalResources, log
+from app.settings import GlobalResources, log
 
 REDIS_KEY_PREFIX = "rag:timers"
 

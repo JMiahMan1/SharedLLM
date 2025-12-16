@@ -10,4 +10,110 @@ asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None,
 collected 3 items
 
 test/integration/test_media_api.py F                                     [ 33%]
-test/integration/test_notes.py 
+test/integration/test_notes.py .                                         [ 66%]
+test/integration/test_timers.py F                                        [100%]
+
+=================================== FAILURES ===================================
+______________________________ test_media_routing ______________________________
+
+    def test_media_routing():
+        print(f"\nStarting Media Routing Tests on {API_URL}...")
+    
+        # ---------------------------------------------------------
+        # TEST 1: Power Control (Should prefer Remote or Switch)
+        # ---------------------------------------------------------
+        print_info("TEST 1: Power Control (Expect: 'turn_on' on Remote/Switch)")
+        res = send_query("Turn on Office TV")
+    
+        if res and "Sent command to turn on" in res:
+            print_pass("Correctly identified Power command.")
+        else:
+            print_fail("Failed to route Power command correctly.")
+    
+        # ---------------------------------------------------------
+        # TEST 2: Music Playback (Should prefer Music Assistant)
+        # ---------------------------------------------------------
+        print_info("TEST 2: Music Playback (Expect: 'play_media' on Music Assistant)")
+        # We use a specific artist to trigger the generic play logic
+        res = send_query("Play Brandon Lake on Office TV")
+    
+        if res and "Sent command to play media" in res:
+            print_pass("Correctly routed Music command.")
+        else:
+            print_fail("Failed to route Music command.")
+    
+        # ---------------------------------------------------------
+        # TEST 3: App Launching (Should prefer Android TV)
+        # ---------------------------------------------------------
+        print_info("TEST 3: App Launching (Expect: 'play_media' with App ID)")
+        res = send_query("Open Netflix on Office TV")
+    
+        # We verify it didn't just try to play a song named "Netflix"
+        if res and "Sent command to play media" in res:
+            print_pass("Correctly routed App Launch command.")
+>       elif "package ID" in res:
+E       TypeError: argument of type 'NoneType' is not a container or iterable
+
+test/integration/test_media_api.py:99: TypeError
+----------------------------- Captured stdout call -----------------------------
+
+Starting Media Routing Tests on http://localhost:11435...
+[94m[INFO][0m TEST 1: Power Control (Expect: 'turn_on' on Remote/Switch)
+------------------------------------------------------------
+Query: 'Turn on Office TV'
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='localhost', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7efd8d19ef90>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[91m[FAIL][0m Failed to route Power command correctly.
+[94m[INFO][0m TEST 2: Music Playback (Expect: 'play_media' on Music Assistant)
+------------------------------------------------------------
+Query: 'Play Brandon Lake on Office TV'
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='localhost', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7efd8d001bd0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[91m[FAIL][0m Failed to route Music command.
+[94m[INFO][0m TEST 3: App Launching (Expect: 'play_media' with App ID)
+------------------------------------------------------------
+Query: 'Open Netflix on Office TV'
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='localhost', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7efd8d002490>: Failed to establish a new connection: [Errno 111] Connection refused'))
+_______________________________ test_timer_flow ________________________________
+
+    def test_timer_flow():
+        print_info("--- Starting Timer & Alarm Service Tests ---")
+    
+        # 0. Cleanup
+        try:
+            timers = requests.get(f"{API_URL}/api/timer/list", headers=HEADERS).json()
+            if isinstance(timers, list):
+                for t in timers:
+                    if t.get("title", "").lower() in ["test short timer", "test long alarm"]:
+                        requests.post(f"{API_URL}/api/timer/delete?timer_id={t['id']}", headers=HEADERS)
+        except:
+            pass
+    
+        # 0. Cleanup (Delete potential leftovers)
+        print_info("TEST 0: Cleanup (Deleting old timers/alarms)...")
+        send_chat("Delete the timer Test Short Task")
+        send_chat("Delete the alarm Test Long Alarm")
+        send_chat("Delete the alarm Test Long")
+        send_chat("Delete the alarm for 8am test long")
+        time.sleep(2)
+    
+        # 1. Create Timer (Short Duration)
+        # Use a name without 'timer' to avoid it being stripped by the backend
+        timer_name = "Test Short Task"
+        print_info(f"TEST 1: Set a 60-second timer: '{timer_name}' (Expect SUCCESS)")
+        resp = send_chat(f"Set a 60-second timer for {timer_name}")
+>       content = resp.get("message", {}).get("content", "")
+E       AttributeError: 'NoneType' object has no attribute 'get'
+
+test/integration/test_timers.py:62: AttributeError
+----------------------------- Captured stdout call -----------------------------
+[94m[INFO][0m --- Starting Timer & Alarm Service Tests ---
+[94m[INFO][0m TEST 0: Cleanup (Deleting old timers/alarms)...
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='localhost', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7efd8d003ed0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='localhost', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7efd8cf04190>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='localhost', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7efd8cf04410>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='localhost', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7efd8cf04690>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[94m[INFO][0m TEST 1: Set a 60-second timer: 'Test Short Task' (Expect SUCCESS)
+[91m[FAIL][0m Request failed: HTTPConnectionPool(host='localhost', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7efd8cf04910>: Failed to establish a new connection: [Errno 111] Connection refused'))
+=========================== short test summary info ============================
+FAILED test/integration/test_media_api.py::test_media_routing - TypeError: ar...
+FAILED test/integration/test_timers.py::test_timer_flow - AttributeError: 'No...
+=================== 2 failed, 1 passed in 144.67s (0:02:24) ====================

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from settings import GlobalResources, HA_ENV_TOKEN
-from logic import roku_ops
+from app.settings import GlobalResources, HA_ENV_TOKEN
+from app.logic import roku_ops
 
 router = APIRouter(prefix="/api/roku", tags=["roku"])
 
