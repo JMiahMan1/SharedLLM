@@ -196,7 +196,7 @@ def test_media_routing():
     # ---------------------------------------------------------
     print_info("TEST 7: Turn Off")
     
-    send_command("Turn off Office TV")
+    send_command("Turn off Office Television")
     
     # ACTUAL VERIFICATION
     success, state = verify_device_state(TEST_ENTITY, 'off', timeout=15)
