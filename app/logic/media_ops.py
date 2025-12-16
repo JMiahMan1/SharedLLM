@@ -1538,7 +1538,7 @@ async def handle_media_command(
              clean_app = clean_app.strip()
              
              target_app = clean_app if clean_app else "unknown"
-             log.info(f"[Android TV] Launching app '{q}' ({target_app}) on {entity_id}")
+             log.info(f"[Android TV] Launching app '{target_app}' on {entity_id}")
              return [await atv_launch(entity_id, target_app, user_creds, redis_client)]
 
         # ------------------------------------------------------------------------
