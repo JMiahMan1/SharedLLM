@@ -14,7 +14,9 @@ TEST_USER = os.getenv("NEXTCLOUD_USER", "admin")
 HEADERS = {"Content-Type": "application/json", "X-RAG-User": TEST_USER, "User-Agent": "TimerTestScript"}
 
 def print_pass(msg): print(f"\033[92m[PASS]\033[0m {msg}")
-def print_fail(msg): print(f"\033[91m[FAIL]\033[0m {msg}")
+def print_fail(msg): 
+    print(f"\033[91m[FAIL]\033[0m {msg}")
+    sys.exit(1)
 def print_info(msg): print(f"\033[94m[INFO]\033[0m {msg}")
 
 def send_chat(query):
@@ -147,5 +149,7 @@ if __name__ == "__main__":
             test_timer_flow()
         else:
             print_fail("API is unhealthy. Check Docker logs.")
+            sys.exit(1)
     except Exception as e:
         print_fail(f"API is unreachable: {e}")
+        sys.exit(1)
