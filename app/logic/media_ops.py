@@ -383,7 +383,7 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
 
                 # Check up to 5 times, every 0.5 seconds (Total ~2.5s max wait)
                 for state_attempt in range(5):
-                    await asyncio.sleep(0.5) 
+                    await asyncio.sleep(1.0) 
                     try:
                         state_url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
                         def _get_name():
@@ -438,7 +438,7 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
         except Exception as e:
             last_err = str(e)
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1.0)
 
     log.error(f"Failed to execute HA command: {last_err}")
     return {
@@ -598,8 +598,8 @@ async def execute_batch_command(
                 'service': intent
             })
     
-    # Aggregate results
-    success_count = sum(1 for r in results if r.get('status') == 'SUCCESS')
+    # Aggregate results - handle both dict and list results
+    success_count = sum(1 for r in results if isinstance(r, dict) and r.get('status') == 'SUCCESS')
     failure_count = len(results) - success_count
     
     # Get list of successful/failed devices
