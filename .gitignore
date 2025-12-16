@@ -1,29 +1,15 @@
-# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Virtual environment
-venv/
-.env.docker
 .env
-
-# Editor directories
+.venv
+env/
+venv/
+*.log
+.DS_Store
 .vscode/
 .idea/
-*.sublime-project
-*.sublime-workspace
 
-# OS files
-.DS_Store
-Thumbs.db
 
-# Logs and temp
-*.log
-tmp/
-
-# Docker
-*.env
-*.env.local
-*.env.*.local
-tmp/
+data/chroma/
+*.sqlite
