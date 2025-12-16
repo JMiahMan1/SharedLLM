@@ -709,11 +709,22 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             # Exclude read-only domains for power commands
             if intent in ["turn_on", "turn_off", "toggle"] and domain in ["sensor", "binary_sensor", "sun", "weather"]:
                  continue
+                        # NEW: Strict Domain Filtering for Media Intents (User Request)
+             # "Lights do not have media play features" - Strictly enforce appropriate domains.
+             media_intents = ["play_media", "stop_media", "media_next", "media_previous", "pause", "resume", "open_app", "volume_up", "volume_down", "volume_set", "volume_mute"]
+             if intent in media_intents and domain not in ["media_player", "remote"]:
+                  log.info(f"Resolution: Skipping {eid} for intent '{intent}' because domain '{domain}' is not a media player or remote.")
+                  continue
+
+             # Navigation commands also specific to media/remotes
+             if intent in ["nav_up", "nav_down", "nav_left", "nav_right", "nav_select", "nav_back", "nav_home"] and domain not in ["media_player", "remote"]:
+                  continue
             
-            # NEW: Exclude sensors for media and navigation commands (prioritize media_player/remote)
-            if intent in ["play_media", "stop_media", "media_next", "media_previous", "pause", "resume",
-                          "nav_up", "nav_down", "nav_left", "nav_right", "nav_select", "nav_back",
-                          "volume_up", "volume_down", "volume_set", "volume_mute", "open_app"] and domain in ["sensor", "binary_sensor"]:
+            # NEW: If query explicitly mentions "TV" or "Television", penalize/exclude Lights/Switches to prevent "Office TV" -> "Office Light"
+            query_lower = query_name.lower()
+            if ("tv" in query_lower or "television" in query_lower) and domain in ["light", "switch", "fan", "cover", "lock"]:
+                 log.info(f"Resolution: Skipping/Penalizing {eid} because query '{query_name}' targets a TV, but this is a {domain}.")
+                 # We simply exclude it to be safe, as "Turn on TV" should never mean "Turn on Light" unless it's a specific bias light
                  continue
             
             raw_candidates.append({
@@ -840,7 +851,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]): score += 5
             
             is_chrome = "chrome" in integ.lower() or "cast" in integ.lower() or "google_cast" in integ.lower()
-            if is_chrome: score -= 20
+            if is_chrome: score -= 5 # Reduced penalty (was -20) to allow Cast TVs to win if no other TV exists
             
             matches.append((score, eid, integ))
 
