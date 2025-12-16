@@ -3,7 +3,7 @@ import re
 import requests
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
-from settings import log, run_blocking, WHOOGLE_URL, SEARCH_HEADERS
+from app.settings import log, run_blocking, WHOOGLE_URL, SEARCH_HEADERS
 
 # Try importing Playwright for Tier 3
 try:

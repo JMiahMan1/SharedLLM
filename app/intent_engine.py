@@ -4,7 +4,7 @@ import os
 import asyncio
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from settings import log, GlobalResources, run_blocking
+from app.settings import log, GlobalResources, run_blocking
 
 PHRASEBOOK_PATH = "/app/data/phrasebook.json"
 

@@ -1,5 +1,5 @@
 from typing import Dict, Any, Callable, Awaitable, Optional
-from settings import log
+from app.settings import log
 
 # Type definition for tool handlers
 # Handlers receive common context arguments and specific parameters

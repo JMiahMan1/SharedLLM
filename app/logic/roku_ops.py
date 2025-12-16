@@ -1,6 +1,6 @@
 import logging
-from settings import log
-from logic.media_ops import execute_ha_service
+from app.settings import log
+from app.logic.media_ops import execute_ha_service
 
 async def launch_app(entity_id: str, app_name_or_id: str, user_creds: dict, redis_client=None) -> dict:
     """

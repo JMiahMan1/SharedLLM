@@ -2,8 +2,8 @@
 import logging
 import asyncio
 import requests
-from settings import log, HA_URL
-from logic.media_ops import execute_ha_service
+from app.settings import log, HA_URL
+from app.logic.media_ops import execute_ha_service
 
 async def ensure_device_on(entity_id: str, user_creds: dict):
     """
