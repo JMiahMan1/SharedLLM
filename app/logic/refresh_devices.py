@@ -7,9 +7,9 @@ import json
 import requests
 from langchain_core.documents import Document
 
-from settings import GlobalResources, get_user_creds, log
-from logic.discovery.device_grouper import group_entities
-from logic.discovery.integration_helper import infer_integration
+from app.settings import GlobalResources, get_user_creds, log
+from app.logic.discovery.device_grouper import group_entities
+from app.logic.discovery.integration_helper import infer_integration
 
 async def refresh_db():
     log.info("Starting Device DB Refresh...")

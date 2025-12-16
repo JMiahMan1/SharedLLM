@@ -1,10 +1,11 @@
+```python
 # app/logic/timer_scheduler.py
 import asyncio
 import time
 from datetime import datetime
-from settings import log
-from .timer_storage import storage
-from .timer_ops import trigger_alarm
+from app.settings import log, GlobalResources
+from app.logic.timer_storage import storage
+from app.logic.timer_ops import trigger_alarm
 
 SCHEDULER_INTERVAL = 5 # seconds
 

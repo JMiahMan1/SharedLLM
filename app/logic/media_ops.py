@@ -5,8 +5,8 @@ import logging
 import requests
 import asyncio
 from typing import List, Dict, Optional, Tuple
-from settings import run_blocking, HA_URL, DEFAULT_MODEL, GlobalResources
-from logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
+from app.settings import run_blocking, HA_URL, DEFAULT_MODEL, GlobalResources
+from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
 
 log = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
     
     # Try ChromaDB next (faster than HA API, no rate limits)
     try:
-        from settings import GlobalResources
+        from app.settings import GlobalResources
         log.debug(f"[CAPABILITY] Querying ChromaDB for {entity_id}")
         
         # Query by exact entity_id match
@@ -644,7 +644,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     
     # 0. Setup & lazy imports
     try:
-        from settings import GlobalResources, run_blocking
+        from app.settings import GlobalResources, run_blocking
         from langchain_chroma import Chroma
     except ImportError:
         log.error("Could not import dependencies for resolution.")
@@ -799,7 +799,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         HW_INTEGRATIONS_POWER = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc", "denonavr", "yamaha"]
         
         # Capability Enrichment (Re-added)
-        from settings import get_user_creds
+        from app.settings import get_user_creds
         redis_client = GlobalResources.redis_client
         admin_creds = get_user_creds("admin")
         
@@ -1095,7 +1095,7 @@ async def handle_media_command(
              if "music_assistant" not in integration and intent not in ["turn_on", "turn_off", "toggle"]:
                  # Clean Lookup for linked MA player
                  # Try finding a device with same name but 'music_assistant' integration
-                 from settings import GlobalResources
+                 from app.settings import GlobalResources
                  ma_docs = GlobalResources.ha_collection.similarity_search(f"{entity_id} music assistant", k=1)
                  ma_entity = None
                  
@@ -1147,7 +1147,7 @@ async def handle_media_command(
                 #, If we resolved a hardware device but assume music (or ambiguous), check if MA player exists.
                 # This fixes "Play Brandon Lake on Office TV" -> resolved hardware TV -> failed video play.
                 if not is_video_request and "music_assistant" not in resolved_int and "media_player" in resolved_id and intent not in ["turn_on", "turn_off", "toggle"]:
-                     from settings import GlobalResources
+                     from app.settings import GlobalResources
                      # Search for MA alternative in DB
                      ma_docs = GlobalResources.ha_collection.similarity_search(f"{potential_device} music assistant", k=3)
                      for d in ma_docs:
@@ -1201,7 +1201,7 @@ async def handle_media_command(
 
         # --- START MASS INTELLIGENCE SWAP (Standard Path) ---
         if entity_id and "media_player" in entity_id and not is_video_request and "music_assistant" not in (integration or "") and intent not in ["turn_on", "turn_off", "toggle"]:
-             from settings import GlobalResources
+             from app.settings import GlobalResources
              # Search for MA alternative in DB
              clean_name = entity_id.split('.')[-1].replace('_', ' ')
              ma_docs = GlobalResources.ha_collection.similarity_search(f"{clean_name} music assistant", k=3)
@@ -1391,7 +1391,7 @@ async def handle_media_command(
         # SMART POWER SWAP: Always prefer a 'remote' entity for power commands on media players
         # This handles Android TV, Roku, etc. where the media_player might be a cast target or less capable.
         if intent in ["turn_on", "turn_off", "toggle"] and domain == "media_player":
-            from settings import GlobalResources
+            from app.settings import GlobalResources
             
             # 1. Naive Check: media_player.foo -> remote.foo
             candidates = [entity_id.replace("media_player.", "remote.")]
@@ -1477,7 +1477,7 @@ async def handle_media_command(
              app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
              # Or iterate known apps
              matched_app = None
-             from logic.android_tv_ops import APP_IDS, launch_app as atv_launch
+             from app.logic.android_tv_ops import APP_IDS, launch_app as atv_launch
              
              for app_key in APP_IDS.keys():
                  if app_key in q_low:
@@ -1491,7 +1491,7 @@ async def handle_media_command(
         
         # WebOS App Launch
         if "webostv" in integration or intent == "open_app":
-             from logic.webos_ops import launch_app as webos_launch
+             from app.logic.webos_ops import launch_app as webos_launch
              # Naive extraction again if not already done
              if not app_name_candidate:
                   app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
@@ -1503,7 +1503,7 @@ async def handle_media_command(
 
         # Roku App Launch
         if "roku" in integration or intent == "open_app":
-             from logic.roku_ops import launch_app as roku_launch
+             from app.logic.roku_ops import launch_app as roku_launch
              # Naive extraction if not done yet
              if not app_name_candidate:
                   app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
@@ -1534,7 +1534,7 @@ async def handle_media_command(
              else:
                  # SEARCH: Use existing web search tool
                  log.info(f"[Search-Play] 'Watch' intent detected. Searching for video: {video_query}")
-                 from logic.web_search import tool_web_search
+                 from app.logic.web_search import tool_web_search
                  
                  # Clean Query: Remove device name from search string to avoid "video on office tv" noise
                  # Aggressive regex to remove "on [device/room]" patterns
@@ -1579,17 +1579,17 @@ async def handle_media_command(
             
             # 1. Android TV Deep Link
             if "android" in integration:
-                from logic.android_tv_ops import play_video as atv_play
+                from app.logic.android_tv_ops import play_video as atv_play
                 return await atv_play(entity_id, target_url, user_creds)
                 
             # 2. WebOS Deep Link
             elif "webostv" in integration:
-                from logic.webos_ops import play_url as webos_play
+                from app.logic.webos_ops import play_url as webos_play
                 return await webos_play(entity_id, target_url, user_creds, redis_client)
                 
             # 3. Roku Deep Link
             elif "roku" in integration:
-                from logic.roku_ops import play_media_url as roku_play
+                from app.logic.roku_ops import play_media_url as roku_play
                 return await roku_play(entity_id, target_url, user_creds, redis_client)
 
         # ------------------------------------------------------------------------
@@ -1685,7 +1685,7 @@ async def handle_media_command(
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices (Delegated) ---
         if "music_assistant" in integration:
             try:
-                from logic.music_assistant_ops import play_media as ma_play_media
+                from app.logic.music_assistant_ops import play_media as ma_play_media
                 log.info(f"Delegating Music Assistant Play on {entity_id} to music_assistant_ops")
                 
                 # Attempt specific type

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import dateparser
 from typing import Dict, List, Optional, Union
 
-from settings import log, GlobalResources, get_user_creds
+from app.settings import log, GlobalResources, get_user_creds
 from .timer_storage import storage
 from .alarm_audio import audio_manager
 # Ensure we import smart_resolve_entity for device targeting

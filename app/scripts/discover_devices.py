@@ -7,7 +7,7 @@ from pprint import pprint
 
 # Add parent directory to path to import settings
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from settings import HA_URL, HA_ENV_TOKEN as HA_TOKEN
+from app.settings import HA_URL, HA_ENV_TOKEN as HA_TOKEN
 
 def detect_integration(entity):
     attrs = entity.get("attributes", {})

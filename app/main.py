@@ -13,25 +13,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Fixed imports
-from settings import (
+from app.settings import (
     get_user_creds, run_blocking, GlobalResources, log,
     DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
     load_resources
 )
-from logic import (
+from app.logic import (
     generate_rag_stream, contextualize_query, try_handle_compound_command, 
     call_ollama_generate, call_openai_chat, 
     get_ha_context, get_rag_context, update_history
 )
-from logic.refresh_devices import refresh_db
-from intent_engine import engine as intent_engine
-from logic.timer_storage import storage as timer_storage
-from routers import music_assistant
+from app.logic.refresh_devices import refresh_db
+from app.intent_engine import engine as intent_engine
+from app.logic.timer_storage import storage as timer_storage
+from app.routers import music_assistant
 
 async def initialize_rag_resources():
     """Reloads RAG resources for hot-reloading."""
     await load_resources()
-    from intent_engine import engine
+    from app.intent_engine import engine
 
     await engine.load()
 
@@ -41,15 +41,15 @@ async def lifespan(app: FastAPI):
     await load_resources()
 
     # Initialize Intent Engine
-    from intent_engine import engine
+    from app.intent_engine import engine
     await engine.load()
 
     # Start Device DB Refresh (Async)
-    from logic.refresh_devices import refresh_db
+    from app.logic.refresh_devices import refresh_db
     asyncio.create_task(refresh_db())
 
     # Start Timer Scheduler
-    from logic.timer_scheduler import start_scheduler, stop_scheduler
+    from app.logic.timer_scheduler import start_scheduler, stop_scheduler
     log.info("Starting Timer/Alarm Scheduler...")
     scheduler_task = asyncio.create_task(start_scheduler())
 
@@ -82,9 +82,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 
 # Register Routers
 app.include_router(music_assistant.router)
-from routers import android_tv
-from routers import webos
-from routers import roku
+from app.routers import android_tv
+from app.routers import webos
+from app.routers import roku
 app.include_router(android_tv.router)
 app.include_router(webos.router)
 app.include_router(roku.router)
@@ -434,7 +434,7 @@ async def admin_logs(lines: int = 100):
 @app.post("/api/admin/run_tests")
 async def admin_run_tests(background_tasks: BackgroundTasks):
     """Run the system verification suite."""
-    from logic.test_runner import runner
+    from app.logic.test_runner import runner
     # We run it synchronously in a thread pool to avoid blocking the loop
     return await run_blocking(runner.run_all)
 
@@ -447,7 +447,7 @@ async def get_device_capabilities(entity_id: str):
     Example: /api/device/capabilities/light.piano_lamp
     """
     try:
-        from logic.media_ops import get_device_capabilities as get_caps
+        from app.logic.media_ops import get_device_capabilities as get_caps
         user_creds = get_user_creds("default")
         redis_client = GlobalResources.redis_client
         

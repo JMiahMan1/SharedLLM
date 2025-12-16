@@ -3,7 +3,7 @@ import os
 import requests
 import urllib.parse
 from datetime import datetime
-from settings import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS, log, run_blocking
+from app.settings import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS, log, run_blocking
 
 NOTES_DIR = "Notes"  # Standard Nextcloud Notes directory
 

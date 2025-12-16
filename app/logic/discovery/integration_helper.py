@@ -1,5 +1,5 @@
 
-from settings import log
+from app.settings import log
 
 def infer_integration(entity_id: str, attributes: dict) -> str:
     """
