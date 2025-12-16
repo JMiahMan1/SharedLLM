@@ -64,3 +64,4 @@ xmltodict
 playwright
 langchain-huggingface
 duckduckgo-search
+PyMuPDF
