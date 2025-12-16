@@ -1519,17 +1519,6 @@ async def handle_media_command(
              log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to roku_ops (integration: {integration})")
              return await roku_launch(entity_id, app_name_candidate, user_creds, redis_client)
         
-        # 4. CAST / GOOGLE CAST - Use media_player.play_media instead of Android ADB
-        if integration in ["cast", "google_cast"] and intent == "open_app":
-             log.info(f"Cast device detected. Using media_player.play_media for app launch on {entity_id}")
-             # Cast devices don't support arbitrary app launch via HA API
-             # Return a helpful error or try standard media playback
-             return [{
-                 "status": "FAILURE",
-                 "message": f"Cast devices don't support direct app launch. Try playing specific media instead.",
-                 "entity_id": entity_id,
-                 "service": "open_app"
-             }]
         
         # 5. FALLBACK - Unknown integration with open_app intent
         # This should rarely happen if device resolution is working properly
