@@ -29,7 +29,8 @@ def main():
         "test_notes.py",
         "test_calendar.py",
         "test_web_search.py",
-        "test_music_info.py"
+        "test_music_info.py",
+        "test_advanced_features.py"
     ]
     
     passed = 0
