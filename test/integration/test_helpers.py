@@ -5,9 +5,17 @@ NO HTTP 200 CHECKS - Only real state verification
 import requests
 import time
 import os
+from dotenv import load_dotenv
+
+# Load .env file FIRST
+load_dotenv()
 
 HA_URL = os.getenv("HA_URL", "https://ha.sumemail.com")
 HA_TOKEN = os.getenv("HA_TOKEN", "")
+
+if not HA_TOKEN:
+    print("[WARN] HA_TOKEN not set - state verification will fail!")
+
 HA_HEADERS = {
     "Authorization": f"Bearer {HA_TOKEN}",
     "Content-Type": "application/json"
