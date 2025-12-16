@@ -10,7 +10,7 @@ from datetime import datetime
 # --- Configuration ---
 API_URL = os.getenv("API_URL", "http://192.168.2.211:11435")
 HEADERS = {"Content-Type": "application/json", "X-RAG-User": "admin_test_suite"}
-LOG_FILE = "live_test_suite_results.txt"
+LOG_FILE = "./temp/live_test_suite_results.txt"
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', handlers=[
@@ -137,6 +137,24 @@ def test_media_lifecycle():
     # 5. Restore
     restore_state(entity)
 
+def test_search_and_play():
+    log.info("\n=== TEST: Search & Play (Watch Command) ===")
+    # Target a device known to handle video (Roku or WebOS)
+    # Ideally we'd use a dynamic discovery, but for regression we can try a generic intent
+    query = "Watch trending cat videos on Roku"
+    
+    resp, _ = send_query(query)
+    # Expected response should indicate video playback, e.g., "Playing... on Roku" or similar silent success
+    # It might also say "Searching web for..."
+    verify("Playing" in resp or "Searching" in resp or "[SILENT_SUCCESS]" in resp, 
+           "Watch command accepted", 
+           f"Watch command failed: {resp}")
+    
+    time.sleep(5)
+    
+    # Cleanup: Stop
+    send_query("Stop on Roku")
+
 def test_color_restore():
     log.info("\n=== TEST: Color Restoration ===")
     entity = "light.kitchen_light_1" # Adjust based on your setup
@@ -179,10 +197,23 @@ def test_tools_cleanup():
     event_title = f"TestEvent_{ts}"
     send_query(f"Schedule {event_title} tomorrow at 9am")
     send_query(f"Cancel the meeting {event_title}")
+    send_query(f"Cancel the meeting {event_title}")
     log.info(f"[CLEANUP] Event {event_title} cancelled.")
+
+def test_search_fact():
+    log.info("\n=== TEST: Search Fact (Linux Kernel) ===")
+    query = "What is the current stable Linux kernel version?"
+    resp, _ = send_query(query)
+    # 6.x is the current stable series (Dec 2025 probably 6.13+ or 7.x?)
+    # Just check for "kernel" or numbers to be safe, or "6." / "7."
+    verify(any(c.isdigit() for c in resp) and "kernel" in resp.lower(), 
+           "Search returned kernel version data", 
+           "Search failed to return kernel info")
 
 if __name__ == "__main__":
     test_context_chain()
+    test_search_fact()
     test_media_lifecycle()
+    test_search_and_play()
     test_color_restore()
     test_tools_cleanup()

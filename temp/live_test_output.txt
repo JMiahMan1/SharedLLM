@@ -1,5 +1,0 @@
-2025-12-09 22:55:45,651 [INFO] --- SETUP: Loading Resources ---
-2025-12-09 22:55:45,651 [INFO] Loading Global Resources...
-2025-12-09 22:55:46,713 [ERROR] Redis Connection Failed: Error -2 connecting to redis:6379. Name or service not known.
-2025-12-09 22:55:46,714 [ERROR] Failed to load embedding model: No module named 'langchain_huggingface'
-2025-12-09 22:55:46,714 [ERROR] CRITICAL: Resources failed to load.

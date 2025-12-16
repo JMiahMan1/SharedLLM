@@ -23,10 +23,15 @@ if os.getenv("DOCKER_ENV") != "1" and os.path.exists(".env"):
 
 # --- Logging ---
 DEBUG = os.getenv("DEBUG", "0") in ("1", "true", "True")
+log_file = os.getenv("LOG_FILE", "/data/app.log")
+# Fallback if directory doesn't exist
+if os.path.dirname(log_file) and not os.path.exists(os.path.dirname(log_file)):
+    log_file = "app.log"
+
 logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(os.getenv("LOG_FILE", "/data/app.log"))],
+    handlers=[logging.StreamHandler(), logging.FileHandler(log_file)],
 )
 log = logging.getLogger("unified-rag")
 
@@ -102,7 +107,14 @@ ALARM_SOUNDS_DIR = os.getenv("ALARM_SOUNDS_DIR", "/local/alarm_sounds")
 
 
 # --- Prompts (Externalized) ---
-DEFAULT_CONTEXT_PROMPT = "Rewrite the following query to be self-contained, resolving any pronouns (he, she, it, they, him, her) using the chat history.\nHistory:\n{history}\nInput: {query}\nRefined (Return ONLY the refined query string, NO JSON, NO MARKDOWN):"
+DEFAULT_CONTEXT_PROMPT = """Rewrite the following query to be self-contained, resolving pronouns and confirmations (Yes/No) using history.
+ Examples:
+ History: [User: Play music, Assistant: TV is off. Turn on?] Input: [Yes] -> Refined: [Turn on TV and play music]
+ History: [User: Who is Barack Obama?] Input: [How old is he?] -> Refined: [How old is Barack Obama]
+ History:
+ {history}
+ Input: {query}
+ Refined (Return ONLY the refined query string):"""
 CONTEXT_REWRITE_PROMPT = os.getenv("CONTEXT_REWRITE_PROMPT", DEFAULT_CONTEXT_PROMPT)
 
 DEFAULT_CALENDAR_PROMPT = """Extract details from: "{query}".

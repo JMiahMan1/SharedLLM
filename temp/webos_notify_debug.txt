@@ -1,5 +1,0 @@
-2025-12-10 11:58:40,576 [INFO] [WebOS] Notify living_room_tv: Test Notification
-2025-12-10 11:58:40,614 [INFO] EXEC HA: notify.living_room_tv on None | Data: {'message': 'Test Notification'}
-2025-12-10 11:58:40,660 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/notify/living_room_tv HTTP/1.1" 400 16
-2025-12-10 11:58:41,210 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/notify/living_room_tv HTTP/1.1" 400 16
-INFO:     172.24.0.1:35514 - "POST /api/webos/notify HTTP/1.1" 500 Internal Server Error

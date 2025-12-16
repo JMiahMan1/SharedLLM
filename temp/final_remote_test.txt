@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/app/live_test.py", line 29, in <module>
-    from app.settings import load_resources, GlobalResources, HA_URL, get_user_creds
-ModuleNotFoundError: No module named 'app'

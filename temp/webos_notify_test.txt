@@ -1,4 +1,0 @@
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100   133  100    55  100    78     48     68  0:00:01  0:00:01 --:--:--   116100   133  100    55  100    78     48     68  0:00:01  0:00:01 --:--:--   116
-{"detail":"'NoneType' object has no attribute 'split'"}

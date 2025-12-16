@@ -1,1 +1,0 @@
-{"status":"FAILURE","message":"Failed: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Read timed out. (read timeout=5.0)","entity_id":"media_player.28_tcl_roku_tv","friendly_name":"28 Tcl Roku Tv","service":"media_player.play_media"}

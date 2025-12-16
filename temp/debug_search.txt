@@ -1,3 +1,0 @@
-  File "/app/test_watch_logic.py", line 16
-    print("\n--- DIRECT SEARCH TEST ---")
-IndentationError: unexpected indent

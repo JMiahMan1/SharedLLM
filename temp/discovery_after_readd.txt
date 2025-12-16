@@ -1,9 +1,0 @@
-media_player.living_room_tv_2            | idle       | Android TV           | Living Room TV
-media_player.tv_master_2                 | unavailable | Unknown              | [TV]Master
-media_player.lg_webos_tv_un6955zuf       | unavailable | Unknown              | [LG] webOS TV UN6955ZUF
---
-media_player.living_room_tv              | on         | WebOS                | Living Room TV
-
---- Living Room Candidates ---
-ID: media_player.living_room_tv_2 (Android TV)
-ID: media_player.living_room_tv (WebOS)

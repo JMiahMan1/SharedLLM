@@ -1,0 +1,201 @@
+/home/jeremiah/.local/lib/python3.14/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+============================= test session starts ==============================
+platform linux -- Python 3.14.2, pytest-8.3.5, pluggy-1.6.0
+rootdir: /home/jeremiah/Summers Drive/Code/SharedLLM
+plugins: asyncio-1.3.0, anyio-4.11.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 20 items
+
+test/unit/test_alarm_logic.py s                                          [  5%]
+test/unit/test_capability_detection.py ......F                           [ 40%]
+test/unit/test_capability_routing.py .s                                  [ 50%]
+test/unit/test_grouping.py FF                                            [ 60%]
+test/unit/test_light_control.py ....F                                    [ 85%]
+test/unit/test_media_resolution.py F                                     [ 90%]
+test/unit/test_notes_unit.py s                                           [ 95%]
+test/unit/test_timer.py s                                                [100%]
+
+=================================== FAILURES ===================================
+____________ TestCapabilityDetection.test_media_player_capabilities ____________
+
+self = <test_capability_detection.TestCapabilityDetection testMethod=test_media_player_capabilities>
+
+    async def test_media_player_capabilities(self):
+        """Test: Media player with skip/volume support."""
+        user_creds = {"user": "test", "ha_token": "fake"}
+        mock_redis = None
+    
+        mock_ha_response = {
+            "entity_id": "media_player.spotify",
+            "state": "playing",
+            "attributes": {
+                "supported_features": 565,  # Pause(1) + Volume(4) + Next(32) + Play Media(512)
+                "friendly_name": "Spotify"
+            }
+        }
+    
+        with patch('logic.media_ops.HA_URL', 'http://test'), \
+             patch('logic.media_ops.run_blocking', new_callable=AsyncMock) as mock_run:
+    
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_ha_response
+            mock_run.return_value = mock_response
+    
+            caps = await get_device_capabilities("media_player.spotify", user_creds, mock_redis)
+    
+            self.assertEqual(caps["domain"], "media_player")
+            self.assertTrue(caps["has_pause"])
+            self.assertTrue(caps["has_next"])
+            self.assertTrue(caps["has_volume"])
+            self.assertTrue(caps["has_play_media"])
+>           self.assertFalse(caps.get("has_previous", False))  # 16 not in bitmask
+E           AssertionError: True is not false
+
+test/unit/test_capability_detection.py:140: AssertionError
+____________________________ test_pattern_detection ____________________________
+
+    def test_pattern_detection():
+        # 1. Locations
+>       assert detect_entity_pattern("Turn on Upstairs Lights")[0] == "location"
+E       AssertionError: assert ('plural', {'value': 'lights'}) == 'location'
+
+test/unit/test_grouping.py:13: AssertionError
+_____________________________ test_filtering_logic _____________________________
+
+    def test_filtering_logic():
+        entities = [
+            ("light.kitchen_1", "hue"),
+            ("light.kitchen_2", "hue"),
+            ("light.bedroom_north", "hue"),
+            ("light.bedroom_south", "hue"),
+            ("light.upstairs_hall", "hue"),
+            ("light.downstairs_hall", "hue")
+        ]
+    
+        friendly_names = {
+            "light.kitchen_1": "Kitchen Light 1",
+            "light.kitchen_2": "Kitchen Light 2",
+            "light.bedroom_north": "North Bedroom Light",
+            "light.bedroom_south": "South Bedroom Light",
+            "light.upstairs_hall": "Upstairs Hallway",
+            "light.downstairs_hall": "Downstairs Hallway"
+        }
+    
+        # Test Location: Upstairs
+>       filtered_up = filter_entities_by_pattern(entities, "location", {'value': 'upstairs'}, friendly_names)
+E       TypeError: filter_entities_by_pattern() takes 2 positional arguments but 4 were given
+
+test/unit/test_grouping.py:45: TypeError
+_____________________ TestLightControl.test_set_color_red ______________________
+
+self = <test_light_control.TestLightControl testMethod=test_set_color_red>
+
+    async def test_set_color_red(self):
+        """Test: 'Set Piano Lamp to red' should generate rgb_color service data."""
+        mock_collection = MagicMock()
+        mock_redis = None
+        user_creds = {"user": "test", "ha_token": "fake", "ha_url": "http://test"}
+    
+        # Mock entity resolution (entity_id passed directly for simplicity)
+        entity_id = "light.piano_lamp"
+    
+        with patch('logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = {"status": "SUCCESS", "message": "Color set"}
+    
+            result = await handle_media_command(
+                intent="set_color",
+                query="set piano lamp to red",
+                entity_id=entity_id,
+                user_creds=user_creds,
+                ha_collection=mock_collection,
+                redis_client=mock_redis
+            )
+    
+            # Verify execute_ha_service was called with correct RGB
+>           mock_exec.assert_called_once()
+
+test/unit/test_light_control.py:35: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <AsyncMock name='execute_ha_service' id='140005114776272'>
+
+    def assert_called_once(self):
+        """assert that the mock was called only once.
+        """
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to have been called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'execute_ha_service' to have been called once. Called 0 times.
+
+/usr/lib64/python3.14/unittest/mock.py:964: AssertionError
+_________________ TestEntityResolution.test_office_tv_routing __________________
+
+self = <test_media_resolution.TestEntityResolution testMethod=test_office_tv_routing>
+
+    async def test_office_tv_routing(self):
+        """
+        Scenario: User has 'Office TV' which appears as:
+        1. media_player.office_tv_mass (Music Assistant)
+        2. media_player.office_tv_android (Android TV)
+    
+        Intent: 'turn_off' -> Should pick Android TV (Hardware)
+        Intent: 'play_media' (music) -> Should pick Mass (Music Service)
+        """
+    
+        # Mock Collection Search Results
+        # Simulating that searching 'Office TV' returns both candidates
+        mock_results = [
+            MockDoc("media_player.office_tv_mass", "music_assistant"),
+            MockDoc("media_player.office_tv_android", "androidtv"),
+            MockDoc("light.office_lights", "hue") # Noise
+        ]
+    
+        mock_collection = MagicMock()
+        # Mocking run_blocking to just return the results directly
+        with patch('logic.media_ops.run_blocking', return_value=mock_results):
+    
+            # TEST 1: Turn Off (Power)
+            # Should prefer the Android TV integration because it controls the actual hardware power
+            eid, integration = await smart_resolve_entity("Office TV", "turn_off", mock_collection)
+            print(f"\n[Turn Off] Resolved: {eid} ({integration})")
+    
+            # CURRENTLY: This might fail or be flaky depending on list order without the fix.
+            # We want to assertion to be Android TV.
+>           self.assertEqual(eid, "media_player.office_tv_android")
+E           AssertionError: None != 'media_player.office_tv_android'
+
+test/unit/test_media_resolution.py:55: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Turn Off] Resolved: None (None)
+------------------------------ Captured log call -------------------------------
+ERROR    logic.media_ops:media_ops.py:669 Error querying Chroma: 'MagicMock' object can't be awaited
+=============================== warnings summary ===============================
+test/unit/test_alarm_logic.py::test_alarm_logic
+test/unit/test_capability_routing.py::test_full_flow
+test/unit/test_notes_unit.py::test_notes_direct
+test/unit/test_timer.py::test_timer_flow
+  /usr/lib/python3.14/site-packages/_pytest/python.py:148: PytestUnhandledCoroutineWarning: async def functions are not natively supported and have been skipped.
+  You need to install a suitable plugin for your async framework, for example:
+    - anyio
+    - pytest-asyncio
+    - pytest-tornasync
+    - pytest-trio
+    - pytest-twisted
+    warnings.warn(PytestUnhandledCoroutineWarning(msg.format(nodeid)))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/unit/test_capability_detection.py::TestCapabilityDetection::test_media_player_capabilities
+FAILED test/unit/test_grouping.py::test_pattern_detection - AssertionError: a...
+FAILED test/unit/test_grouping.py::test_filtering_logic - TypeError: filter_e...
+FAILED test/unit/test_light_control.py::TestLightControl::test_set_color_red
+FAILED test/unit/test_media_resolution.py::TestEntityResolution::test_office_tv_routing
+============= 5 failed, 11 passed, 4 skipped, 4 warnings in 0.51s ==============

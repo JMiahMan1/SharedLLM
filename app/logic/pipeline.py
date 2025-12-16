@@ -187,6 +187,15 @@ async def contextualize_query(query, user, model):
     hist = get_history_context(user)
     if not hist:
         return query, intent, score, is_high_confidence
+
+    # Explicit handling for confirmations
+    if query.lower().strip().strip("!.") in ["yes", "sure", "please", "please do", "ok", "yep", "do it"]:
+         special_prompt = f"History:\n{hist}\nThe user confirmed 'Yes' to the Assistant's last question. Rewrite 'Yes' into a full, explicit command (e.g., 'Turn on the TV' or 'Turn on TV and play music').\nRefined Command (No JSON, Just Text):"
+         r = await call_ollama_generate(special_prompt, model)
+         refined = clean_llm_output(r.get("text", query), is_voice=False)
+         log.info(f"[CONTEXT REWRITE] Confirmation '{query}' -> '{refined}'")
+         return refined, intent, score, is_high_confidence
+
     if len(query) > 150:
         return query, intent, score, is_high_confidence
     prompt = CONTEXT_REWRITE_PROMPT.format(history=hist, query=query)

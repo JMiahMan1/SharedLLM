@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/app/scripts/discover_devices.py", line 10, in <module>
-    from settings import HA_URL, HA_TOKEN
-ImportError: cannot import name 'HA_TOKEN' from 'settings' (/app/scripts/../settings.py)

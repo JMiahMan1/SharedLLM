@@ -1,12 +1,0 @@
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100    66    0     0  100    66      0    326 --:--:-- --:--:-- --:--:--   325100    66    0     0  100    66      0     54  0:00:01  0:00:01 --:--:--    54100    66    0     0  100    66      0     29  0:00:02  0:00:02 --:--:--    29100   276  100   210  100    66     75     23  0:00:02  0:00:0{"status":"SUCCESS","message":"Sent command to turn on the Living Room TV.","entity_id":"media_player.living_room_tv","friendly_name":"Living Room TV","service":"media_player.turn_on","new_state":"unavailable"}
-2 --:--:--    99
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100    73    0     0  100    73      0     60  0:00:01  0:00:01 --:--:--    60100    73    0     0  100    73      0     33  0:00:02  0:00:02 --:--:--    33{"status":"SUCCESS","message":"Sent command to turn on the [LG] webOS TV UN6955ZUF.","entity_id":"media_player.lg_webos_tv_un6955zuf","friendly_name":"[LG] webOS TV UN6955ZUF","service":"media_player.turn_on","new_state":"unavailable"}
-100   308  100   235  100    73     81     25  0:00:02  0:00:02 --:--:--   107100   308  100   235  100    73     81     25  0:00:02  0:00:02 --:--:--   107
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100    68    0     0  100    68      0     56  0:00:01  0:00:01 --:--:--    56100    68    0     0  100    68      0     30  0:00:02  0:00:02 --:--:--    30{"status":"SUCCESS","message":"Sent command to turn on the LG webOS TV 6B29.","entity_id":"media_player.lg_webos_tv_6b29","friendly_name":"LG webOS TV 6B29","service":"media_player.turn_on","new_state":"unavailable"}
-100   284  100   216  100    68     78     24  0:00:02  0:00:02 --:--:--   103100   284  100   216  100    68     78     24  0:00:02  0:00:02 --:--:--   103
