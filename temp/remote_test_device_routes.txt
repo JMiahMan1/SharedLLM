@@ -4,4 +4,4 @@
 [94m[INFO][0m TEST 2: WebOS Direct Routes
 [92m[PASS][0m WebOS notify route exists (Status: 422)
 [94m[INFO][0m TEST 3: Android TV Direct Routes
-[91m[FAIL][0m Android launch route 404
+[92m[PASS][0m Android launch route exists (Status: 422)

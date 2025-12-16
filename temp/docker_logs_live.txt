@@ -1,0 +1,200 @@
+2025-12-15 21:20:02,384 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2884
+2025-12-15 21:20:02,386 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:20:14,410 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:20:14,452 [INFO] [PIPELINE DEBUG] Using provided intent: nav_down (Score: 1.0)
+2025-12-15 21:20:14,453 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2152
+2025-12-15 21:20:14,456 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:20:20,651 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:20:20,653 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'nav_down', 'device_name': '28-inch TCL Roku TV'}}
+2025-12-15 21:20:20,653 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: '28-inch TCL Roku TV' (Music Mode: False)
+2025-12-15 21:20:20,653 [INFO] DEBUG: Entering smart_resolve_entity. Q='28-inch TCL Roku TV' Intent='nav_down' Multiple=True
+2025-12-15 21:20:20,671 [INFO] DEBUG: Search returned 30 docs.
+2025-12-15 21:20:20,671 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='binary_sensor.28_tcl_roku_tv_supports_ethernet', metadata={'state': 'off', 'domain': 'binary_sensor', 'attributes': '{"friendly_name": "28\\" TCL Roku TV Supports Ethernet"}', 'integration': 'roku', 'group_name': '', 'entity_id': 'binary_sensor.28_tcl_roku_tv_supports_ethernet', 'last_updated': '709077.196', 'capabilities': '', 'group_id': 'binary_sensor.28_tcl_roku_tv_supports_ethernet', 'source': 'home_assistant', 'friendly_name': '28" TCL Roku TV Supports Ethernet'}, page_content='28" TCL Roku TV Supports Ethernet (binary_sensor.28_tcl_roku_tv_supports_ethernet) is a roku device in group \'\'.'), 0.5067911744117737)
+2025-12-15 21:20:20,671 [INFO] match found in Group: binary_sensor.28_tcl_roku_tv_supports_ethernet (via 28" TCL Roku TV Supp...)
+2025-12-15 21:20:20,712 [INFO] Group binary_sensor.28_tcl_roku_tv_supports_ethernet has 1 members.
+2025-12-15 21:20:20,712 [INFO] Capability Routing used binary_sensor.28_tcl_roku_tv_supports_ethernet (roku) for intent nav_down
+2025-12-15 21:20:20,712 [INFO] [Device Fallback] Resolved '28-inch TCL Roku TV' to binary_sensor.28_tcl_roku_tv_supports_ethernet
+2025-12-15 21:20:20,713 [INFO] [DISPATCH] Dispatching intent: 'nav_down' (Type: <class 'str'>) for entity: binary_sensor.28_tcl_roku_tv_supports_ethernet
+2025-12-15 21:20:20,717 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:20:20,737 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/binary_sensor.28_tcl_roku_tv_supports_ethernet HTTP/1.1" 200 373
+2025-12-15 21:20:20,738 [INFO] EXEC HA: remote.send_command on binary_sensor.28_tcl_roku_tv_supports_ethernet | Data: {'command': 'DPAD_DOWN'}
+2025-12-15 21:20:20,740 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:20:20,763 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/remote/send_command HTTP/1.1" 200 10
+2025-12-15 21:20:21,268 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:20:21,293 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/binary_sensor.28_tcl_roku_tv_supports_ethernet HTTP/1.1" 200 373
+2025-12-15 21:20:21,798 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:20:21,830 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/binary_sensor.28_tcl_roku_tv_supports_ethernet HTTP/1.1" 200 373
+2025-12-15 21:20:22,333 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:20:22,360 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/binary_sensor.28_tcl_roku_tv_supports_ethernet HTTP/1.1" 200 373
+2025-12-15 21:20:22,864 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:20:22,888 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/binary_sensor.28_tcl_roku_tv_supports_ethernet HTTP/1.1" 200 373
+2025-12-15 21:20:23,393 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:20:23,416 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/binary_sensor.28_tcl_roku_tv_supports_ethernet HTTP/1.1" 200 373
+2025-12-15 21:20:23,418 [INFO] Executing Web Search for: Scroll down on the 28-inch TCL Roku TV
+2025-12-15 21:20:23,423 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-15 21:20:23,470 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:20:23,496 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49418
+2025-12-15 21:20:23,746 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-15 21:20:28,127 [DEBUG] https://search.sumemail.com:443 "GET /search?q=Scroll+down+on+the+28-inch+TCL+Roku+TV&format=json HTTP/2.0" 200 8670
+2025-12-15 21:20:28,130 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6953
+2025-12-15 21:20:28,133 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:20:29,359 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:20:35,275 [DEBUG] [RESPONSE] Final response to user (205 chars): Use the CH plus /- buttons on your TCL Roku TV remote to scroll through channels or menus. If the remote isnt responding, check the batteries and restart the TV. Let me know if you need further assistance!
+2025-12-15 21:20:35,276 [DEBUG] [RESPONSE] Returning to client: Use the CH plus /- buttons on your TCL Roku TV remote to scroll through channels or menus. If the remote isnt responding, check the batteries and restart the TV. Let me know if you need further assist
+INFO:     192.168.2.1:45838 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-15 21:20:35,289 [DEBUG] [REGEX OVERRIDE] Matched 'stop_media' via pattern: \b(stop|pause)\b...
+2025-12-15 21:20:35,289 [INFO] [INTENT] Regex override: 'Pause the Office TV' -> stop_media
+2025-12-15 21:20:35,292 [INFO] [PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+2025-12-15 21:20:35,292 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2135
+2025-12-15 21:20:35,294 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:20:59,074 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:20:59,077 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop', 'device_name': 'Office TV'}}
+2025-12-15 21:20:59,077 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV' (Music Mode: False)
+2025-12-15 21:20:59,077 [INFO] DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='stop' Multiple=True
+2025-12-15 21:20:59,101 [INFO] DEBUG: Search returned 30 docs.
+2025-12-15 21:20:59,102 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv', metadata={'friendly_name': 'Office TV Remote', 'entity_id': 'media_player.office_tv', 'attributes': '{"assumed_state": true, "device_class": "tv", "friendly_name": "Office TV Remote", "supported_features": 153529}', 'source': 'home_assistant', 'group_name': '', 'domain': 'media_player', 'last_updated': '709077.196', 'capabilities': 'turn_on,turn_off,play_media', 'group_id': 'media_player.office_tv', 'state': 'off', 'integration': 'tv'}, page_content="Office TV Remote (media_player.office_tv) is a tv device in group ''. Can turn off. Can play media."), 0.9782088398933411)
+2025-12-15 21:20:59,102 [INFO] match found in Group: media_player.office_tv (via Office TV Remote (me...)
+2025-12-15 21:20:59,103 [INFO] Group media_player.office_tv has 1 members.
+2025-12-15 21:20:59,103 [INFO] Capability Routing used media_player.office_tv (tv) for intent stop
+2025-12-15 21:20:59,103 [INFO] [Device Fallback] Resolved 'Office TV' to media_player.office_tv
+2025-12-15 21:20:59,103 [INFO] Sanitized intent from 'stop' to 'stop_media'
+2025-12-15 21:20:59,103 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': "Media command 'stop_media' could not be executed.", 'entity_id': 'media_player.office_tv', 'service': 'stop_media'}]
+2025-12-15 21:20:59,104 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'stop_media' on 'media_player.office_tv' failed. Reason: Media command 'stop_media' could not be executed.
+
+2025-12-15 21:20:59,104 [INFO] DEBUG: Checking Simple Intent 'stop_media' for silent mode. Results: 1
+2025-12-15 21:20:59,104 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2620
+2025-12-15 21:20:59,106 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:20:59,571 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:21:09,759 [DEBUG] [RESPONSE] Final response to user (186 chars): The Office TV cannot be paused at this moment. The command to stop media playback failed, so I'll check if it's already off or if there's another issue. Let me confirm its current state.
+2025-12-15 21:21:09,760 [DEBUG] [RESPONSE] Returning to client: The Office TV cannot be paused at this moment. The command to stop media playback failed, so I'll check if it's already off or if there's another issue. Let me confirm its current state.
+INFO:     192.168.2.1:47516 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-15 21:21:10,986 [DEBUG] Intent Match: 'Resume on Office TV' -> 'play_media' (0.55) via 'resume'
+2025-12-15 21:21:10,987 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2841
+2025-12-15 21:21:10,988 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:21:35,110 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:21:35,153 [INFO] [PIPELINE DEBUG] Using provided intent: play_media (Score: 0.5517991601224983)
+2025-12-15 21:21:35,154 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2144
+2025-12-15 21:21:35,157 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:21:42,985 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:21:42,988 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play_media', 'device_name': 'Office TV'}}
+2025-12-15 21:21:42,989 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV' (Music Mode: True)
+2025-12-15 21:21:42,989 [INFO] DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='play_media' Multiple=True
+2025-12-15 21:21:43,013 [INFO] DEBUG: Search returned 30 docs.
+2025-12-15 21:21:43,013 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv', metadata={'attributes': '{"assumed_state": true, "device_class": "tv", "friendly_name": "Office TV Remote", "supported_features": 153529}', 'integration': 'tv', 'group_name': '', 'friendly_name': 'Office TV Remote', 'last_updated': '709077.196', 'domain': 'media_player', 'capabilities': 'turn_on,turn_off,play_media', 'entity_id': 'media_player.office_tv', 'source': 'home_assistant', 'group_id': 'media_player.office_tv', 'state': 'off'}, page_content="Office TV Remote (media_player.office_tv) is a tv device in group ''. Can turn off. Can play media."), 0.9782088398933411)
+2025-12-15 21:21:43,014 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+2025-12-15 21:21:43,014 [INFO] [BATCH] Executing 'play_media' on 1 entities
+2025-12-15 21:21:43,014 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.office_tv_chrome_2
+2025-12-15 21:21:43,014 [INFO] [CAPABILITY] Redis cache HIT for media_player.office_tv_chrome_2
+2025-12-15 21:21:43,016 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:43,090 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:43,092 [INFO] Executing Standard Play on media_player.office_tv_chrome_2 Type: music
+2025-12-15 21:21:43,094 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:43,159 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:43,160 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'resume', 'media_content_type': 'music'}
+2025-12-15 21:21:43,162 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:44,005 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+2025-12-15 21:21:44,008 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-15 21:21:44,008 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-15 21:21:44,009 [INFO] Self-Healing: Retrying 'resume' as 'video' on media_player.office_tv_chrome_2
+2025-12-15 21:21:44,011 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:44,044 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:44,045 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'resume', 'media_content_type': 'video'}
+2025-12-15 21:21:44,047 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:44,420 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+2025-12-15 21:21:44,423 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-15 21:21:44,423 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-15 21:21:44,423 [ERROR] Persistent 500 Error on media_player.office_tv_chrome_2. Device might be unresponsive or integration broken.
+2025-12-15 21:21:44,424 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: Office Tv Chrome 2', 'service': 'play_media', 'batch_results': [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office Tv Chrome 2', 'service': 'media_player.play_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}]
+2025-12-15 21:21:44,424 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'play_media' on 'batch_command' failed. Reason: Failed to control all 1 devices: Office Tv Chrome 2
+
+2025-12-15 21:21:44,424 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-15 21:21:44,424 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2622
+2025-12-15 21:21:44,426 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:21:45,041 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:21:54,272 [DEBUG] [RESPONSE] Final response to user (200 chars): Resuming playback on the Office TV. Error: Unable to control the device. Please check if the TV is on and properly connected, or confirm the correct device name. Let me know how you'd like to proceed!
+2025-12-15 21:21:54,272 [DEBUG] [RESPONSE] Returning to client: Resuming playback on the Office TV. Error: Unable to control the device. Please check if the TV is on and properly connected, or confirm the correct device name. Let me know how you'd like to proceed!
+INFO:     192.168.2.1:42632 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-15 21:21:55,391 [DEBUG] [REGEX OVERRIDE] Matched 'media_next' via pattern: \b(skip|next)\b...
+2025-12-15 21:21:55,391 [INFO] [INTENT] Regex override: 'Skip this song on Office TV' -> media_next
+2025-12-15 21:21:55,394 [INFO] [PIPELINE DEBUG] Using provided intent: media_next (Score: 1.0)
+2025-12-15 21:21:55,394 [INFO] [FAST ORCHESTRA] Bypassing LLM for media_next
+2025-12-15 21:21:55,395 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Skip this song on Office TV' (Music Mode: True)
+2025-12-15 21:21:55,395 [INFO] DEBUG: Entering smart_resolve_entity. Q='Skip this song on Office TV' Intent='media_next' Multiple=True
+2025-12-15 21:21:55,413 [INFO] DEBUG: Search returned 30 docs.
+2025-12-15 21:21:55,413 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='switch.jeremiah_s_echo_dot_office_do_not_disturb', metadata={'last_updated': '709077.197', 'entity_id': 'switch.jeremiah_s_echo_dot_office_do_not_disturb', 'friendly_name': "Jeremiah's Echo Dot - Office Do not disturb", 'integration': 'unknown', 'domain': 'switch', 'attributes': '{"friendly_name": "Jeremiah\'s Echo Dot - Office Do not disturb"}', 'capabilities': '', 'state': 'off', 'group_name': '', 'group_id': 'switch.jeremiah_s_echo_dot_office_do_not_disturb', 'source': 'home_assistant'}, page_content="Jeremiah's Echo Dot - Office Do not disturb (switch.jeremiah_s_echo_dot_office_do_not_disturb) is a unknown device in group ''."), 1.3421550989151)
+2025-12-15 21:21:55,413 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+2025-12-15 21:21:55,413 [INFO] [BATCH] Executing 'media_next' on 1 entities
+2025-12-15 21:21:55,435 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:55,455 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:55,456 [INFO] Transport Short Circuit: Device media_player.office_tv_chrome_2 is active, proceeding directly.
+2025-12-15 21:21:55,457 [INFO] [_execute_transport_command] Intent='media_next' Entity='media_player.office_tv_chrome_2'
+2025-12-15 21:21:55,458 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:55,531 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:55,533 [INFO] EXEC HA: media_player.media_next_track on media_player.office_tv_chrome_2 | Data: {}
+2025-12-15 21:21:55,535 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:55,591 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/media_next_track HTTP/1.1" 200 10
+2025-12-15 21:21:56,096 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:56,119 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:56,625 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:56,649 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:57,153 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:57,174 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:57,678 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:57,707 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:58,211 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:58,233 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:58,234 [ERROR] [Device Fallback] Error resolving 'Skip this song on Office TV': 'list' object has no attribute 'get'
+Traceback (most recent call last):
+  File "/workspace/app/logic/media_ops.py", line 1028, in handle_media_command
+    return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/app/logic/media_ops.py", line 602, in execute_batch_command
+    success_count = sum(1 for r in results if r.get('status') == 'SUCCESS')
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/app/logic/media_ops.py", line 602, in <genexpr>
+    success_count = sum(1 for r in results if r.get('status') == 'SUCCESS')
+                                              ^^^^^
+AttributeError: 'list' object has no attribute 'get'
+2025-12-15 21:21:58,236 [INFO] DEBUG: Entering smart_resolve_entity. Q='office tv' Intent='media_next' Multiple=False
+2025-12-15 21:21:58,259 [INFO] DEBUG: Search returned 15 docs.
+2025-12-15 21:21:58,259 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv', metadata={'entity_id': 'media_player.office_tv', 'friendly_name': 'Office TV Remote', 'group_id': 'media_player.office_tv', 'attributes': '{"assumed_state": true, "device_class": "tv", "friendly_name": "Office TV Remote", "supported_features": 153529}', 'capabilities': 'turn_on,turn_off,play_media', 'last_updated': '709077.196', 'integration': 'tv', 'domain': 'media_player', 'group_name': '', 'source': 'home_assistant', 'state': 'off'}, page_content="Office TV Remote (media_player.office_tv) is a tv device in group ''. Can turn off. Can play media."), 0.9782088398933411)
+2025-12-15 21:21:58,259 [INFO] Transport Short Circuit: Found explicit device media_player.office_tv_chrome_2 from query.
+2025-12-15 21:21:58,280 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:58,298 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:58,300 [INFO] Transport Short Circuit: Device media_player.office_tv_chrome_2 is active, proceeding directly.
+2025-12-15 21:21:58,300 [INFO] [_execute_transport_command] Intent='media_next' Entity='media_player.office_tv_chrome_2'
+2025-12-15 21:21:58,302 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:58,325 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:58,326 [INFO] EXEC HA: media_player.media_next_track on media_player.office_tv_chrome_2 | Data: {}
+2025-12-15 21:21:58,328 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:58,351 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/media_next_track HTTP/1.1" 200 10
+2025-12-15 21:21:58,895 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:58,927 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:59,432 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:21:59,486 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:21:59,991 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:22:00,075 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:22:00,580 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:22:00,636 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:22:01,141 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:22:01,211 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:22:01,213 [INFO] Executing Web Search for: Skip this song on Office TV
+2025-12-15 21:22:01,223 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-15 21:22:01,261 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:22:01,339 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49407
+2025-12-15 21:22:05,718 [DEBUG] https://search.sumemail.com:443 "GET /search?q=Skip+this+song+on+Office+TV&format=json HTTP/2.0" 200 10309
+2025-12-15 21:22:05,721 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=7440
+2025-12-15 21:22:05,723 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:22:06,538 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None

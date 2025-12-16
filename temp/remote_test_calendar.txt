@@ -1,67 +1,8 @@
 [CalendarTest] Starting Calendar Tests...
 [CalendarTest] TEST 1: List Events
-Traceback (most recent call last):
-  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 644, in send
-    resp = conn.urlopen(
-        method=request.method,
-    ...<9 lines>...
-        chunked=chunked,
-    )
-  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1811, in urlopen
-    retries = retries.increment(
-        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
-    )
-  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/util/retry.py", line 499, in increment
-    raise reraise(type(error), error, _stacktrace)
-          ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/util/util.py", line 39, in reraise
-    raise value
-  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1733, in urlopen
-    response = self._make_request(  # type: ignore[call-overload,misc]
-        conn,
-    ...<15 lines>...
-        extension=extension,
-    )
-  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1360, in _make_request
-    response = conn.getresponse(
-        police_officer=self.pool, early_response_callback=on_early_response
-    )
-  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 634, in getresponse
-    low_response = super().getresponse(
-        promise=promise,
-        early_response_callback=early_response_handler,
-    )
-  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/backend/hface.py", line 1532, in getresponse
-    head_event: HeadersReceived | EarlyHeadersReceived = self.__exchange_until(  # type: ignore[assignment]
-                                                         ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        (
-        ^
-    ...<9 lines>...
-        stream_id=stream_id,
-        ^^^^^^^^^^^^^^^^^^^^
-    ).pop()
-    ^
-  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/backend/hface.py", line 1080, in __exchange_until
-    raise ProtocolError(event.message)
-urllib3.exceptions.ProtocolError: None
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/integration/test_calendar.py", line 45, in <module>
-    test_calendar_flow()
-    ~~~~~~~~~~~~~~~~~~^^
-  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/integration/test_calendar.py", line 22, in test_calendar_flow
-    r = requests.post(f"{API_URL}/api/chat", json={"messages":[{"role":"user","content":"What is on my calendar today?"}]}, headers=HEADERS)
-  File "/usr/lib/python3.14/site-packages/requests/api.py", line 115, in post
-    return request("post", url, data=data, json=json, **kwargs)
-  File "/usr/lib/python3.14/site-packages/requests/api.py", line 59, in request
-    return session.request(method=method, url=url, **kwargs)
-           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 589, in request
-    resp = self.send(prep, **send_kwargs)
-  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 703, in send
-    r = adapter.send(request, **kwargs)
-  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 659, in send
-    raise ConnectionError(err, request=request)
-requests.exceptions.ConnectionError: None
+[CalendarTest] Response: {"model":"qwen3:latest","created_at":"2025-12-16T05:18:43Z","message":{"role":"assistant","content":...
+[CalendarTest] TEST 2: Add Event 'Test Meeting' at 5pm
+[CalendarTest] Response: {"model":"qwen3:latest","created_at":"2025-12-16T05:19:01Z","message":{"role":"assistant","content":...
+[CalendarTest] ✅ Add Event Intent routed successfully.
+[CalendarTest] TEST 3: Delete Event 'Test Meeting'
+[CalendarTest] Response: {"model":"qwen3:latest","created_at":"2025-12-16T05:19:36Z","message":{"role":"assistant","content":...

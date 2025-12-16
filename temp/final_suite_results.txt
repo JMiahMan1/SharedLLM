@@ -1,0 +1,25 @@
+🚀 Launching Test Suite (9 scripts)...
+
+>>> STARTING test_system_admin.py (Log: temp/remote_test_system_admin.txt) <<<
+✅ PASS: test_system_admin.py (2.0s)
+
+>>> STARTING test_device_routes.py (Log: temp/remote_test_device_routes.txt) <<<
+✅ PASS: test_device_routes.py (2.0s)
+
+>>> STARTING test_media_api.py (Log: temp/remote_test_media_api.txt) <<<
+❌ FAIL: test_media_api.py (132.0s) - Exit Code: 1
+--- LOG TAIL ---
+Command: 'Open Netflix on Office TV'
+Response (37.60s): Turning on the Office TV Chrome to open Netflix....
+[WARN] Could not verify Netflix launch. app_id=music_assistant, media_title=brandon lake - hard fought hallelujah
+[92m[PASS][0m Command sent (app verification not supported on this device)
+[94m[INFO][0m TEST 4: Pause
+Command: 'Pause the Office TV'
+Response (62.83s): Pausing the Office TV....
+[91m[FAIL][0m Failed to pause! State: off
+TV might be in a state where it cannot receive comma...
+[91m[FAIL][0m Failed to pause! State: playing
+
+----------------
+
+>>> STARTING test_timers.py (Log: temp/remote_test_timers.txt) <<<

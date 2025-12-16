@@ -1122,6 +1122,18 @@ async def handle_media_command(
                          entity_id = ma_entity
                          integration = "music_assistant"
 
+             # AUTO-POWER-ON: Check if device is off and turn it on first
+             try:
+                 from app.logic.media_ops import get_entity_state
+                 state_data = await get_entity_state(entity_id, user_creds)
+                 
+                 if state_data and state_data == 'off':
+                     log.info(f"AUTO-POWER-ON: Turning on {entity_id} before transport command.")
+                     await execute_ha_service("homeassistant", "turn_on", entity_id, user_creds, {}, redis_client)
+                     await asyncio.sleep(2) # Give device time to power on
+             except Exception as e:
+                 log.warning(f"AUTO-POWER-ON failed for {entity_id}: {e}")
+
              state = await get_entity_state(entity_id, user_creds)
              if state in ["playing", "paused", "buffering"]:
                  log.info(f"Transport Short Circuit: Device {entity_id} is active, proceeding directly.")
@@ -1241,6 +1253,18 @@ async def handle_media_command(
         if not entity_id:
             should_scan = True
         else:
+            # AUTO-POWER-ON: Check if device is off and turn it on first
+            try:
+                from app.logic.media_ops import get_entity_state
+                state_data = await get_entity_state(entity_id, user_creds)
+                
+                if state_data == "off":
+                    log.info(f"AUTO-POWER-ON: Turning on {entity_id} before transport command.")
+                    await execute_ha_service("homeassistant", "turn_on", entity_id, user_creds, {}, redis_client)
+                    await asyncio.sleep(2) # Give device time to power on
+            except Exception as e:
+                log.warning(f"AUTO-POWER-ON failed for {entity_id}: {e}")
+
             state = await get_entity_state(entity_id, user_creds)
             if state in ["off", "unavailable"]:
                 log.info(f"Targeted entity {entity_id} is {state}. Scanning for active players...")
@@ -1517,7 +1541,41 @@ async def handle_media_command(
                   app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
              
              log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to roku_ops (integration: {integration})")
+             log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to roku_ops (integration: {integration})")
              return await roku_launch(entity_id, app_name_candidate, user_creds, redis_client)
+        
+        # 4. CAST - Only if integration is cast
+        if integration == "cast":
+             # Cast devices use specific App Names/IDs (Netflix, YouTube), not package names
+             CAST_APPS = {
+                 "netflix": "Netflix",
+                 "youtube": "YouTube",
+                 "spotify": "Spotify",
+                 "plex": "Plex",
+                 "hulu": "Hulu",
+                 "prime video": "Amazon Prime Video",
+                 "disney+": "Disney+",
+                 "disney plus": "Disney+"
+             }
+             
+             if not app_name_candidate:
+                  app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
+             
+             target_app_id = None
+             for k, v in CAST_APPS.items():
+                 if k in app_name_candidate.lower():
+                     target_app_id = v
+                     break
+            
+             if not target_app_id:
+                  target_app_id = app_name_candidate # Try raw name as fallback
+             
+             log.info(f"[Cast] Launching app '{target_app_id}' on {entity_id}")
+             return [await execute_ha_service(
+                 "media_player", "play_media", entity_id, user_creds,
+                 {"media_content_id": target_app_id, "media_content_type": "app"},
+                 redis_client
+             )]
         
         
         # 5. FALLBACK - Unknown integration with open_app intent
@@ -1850,6 +1908,24 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
                     "media_player", "volume_up", entity_id, user_creds, {}, redis_client
                 )
             return result
+        
+        elif intent == "media_pause":
+             result = await execute_ha_service(
+                "media_player", "media_pause", entity_id, user_creds, {}, redis_client
+             )
+             # Fallback: If Pause fails, try Stop
+             if result.get("status") != "SUCCESS":
+                 log.warning(f"[Transport] media_pause failed for {entity_id}. Falling back to media_stop.")
+                 return await execute_ha_service(
+                    "media_player", "media_stop", entity_id, user_creds, {}, redis_client
+                 )
+             return result
+        
+        elif intent == "media_play":
+             result = await execute_ha_service(
+                "media_player", "media_play", entity_id, user_creds, {}, redis_client
+             )
+             return result
         
         elif intent == "volume_down":
             if volume_level is not None:
