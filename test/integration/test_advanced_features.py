@@ -20,7 +20,8 @@ def test_advanced_features():
     # 1. Timer Pause/Resume
     log("TEST 1: Timer Pause/Resume")
     # First create a timer
-    requests.post(f"{API_URL}/api/chat", json={"messages":[{"role":"user","content":"Set a 5 minute timer called PauseTest"}]}, headers=HEADERS)
+    r = requests.post(f"{API_URL}/api/chat", json={"messages":[{"role":"user","content":"Set a 5 minute timer called PauseTest"}]}, headers=HEADERS)
+    log(f"Create Timer Resp: {r.text}")
     
     # Pause
     r = requests.post(f"{API_URL}/api/chat", json={"messages":[{"role":"user","content":"Pause the PauseTest timer"}]}, headers=HEADERS)

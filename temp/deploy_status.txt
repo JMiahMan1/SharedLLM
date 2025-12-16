@@ -1,0 +1,20 @@
+#14 naming to docker.io/library/sharedllm-rag-api
+#14 naming to docker.io/library/sharedllm-rag-api 0.0s done
+#14 DONE 0.4s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ sharedllm-rag-api  Built
+ Container unified_rag_redis  Recreate
+ Container unified_rag_redis  Recreated
+ Container unified_rag_api  Recreate
+time="2025-12-15T21:35:14-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+ Container unified_rag_api  Recreated
+ Container unified_rag_redis  Starting
+ Container unified_rag_redis  Started
+ Container unified_rag_api  Starting
+Waiting for application startup...
+ Container unified_rag_api  Started
+.............[OK] Application started successfully!
+
+[OK] Deployment Verification Successful.
