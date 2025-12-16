@@ -1,4 +1,4 @@
-```python
+
 # app/logic/timer_scheduler.py
 import asyncio
 import time
