@@ -1,3 +1,0 @@
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100   108    0     0  100   108      0     89  0:00:01  0:00:01 --:--:--    89100   155  100    47  100   108     23     54  0:00:02  0:00:01  0:00:01    78100   155  100    47  100   108     23     54  0:{"detail":"Failed: HTTP 400: 400: Bad Request"}00:02  0:00:01  0:00:01    78

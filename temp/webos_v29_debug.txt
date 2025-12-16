@@ -1,5 +1,0 @@
-2025-12-10 12:02:10,388 [INFO] [WebOS] Notify living_room_tv: WebOS Integration Test - Success!
-2025-12-10 12:02:10,428 [INFO] EXEC HA: notify.living_room_tv on None | Data: {'message': 'WebOS Integration Test - Success!'}
-2025-12-10 12:02:10,470 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/notify/living_room_tv HTTP/1.1" 400 16
-2025-12-10 12:02:11,077 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/notify/living_room_tv HTTP/1.1" 400 16
-INFO:     172.24.0.1:53424 - "POST /api/webos/notify HTTP/1.1" 500 Internal Server Error

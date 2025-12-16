@@ -43,7 +43,7 @@ async def tool_web_search(query: str) -> str:
                 results = data.get("results", data.get("hits", []))
                 if results:
                     # Validate that we actually have URLs
-                    has_urls = any(r.get('url') or r.get('link') for r in results)
+                    has_urls = any(r.get('url') or r.get('link') or r.get('href') for r in results)
                     if not has_urls:
                         log.warning("Web Search Tier 1 (JSON) returned results but NO URLs. Falling back to Tier 2.")
                         # Raise exception or pass to trigger fallback? 
@@ -51,7 +51,7 @@ async def tool_web_search(query: str) -> str:
                         # We need to NOT return here.
                         raise ValueError("No URLs in JSON response")
 
-                    formatted = [f"Title: {res.get('title')}\nURL: {res.get('url', res.get('link', ''))}\nSnippet: {res.get('content', '')}" for res in results[:4]]
+                    formatted = [f"Title: {res.get('title')}\nURL: {res.get('url', res.get('link', res.get('href', '')))}\nSnippet: {res.get('content', '')}" for res in results[:4]]
                     return "### Real-time Web Search Results (JSON):\n" + "\n\n".join(formatted)
             except Exception as e:
                 log.warning(f"Web Search Tier 1 (JSON) Processing Error: {e}. Switching to Tier 2.") 
@@ -174,8 +174,55 @@ async def _scrape_with_playwright(url):
                         if len(results) >= 2: break
                 
                 # Fallback: If no structured results found, grab the body text
+                # Fallback: If no structured results found, grab the body text
+                # But first, try DuckDuckGo HTML if Whoogle failed (heuristic check)
                 if not results:
-                     log.info("Playwright: Specific selectors failed, grabbing generalized body text.")
+                     log.warning("Playwright: Whoogle selectors failed. Trying DuckDuckGo HTML fallback...")
+                     ddg_url = f"https://html.duckduckgo.com/html/?q={url.split('q=')[-1]}"
+                     await page.goto(ddg_url, timeout=15000, wait_until="networkidle")
+                     content = await page.content()
+                     soup = BeautifulSoup(content, "html.parser")
+                     
+                     
+                     # DDG HTML Selectors
+                     ddg_selectors = [".result", ".web-result"]
+                     for sel in ddg_selectors:
+                         found = soup.select(sel)
+                         if found:
+                             for res in found[:4]:
+                                 title = res.select_one(".result__title, .result__a")
+                                 body = res.select_one(".result__snippet, .result__snippet")
+                                 if title:
+                                     t_text = title.get_text(strip=True)
+                                     link = title.find("a").get("href") if title.find("a") else None
+                                     if not link and title.name == 'a': link = title.get("href")
+                                     
+                                     b_text = body.get_text(strip=True) if body else ""
+                                     if t_text and link:
+                                         results.append(f"Title: {t_text}\nURL: {link}\nSnippet: {b_text}")
+                             if len(results) >= 2: break
+                
+                # Double Fallback: Try Bing if DDG failed/blocked
+                if not results:
+                     log.warning("Playwright: DDG failed. Trying Bing HTML fallback...")
+                     bing_url = f"https://www.bing.com/search?q={url.split('q=')[-1]}"
+                     await page.goto(bing_url, timeout=15000, wait_until="networkidle")
+                     content = await page.content()
+                     soup = BeautifulSoup(content, "html.parser")
+                     
+                     bing_results = soup.select(".b_algo")
+                     for res in bing_results[:4]:
+                         title = res.select_one("h2 a")
+                         body = res.select_one(".b_caption p, .b_algoSlug")
+                         if title:
+                              t_text = title.get_text(strip=True)
+                              link = title.get("href")
+                              b_text = body.get_text(strip=True) if body else ""
+                              if link:
+                                  results.append(f"Title: {t_text}\nURL: {link}\nSnippet: {b_text}")
+
+                if not results:
+                     log.info("Playwright: All selectors failed, grabbing generalized body text.")
                      text = soup.body.get_text(separator=' ', strip=True)[:2000]
                      results.append(f"Page Text: {text}")
                      

@@ -1,4 +1,0 @@
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100    67    0     0  100    67      0     55  0:00:01  0:00:01 --:--:--    55100    67    0     0  100    67      0     30  0:00:02  0:00:02 --:--:--    30100   289  100   222  100    67     75     22  0:00:03  0:00:02  0:00:01    98100   289  100   222  100    67     75     22  0:00:03  0:00:02  0:00:01    98
-{"status":"SUCCESS","message":"Sent command to select source the Living Room TV.","entity_id":"media_player.living_room_tv","friendly_name":"Living Room TV","service":"media_player.select_source","new_state":"unavailable"}

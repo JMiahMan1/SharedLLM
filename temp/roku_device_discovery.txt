@@ -1,2 +1,0 @@
-media_player.28_tcl_roku_tv              | on         | Android TV           | 28" TCL Roku TV
-

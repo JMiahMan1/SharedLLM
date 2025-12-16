@@ -1,0 +1,67 @@
+/home/jeremiah/.local/lib/python3.14/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+============================= test session starts ==============================
+platform linux -- Python 3.14.2, pytest-8.3.5, pluggy-1.6.0
+rootdir: /home/jeremiah/Summers Drive/Code/SharedLLM
+plugins: asyncio-1.3.0, anyio-4.11.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 20 items
+
+test/unit/test_alarm_logic.py s                                          [  5%]
+test/unit/test_capability_detection.py .......                           [ 40%]
+test/unit/test_capability_routing.py .s                                  [ 50%]
+test/unit/test_grouping.py ..                                            [ 60%]
+test/unit/test_light_control.py .....                                    [ 85%]
+test/unit/test_media_resolution.py F                                     [ 90%]
+test/unit/test_notes_unit.py s                                           [ 95%]
+test/unit/test_timer.py s                                                [100%]
+
+=================================== FAILURES ===================================
+_________________ TestEntityResolution.test_office_tv_routing __________________
+
+self = <test_media_resolution.TestEntityResolution testMethod=test_office_tv_routing>
+
+    async def test_office_tv_routing(self):
+        """
+        Scenario: User has 'Office TV' which appears as:
+        1. media_player.office_tv_mass (Music Assistant)
+        2. media_player.office_tv_android (Android TV)
+    
+        Intent: 'turn_off' -> Should pick Android TV (Hardware)
+        Intent: 'play_media' (music) -> Should pick Mass (Music Service)
+        """
+    
+        # Mock Collection Search Results
+        # Simulating that searching 'Office TV' returns both candidates
+        mock_results = [
+            MockDoc("media_player.office_tv_mass", "music_assistant"),
+            MockDoc("media_player.office_tv_android", "androidtv"),
+            MockDoc("light.office_lights", "hue") # Noise
+        ]
+    
+        mock_collection = MagicMock()
+        # Mocking run_blocking to just return the results directly
+>       with patch('logic.media_ops.run_blocking', new_callable=AsyncMock) as mock_run:
+E       NameError: name 'AsyncMock' is not defined
+
+test/unit/test_media_resolution.py:46: NameError
+=============================== warnings summary ===============================
+test/unit/test_alarm_logic.py::test_alarm_logic
+test/unit/test_capability_routing.py::test_full_flow
+test/unit/test_notes_unit.py::test_notes_direct
+test/unit/test_timer.py::test_timer_flow
+  /usr/lib/python3.14/site-packages/_pytest/python.py:148: PytestUnhandledCoroutineWarning: async def functions are not natively supported and have been skipped.
+  You need to install a suitable plugin for your async framework, for example:
+    - anyio
+    - pytest-asyncio
+    - pytest-tornasync
+    - pytest-trio
+    - pytest-twisted
+    warnings.warn(PytestUnhandledCoroutineWarning(msg.format(nodeid)))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/unit/test_media_resolution.py::TestEntityResolution::test_office_tv_routing
+============= 1 failed, 15 passed, 4 skipped, 4 warnings in 0.48s ==============
