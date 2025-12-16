@@ -16,14 +16,25 @@ DIR="${2:-/home/jeremiah/SharedLLM}"
 
 echo "Deploying to $HOST:$DIR"
 
+# Sync local .env to remote to ensure config match
+if [ -f .env ]; then
+    echo "Syncing local .env to remote..."
+    scp .env "$HOST:$DIR/.env"
+fi
 
-# Sync local code to remote (Bypassing git to allow local dev testing)
-echo "Syncing local code to remote..."
-rsync -avz --exclude '__pycache__' --exclude '.git' --exclude 'temp' --exclude '.venv' ./ "$HOST:$DIR/"
+# Detect current branch locally
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+echo "Branch: $BRANCH"
 
 ssh "$HOST" << EOF
     cd "$DIR"
-    echo "Code synced. Restarting containers..."
+    echo "Fetching latest code..."
+    git fetch origin
+    
+    # Ensure we are on the correct branch and sync hard
+    git checkout $BRANCH || git checkout -b $BRANCH origin/$BRANCH
+    git reset --hard origin/$BRANCH
+    git pull origin $BRANCH
     
     # Prune pycache to prevent lingering issues
     find app -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null

@@ -699,11 +699,21 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             # Threshold (Relaxed for distance-based scoring)
             if score > 1.4: continue 
             
-            # Basic Domain Safety
+            # Basic Domain Safety - Filter out sensors for actionable intents
             domain = eid.split('.')[0]
+            
+            # Exclude sensors/binary_sensors for color/brightness commands
             if intent in ["set_color", "set_brightness", "dim", "brighten"] and domain != "light":
                  continue
+            
+            # Exclude read-only domains for power commands
             if intent in ["turn_on", "turn_off", "toggle"] and domain in ["sensor", "binary_sensor", "sun", "weather"]:
+                 continue
+            
+            # NEW: Exclude sensors for media and navigation commands (prioritize media_player/remote)
+            if intent in ["play_media", "stop_media", "media_next", "media_previous", "pause", "resume",
+                          "nav_up", "nav_down", "nav_left", "nav_right", "nav_select", "nav_back",
+                          "volume_up", "volume_down", "volume_set", "volume_mute", "open_app"] and domain in ["sensor", "binary_sensor"]:
                  continue
             
             raw_candidates.append({
@@ -1467,50 +1477,67 @@ async def handle_media_command(
     # -------------------------------------------------
     if intent in ["play_media", "open_app", "watch_video", "view_content"]:
 
-        # APP LAUNCH
-        # APP LAUNCH
-        # If integration is Android TV or device has apps, try to resolve app intent
+        # APP LAUNCH - INTEGRATION-BASED ROUTING
+        # Priority: Route by device capability (integration type) first, not query content
         app_name_candidate = None
         
-        if "android" in integration or "app" in q_low or intent == "open_app":
-             # Extract App Name (naive)
-             app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
-             # Or iterate known apps
-             matched_app = None
+        # Extract app name from query (common for all platforms)
+        if "app" in q_low or intent == "open_app":
+             app_name_candidate = q_low.replace("open ", "").replace("launch ", "").replace("start ", "").strip()
+        
+        # 1. ANDROID TV - Only if integration is explicitly androidtv
+        if integration == "androidtv":
              from app.logic.android_tv_ops import APP_IDS, launch_app as atv_launch
              
+             # Try to match known app
+             matched_app = None
              for app_key in APP_IDS.keys():
                  if app_key in q_low:
                      matched_app = app_key
                      break
              
-             if matched_app or intent == "open_app": # If explicit open_app, execute even if not in known list (pass raw)
+             if matched_app or intent == "open_app":
                  target_app = matched_app if matched_app else app_name_candidate
-                 log.info(f"Delegating App Launch '{target_app}' on {entity_id} to android_tv_ops")
+                 log.info(f"Delegating App Launch '{target_app}' on {entity_id} to android_tv_ops (integration: {integration})")
                  return [await atv_launch(entity_id, target_app, user_creds, redis_client)]
         
-        # WebOS App Launch
-        if "webostv" in integration or intent == "open_app":
+        # 2. WEBOS - Only if integration is webostv
+        if integration == "webostv":
              from app.logic.webos_ops import launch_app as webos_launch
-             # Naive extraction again if not already done
              if not app_name_candidate:
                   app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
              
-             # WebOS sources are usually case sensitive or specific names like "YouTube", "Netflix"
-             # Ideally we'd have a mapping or fuzzy search the source list, but simple pass-through is a start.
-             log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to webos_ops")
+             log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to webos_ops (integration: {integration})")
              return await webos_launch(entity_id, app_name_candidate, user_creds, redis_client)
 
-        # Roku App Launch
-        if "roku" in integration or intent == "open_app":
+        # 3. ROKU - Only if integration is roku
+        if integration == "roku":
              from app.logic.roku_ops import launch_app as roku_launch
-             # Naive extraction if not done yet
              if not app_name_candidate:
                   app_name_candidate = q_low.replace("open ", "").replace("launch ", "").strip()
              
-             # Roku supports app names or app IDs
-             log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to roku_ops")
+             log.info(f"Delegating App Launch '{app_name_candidate}' on {entity_id} to roku_ops (integration: {integration})")
              return await roku_launch(entity_id, app_name_candidate, user_creds, redis_client)
+        
+        # 4. CAST / GOOGLE CAST - Use media_player.play_media instead of Android ADB
+        if integration in ["cast", "google_cast"] and intent == "open_app":
+             log.info(f"Cast device detected. Using media_player.play_media for app launch on {entity_id}")
+             # Cast devices don't support arbitrary app launch via HA API
+             # Return a helpful error or try standard media playback
+             return [{
+                 "status": "FAILURE",
+                 "message": f"Cast devices don't support direct app launch. Try playing specific media instead.",
+                 "entity_id": entity_id,
+                 "service": "open_app"
+             }]
+        
+        # 5. FALLBACK - Unknown integration with open_app intent
+        # This should rarely happen if device resolution is working properly
+        if intent == "open_app":
+             log.warning(f"Unknown integration '{integration}' for app launch on {entity_id}. Attempting Android TV fallback.")
+             from app.logic.android_tv_ops import APP_IDS, launch_app as atv_launch
+             target_app = app_name_candidate if app_name_candidate else "unknown"
+             return [await atv_launch(entity_id, target_app, user_creds, redis_client)]
 
         # ------------------------------------------------------------------------
         # UNIVERSAL VIDEO INTENT ("WATCH" / "VIEW")
