@@ -28,22 +28,20 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - TZ=America/Phoenix
 
-    # --- Corrected Volumes Block (Merged) ---
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ./app:/app:z
-      - ./data:/data:z
+      - .:/workspace:z
       - rag_chroma:/data/chroma_db:z
       # Mounting the system prompt file separately for clarity
-      - ./app/data/system_prompt.txt:/app/data/system_prompt.txt
+      - ./app/data/system_prompt.txt:/workspace/app/data/system_prompt.txt
       # Adding the necessary temp dir for Nextcloud ingestion
       - ./data/nextcloud_temp:/data/nextcloud_temp:z
 
     ports:
       - "11435:11435"
-    working_dir: /app
+    working_dir: /workspace
     entrypoint: []
-    command: [ "python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "11435", "--workers", "1", "--reload", "--log-level", "debug" ]
+    command: [ "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "11435", "--workers", "1", "--reload", "--log-level", "debug" ]
     depends_on:
       - redis # CRITICAL: Depend on Redis service
     networks:

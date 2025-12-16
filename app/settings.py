@@ -69,7 +69,7 @@ if OPENAI_API_KEY:
 
 # Timeouts & Retries
 # Timeouts & Retries
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "30"))
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 OLLAMA_RETRY = int(os.getenv("OLLAMA_RETRY", "1"))
 
 # Lowered cache TTL for faster test feedback
