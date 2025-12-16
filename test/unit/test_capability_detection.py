@@ -117,7 +117,7 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
             "entity_id": "media_player.spotify",
             "state": "playing",
             "attributes": {
-                "supported_features": 565,  # Pause(1) + Volume(4) + Next(32) + Play Media(512)
+                "supported_features": 549,  # Pause(1) + Volume(4) + Next(32) + Play Media(512)
                 "friendly_name": "Spotify"
             }
         }
@@ -180,7 +180,7 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
                 "friendly_name": "Simple Bulb"
             }
             
-            result = await handle_media_command(
+            result_list = await handle_media_command(
                 intent="set_color",
                 query="set simple bulb to blue",
                 entity_id=entity_id,
@@ -189,6 +189,8 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
                 redis_client=mock_redis
             )
             
+            result = result_list[0] if isinstance(result_list, list) else result_list
+    
             self.assertEqual(result["status"], "FAILURE")
             self.assertIn("doesn't support color control", result["message"])
             self.assertIn("Simple Bulb", result["message"])
@@ -206,7 +208,7 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
                 "friendly_name": "On/Off Light"
             }
             
-            result = await handle_media_command(
+            result_list = await handle_media_command(
                 intent="set_brightness",
                 query="set on/off light to 50%",
                 entity_id=entity_id,
@@ -214,7 +216,8 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
                 ha_collection=None,
                 redis_client=mock_redis
             )
-            
+    
+            result = result_list[0] if isinstance(result_list, list) else result_list
             self.assertEqual(result["status"], "FAILURE")
             self.assertIn("on/off only", result["message"])
 

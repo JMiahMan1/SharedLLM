@@ -1,8 +1,15 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 import sys
-import os
 
+# Mocking dependencies for test environment
+sys.modules['fastapi'] = MagicMock()
+sys.modules['pydantic'] = MagicMock()
+sys.modules['uvicorn'] = MagicMock()
+sys.modules['langchain_chroma'] = MagicMock()
+sys.modules['settings'] = MagicMock() # Often imported by media_ops
+
+import os
 # Adjust path to import app modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../app')))
 
@@ -35,26 +42,28 @@ class TestEntityResolution(unittest.IsolatedAsyncioTestCase):
         ]
         
         mock_collection = MagicMock()
-        # Mocking run_blocking to just return the results directly
-        with patch('logic.media_ops.run_blocking', return_value=mock_results):
-            
-            # TEST 1: Turn Off (Power)
-            # Should prefer the Android TV integration because it controls the actual hardware power
-            eid, integration = await smart_resolve_entity("Office TV", "turn_off", mock_collection)
-            print(f"\n[Turn Off] Resolved: {eid} ({integration})")
-            
-            # CURRENTLY: This might fail or be flaky depending on list order without the fix.
-            # We want to assertion to be Android TV.
-            self.assertEqual(eid, "media_player.office_tv_android")
-            self.assertEqual(integration, "androidtv")
+        
+        # Configure mocked settings.run_blocking to be AsyncMock
+        # smart_resolve_entity does a local import: 'from settings import run_blocking'
+        sys.modules['settings'].run_blocking = AsyncMock(return_value=mock_results)
+        
+        # TEST 1: Turn Off (Power)
+        # Should prefer the Android TV integration because it controls the actual hardware power
+        eid, integration = await smart_resolve_entity("Office TV", "turn_off", mock_collection)
+        print(f"\n[Turn Off] Resolved: {eid} ({integration})")
+        
+        # CURRENTLY: This might fail or be flaky depending on list order without the fix.
+        # We want to assertion to be Android TV.
+        self.assertEqual(eid, "media_player.office_tv_android")
+        self.assertEqual(integration, "androidtv")
 
-            # TEST 2: Play Music
-            # Should prefer Music Assistant
-            eid_music, int_music = await smart_resolve_entity("Office TV", "play_media", mock_collection, is_music=True)
-            print(f"[Play Music] Resolved: {eid_music} ({int_music})")
-            
-            self.assertEqual(eid_music, "media_player.office_tv_mass")
-            self.assertEqual(int_music, "music_assistant")
+        # TEST 2: Play Music
+        # Should prefer Music Assistant
+        eid_music, int_music = await smart_resolve_entity("Office TV", "play_media", mock_collection, is_music=True)
+        print(f"[Play Music] Resolved: {eid_music} ({int_music})")
+        
+        self.assertEqual(eid_music, "media_player.office_tv_mass")
+        self.assertEqual(int_music, "music_assistant")
 
 if __name__ == '__main__':
     unittest.main()

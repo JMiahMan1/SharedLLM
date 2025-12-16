@@ -1,4 +1,0 @@
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100    62    0     0  100    62      0     51  0:00:01  0:00:01 --:--:--    51100    62    0     0  100    62      0     28  0:00:02  0:00:02 --:--:--    28100   268  100   206  100    62     72     21  0:00:02  0:00:02 --:--:--    94100   268  100   206  100    62     72     21  0:00:02  0:00:02 --:--:--    94
-{"status":"SUCCESS","message":"Sent command to play media the Office TV Remote.","entity_id":"media_player.office_tv","friendly_name":"Office TV Remote","service":"media_player.play_media","new_state":"on"}
