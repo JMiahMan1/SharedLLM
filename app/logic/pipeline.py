@@ -517,7 +517,9 @@ async def generate_rag_stream(
             "volume_down", "volume_set", "volume_mute", "timer_add",
             "alarm_add", "timer_delete", "timer_pause", "timer_resume",
             "calendar_add", "calendar_delete", "calendar_update",
-            "note_add", "note_append", "note_delete"
+            "note_add", "note_append", "note_delete",
+            "timer_list", "calendar_list", "calendar_read", "note_list", "note_read", 
+            "music_list", "list_playlists", "list_radio"
         ]
         
         # Skip web search if:
@@ -590,6 +592,17 @@ async def generate_rag_stream(
                 "volume_down",
                 "volume_set",
                 "volume_mute",
+                "timer_add",
+                "timer_delete", 
+                "timer_pause",
+                "timer_resume",
+                "alarm_add",
+                "calendar_add",
+                "calendar_delete",
+                "calendar_update",
+                "note_add",
+                "note_delete",
+                "note_append"
             ]
             if intent in silent_candidates:
                 log.info(f"DEBUG: Entering Silent Mode for intent '{intent}'")

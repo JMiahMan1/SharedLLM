@@ -1,0 +1,25 @@
+🚀 Launching Test Suite (9 scripts)...
+
+>>> STARTING test_system_admin.py (Log: temp/remote_test_system_admin.txt) <<<
+✅ PASS: test_system_admin.py (10.0s)
+
+>>> STARTING test_device_routes.py (Log: temp/remote_test_device_routes.txt) <<<
+❌ FAIL: test_device_routes.py (2.0s) - Exit Code: 1
+--- LOG TAIL ---
+[94m[INFO][0m --- Direct Device Route Tests (http://192.168.2.211:11435) ---
+[94m[INFO][0m TEST 1: Roku Direct Routes
+[92m[PASS][0m Roku launch route exists (Status: 422)
+[94m[INFO][0m TEST 2: WebOS Direct Routes
+[92m[PASS][0m WebOS notify route exists (Status: 422)
+[94m[INFO][0m TEST 3: Android TV Direct Routes
+[91m[FAIL][0m Android launch route 404
+
+----------------
+
+>>> STARTING test_media_api.py (Log: temp/remote_test_media_api.txt) <<<
+✅ PASS: test_media_api.py (270.0s)
+
+>>> STARTING test_timers.py (Log: temp/remote_test_timers.txt) <<<
+✅ PASS: test_timers.py (216.0s)
+
+>>> STARTING test_notes.py (Log: temp/remote_test_notes.txt) <<<

@@ -1,16 +1,27 @@
 
-Starting Media Routing Tests on http://192.168.2.211:11435...
-[94m[INFO][0m TEST 1: Power Control
-------------------------------------------------------------
-Query: 'Turn on Office TV'
-Response (1.35s): Done.
-[92m[PASS][0m Turn on Office TV passed.
-[94m[INFO][0m TEST 2: Music Playback
-------------------------------------------------------------
-Query: 'Play Brandon Lake on Office TV'
-Response (25.14s): Done.
-[92m[PASS][0m Play Brandon Lake on Office TV passed.
-[94m[INFO][0m TEST 3: App Launching
-------------------------------------------------------------
-Query: 'Open Netflix on Office TV'
-[91m[FAIL][0m Request failed: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=90)
+============================================================
+Media Routing Tests - ACTUAL STATE VERIFICATION
+API: http://192.168.2.211:11435
+Entity: media_player.office_tv_chrome_2
+============================================================
+
+[94m[INFO][0m TEST 1: Turn On Device
+Initial state: playing
+Command: 'Turn on Office TV'
+Response (1.14s): Done....
+[92m[PASS][0m Device verified ON
+[94m[INFO][0m TEST 2: Play Music
+Command: 'Play Brandon Lake on Office TV'
+Response (10.57s): Done....
+[92m[PASS][0m Media verified PLAYING
+[94m[INFO][0m TEST 3: Open Netflix
+Command: 'Open Netflix on Office TV'
+Response (37.60s): Turning on the Office TV Chrome to open Netflix....
+[WARN] Could not verify Netflix launch. app_id=music_assistant, media_title=brandon lake - hard fought hallelujah
+[92m[PASS][0m Command sent (app verification not supported on this device)
+[94m[INFO][0m TEST 4: Pause
+Command: 'Pause the Office TV'
+Response (62.83s): Pausing the Office TV....
+[91m[FAIL][0m Failed to pause! State: off
+TV might be in a state where it cannot receive comma...
+[91m[FAIL][0m Failed to pause! State: playing
