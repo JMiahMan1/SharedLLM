@@ -2004,6 +2004,30 @@ async def handle_media_command(
         else:
             # Standard Media Player Service
             
+            # --- CRITICAL FIX: SMART POWER SYNC ---
+            # If playing music on a Cast device (e.g. office_tv_chrome_2), ensure the TV itself (office_tv) is ON.
+            # This fixes "nothing playing" when Cast is active but TV is Off/Standby.
+            
+            # Copy sibling logic from earlier (re-resolve or assume cached map if efficient, here doing quick lookup)
+            tv_sibling = None
+            if "chrome" in entity_id or "cast" in entity_id or "speaker" in entity_id:
+                  # Use simple string replacement for speed as detailed vector search happened in handle_media_command
+                  # Try finding the "TV" version of this entity
+                  possible_tv = entity_id.replace("_chrome_2", "").replace("_chrome", "").replace("_cast", "").replace("_speaker", "")
+                  if possible_tv != entity_id:
+                       tv_sibling = possible_tv
+
+            if tv_sibling:
+                  try:
+                       tv_state = await get_entity_state(tv_sibling, user_creds)
+                       if tv_state in ["off", "standby", "unavailable"]:
+                            log.info(f"[SmartPowerSync] Sibling TV {tv_sibling} is OFF. Turning ON to support Cast Playback.")
+                            await execute_ha_service("media_player", "turn_on", tv_sibling, user_creds, {}, redis_client)
+                            import asyncio
+                            await asyncio.sleep(4) # Wait for TV boot
+                  except Exception as e:
+                       log.warning(f"SmartPowerSync failed for {tv_sibling}: {e}")
+
             # If content is generic/garbage (failed to clean meaningfully) and it's a TV/Generic, 
             # try RESUME (media_play) instead of play_media with garbage.
             # "original_title" would be "Play some music", "clean_title" might be "Play some music" if <3 char logic hit.
@@ -2200,6 +2224,13 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
         if volume_match:
             volume_level = int(volume_match.group(1)) / 100.0
             volume_level = max(0.0, min(1.0, volume_level))
+
+        # CRITICAL FIX: Ensure Audio is Playing before Volume Change
+        # User Feedback: "audio must be playing to change volume"
+        curr_state = await get_entity_state(target_entity, user_creds)
+        if curr_state not in ["playing", "paused", "buffering", "on"]: # 'on' accepted as some amps report 'on'
+             log.warning(f"[Volume] Skipping volume change on {target_entity} because state is {curr_state} (not playing).")
+             return {"status": "FAILURE", "message": f"Volume cannot be changed because {target_entity} is not playing audio (State: {curr_state}).", "entity_id": target_entity}
 
         # Redirection Logic for Music Assistant
         target_entity = entity_id
