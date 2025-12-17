@@ -1,0 +1,21 @@
+2025-12-17 10:30:11,789 [INFO] Loading Global Resources...
+2025-12-17 10:30:12,945 [ERROR] Redis Connection Failed: Error -2 connecting to redis:6379. Name or service not known.
+2025-12-17 10:30:12,945 [ERROR] Failed to load embedding model: No module named 'langchain_huggingface'
+--- Listing All Media Players ---
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/temp/inspect_players.py", line 59, in <module>
+    asyncio.run(list_all_players())
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/asyncio/runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib64/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib64/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/temp/inspect_players.py", line 16, in list_all_players
+    docs = GlobalResources.ha_collection.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'get'
