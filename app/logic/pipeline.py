@@ -529,8 +529,10 @@ async def generate_rag_stream(
         # 2. OR action succeeded and intent is a simple command
         action_succeeded = action_results and all(r.get("status") == "SUCCESS" for r in action_results)
         is_no_search_intent = intent in no_search_intents
-        
+
+        log.debug(f"[SEARCH DECISION] intent={intent}, action_succeeded={action_succeeded}, is_no_search_intent={is_no_search_intent}, no_search_intents={no_search_intents}")
         should_search = not already_searched and not (action_succeeded and is_no_search_intent)
+        log.debug(f"[SEARCH DECISION] should_search={should_search}")
 
         if should_search:
             tasks.append(tool_web_search(refined))
