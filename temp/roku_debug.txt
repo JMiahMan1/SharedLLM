@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/home/jeremiah/Summers Drive/Code/SharedLLM/temp/debug_roku.py", line 6, in <module>
-    from app.settings import get_user_creds
-ModuleNotFoundError: No module named 'app'

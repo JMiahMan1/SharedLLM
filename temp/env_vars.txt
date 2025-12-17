@@ -1,2 +1,0 @@
-HA_URL=https://ha.sumemail.com
-HA_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhNzg4NzhjNzdlMzM0N2Q0OWQ5NWEyNjE2NmI4ODhmNiIsImlhdCI6MTc2MTk0MDE4MywiZXhwIjoyMDc3MzAwMTgzfQ.y0cxCphUIntpJznahl_k0p-ewIP5n55A7kXq1I5accQ
