@@ -303,7 +303,7 @@ async def _handle_single_command(
                 "tool_name": "media_command",
                 "parameters": {"intent": intent, "device_name": None} # None enables context lookup or query parsing
              }
-        elif intent in ["media_next", "media_previous"]:
+        elif intent in ["media_next", "media_previous", "stop_media", "play_media"]:
              action_plan = {
                 "action": "tool_call",
                 "tool_name": "media_command",
