@@ -1656,12 +1656,16 @@ async def handle_media_command(
                 }]
             
             brightness = None
-            
+
             # Look for percentage (e.g., "50%", "100%")
+            log.debug(f"[BRIGHTNESS] Parsing brightness from query: '{query}'")
             pct_match = re.search(r"(\d+)\s*%", query)
             if pct_match:
                 pct = int(pct_match.group(1))
                 brightness = int((pct / 100.0) * 255)
+                log.debug(f"[BRIGHTNESS] Found percentage {pct}%, setting brightness to {brightness}")
+            else:
+                log.debug(f"[BRIGHTNESS] No percentage found in query")
             
             # Relative adjustments
             elif intent == "dim":
