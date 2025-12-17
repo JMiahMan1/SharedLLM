@@ -1099,6 +1099,7 @@ async def handle_media_command(
     ha_collection,
     redis_client,
     device_name: str = None,  # Optional: Explicit device name from Orchestrator
+    brightness: str = None,   # Optional: Explicit brightness from Orchestrator
 ):
     """
     Handles media command and ensures a structured dictionary is returned.
@@ -1588,15 +1589,30 @@ async def handle_media_command(
             
             brightness = None
 
-            # Look for percentage (e.g., "50%", "100%")
-            log.debug(f"[BRIGHTNESS] Parsing brightness from query: '{query}'")
-            pct_match = re.search(r"(\d+)\s*%", query)
-            if pct_match:
-                pct = int(pct_match.group(1))
-                brightness = int((pct / 100.0) * 255)
-                log.debug(f"[BRIGHTNESS] Found percentage {pct}%, setting brightness to {brightness}")
+            # First, check if brightness was provided by orchestrator
+            if brightness:
+                log.debug(f"[BRIGHTNESS] Using orchestrator brightness: '{brightness}'")
+                if isinstance(brightness, str):
+                    if brightness.endswith('%'):
+                        pct = int(brightness.rstrip('%'))
+                        brightness = int((pct / 100.0) * 255)
+                        log.debug(f"[BRIGHTNESS] Converted {pct}% to brightness {brightness}")
+                    else:
+                        # Assume it's already a numeric value
+                        brightness = int(brightness)
+                        log.debug(f"[BRIGHTNESS] Using numeric brightness {brightness}")
+                else:
+                    brightness = int(brightness)
             else:
-                log.debug(f"[BRIGHTNESS] No percentage found in query")
+                # Fallback to parsing from query text
+                log.debug(f"[BRIGHTNESS] Parsing brightness from query: '{query}'")
+                pct_match = re.search(r"(\d+)\s*%", query)
+                if pct_match:
+                    pct = int(pct_match.group(1))
+                    brightness = int((pct / 100.0) * 255)
+                    log.debug(f"[BRIGHTNESS] Found percentage {pct}%, setting brightness to {brightness}")
+                else:
+                    log.debug(f"[BRIGHTNESS] No percentage found in query")
 
             # Relative adjustments (only if no percentage found)
             if brightness is None:
