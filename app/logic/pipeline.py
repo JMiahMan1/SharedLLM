@@ -415,6 +415,7 @@ async def try_handle_compound_command(
         log.info("[COMPOUND] Returning None - no valid results")
         return None
     log.info(f"[COMPOUND] Returning: {valid_results}")
+    print(f"[DEBUG] try_handle_compound_command returning: {valid_results}")
     return valid_results
 
 
