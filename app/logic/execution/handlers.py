@@ -221,8 +221,17 @@ async def handle_note_delete(params: dict = None, **kwargs):
 
 # --- SEARCH & MISC ---
 @ActionDispatcher.register("web_search")
-async def handle_web_search(query: str, **kwargs):
+async def handle_web_search(query: str, user_creds: dict = None, model: str = None, **kwargs):
     log.info(f"Executing Tool: web_search for query: {query}")
+
+    # Contextualize the web search query using conversation history (like RAG does)
+    if user_creds and model:
+        from app.logic.pipeline import contextualize_query
+        user = user_creds.get("user", "default")
+        refined_query, _, _, _ = await contextualize_query(query, user, model)
+        log.info(f"Web search contextualized: '{query}' -> '{refined_query}'")
+        query = refined_query
+
     res = await tool_web_search(query)
     return {"status": "SUCCESS", "message": res, "service": "web_search"}
 
