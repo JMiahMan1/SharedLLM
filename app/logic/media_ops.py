@@ -1966,13 +1966,31 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     intent = intent.strip()
     log.info(f"[_execute_transport_command] Intent='{intent}' (repr={repr(intent)}) Entity='{entity_id}'")
 
-    if intent == "stop_media":
+    elif intent == "stop_media":
         log.info(f"[Transport] Match stop_media for {entity_id}")
         # Check state first to avoid 500 error on off devices
         state = await get_entity_state(entity_id, user_creds)
-        if state in ["off", "unavailable", "idle"]:
+        if state in ["off", "unavailable", "idle", "standby"]:
              return {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
         return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
+
+    elif intent == "turn_off":
+        log.info(f"[Transport] Match turn_off for {entity_id}")
+        
+        # 1. For Android TV / Google Cast devices (often just exit app with media_player.turn_off)
+        # We try to find a remote and send POWER or SLEEP
+        if "android" in integration or "google_cast" in integration:
+            remote_id = entity_id.replace("media_player", "remote")
+            if await _has_remote(remote_id):
+                log.info(f"[TurnOff] Using remote.send_command(POWER) for {entity_id} via {remote_id}")
+                return await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "POWER"}, redis_client)
+        
+        # 2. For WebOS (similar behavior, good to force power off)
+        elif "webostv" in integration:
+             return await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, redis_client)
+
+        # Default fallback
+        return await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, redis_client)
 
     elif intent == "media_pause":
         log.info(f"[Transport] Match media_pause for {entity_id}")
