@@ -1,5 +1,0 @@
-a784989 refactor: rewrite tests with ACTUAL state verification
-8158fec fix: Netflix 'Item Not Found' - extract app name from query
-d6ad8f5 fix: critical issues from Pass 1 monitoring
-b2e3c25 fix: critical device routing and performance issues
-2d16d28 perf: prevent unnecessary web search after successful actions, increase Ollama timeout to 60s

@@ -22,47 +22,65 @@ def normalize_name(name: str) -> str:
         n = re.sub(suffix, "", n)
     return n.strip()
 
-def group_entities(entities: list) -> dict:
+def group_entities(entities: list, device_map: dict = None) -> dict:
     """
     Groups entities into 'Physical Devices'.
     
     Returns:
         Dict[str, Dict]: {
-            "group_id": {
-                "friendly_name": "Office TV",
-                "members": [
-                    {"entity_id": "media_player.office_tv", "domain": "media_player", "integration": "androidtv"},
-                    {"entity_id": "remote.office_tv", "domain": "remote", "integration": "androidtv"},
-                    {"entity_id": "media_player.office_tv_chrome", "domain": "media_player", "integration": "cast"}
-                ],
-                "capabilities": ["turn_off", "play_media", "remote_control"]
-            }
+            "group_id": { "friendly_name": "Office TV", "members": [...], "capabilities": [...] }
         }
     """
     groups = defaultdict(lambda: {"members": [], "friendly_name": "", "capabilities": set(), "score": 0})
+    if device_map is None: device_map = {}
     
-    # 1. First Pass: Create Groups Keyed by Normalized Name
+    # 1. First Pass: Create Groups
     for e in entities:
-        # Infer Integration
-        integration = "unknown"
         eid = e.get("entity_id", "")
         attrs = e.get("attributes", {})
         
+        # Get Registry Data
+        reg = device_map.get(eid, {})
+        did = reg.get("device_id")
+        man = reg.get("manufacturer")
+        mod = reg.get("model")
+        
+        
+        # Determine Group Key (Unification Strategy)
+        group_key = None
+        
+        clean_name = normalize_name(attrs.get("friendly_name", eid))
+        if not clean_name: clean_name = "unknown"
+        
+        # Strategy 0: Super Unification (Man + Mod + Name Match)
+        # This merges distinct HA Devices (e.g. Cast vs Remote) that share
+        # the same hardware signature and same logical name (e.g. "Office").
+        if man and mod and clean_name != "unknown":
+             # "askey:sti6140d360:office"
+             group_key = f"{man}:{mod}:{clean_name}".lower()
+        
+        # Strategy 1: Device ID (Strong - native HA grouping)
+        elif did:
+            group_key = f"device_id:{did}"
+            
+        # Strategy 2: Man/Model Only (Generic hardware grouping?)
+        # Risky without name if user has multiple devices of same model.
+        # Fallback to Name.
+        
+        # Strategy 3: Name Normalization (Legacy/Fallback)
+        if not group_key:
+            group_key = f"name:{clean_name}"
+        
+        # Add to Group
+        # Infer Integration (Tentative - updated properly in refresh_devices, but good for local context)
+        integration = "unknown"
         if "mass" in eid or attrs.get("app_id") == "music_assistant":
             integration = "music_assistant"
         elif "androidtv" in eid or "remote" in eid:
-            integration = "androidtv_remote" # Guess
+             integration = "androidtv_remote"
         elif "_chrome" in eid or "cast" in attrs.get("app_name", "").lower():
-            integration = "cast"
-            
-        clean_name = normalize_name(e.get("friendly_name", eid))
-        
-        # Use first 3 words as key if long? No, use full normalized name.
-        if not clean_name: clean_name = "unknown"
-        
-        group_key = clean_name
-        
-        # Add to Group
+             integration = "cast"
+             
         groups[group_key]["members"].append({
             "entity_id": eid,
             "friendly_name": e.get("friendly_name"),
@@ -70,15 +88,20 @@ def group_entities(entities: list) -> dict:
             "integration": integration,
             "state": e.get("state"),
             "features": attrs.get("supported_features", 0),
-            "attributes": attrs  # Preserve raw attributes for ingestion
+            "attributes": attrs,
+            "manufacturer": man,
+            "model": mod
         })
         
-        # Update Group Meta
-        if len(e.get("friendly_name", "")) > len(groups[group_key]["friendly_name"]):
-            # Use longest name as label, but stripped? 
-            # Actually, use the name that matches the key best?
-            # Let's just use the cleanest version of the first member's name
-             groups[group_key]["friendly_name"] = clean_name.title()
+        # Update Representative Friendly Name for the Group
+        # Goal: "Office TV" is better than "Office TV Chrome" or "Office TV Remote"
+        curr_name = groups[group_key]["friendly_name"]
+        new_name = normalize_name(attrs.get("friendly_name", eid)).title()
+        
+        # Heuristic: Shorter normalized names are usually 'better' / more base names
+        # e.g. "Office Tv" vs "Office Tv Chrome"
+        if not curr_name or (len(new_name) < len(curr_name) and len(new_name) > 2):
+             groups[group_key]["friendly_name"] = new_name
 
     # 2. Add Capabilities
     final_groups = {}
