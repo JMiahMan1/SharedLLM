@@ -1943,6 +1943,14 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
              return {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
         return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
 
+    elif intent == "media_pause":
+        log.info(f"[Transport] Match media_pause for {entity_id}")
+        return await execute_ha_service("media_player", "media_pause", entity_id, user_creds, {}, redis_client)
+
+    elif intent == "media_play":
+        log.info(f"[Transport] Match media_play for {entity_id}")
+        return await execute_ha_service("media_player", "media_play", entity_id, user_creds, {}, redis_client)
+
     is_mass = "music_assistant" in integration
 
     # Helper to check if remote exists
