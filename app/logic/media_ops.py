@@ -2185,13 +2185,19 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     intent = intent.strip()
     log.info(f"[_execute_transport_command] Intent='{intent}' (repr={repr(intent)}) Entity='{entity_id}'")
 
+    result = None
+
     if intent == "stop_media":
         log.info(f"[Transport] Match stop_media for {entity_id}")
         # Check state first to avoid 500 error on off devices
         state = await get_entity_state(entity_id, user_creds)
         if state in ["off", "unavailable", "idle", "standby"]:
-             return {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
-        return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
+             result = {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
+             log.info(f"[Transport] Returning result: {result}")
+             return result
+        result = await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
+        log.info(f"[Transport] Returning result: {result}")
+        return result
 
         # 1. SMART REDIRECT: Look for "TV" sibling
         # If we are controlling a Cast device (speaker), but there is a "TV" sibling (Android TV),
