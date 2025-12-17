@@ -2219,7 +2219,8 @@ async def handle_media_command(
                  # await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
 
             log.info(f"[HANDLE_MEDIA_COMMAND] Returning transport result: {result}")
-            return result
+    print(f"[DEBUG] handle_media_command returning: {result}")
+    return result
 
     log.info(f"[HANDLE_MEDIA_COMMAND] Returning final failure for intent {intent}")
     return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
