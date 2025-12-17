@@ -598,34 +598,42 @@ async def execute_batch_command(
                 'service': intent
             })
     
+    # Flatten nested lists (handle_media_command can return lists)
+    flattened_results = []
+    for r in results:
+        if isinstance(r, list):
+            flattened_results.extend(r)
+        else:
+            flattened_results.append(r)
+    
     # Aggregate results - handle both dict and list results
-    success_count = sum(1 for r in results if isinstance(r, dict) and r.get('status') == 'SUCCESS')
-    failure_count = len(results) - success_count
+    success_count = sum(1 for r in flattened_results if isinstance(r, dict) and r.get('status') == 'SUCCESS')
+    failure_count = len(flattened_results) - success_count
     
     # Get list of successful/failed devices
     successful_devices = [r.get('friendly_name', r.get('entity_id', '?')) 
-                         for r in results if r.get('status') == 'SUCCESS']
+                         for r in flattened_results if isinstance(r, dict) and r.get('status') == 'SUCCESS']
     failed_devices = [r.get('friendly_name', r.get('entity_id', '?'))
-                     for r in results if r.get('status') != 'SUCCESS']
+                     for r in flattened_results if isinstance(r, dict) and r.get('status') != 'SUCCESS']
     
-    if success_count == len(results):
+    if success_count == len(flattened_results):
         message = f"Successfully controlled {success_count} devices: {', '.join(successful_devices)}"
         status = 'SUCCESS'
     elif success_count > 0:
-        message = f"Controlled {success_count}/{len(results)} devices. "
+        message = f"Controlled {success_count}/{len(flattened_results)} devices. "
         message += f"Success: {', '.join(successful_devices)}. "
         if failed_devices:
             message += f"Failed: {', '.join(failed_devices)}"
         status = 'SUCCESS'  # Partial success still counts as success
     else:
-        message = f"Failed to control all {len(results)} devices: {', '.join(failed_devices)}"
+        message = f"Failed to control all {len(flattened_results)} devices: {', '.join(failed_devices)}"
         status = 'FAILURE'
     
     return {
         'status': status,
         'message': message,
         'service': intent,
-        'batch_results': results,
+        'batch_results': flattened_results,
         'success_count': success_count,
         'failure_count': failure_count,
         'friendly_name': f"{success_count} devices",  # For LLM context formatting
@@ -1037,7 +1045,7 @@ async def handle_media_command(
     strict_resolution = (is_music_request or is_audiobook_request) or (
         (intent == "play_media" or intent == "play") and not is_video_request
     )
-    is_transport = intent in ["media_next", "media_previous", "stop_media", "volume_set", "volume_up", "volume_down", "volume_mute"]
+        is_transport = intent in ["media_next", "media_previous", "stop_media", "media_pause", "media_play", "resume", "volume_set", "volume_up", "volume_down", "volume_mute"]
 
     # --- Device Name Fallback ---
     # If Orchestrator provides device_name but no entity_id, resolve it
@@ -1077,9 +1085,13 @@ async def handle_media_command(
     if intent not in MEDIA_INTENTS:
         original_intent = intent
         intent_lower = intent.lower()
-        if "play" in intent_lower:
+        if "resume" in intent_lower or "unpause" in intent_lower:
+            intent = "media_play"
+        elif "play" in intent_lower:
             intent = "play_media"
-        elif "stop" in intent_lower or "pause" in intent_lower:
+        elif "pause" in intent_lower:
+            intent = "media_pause"
+        elif "stop" in intent_lower:
             intent = "stop_media"
         elif "next" in intent_lower or "skip" in intent_lower:
             intent = "media_next"
@@ -1102,7 +1114,7 @@ async def handle_media_command(
         if intent != original_intent:
             log.info(f"Sanitized intent from '{original_intent}' to '{intent}'")
             # CRITICAL FIX: Update is_transport after sanitization
-            is_transport = intent in ["media_next", "media_previous", "stop_media", "volume_set", "volume_up", "volume_down", "volume_mute", "media_pause", "media_play", "play_media"]
+            is_transport = intent in ["media_next", "media_previous", "stop_media", "media_pause", "media_play", "resume", "volume_set", "volume_up", "volume_down", "volume_mute"]
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---
     if is_transport:
