@@ -527,11 +527,15 @@ async def generate_rag_stream(
         # Skip web search if:
         # 1. Already searched in action results
         # 2. OR action succeeded and intent is a simple command
+        # 3. OR action was executed (even if failed) for transport/media commands
         action_succeeded = action_results and all(r.get("status") == "SUCCESS" for r in action_results)
         is_no_search_intent = intent in no_search_intents
 
-        log.debug(f"[SEARCH DECISION] intent={intent}, action_succeeded={action_succeeded}, is_no_search_intent={is_no_search_intent}, no_search_intents={no_search_intents}")
-        should_search = not already_searched and not (action_succeeded and is_no_search_intent)
+        # For transport commands, consider them executed even if they fail (e.g., no active devices)
+        transport_executed = action_results and any(r.get("service") in ["media_stop", "media_play", "media_pause", "stop_media"] for r in action_results)
+
+        log.debug(f"[SEARCH DECISION] intent={intent}, action_succeeded={action_succeeded}, is_no_search_intent={is_no_search_intent}, transport_executed={transport_executed}")
+        should_search = not already_searched and not (action_succeeded and is_no_search_intent) and not transport_executed
         log.debug(f"[SEARCH DECISION] should_search={should_search}")
 
         if should_search:
