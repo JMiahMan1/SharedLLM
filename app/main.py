@@ -12,12 +12,19 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Fixed imports
-from app.settings import (
-    get_user_creds, run_blocking, GlobalResources, log,
-    DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
-    load_resources
-)
+# Fixed imports with Fallback
+try:
+    from app.settings import (
+        get_user_creds, run_blocking, GlobalResources, log,
+        DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
+        load_resources
+    )
+except ImportError:
+    from settings import (
+        get_user_creds, run_blocking, GlobalResources, log,
+        DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
+        load_resources
+    )
 from app.logic import (
     generate_rag_stream, contextualize_query, try_handle_compound_command, 
     call_ollama_generate, call_openai_chat, 
