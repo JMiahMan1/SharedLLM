@@ -964,9 +964,15 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
                 elif "play_media" in caps: score += 10
         
         # REMOTE CONTROL
-        elif intent.startswith("nav_") or intent == "open_app":
+        elif intent.startswith("nav_"):
             if domain == "remote": score += 100
             elif integration == "androidtv_remote": score += 90
+
+        # APP LAUNCH (Merge with remote but prioritize Smart Players)
+        elif intent == "open_app":
+            if "cast" in integration or "androidtv" in integration:
+                if domain == "media_player": score += 100
+            elif domain == "remote": score += 50
 
         # PLAYBACK CONTROLS (Pause, Resume, Stop, Next, Prev)
         # Prioritize media_player entities over remotes/others

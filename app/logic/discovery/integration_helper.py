@@ -58,6 +58,10 @@ def infer_integration(entity_id: str, attributes: dict, manufacturer: str = None
             
         if "android" in eid or "shield" in eid or "fire" in eid:
              return "androidtv"
+        
+        # Explicit Cast Check in Entity ID
+        if "cast" in eid or "chrome" in eid:
+             return "cast"
 
         # Standard Google Home Device Types (from documentation)
         if device_class in ["tv", "settop", "streaming_box", "streaming_soundbar"]:
