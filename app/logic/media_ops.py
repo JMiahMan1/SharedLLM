@@ -1428,25 +1428,31 @@ async def handle_media_command(
         ]
         
         target_sibling = None
-        current_is_desired = False # We'll assume false and check
         
-        for cand in candidates:
+        # Parallelize state checks
+        async def check_cand(c):
              try:
-                 s = await get_entity_state(cand, user_creds)
-                 # We assume:
-                 # Standard TV entity (Android Remote) name usually matches base_id or has no 'chrome/cast' suffix
-                 # Standard Speaker entity has 'chrome' or 'cast' or 'speaker' suffix
-                 
-                 is_speaker_cand = any(x in cand for x in ["chrome", "cast", "speaker"])
-                 is_tv_cand = not is_speaker_cand # Heuristic
-                 
-                 if desired_class == "tv" and is_tv_cand:
-                      if await get_entity_state(cand, user_creds) not in ["unavailable", "unknown", None]:
-                           target_sibling = cand
-                 elif desired_class == "speaker" and is_speaker_cand:
-                      if await get_entity_state(cand, user_creds) not in ["unavailable", "unknown", None]:
-                           target_sibling = cand
+                 s = await get_entity_state(c, user_creds)
+                 if s and s not in ["unavailable", "unknown", None]:
+                     return c, s
              except: pass
+             return c, None
+
+        results = await asyncio.gather(*(check_cand(c) for c in candidates))
+        valid_candidates = {c: s for c, s in results if s}
+
+        for cand in candidates:
+             if cand not in valid_candidates: continue
+             
+             is_speaker_cand = any(x in cand for x in ["chrome", "cast", "speaker"])
+             is_tv_cand = not is_speaker_cand 
+             
+             if desired_class == "tv" and is_tv_cand:
+                  target_sibling = cand
+                  break
+             elif desired_class == "speaker" and is_speaker_cand:
+                  target_sibling = cand
+                  break
 
         if target_sibling and target_sibling != entity_id:
              log.info(f"[SmartRoute] Swapping {entity_id} -> {target_sibling} for {desired_class} intent.")
@@ -2050,18 +2056,25 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
                  candidates.append(base_id.replace(suffix, ""))
         
         # Check candidates for device_class=tv
-        for c in candidates:
-             cand_id = f"media_player.{c}"
-             if cand_id == entity_id: continue
+        
+        # Parallel check
+        async def check_cand(c):
              try:
-                 s = await get_entity_state(cand_id, user_creds)
-                 # We need attributes, so we assume if state exists, we might want to check it.
-                 # But we don't have attributes here easily.
-                 # Heuristic: if name matches 'office_tv', it's likely the TV.
-                 if s and s != "unknown" and s != "unavailable":
-                      tv_sibling = cand_id
-                      break
+                 s = await get_entity_state(c, user_creds)
+                 if s and s not in ["unknown", "unavailable"]:
+                     return c
              except: pass
+             return None
+
+        # Resolve all candidates in parallel
+        cand_ids = [f"media_player.{c}" for c in candidates if f"media_player.{c}" != entity_id]
+        valid_sibs = await asyncio.gather(*(check_cand(cid) for cid in cand_ids))
+        
+        # Pick first valid TV-like sibling
+        for vs in valid_sibs:
+             if vs:
+                  tv_sibling = vs
+                  break
         
         if tv_sibling:
              log.info(f"[Transport] Redirecting {intent} from {entity_id} to TV Sibling: {tv_sibling}")
@@ -2161,18 +2174,29 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
         # For simplicity, re-calculate or just use the same candidates logic locally if needed.
         # Merging logic:
         
-        tv_sibling = None
+        # Parallel check for Volume Redirection
+        async def check_cand(c):
+             # Same as above, just checking existence
+             try:
+                 s = await get_entity_state(c, user_creds)
+                 if s and s not in ["unknown", "unavailable"]:
+                     return c
+             except: pass
+             return None
+
+        cand_ids = []
         base_id = entity_id.replace("media_player.", "")
         for suffix in ["_chrome_2", "_chrome", "_cast", "_2", "_speaker"]:
              if base_id.endswith(suffix):
                  cand = f"media_player.{base_id.replace(suffix, '')}"
                  if cand != entity_id:
-                      try: 
-                          s = await get_entity_state(cand, user_creds)
-                          if s and s not in ["unknown", "unavailable"]:
-                               tv_sibling = cand
-                               break
-                      except: pass
+                      cand_ids.append(cand)
+
+        valid_sibs = await asyncio.gather(*(check_cand(cid) for cid in cand_ids))
+        for vs in valid_sibs:
+             if vs:
+                  tv_sibling = vs
+                  break
         
         if tv_sibling:
              log.info(f"[Volume] Redirecting volume to TV sibling: {tv_sibling}")
