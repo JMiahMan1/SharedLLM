@@ -312,10 +312,21 @@ async def _handle_single_command(
             # For transport commands, only set device_name if query contains a device reference
             device_in_query = bool(re.search(r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media)\b", query.lower()))
             log.info(f"[FAST PATH] device_in_query: {device_in_query}, query: {query}")
+
+            device_name = None
+            if device_in_query:
+                # Extract device name from query by finding text after "on" or "in"
+                match = re.search(r"\b(on|in)\s+(the\s+)?(.+)", query.lower())
+                if match:
+                    device_part = match.group(3).strip()
+                    # Take first few words as device name (avoid including the media title)
+                    words = device_part.split()[:3]  # Limit to 3 words
+                    device_name = " ".join(words).title()
+
             action_plan = {
                 "action": "tool_call",
                 "tool_name": "media_command",
-                "parameters": {"intent": intent, "device_name": query if device_in_query else None}
+                "parameters": {"intent": intent, "device_name": device_name}
             }
             log.info(f"[FAST PATH] action_plan set: {action_plan}")
         elif intent in ["open_app"]:
