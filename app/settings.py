@@ -232,16 +232,7 @@ class GlobalResources:
     redis_client = None
 
 
-def get_user_creds(user: str = "default") -> Dict[str, str]:
-    # In a real app, this would fetch from DB
-    return {
-        "user": user,
-        "nextcloud_url": NEXTCLOUD_URL,
-        "nextcloud_user": NEXTCLOUD_USER,
-        "nextcloud_pass": NEXTCLOUD_PASS,
-        "ha_url": HA_URL,
-        "ha_token": HA_ENV_TOKEN,
-    }
+# User management is imported at the end to avoid circular imports
 
 
 # --- Resource Loading (Hot Reloadable) ---
@@ -312,3 +303,7 @@ ha_state_cache = {}
 def get_ha_state(entity_id: str) -> Optional[Dict]:
     # TODO: Implement proper caching with TTL
     return ha_state_cache.get(entity_id)
+
+
+# --- User Management (imported here to avoid circular imports) ---
+from .users import get_user_creds
