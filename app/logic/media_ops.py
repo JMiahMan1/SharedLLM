@@ -1343,16 +1343,18 @@ async def handle_media_command(
             if is_transport and (len(cleaned_stripped) < 3 or cleaned_stripped in ["to", "the", "a", "an", "to song", "song"] or "song" in cleaned_stripped):
                 log.info(f"[Transport] Skipping device resolution for short/generic query: '{cleaned_for_res}'")
                 resolved_result = None
+                # For transport commands with skipped resolution, set entity_id to None to trigger transport redirection
+                entity_id, integration = None, None
             else:
                 resolved_result = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
-            if isinstance(resolved_result, list):
-                 if resolved_result:
-                     log.info(f"[Standard] Resolved {len(resolved_result)} entities. Executing Batch.")
-                     return await execute_batch_command(resolved_result, intent, query, user_creds, ha_collection, redis_client)
-                 else:
-                     entity_id, integration = None, None
-            else:
-                 entity_id, integration = resolved_result
+                if isinstance(resolved_result, list):
+                     if resolved_result:
+                         log.info(f"[Standard] Resolved {len(resolved_result)} entities. Executing Batch.")
+                         return await execute_batch_command(resolved_result, intent, query, user_creds, ha_collection, redis_client)
+                     else:
+                         entity_id, integration = None, None
+                else:
+                     entity_id, integration = resolved_result
 
         # --- START MASS INTELLIGENCE SWAP (Standard Path) ---
         if entity_id and "media_player" in entity_id and not is_video_request and "music_assistant" not in (integration or "") and intent not in ["turn_on", "turn_off", "toggle"]:
@@ -1388,12 +1390,18 @@ async def handle_media_command(
     log.info(f"[DEBUG_TRANSPORT] Checking Redirection: intent='{intent}' is_transport={is_transport} entity={entity_id}")
     if is_transport:
         log.info(f"[DEBUG_TRANSPORT] Entered Transport Redirection Block for {intent}")
+        should_scan = False
 
         # For transport commands, prioritize: last media entity > active devices > resolved entity
         last_media = get_last_media_entity(redis_client, user_creds.get("user"))
         if last_media:
             log.info(f"[Transport] Using last media entity: {last_media}")
             entity_id = last_media
+            # Check if the last media entity is available
+            state = await get_entity_state(entity_id, user_creds)
+            if state in ["off", "unavailable"]:
+                log.info(f"[Transport] Last media entity {entity_id} is {state}. Scanning for active players...")
+                should_scan = True
         else:
             # No last media entity - scan for active devices
             log.info("[Transport] No last media entity, scanning for active devices")
