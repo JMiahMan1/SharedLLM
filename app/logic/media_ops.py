@@ -1973,26 +1973,94 @@ async def handle_media_command(
         if not clean_title:
              return {"status": "FAILURE", "message": "I understood the device, but not what to play. Please specify content.", "entity_id": entity_id, "service": "media_command"}
 
-        if state in ["off", "unavailable"]:
-            await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
+        # Helper to get current state
+        async def get_state(eid):
+            if not eid: return "unknown"
+            s = await get_ha_state(eid, user_creds, redis_client)
+            return s.get("state", "unknown") if s else "unknown"
 
-        # --- SMART SWAP: Use Music Assistant Entity for Music Requests ---
-        # If we have a Cast/Speaker entity that isn't explicitly MA, try to find its MA counterpart
+        initial_state = await get_state(entity_id)
+
+        if initial_state in ["off", "unavailable"]:
+            await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
+        # --- SMART SWAP: Group-Based Sibling Lookup ---
+        # If we have a TV/Cast entity, try to find the "Music Assistant" or "Speaker" sibling in the SAME GROUP.
         if ctype != "video" and "music_assistant" not in integration:
-             # Try finding a device with same name but 'music_assistant' integration
              from app.settings import GlobalResources
-             # Search for the entity_id or friendly_name with "mass" or "music assistant"
-             # We use the base entity_id to find the MA version
-             base_search = entity_id.replace("media_player.", "").replace("_chrome_2", "").replace("_chrome", "").replace("_cast", "")
-             ma_docs = GlobalResources.ha_collection.similarity_search(f"{base_search} music assistant", k=1)
              
-             for d in ma_docs:
-                 if d.metadata.get("integration") == "music_assistant":
-                     ma_entity = d.metadata.get("entity_id")
-                     log.info(f"[Smart MA Swap] Swapping {entity_id} ({integration}) -> {ma_entity} (music_assistant) for music playback.")
-                     entity_id = ma_entity
-                     integration = "music_assistant"
-                     break
+             # 1. Get metadata for current entity to find its group
+             current_meta = await run_blocking(lambda: next(
+                 (d.metadata for d in GlobalResources.ha_collection.get(ids=[entity_id])["ids"] 
+                  if GlobalResources.ha_collection.get(ids=[entity_id])["metadatas"]), None)
+             )
+             
+             # Fix: .get() structure from Chroma is complex {ids: [], metadatas: []}
+             # Let's try a safer fetch or just similarity search by ID to get the doc
+             try:
+                 # Fetch doc by ID to get metadata
+                 docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                 current_meta = docs["metadatas"][0] if docs and docs["metadatas"] else None
+             except:
+                 current_meta = None
+
+             if current_meta and current_meta.get("group_name"):
+                 group_name = current_meta["group_name"]
+                 log.info(f"[Smart Swap] Looking for Music sibling in group: '{group_name}'")
+                 
+                 # 2. Search for siblings in the same group
+                 siblings = GlobalResources.ha_collection.get(
+                     where={"group_name": group_name},
+                     include=["metadatas"]
+                 )
+                 
+                 candidates = []
+                 if siblings and siblings.get("metadatas"):
+                     for meta in siblings["metadatas"]:
+                         s_id = meta.get("entity_id")
+                         if s_id == entity_id: continue
+                         
+                         s_integ = meta.get("integration", "")
+                         s_attrs = str(meta.get("attributes", "")).lower()
+                         s_name = meta.get("friendly_name", "").lower()
+                         
+                         # Check strict MA Capability (Source of Truth)
+                         is_ma = "music_assistant" in s_integ or "music_assistant" in s_attrs or "mass_player_type" in s_attrs
+                         
+                         if is_ma:
+                             score = 0
+                             # Prioritize Speakers (Device Class Only) - Optional, mainly we want capability
+                             if "device_class': 'speaker'" in s_attrs:
+                                 score += 5
+                                 
+                             # NAME MATCH BOOST REPLACED BY DEVICE INFO MATCH
+                             # Check if this candidate is physically the same device (Resulting in Model/Manufacturer match)
+                             target_model = current_meta.get("model")
+                             target_mfr = current_meta.get("manufacturer")
+                             
+                             s_model = meta.get("model")
+                             s_mfr = meta.get("manufacturer")
+                             
+                             # Critical: Match specific hardware if possible
+                             if target_model and s_model and target_model == s_model:
+                                 score += 50 # Definitive Match (Same Hardware)
+                             elif target_mfr and s_mfr and target_mfr == s_mfr:
+                                 score += 10 # Likely matches (Same Brand)
+                                 
+                             candidates.append((score, s_id))
+                 
+                 # Pick best candidate
+                 if candidates:
+                     candidates.sort(key=lambda x: x[0], reverse=True)
+                     best_ma_candidate = candidates[0][1]
+                     log.info(f"[Smart Swap] Candidates: {candidates}. Selected: {best_ma_candidate}")
+                 if best_ma_candidate:
+                     log.info(f"[Smart Swap] Swapping {entity_id} -> {best_ma_candidate} (Group: {group_name})")
+                     entity_id = best_ma_candidate
+                     integration = "music_assistant" # Treat as MA potentially
+                     
+                     # Update integration flag if real integration is known
+                     # (We assume regular flow will handle it)
+
 
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices ---
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices (Delegated) ---
