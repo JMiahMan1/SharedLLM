@@ -155,7 +155,7 @@ CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Add to my calendar" -> calendar_add
 
 MEDIA COMMAND EXAMPLES:
-- "Play some music on the Office TV" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "play_media", "device_name": "Office TV", "media_title": "music"}}}}
+- "Play Brandon Lake on the Office TV" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "play_media", "device_name": "Office TV", "media_title": "Brandon Lake"}}}}
 - "Turn on the living room light" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "turn_on", "device_name": "living room light"}}}}
 
 If the intent is a clear, confident action, generate the JSON for a tool call.
