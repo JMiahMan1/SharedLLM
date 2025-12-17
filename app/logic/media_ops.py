@@ -1339,7 +1339,8 @@ async def handle_media_command(
                 entity_id = get_last_entity(redis_client, user_creds.get("user"))
         else:
             # For transport commands, skip device resolution if cleaned query is too short or generic
-            if is_transport and (len(cleaned_for_res.strip()) < 3 or cleaned_for_res.strip() in ["to", "the", "a", "an"]):
+            cleaned_stripped = cleaned_for_res.strip()
+            if is_transport and (len(cleaned_stripped) < 3 or cleaned_stripped in ["to", "the", "a", "an", "to song", "song"] or "song" in cleaned_stripped):
                 log.info(f"[Transport] Skipping device resolution for short/generic query: '{cleaned_for_res}'")
                 resolved_result = None
             else:
