@@ -1670,9 +1670,9 @@ async def handle_media_command(
             # Relative adjustments (only if no percentage found)
             if brightness is None:
                 if intent == "dim":
-                brightness = 70  # ~30% brightness
-            elif intent == "brighten":
-                brightness = 255  # Max brightness
+                    brightness = 70  # ~30% brightness
+                elif intent == "brighten":
+                    brightness = 255  # Max brightness
             
             if brightness is None:
                 brightness = 128  # Default to 50%
