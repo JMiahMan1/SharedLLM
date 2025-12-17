@@ -1974,22 +1974,69 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
              return {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
         return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
 
+        # 1. SMART REDIRECT: Look for "TV" sibling
+        # If we are controlling a Cast device (speaker), but there is a "TV" sibling (Android TV),
+        # we should prioritize the TV for Power and Volume.
+        
+        tv_sibling = None
+        base_id = entity_id.replace("media_player.", "")
+        candidates = [base_id]
+        for suffix in ["_chrome_2", "_chrome", "_cast", "_2", "_speaker"]:
+             if base_id.endswith(suffix):
+                 candidates.append(base_id.replace(suffix, ""))
+        
+        # Check candidates for device_class=tv
+        for c in candidates:
+             cand_id = f"media_player.{c}"
+             if cand_id == entity_id: continue
+             try:
+                 s = await get_entity_state(cand_id, user_creds)
+                 # We need attributes, so we assume if state exists, we might want to check it.
+                 # But we don't have attributes here easily.
+                 # Heuristic: if name matches 'office_tv', it's likely the TV.
+                 if s and s != "unknown" and s != "unavailable":
+                      tv_sibling = cand_id
+                      break
+             except: pass
+        
+        if tv_sibling:
+             log.info(f"[Transport] Redirecting {intent} from {entity_id} to TV Sibling: {tv_sibling}")
+             # For Turn OFF: definitive
+             if intent == "turn_off":
+                 return await execute_ha_service("media_player", "turn_off", tv_sibling, user_creds, {}, redis_client)
+                 
     elif intent == "turn_off":
         log.info(f"[Transport] Match turn_off for {entity_id}")
         
-        # 1. For Android TV / Google Cast devices (often just exit app with media_player.turn_off)
-        # We try to find a remote and send POWER or SLEEP
-        if "android" in integration or "google_cast" in integration:
-            remote_id = entity_id.replace("media_player", "remote")
-            if await _has_remote(remote_id):
-                log.info(f"[TurnOff] Using remote.send_command(POWER) for {entity_id} via {remote_id}")
-                return await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "POWER"}, redis_client)
+        # 1. For Android TV / Google Cast devices
+        # Try to find a "Power" sibling (remote or Android TV entity)
+        power_candidates = []
+        base_id = entity_id.replace("media_player.", "")
         
-        # 2. For WebOS (similar behavior, good to force power off)
-        elif "webostv" in integration:
-             return await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, redis_client)
+        # Common suffix stripping
+        clean_base = base_id
+        for suffix in ["_chrome_2", "_chrome", "_cast", "_2", "_speaker"]:
+            clean_base = clean_base.replace(suffix, "")
+            
+        # Candidates: remote.{clean_base}, media_player.{clean_base}
+        power_candidates.append(f"remote.{clean_base}")
+        power_candidates.append(f"media_player.{clean_base}") # e.g. media_player.office_tv
+        
+        # Original remote replacement
+        power_candidates.append(entity_id.replace("media_player", "remote"))
 
-        # Default fallback
+        for candidate in power_candidates:
+             if candidate == entity_id: continue
+             if await _has_remote(candidate):
+                 log.info(f"[TurnOff] Found power controller: {candidate}")
+                 if candidate.startswith("remote."):
+                     return await execute_ha_service("remote", "send_command", candidate, user_creds, {"command": "POWER"}, redis_client)
+                 elif candidate.startswith("media_player."):
+                     # Check if it's an Android TV entity (heuristic: supports pause/play/turn_off)
+                     # Just try turning it off
+                     return await execute_ha_service("media_player", "turn_off", candidate, user_creds, {}, redis_client)
+
+        # Default fallback (original entity)
         return await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, redis_client)
 
     elif intent == "media_pause":
@@ -2036,78 +2083,68 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     # --- Volume Control Commands ---
     elif intent in ["volume_set", "volume_up", "volume_down", "volume_mute"]:
         import re
-        # Extract volume level from query (e.g., "30%", "60 percent", "to 50")
+        # Extract volume level
         volume_match = re.search(r'(\d+)\s*%?', query)
         volume_level = None
         if volume_match:
-            volume_level = int(volume_match.group(1)) / 100.0  # Convert to 0.0-1.0
-            volume_level = max(0.0, min(1.0, volume_level))  # Clamp
+            volume_level = int(volume_match.group(1)) / 100.0
+            volume_level = max(0.0, min(1.0, volume_level))
+
+        # Redirection Logic for Music Assistant
+        target_entity = entity_id
         
+        # Use TV Sibling for Volume if found (calculated above, but scope issue. recalculate or pass?)
+        # For simplicity, re-calculate or just use the same candidates logic locally if needed.
+        # Merging logic:
+        
+        tv_sibling = None
+        base_id = entity_id.replace("media_player.", "")
+        for suffix in ["_chrome_2", "_chrome", "_cast", "_2", "_speaker"]:
+             if base_id.endswith(suffix):
+                 cand = f"media_player.{base_id.replace(suffix, '')}"
+                 if cand != entity_id:
+                      try: 
+                          s = await get_entity_state(cand, user_creds)
+                          if s and s not in ["unknown", "unavailable"]:
+                               tv_sibling = cand
+                               break
+                      except: pass
+        
+        if tv_sibling:
+             log.info(f"[Volume] Redirecting volume to TV sibling: {tv_sibling}")
+             target_entity = tv_sibling
+
         if intent == "volume_set":
             if volume_level is not None:
-                result = await execute_ha_service(
-                    "media_player", "volume_set", entity_id, user_creds, 
-                    {"volume_level": volume_level}, redis_client
-                )
-                return result
-            else:
-                return {"status": "FAILURE", "message": "Could not parse volume level from command.", "entity_id": entity_id, "service": "volume_set"}
-        
+                return await execute_ha_service("media_player", "volume_set", target_entity, user_creds, {"volume_level": volume_level}, redis_client)
+            return {"status": "FAILURE", "message": "Could not parse volume level.", "entity_id": target_entity, "service": "volume_set"}
+            
         elif intent == "volume_up":
-            if volume_level is not None:
-                # Set to specific level
-                result = await execute_ha_service(
-                    "media_player", "volume_set", entity_id, user_creds, 
-                    {"volume_level": volume_level}, redis_client
-                )
-            else:
-                # Just bump up by default increment
-                result = await execute_ha_service(
-                    "media_player", "volume_up", entity_id, user_creds, {}, redis_client
-                )
-            return result
-        
-        elif intent == "media_pause":
-             result = await execute_ha_service(
-                "media_player", "media_pause", entity_id, user_creds, {}, redis_client
-             )
-             # Fallback: If Pause fails, try Stop
-             if result.get("status") != "SUCCESS":
-                 log.warning(f"[Transport] media_pause failed for {entity_id}. Falling back to media_stop.")
-                 return await execute_ha_service(
-                    "media_player", "media_stop", entity_id, user_creds, {}, redis_client
-                 )
-             return result
-        
-        elif intent == "media_play":
-             result = await execute_ha_service(
-                "media_player", "media_play", entity_id, user_creds, {}, redis_client
-             )
-             return result
-        
+            return await execute_ha_service("media_player", "volume_up", target_entity, user_creds, {}, redis_client)
+            
         elif intent == "volume_down":
-            if volume_level is not None:
-                result = await execute_ha_service(
-                    "media_player", "volume_set", entity_id, user_creds, 
-                    {"volume_level": volume_level}, redis_client
-                )
-            else:
-                result = await execute_ha_service(
-                    "media_player", "volume_down", entity_id, user_creds, {}, redis_client
-                )
-            return result
-        
+            return await execute_ha_service("media_player", "volume_down", target_entity, user_creds, {}, redis_client)
+            
         elif intent == "volume_mute":
             should_mute = True
-            log.info(f"[DEBUG_MUTE] Raw Query: '{query}'")
-            # Fix: 'mute office' contains 'mute off', so we need word boundaries
             if "unmute" in query.lower() or re.search(r"\bmute\s+off\b", query.lower()):
                  should_mute = False
-            log.info(f"[DEBUG_MUTE] Determined should_mute: {should_mute}")
-            
-            result = await execute_ha_service(
-                "media_player", "volume_mute", entity_id, user_creds, 
-                {"is_volume_muted": should_mute}, redis_client
+            return await execute_ha_service("media_player", "volume_mute", target_entity, user_creds, {"is_volume_muted": should_mute}, redis_client)
+
+    # Detached Transport Commands (Correct Indentation)
+    elif intent == "media_pause":
+         result = await execute_ha_service("media_player", "media_pause", entity_id, user_creds, {}, redis_client)
+         if result.get("status") != "SUCCESS":
+             log.warning(f"[Transport] media_pause failed for {entity_id}. Falling back to media_stop.")
+             return await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
+         return result
+    
+    elif intent == "media_play":
+         return await execute_ha_service("media_player", "media_play", entity_id, user_creds, {}, redis_client)
+    
+    # Fallback to generic service call if intent matches a service name (e.g. media_stop)
+    # But usually mapped above.
+    return await execute_ha_service("media_player", intent, entity_id, user_creds, {}, redis_client)
             )
             return result
 
