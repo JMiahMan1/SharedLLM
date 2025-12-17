@@ -205,8 +205,6 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
             }
         else:
              log.error(f"[MA PLAY] Failed: {response.status_code} - {response.text}")
-             # Log full response for debugging
-             log.error(f"[MA PLAY] Full response: {response.content}")
              return {
                 "status": "FAILURE",
                 "message": f"Failed to play media: {response.status_code} - {response.text[:100]}"
