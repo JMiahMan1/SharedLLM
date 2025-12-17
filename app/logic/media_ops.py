@@ -1576,16 +1576,7 @@ async def handle_media_command(
                     "entity_id": entity_id,
                     "service": "set_color"
                 }]
-        elif intent in ["dim", "brighten", "set_brightness"]:
-            if not caps.get("has_brightness"):
-                return [{
-                    "status": "FAILURE",
-                    "message": f"{friendly_name} doesn't support brightness control. It's an on/off only light.",
-                    "entity_id": entity_id,
-                    "service": "set_brightness"
-                }]
-        
-        # Validate brightness support
+        # Handle brightness commands
         elif intent in ["set_brightness", "dim", "brighten"]:
             if not caps.get("has_brightness"):
                 return [{
