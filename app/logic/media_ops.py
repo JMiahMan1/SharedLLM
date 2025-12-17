@@ -1055,11 +1055,11 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
     return None
 
 async def handle_media_command(
-    intent: str, 
-    query: str, 
-    entity_id: str, 
-    user_creds: dict, 
-    ha_collection, 
+    intent: str,
+    query: str,
+    entity_id: str,
+    user_creds: dict,
+    ha_collection,
     redis_client,
     device_name: str = None,  # Optional: Explicit device name from Orchestrator
 ):
@@ -1068,6 +1068,7 @@ async def handle_media_command(
     Supports multi-device pattern matching (even/odd/range/list/all).
     """
     q_low = query.lower()
+    log.info(f"[HANDLE_MEDIA_COMMAND] Called with intent={intent}, entity_id={entity_id}, device_name={device_name}")
     
     # [IntentOverride] Force upgrade for ambiguous "Watch" commands (e.g. "Watch on Roku" classified as turn_on)
     if re.search(r"\b(watch|view)\b", q_low) and intent not in ["watch_video", "view_content", "play_media"]:
@@ -2176,8 +2177,10 @@ async def handle_media_command(
                  # Optional: Try one last ditch 'turn_on' if we suspect sleep?
                  # await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
 
+            log.info(f"[HANDLE_MEDIA_COMMAND] Returning transport result: {result}")
             return result
 
+    log.info(f"[HANDLE_MEDIA_COMMAND] Returning final failure for intent {intent}")
     return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
 
 async def _execute_transport_command(intent: str, entity_id: str, domain: str, user_creds: dict, integration: str, redis_client, query: str = ""):
