@@ -567,7 +567,7 @@ async def generate_rag_stream(
         )
 
         log.debug(f"[SEARCH DECISION] intent={intent}, action_succeeded={action_succeeded}, is_no_search_intent={is_no_search_intent}, transport_executed={transport_executed}")
-        should_search = not already_searched and not (action_succeeded and is_no_search_intent) and not transport_executed
+        should_search = not already_searched and not is_no_search_intent and not transport_executed
         log.debug(f"[SEARCH DECISION] should_search={should_search}")
 
         if should_search:
