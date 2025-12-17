@@ -49,7 +49,7 @@ MEDIA_INTENTS = [
 # Used by pipeline.py for Regex Overrides
 REGEX_INTENT_MAP = {
     r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)": "open_app",
-    r"\b(play)\b": "play_media",
+    r"\bplay\b": "play_media",
     r"\b(stop|pause)\b": "stop_media",
     r"\b(skip|next)\b": "media_next",
     r"\b(previous|back|prev)\b": "media_previous",
