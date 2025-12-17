@@ -319,7 +319,7 @@ class IntentEngine:
     ) -> Tuple[Optional[str], float, bool]:
         # Check regex overrides first
         log.info(f"[REGEX CHECK] Intent engine checking query: '{query}'")
-        from app.logic.media_ops import REGEX_INTENT_MAP
+        from app.domains.media import REGEX_INTENT_MAP
         import re
         q_low = query.lower()
         log.info(f"[REGEX CHECK] REGEX_INTENT_MAP has {len(REGEX_INTENT_MAP)} patterns")

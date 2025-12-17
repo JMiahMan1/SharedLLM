@@ -1541,7 +1541,7 @@ async def handle_media_command(
     # COLOR & BRIGHTNESS CONTROL
     # -------------------------------------------------
     if intent in ["set_color", "set_brightness", "dim", "brighten"]:
-        from app.logic.light_ops import handle_light_command
+        from app.domains.lighting import handle_light_command
         return await handle_light_command(intent, query, entity_id, user_creds, redis_client)
 
     # -------------------------------------------------
