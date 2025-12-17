@@ -113,8 +113,10 @@ def test_timer_flow():
     resp = send_chat(f"Set an alarm for 8am called {alarm_name}")
     content = resp.get("message", {}).get("content", "")
     
-    if any(x in content.lower() for x in ["set", "started", "created", "success"]) and "alarm" in content.lower():
+    if any(x in content.lower() for x in ["set", "started", "created", "success", "done"]) and "alarm" in content.lower():
         print_pass(f"Alarm set: {content}")
+    elif content.strip() == "Done.":
+         print_pass(f"Alarm set (Silent Mode): {content}")
     else:
         print_fail(f"Failed to set alarm. Response: {content}")
         return

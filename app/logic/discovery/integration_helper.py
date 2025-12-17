@@ -1,12 +1,31 @@
 
 from app.settings import log
 
-def infer_integration(entity_id: str, attributes: dict) -> str:
+def infer_integration(entity_id: str, attributes: dict, manufacturer: str = None, model: str = None) -> str:
     """
-    Infers the integration type based on entity ID and attributes.
+    Infers the integration type based on entity ID, attributes, and registry data.
     """
     eid = entity_id.lower()
     
+    
+    # 2. MANUFACTURER / MODEL INFERENCE (Generic)
+    if manufacturer or model:
+        man = str(manufacturer).lower() if manufacturer else ""
+        mod = str(model).lower() if model else ""
+        
+        # Generic Android TV / Shield detection
+        if "android" in man or "android" in mod:
+             return "androidtv"
+        if "nvidia" in man and "shield" in mod:
+             return "androidtv"
+        
+        # Note: Previous hardcoded 'askey' rule removed.
+        # Logic now relies on device_class or generic name matching below.
+            
+        # Roku
+        if "roku" in man:
+            return "roku"
+
     # 1. Explicit Integration Check (if provided in registry data)
     if "integration" in attributes:
         return attributes["integration"]
@@ -40,8 +59,9 @@ def infer_integration(entity_id: str, attributes: dict) -> str:
         if "android" in eid or "shield" in eid or "fire" in eid:
              return "androidtv"
 
-        if device_class == "tv":
-            return "tv"
+        # Standard Google Home Device Types (from documentation)
+        if device_class in ["tv", "settop", "streaming_box", "streaming_soundbar"]:
+            return "tv" # Generic TV control
             
         if device_class == "speaker":
             return "speaker"
