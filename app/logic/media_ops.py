@@ -1763,20 +1763,51 @@ async def handle_media_command(
         if target_url:
             log.info(f"[DeepLink] Routing Video URL: {target_url}")
             
-            # 1. Android TV Deep Link
-            if "android" in integration:
-                from app.logic.android_tv_ops import play_video as atv_play
-                return await atv_play(entity_id, target_url, user_creds)
+            # Extract Video ID for Roku
+            video_id = None
+            vid_match = re.search(r'(?:v=|/)([0-9A-Za-z_-]{11})', target_url)
+            if vid_match:
+                video_id = vid_match.group(1)
+
+            # 1. Android TV Deep Link (YouTube App)
+            if "android" in integration or "google_cast" in integration:
+                # Attempt to find remote entity
+                remote_id = entity_id.replace("media_player", "remote")
+                
+                # Check if remote exists (optional but good for logging)
+                # Just try to send the command via remote.turn_on with activity
+                log.info(f"[YouTube-ATV] Launching {target_url} on {remote_id}")
+                return await execute_ha_service(
+                    "remote", "turn_on", remote_id, user_creds, 
+                    {"activity": target_url}, redis_client
+                )
                 
             # 2. WebOS Deep Link
             elif "webostv" in integration:
                 from app.logic.webos_ops import play_url as webos_play
                 return await webos_play(entity_id, target_url, user_creds, redis_client)
                 
-            # 3. Roku Deep Link
+            # 3. Roku Deep Link (YouTube App)
             elif "roku" in integration:
-                from app.logic.roku_ops import play_media_url as roku_play
-                return await roku_play(entity_id, target_url, user_creds, redis_client)
+                if video_id:
+                    log.info(f"[YouTube-Roku] Launching Video ID {video_id} on {entity_id}")
+                    # Verified Method: Launch App 837 with contentId
+                    return await execute_ha_service(
+                        "media_player", "play_media", entity_id, user_creds,
+                        {
+                            "media_content_type": "app",
+                            "media_content_id": "837",
+                            "extra": {"content_id": video_id, "media_type": "live"}
+                        },
+                        redis_client
+                    )
+                else:
+                    log.warning(f"[YouTube-Roku] Could not extract video ID from {target_url}. Launching Home.")
+                    return await execute_ha_service(
+                        "media_player", "play_media", entity_id, user_creds,
+                        {"media_content_type": "app", "media_content_id": "837"},
+                        redis_client
+                    )
 
         # ------------------------------------------------------------------------
         # UNIVERSAL VIDEO DEEP LINKING (YouTube, Rumble, etc.)

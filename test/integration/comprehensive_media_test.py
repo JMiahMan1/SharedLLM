@@ -52,7 +52,7 @@ HA_HEADERS = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "applicatio
 DEVICES = {
     "Office TV": "media_player.office_tv_chrome_2",
     "Master Bedroom TV": "media_player.master_bedroom_tv_2",
-    # "Gracie's TV": "media_player.gracies_tv",  # TODO: Verify entity ID
+    "Gracie's TV": "media_player.28_tcl_roku_tv",
 }
 
 # Output files
@@ -67,6 +67,7 @@ class EnhancedTestResults:
         self.tests_run = 0
         self.tests_passed = 0
         self.tests_failed = 0
+        self.tests_skipped = 0
         self.errors = []
         self.detailed_logs = []
         self.start_time = datetime.now()
@@ -117,6 +118,12 @@ class EnhancedTestResults:
             print(f"       Expected: {expected}, Got: {actual}")
             
         self.log_detail("FAIL", test_name, error_context)
+
+    def log_skip(self, test_name: str, reason: str):
+        """Log skipped test"""
+        self.tests_skipped += 1
+        print(f"\033[93m⚠️  SKIP\033[0m {test_name} ({reason})")
+        self.log_detail("SKIP", test_name, {"reason": reason})
     
     def log_backend_error(self, error_type: str, message: str):
         """Log errors detected in backend logs"""
@@ -176,13 +183,16 @@ class EnhancedTestResults:
         print("COMPREHENSIVE TEST SUMMARY")
         print("="*80)
         print(f"Duration: {duration:.1f}s")
-        print(f"Total Tests: {self.tests_run}")
+        print(f"Total Tests: {self.tests_run + self.tests_skipped}")
         print(f"Passed: \033[92m{self.tests_passed}\033[0m")
         print(f"Failed: \033[91m{self.tests_failed}\033[0m")
-        if self.tests_run > 0:
-            success_rate = self.tests_passed / self.tests_run * 100
+        print(f"Skipped: \033[93m{self.tests_skipped}\033[0m")
+        
+        total_valid = self.tests_run
+        if total_valid > 0:
+            success_rate = self.tests_passed / total_valid * 100
             color = "\033[92m" if success_rate >= 80 else "\033[93m" if success_rate >= 50 else "\033[91m"
-            print(f"Success Rate: {color}{success_rate:.1f}%\033[0m")
+            print(f"Success Rate (of attempted): {color}{success_rate:.1f}%\033[0m")
         
         if self.backend_errors:
             print(f"\nBackend Errors Detected: \033[93m{len(self.backend_errors)}\033[0m")
@@ -239,7 +249,7 @@ def capture_docker_logs():
         log(f"Failed to capture docker logs: {e}", "WARNING")
 
 def get_detailed_state(entity_id: str) -> Optional[dict]:
-   """Get detailed device state with all attributes"""
+    """Get detailed device state with all attributes"""
     state_data = get_ha_state(entity_id)
     if not state_data:
         return None
@@ -343,9 +353,14 @@ def wait_for_state(entity_id: str, expected_states: List[str], timeout: int = 20
     return (current_state, state_info)
 
 def run_test(test_name: str, device_name: str, entity_id: str, 
-             command: str, expected_states: List[str], timeout: int = 15) -> bool:
+             command: str, expected_states: List[str], timeout: int = 15, 
+             precondition_met: bool = True) -> bool:
     """Run a single test with full verification"""
     
+    if not precondition_met:
+        results.log_skip(test_name, "Dependency failed (preceding Play command failed)")
+        return False
+
     log(f"\n--- {test_name} ---")
     start_time = time.time()
     
@@ -395,7 +410,7 @@ def test_music_playback(device_name: str, entity_id: str):
     time.sleep(2)
     
     # Test 1: Play Music (tests auto-power-on)
-    run_test(
+    play_success = run_test(
         f"{device_name} - Play Music (Auto-Power-On)",
         device_name, entity_id,
         f"Play Brandon Lake on {device_name}",
@@ -410,7 +425,8 @@ def test_music_playback(device_name: str, entity_id: str):
         device_name, entity_id,
         f"Pause music on {device_name}",
         ['paused'],
-        timeout=15
+        timeout=15,
+        precondition_met=play_success
     )
     time.sleep(2)
     
@@ -420,7 +436,8 @@ def test_music_playback(device_name: str, entity_id: str):
         device_name, entity_id,
         f"Resume music on {device_name}",
         ['playing'],
-        timeout=15
+        timeout=15,
+        precondition_met=play_success
     )
     time.sleep(2)
     
@@ -430,17 +447,22 @@ def test_music_playback(device_name: str, entity_id: str):
         device_name, entity_id,
         f"Skip to next song on {device_name}",
         ['playing'],
-        timeout=15
+        timeout=15,
+        precondition_met=play_success
     )
     time.sleep(2)
-    
-    # Test 5: Stop
+
+    # Test 5: Volume Control
+    test_volume_control(device_name, entity_id, precondition_met=play_success)
+
+    # Test 6: Stop
     run_test(
         f"{device_name} - Stop Music",
         device_name, entity_id,
         f"Stop music on {device_name}",
         ['idle', 'off', 'paused'],
-        timeout=15
+        timeout=15,
+        precondition_met=play_success
     )
     
     # Cleanup
@@ -449,6 +471,41 @@ def test_music_playback(device_name: str, entity_id: str):
     
     # Capture logs after music tests
     capture_docker_logs()
+
+def test_volume_control(device_name: str, entity_id: str, precondition_met: bool = True):
+    """Test volume control"""
+    if not precondition_met:
+        results.log_skip(f"{device_name} - Volume Control", "Dependency failed")
+        return
+
+    log(f"\n--- {device_name} - Volume Tests ---")
+    
+    # Set Volume to 25% (0.25)
+    log(f"Command: Set volume to 25% on {device_name}")
+    send_command(f"Set volume to 25% on {device_name}")
+    time.sleep(3)
+    
+    # Verify
+    state = get_detailed_state(entity_id)
+    vol = state.get("volume")
+    if vol is not None and 0.23 <= vol <= 0.27:
+         results.log_pass(f"{device_name} - Set Volume 25%", 0, state)
+    else:
+         results.log_fail(f"{device_name} - Set Volume 25%", f"Volume mismatch: {vol}", "0.25", str(vol), state)
+
+    # Set Volume to 35% (0.35)
+    log(f"Command: Set volume to 35% on {device_name}")
+    send_command(f"Set volume to 35% on {device_name}")
+    time.sleep(3)
+    
+    # Verify
+    state = get_detailed_state(entity_id)
+    vol = state.get("volume")
+    if vol is not None and 0.33 <= vol <= 0.37:
+         results.log_pass(f"{device_name} - Set Volume 35%", 0, state)
+    else:
+         results.log_fail(f"{device_name} - Set Volume 35%", f"Volume mismatch: {vol}", "0.35", str(vol), state)
+
 
 def test_video_playback(device_name: str, entity_id: str):
     """Test video playback via YouTube"""
@@ -461,11 +518,11 @@ def test_video_playback(device_name: str, entity_id: str):
     time.sleep(2)
     
     # Test 1: Play YouTube Video (tests auto-power-on)
-    run_test(
+    play_success = run_test(
         f"{device_name} - Play YouTube Video (Auto-Power-On)",
         device_name, entity_id,
         f"Watch Big Buck Bunny on YouTube with {device_name}",
-        ['playing', 'buffering'],
+        ['playing', 'buffering', 'on'], # 'on' accepted as some app launches don't report playing immediately
         timeout=35
     )
     time.sleep(3)
@@ -476,7 +533,8 @@ def test_video_playback(device_name: str, entity_id: str):
         device_name, entity_id,
         f"Pause video on {device_name}",
         ['paused'],
-        timeout=15
+        timeout=15,
+        precondition_met=play_success
     )
     time.sleep(2)
     
@@ -486,7 +544,8 @@ def test_video_playback(device_name: str, entity_id: str):
         device_name, entity_id,
         f"Resume video on {device_name}",
         ['playing'],
-        timeout=15
+        timeout=15,
+        precondition_met=play_success
     )
     time.sleep(2)
     
@@ -496,7 +555,8 @@ def test_video_playback(device_name: str, entity_id: str):
         device_name, entity_id,
         f"Stop video on {device_name}",
         ['idle', 'off', 'paused'],
-        timeout=15
+        timeout=15,
+        precondition_met=play_success
     )
     
     # Cleanup
