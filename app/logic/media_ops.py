@@ -99,6 +99,19 @@ def get_last_entity(redis_client, user: str) -> str:
         return val.decode('utf-8') if isinstance(val, bytes) else val
     return None
 
+def _get_last_media_entity_key(user: str) -> str:
+    return f"rag:last_media_entity:{user}"
+
+def _set_last_media_entity(redis_client, user: str, entity_id: str):
+    if redis_client and entity_id and entity_id.startswith("media_player."):
+        redis_client.setex(_get_last_media_entity_key(user), 86400, entity_id)
+
+def get_last_media_entity(redis_client, user: str) -> str:
+    if redis_client:
+        val = redis_client.get(_get_last_media_entity_key(user))
+        return val.decode('utf-8') if isinstance(val, bytes) else val
+    return None
+
 async def get_entity_state(entity_id: str, user_creds: dict) -> str:
     if not HA_URL:
         return "unknown"
@@ -1342,6 +1355,9 @@ async def handle_media_command(
         user = user_creds.get("user")
         if user and entity_id:
              _set_last_entity(redis_client, user, entity_id)
+             # Also track last media entity for transport commands
+             if entity_id.startswith("media_player."):
+                 _set_last_media_entity(redis_client, user, entity_id)
 
     if entity_id:
         domain = entity_id.split('.')[0]
@@ -1355,7 +1371,13 @@ async def handle_media_command(
         log.info("[DEBUG_TRANSPORT] Entered Transport Redirection Block")
         should_scan = False
         if not entity_id:
-            should_scan = True
+            # First try to get the last media entity used
+            last_media = get_last_media_entity(redis_client, user_creds.get("user"))
+            if last_media:
+                log.info(f"[Transport] Using last media entity: {last_media}")
+                entity_id = last_media
+            else:
+                should_scan = True
         else:
             # AUTO-POWER-ON: Check if device is off and turn it on first
             try:
