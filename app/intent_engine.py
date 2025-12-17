@@ -317,6 +317,19 @@ class IntentEngine:
         threshold: float = 0.60,
         high_confidence_threshold: float = 0.80,
     ) -> Tuple[Optional[str], float, bool]:
+        # Check regex overrides first
+        log.info(f"[REGEX CHECK] Intent engine checking query: '{query}'")
+        from app.logic.media_ops import REGEX_INTENT_MAP
+        import re
+        q_low = query.lower()
+        log.info(f"[REGEX CHECK] REGEX_INTENT_MAP has {len(REGEX_INTENT_MAP)} patterns")
+        for pattern, intent in REGEX_INTENT_MAP.items():
+            log.info(f"[REGEX CHECK] Testing pattern: {pattern} -> {intent}")
+            if re.search(pattern, q_low):
+                log.info(f"[REGEX OVERRIDE] Matched '{intent}' via pattern: {pattern[:50]}...")
+                return intent, 1.0, True
+        log.info(f"[REGEX CHECK] No regex matches for: '{q_low}'")
+
         if not self.is_ready or not GlobalResources.embedding_model:
             # Assume keyword match is high confidence for simplicity if vectors fail
             return (self._keyword_fallback(query), 1.0, True)
@@ -331,7 +344,11 @@ class IntentEngine:
             best_score = float(scores[best_idx])
             intent, matched_phrase = self.vector_index[best_idx]
 
-            is_high_confidence = best_score >= high_confidence_threshold
+            # Special handling for play_media - consider it high confidence even with low scores
+            if intent == 'play_media' and best_score >= 0.1:
+                is_high_confidence = True
+            else:
+                is_high_confidence = best_score >= high_confidence_threshold
 
             if best_score >= threshold:
                 log.debug(
