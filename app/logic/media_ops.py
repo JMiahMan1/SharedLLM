@@ -1167,7 +1167,9 @@ async def handle_media_command(
             is_transport = intent in ["media_next", "media_previous", "stop_media", "media_pause", "media_play", "resume", "volume_set", "volume_up", "volume_down", "volume_mute"]
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---
+    log.info(f"[DEBUG_TRANSPORT] Checking transport: intent='{intent}' is_transport={is_transport} entity_id='{entity_id}'")
     if is_transport:
+        log.info(f"[DEBUG_TRANSPORT] ENTERING TRANSPORT SHORT CIRCUIT for {intent}")
         device_match = re.search(r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media)\b", q_low)
 
         # 2a. Resolve device name from query if present
