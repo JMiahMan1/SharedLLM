@@ -1,0 +1,21 @@
+--- VERIFYING PAUSE/RESUME ROUTING FIX ---
+
+1. Launching YouTube...
+Sending: 'Launch YouTube on Office TV'...
+Error: HTTPConnectionPool(host='192.168.2.211', port=11435): Read timed out. (read timeout=30)
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+❌ FAILED: Did not reach 'playing' state. Cannot test pause.

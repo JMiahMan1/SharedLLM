@@ -1,0 +1,5 @@
+Querying https://ha.sumemail.com/api/states...
+
+Found Entities:
+media_player.28_tcl_roku_tv | Gracies TV | off
+media_player.gracie_s_echo_dot_bedroom |  | unavailable

@@ -1,0 +1,100 @@
+2025-12-17 00:03:17,249 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-17 00:03:17,317 [DEBUG] https://ha.sumemail.com:443 "POST /api/template HTTP/1.1" 200 72279
+2025-12-17 00:03:17,336 [INFO] Built Device Map for 697 entities.
+2025-12-17 00:03:17,344 [INFO] Formed 135 Device Groups.
+2025-12-17 00:03:17,347 [INFO] Upserting 158 documents to ChromaDB...
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: binary_sensor.music_assistant_server_running | Group: music assistant:home assistant add-on:music running | Integ: unknown
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: light.kauf_plug_d67371_kauf_plug | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: switch.string_lights_front | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: light.downstairs_bathroom_1_light | Group: signify:wiz a19 filament:downstairs bathroom 1 light | Integ: unknown
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: light.downstairs_bathroom_2_light | Group: signify:wiz a19 filament:downstairs bathroom 2 light | Integ: unknown
+2025-12-17 00:03:17,395 [DEBUG] Starting new HTTPS connection (1): us.i.posthog.com:443
+2025-12-17 00:03:17,491 [INFO] Timer Scheduler Started.
+INFO:     Application startup complete.
+INFO:     Started server process [53]
+INFO:     Waiting for application startup.
+2025-12-17 00:03:18,390 [INFO] Loading Global Resources...
+2025-12-17 00:03:18,392 [INFO] Redis Connected.
+2025-12-17 00:03:22,156 [INFO] Use pytorch device_name: cpu
+2025-12-17 00:03:22,157 [INFO] Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+2025-12-17 00:03:22,158 [DEBUG] Starting new HTTPS connection (1): huggingface.co:443
+2025-12-17 00:03:22,608 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json HTTP/2.0" 307 0
+2025-12-17 00:03:22,644 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/modules.json HTTP/2.0" 200 0
+2025-12-17 00:03:22,752 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config_sentence_transformers.json HTTP/2.0" 307 0
+2025-12-17 00:03:22,783 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/config_sentence_transformers.json HTTP/2.0" 200 0
+2025-12-17 00:03:22,892 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config_sentence_transformers.json HTTP/2.0" 307 0
+2025-12-17 00:03:22,922 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/config_sentence_transformers.json HTTP/2.0" 200 0
+2025-12-17 00:03:23,036 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/README.md HTTP/2.0" 307 0
+2025-12-17 00:03:23,066 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/README.md HTTP/2.0" 200 0
+2025-12-17 00:03:23,166 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json HTTP/2.0" 307 0
+2025-12-17 00:03:23,197 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/modules.json HTTP/2.0" 200 0
+2025-12-17 00:03:23,308 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/sentence_bert_config.json HTTP/2.0" 307 0
+2025-12-17 00:03:23,335 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/sentence_bert_config.json HTTP/2.0" 200 0
+2025-12-17 00:03:23,443 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/adapter_config.json HTTP/2.0" 404 0
+2025-12-17 00:03:23,548 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json HTTP/2.0" 307 0
+2025-12-17 00:03:23,578 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/config.json HTTP/2.0" 200 0
+2025-12-17 00:03:23,753 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer_config.json HTTP/2.0" 307 0
+2025-12-17 00:03:23,784 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/tokenizer_config.json HTTP/2.0" 200 0
+2025-12-17 00:03:23,891 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2/tree/main/additional_chat_templates?recursive=False&expand=False HTTP/2.0" 404 64
+2025-12-17 00:03:24,003 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2/tree/main?recursive=True&expand=False HTTP/2.0" 200 6465
+2025-12-17 00:03:24,144 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/1_Pooling/config.json HTTP/2.0" 307 0
+2025-12-17 00:03:24,177 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 0
+2025-12-17 00:03:24,288 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2 HTTP/2.0" 200 6797
+2025-12-17 00:03:24,294 [INFO] Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+2025-12-17 00:03:24,537 [INFO] Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2025-12-17 00:03:24,588 [DEBUG] Starting component System
+2025-12-17 00:03:24,589 [DEBUG] Starting component Posthog
+2025-12-17 00:03:24,657 [INFO] ChromaDB Loaded from /data/chroma_db
+2025-12-17 00:03:24,657 [INFO] --- Initializing Semantic Intent Engine ---
+2025-12-17 00:03:24,658 [INFO] Loaded phrasebook from /app/data/phrasebook.json
+2025-12-17 00:03:24,658 [INFO] Vectorizing 187 phrases for Intent Engine...
+2025-12-17 00:03:24,913 [INFO] Intent Engine Ready. Indexed 187 phrases.
+2025-12-17 00:03:24,913 [INFO] Starting Timer/Alarm Scheduler...
+2025-12-17 00:03:24,914 [INFO] Starting Device DB Refresh...
+2025-12-17 00:03:24,916 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-17 00:03:25,146 [DEBUG] Starting new HTTPS connection (1): us.i.posthog.com:443
+2025-12-17 00:03:25,527 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-17 00:03:28,927 [ERROR] Error fetching states: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x7f447c0c11d0>: Failed to resolve 'ha.sumemail.com' (Name or service not known: ha.sumemail.com using 1 resolver(s))"))
+2025-12-17 00:03:28,928 [INFO] Timer Scheduler Started.
+INFO:     Application startup complete.
+2025-12-17 00:03:28,937 [DEBUG] [REGEX OVERRIDE] Matched 'play_media' via pattern: \b(play)\b...
+2025-12-17 00:03:28,938 [INFO] [INTENT] Regex override: 'Play Brandon Lake on Gracie' -> play_media
+2025-12-17 00:03:28,941 [INFO] [PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+2025-12-17 00:03:28,941 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2143
+2025-12-17 00:03:28,944 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-17 00:03:28,977 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on YouTube with Office TV' -> Best: 'play_media' (0.34)
+2025-12-17 00:03:28,980 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2170
+2025-12-17 00:03:28,983 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-17 00:03:30,228 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on YouTube with Gracie's TV' -> Best: 'open_app' (0.27)
+2025-12-17 00:03:30,228 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2172
+2025-12-17 00:03:30,229 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-17 00:03:32,223 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on YouTube with Gracie' -> Best: 'media_next' (0.27)
+2025-12-17 00:03:32,224 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2167
+2025-12-17 00:03:32,226 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-17 00:03:47,707 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-17 00:03:47,732 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on YouTube with Office TV' -> Best: 'play_media' (0.34)
+2025-12-17 00:03:47,732 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2159
+2025-12-17 00:03:47,734 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-17 00:03:53,841 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-17 00:03:53,844 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'Gracie'}}
+2025-12-17 00:03:53,845 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Gracie' (Music Mode: True)
+2025-12-17 00:03:53,845 [INFO] DEBUG: Entering smart_resolve_entity. Q='Gracie' Intent='play' Multiple=True
+2025-12-17 00:03:53,999 [INFO] Using prefix match for 'Gracie': media_player.28_tcl_roku_tv (gracies tv)
+2025-12-17 00:03:53,999 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+2025-12-17 00:03:53,999 [INFO] [BATCH] Executing 'play' on 1 entities
+2025-12-17 00:03:53,999 [INFO] Sanitized intent from 'play' to 'play_media'
+2025-12-17 00:03:53,999 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='play_media' is_transport=False entity=media_player.28_tcl_roku_tv
+2025-12-17 00:03:53,999 [ERROR] [BATCH] Error executing on media_player.28_tcl_roku_tv: cannot access local variable 'asyncio' where it is not associated with a value
+2025-12-17 00:03:53,999 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: media_player.28_tcl_roku_tv', 'service': 'play', 'batch_results': [{'status': 'FAILURE', 'message': "cannot access local variable 'asyncio' where it is not associated with a value", 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'play'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}]
+2025-12-17 00:03:53,999 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'play' on 'batch_command' failed. Reason: Failed to control all 1 devices: media_player.28_tcl_roku_tv
+
+2025-12-17 00:03:54,000 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-17 00:03:54,000 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2627
+2025-12-17 00:03:54,001 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-17 00:03:54,192 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-17 00:04:17,916 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-17 00:04:17,957 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on YouTube with Gracie's TV' -> Best: 'open_app' (0.27)
+2025-12-17 00:04:17,958 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2161
+2025-12-17 00:04:17,959 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434

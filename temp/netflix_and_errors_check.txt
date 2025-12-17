@@ -1,0 +1,3 @@
+2025-12-15 21:25:52,634 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+2025-12-15 21:25:52,637 [WARNING] HA 500 Error: 500 Internal Server Error
+2025-12-15 21:25:52,637 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error

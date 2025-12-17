@@ -1,0 +1,282 @@
+
+================================================================================
+COMPREHENSIVE MEDIA PLAYBACK TEST SUITE - DYNAMIC DISCOVERY
+================================================================================
+[94m[INFO][0m Discovering devices from Home Assistant...
+[92m[SUCCESS][0m Discovered 'Office TV': Music=media_player.office_tv_chrome_2, Video=media_player.office_tv
+[92m[SUCCESS][0m Discovered 'Master Bedroom TV': Music=media_player.master_bedroom_tv_2, Video=media_player.master_bedroom_tv_3
+[92m[SUCCESS][0m Discovered 'Gracie': Music=media_player.gracie_s_echo_dot_bedroom, Video=media_player.28_tcl_roku_tv
+[92m[SUCCESS][0m Discovered 'Roku': Music=media_player.28_tcl_roku_tv, Video=media_player.28_tcl_roku_tv
+[92m[SUCCESS][0m Discovered 'Living Room TV': Music=media_player.living_room_tv_2, Video=media_player.living_room_tv
+[92m[SUCCESS][0m Discovered 'LG': Music=media_player.lg_webos_tv_un6955zuf, Video=media_player.lg_webos_tv_un6955zuf
+[94m[INFO][0m 
+Pre-flight checks...
+[92m[SUCCESS][0m API is Healthy.
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m Testing Device: Office TV
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: Office TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.office_tv OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv is OFF
+[94m[INFO][0m 
+--- Office TV - Play Music ---
+[94m[INFO][0m Command: 'Play Brandon Lake on Office TV'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Office TV - Play Music
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Office TV - Pause Music (Dependency failed)
+[93m⚠️  SKIP[0m Office TV - Resume Music (Dependency failed)
+[93m⚠️  SKIP[0m Office TV - Skip Track (Dependency failed)
+[93m⚠️  SKIP[0m Office TV - Stop Music (Dependency failed)
+[94m[INFO][0m Forcing media_player.office_tv OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv is OFF
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m YOUTUBE VIDEO TESTS: Office TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.office_tv OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv is OFF
+[94m[INFO][0m 
+--- Office TV - Play Video ---
+[94m[INFO][0m Command: 'Watch Big Buck Bunny on YouTube with Office TV'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Office TV - Play Video
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Office TV - Pause Video (Dependency failed)
+[93m⚠️  SKIP[0m Office TV - Resume Video (Dependency failed)
+[93m⚠️  SKIP[0m Office TV - Stop Video (Dependency failed)
+[94m[INFO][0m Forcing media_player.office_tv OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv is OFF
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m Testing Device: Master Bedroom TV
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: Master Bedroom TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.master_bedroom_tv_3 OFF
+[92m[SUCCESS][0m ✅ media_player.master_bedroom_tv_3 is OFF
+[94m[INFO][0m 
+--- Master Bedroom TV - Play Music ---
+[94m[INFO][0m Command: 'Play Brandon Lake on Master Bedroom TV'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Master Bedroom TV - Play Music
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Master Bedroom TV - Pause Music (Dependency failed)
+[93m⚠️  SKIP[0m Master Bedroom TV - Resume Music (Dependency failed)
+[93m⚠️  SKIP[0m Master Bedroom TV - Skip Track (Dependency failed)
+[93m⚠️  SKIP[0m Master Bedroom TV - Stop Music (Dependency failed)
+[94m[INFO][0m Forcing media_player.master_bedroom_tv_3 OFF
+[92m[SUCCESS][0m ✅ media_player.master_bedroom_tv_3 is OFF
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m YOUTUBE VIDEO TESTS: Master Bedroom TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.master_bedroom_tv_3 OFF
+[92m[SUCCESS][0m ✅ media_player.master_bedroom_tv_3 is OFF
+[94m[INFO][0m 
+--- Master Bedroom TV - Play Video ---
+[94m[INFO][0m Command: 'Watch Big Buck Bunny on YouTube with Master Bedroom TV'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Master Bedroom TV - Play Video
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Master Bedroom TV - Pause Video (Dependency failed)
+[93m⚠️  SKIP[0m Master Bedroom TV - Resume Video (Dependency failed)
+[93m⚠️  SKIP[0m Master Bedroom TV - Stop Video (Dependency failed)
+[94m[INFO][0m Forcing media_player.master_bedroom_tv_3 OFF
+[92m[SUCCESS][0m ✅ media_player.master_bedroom_tv_3 is OFF
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m Testing Device: Gracie
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: Gracie
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.28_tcl_roku_tv OFF
+[92m[SUCCESS][0m ✅ media_player.28_tcl_roku_tv is OFF
+[94m[INFO][0m 
+--- Gracie - Play Music ---
+[94m[INFO][0m Command: 'Play Brandon Lake on Gracie'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Gracie - Play Music
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Gracie - Pause Music (Dependency failed)
+[93m⚠️  SKIP[0m Gracie - Resume Music (Dependency failed)
+[93m⚠️  SKIP[0m Gracie - Skip Track (Dependency failed)
+[93m⚠️  SKIP[0m Gracie - Stop Music (Dependency failed)
+[94m[INFO][0m Forcing media_player.28_tcl_roku_tv OFF
+[92m[SUCCESS][0m ✅ media_player.28_tcl_roku_tv is OFF
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m YOUTUBE VIDEO TESTS: Gracie
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.28_tcl_roku_tv OFF
+[92m[SUCCESS][0m ✅ media_player.28_tcl_roku_tv is OFF
+[94m[INFO][0m 
+--- Gracie - Play Video ---
+[94m[INFO][0m Command: 'Watch Big Buck Bunny on YouTube with Gracie'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Gracie - Play Video
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Gracie - Pause Video (Dependency failed)
+[93m⚠️  SKIP[0m Gracie - Resume Video (Dependency failed)
+[93m⚠️  SKIP[0m Gracie - Stop Video (Dependency failed)
+[94m[INFO][0m Forcing media_player.28_tcl_roku_tv OFF
+[92m[SUCCESS][0m ✅ media_player.28_tcl_roku_tv is OFF
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m Testing Device: Roku
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: Roku
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.28_tcl_roku_tv OFF
+[92m[SUCCESS][0m ✅ media_player.28_tcl_roku_tv is OFF
+[94m[INFO][0m 
+--- Roku - Play Music ---
+[94m[INFO][0m Command: 'Play Brandon Lake on Roku'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Roku - Play Music
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Roku - Pause Music (Dependency failed)
+[93m⚠️  SKIP[0m Roku - Resume Music (Dependency failed)
+[93m⚠️  SKIP[0m Roku - Skip Track (Dependency failed)
+[93m⚠️  SKIP[0m Roku - Stop Music (Dependency failed)
+[94m[INFO][0m Forcing media_player.28_tcl_roku_tv OFF
+[92m[SUCCESS][0m ✅ media_player.28_tcl_roku_tv is OFF
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m YOUTUBE VIDEO TESTS: Roku
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.28_tcl_roku_tv OFF
+[92m[SUCCESS][0m ✅ media_player.28_tcl_roku_tv is OFF
+[94m[INFO][0m 
+--- Roku - Play Video ---
+[94m[INFO][0m Command: 'Watch Big Buck Bunny on YouTube with Roku'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Roku - Play Video
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Roku - Pause Video (Dependency failed)
+[93m⚠️  SKIP[0m Roku - Resume Video (Dependency failed)
+[93m⚠️  SKIP[0m Roku - Stop Video (Dependency failed)
+[94m[INFO][0m Forcing media_player.28_tcl_roku_tv OFF
+[92m[SUCCESS][0m ✅ media_player.28_tcl_roku_tv is OFF
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m Testing Device: Living Room TV
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: Living Room TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.living_room_tv OFF
+[92m[SUCCESS][0m ✅ media_player.living_room_tv is OFF
+[94m[INFO][0m 
+--- Living Room TV - Play Music ---
+[94m[INFO][0m Command: 'Play Brandon Lake on Living Room TV'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Living Room TV - Play Music
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Living Room TV - Pause Music (Dependency failed)
+[93m⚠️  SKIP[0m Living Room TV - Resume Music (Dependency failed)
+[93m⚠️  SKIP[0m Living Room TV - Skip Track (Dependency failed)
+[93m⚠️  SKIP[0m Living Room TV - Stop Music (Dependency failed)
+[94m[INFO][0m Forcing media_player.living_room_tv OFF
+[92m[SUCCESS][0m ✅ media_player.living_room_tv is OFF
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m YOUTUBE VIDEO TESTS: Living Room TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.living_room_tv OFF
+[92m[SUCCESS][0m ✅ media_player.living_room_tv is OFF
+[94m[INFO][0m 
+--- Living Room TV - Play Video ---
+[94m[INFO][0m Command: 'Watch Big Buck Bunny on YouTube with Living Room TV'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m Living Room TV - Play Video
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m Living Room TV - Pause Video (Dependency failed)
+[93m⚠️  SKIP[0m Living Room TV - Resume Video (Dependency failed)
+[93m⚠️  SKIP[0m Living Room TV - Stop Video (Dependency failed)
+[94m[INFO][0m Forcing media_player.living_room_tv OFF
+[92m[SUCCESS][0m ✅ media_player.living_room_tv is OFF
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m Testing Device: LG
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: LG
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.lg_webos_tv_un6955zuf OFF
+[92m[SUCCESS][0m ✅ media_player.lg_webos_tv_un6955zuf is OFF
+[94m[INFO][0m 
+--- LG - Play Music ---
+[94m[INFO][0m Command: 'Play Brandon Lake on LG'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m LG - Play Music
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m LG - Pause Music (Dependency failed)
+[93m⚠️  SKIP[0m LG - Resume Music (Dependency failed)
+[93m⚠️  SKIP[0m LG - Skip Track (Dependency failed)
+[93m⚠️  SKIP[0m LG - Stop Music (Dependency failed)
+[94m[INFO][0m Forcing media_player.lg_webos_tv_un6955zuf OFF
+[92m[SUCCESS][0m ✅ media_player.lg_webos_tv_un6955zuf is OFF
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m YOUTUBE VIDEO TESTS: LG
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.lg_webos_tv_un6955zuf OFF
+[92m[SUCCESS][0m ✅ media_player.lg_webos_tv_un6955zuf is OFF
+[94m[INFO][0m 
+--- LG - Play Video ---
+[94m[INFO][0m Command: 'Watch Big Buck Bunny on YouTube with LG'
+[93m[WARNING][0m Timeout... retrying
+[91m❌ FAIL[0m LG - Play Video
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[93m⚠️  SKIP[0m LG - Pause Video (Dependency failed)
+[93m⚠️  SKIP[0m LG - Resume Video (Dependency failed)
+[93m⚠️  SKIP[0m LG - Stop Video (Dependency failed)
+[94m[INFO][0m Forcing media_player.lg_webos_tv_un6955zuf OFF
+[92m[SUCCESS][0m ✅ media_player.lg_webos_tv_un6955zuf is OFF
+[94m[INFO][0m 
+Capturing final logs...
+
+[93m[INFO][0m Errors written to temp/comprehensive_test_errors.txt
+[93m[INFO][0m Detailed log written to temp/comprehensive_test_detailed.txt
+
+================================================================================
+COMPREHENSIVE TEST SUMMARY
+================================================================================
+Duration: 1665.0s
+Total Tests: 54
+Passed: [92m0[0m
+Failed: [91m12[0m
+Skipped: [93m42[0m
+Success Rate (of attempted): [91m0.0%[0m
+================================================================================

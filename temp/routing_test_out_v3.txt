@@ -1,0 +1,18 @@
+2025-12-16 23:38:30,558 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='play_media' is_transport=False entity=Play music
+2025-12-16 23:38:30,559 [WARNING] [CAPABILITY] ChromaDB query error for Play music: 'NoneType' object has no attribute 'get'
+2025-12-16 23:38:30,587 [WARNING] Failed to fetch capabilities for Play music: 401
+2025-12-16 23:38:30,587 [INFO] Generic content request on Play music. Attempting RESUME (media_play).
+2025-12-16 23:38:30,587 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='play_media' is_transport=False entity=Watch video
+2025-12-16 23:38:30,587 [WARNING] [CAPABILITY] ChromaDB query error for Watch video: 'NoneType' object has no attribute 'get'
+2025-12-16 23:38:30,605 [WARNING] Failed to fetch capabilities for Watch video: 401
+2025-12-16 23:38:30,605 [INFO] Generic content request on Watch video. Attempting RESUME (media_play).
+2025-12-16 23:38:30,605 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='turn_off' is_transport=False entity=Turn off
+2025-12-16 23:38:30,605 [INFO] [DISPATCH] Dispatching intent: 'turn_off' (Type: <class 'str'>) for entity: Turn off
+--- Test 1: Play Music on TV Entity (Should Swap to Speaker) ---
+EXECUTE: Play music.media_play -> Play music | Data: {}
+
+--- Test 2: Play Video on Speaker Entity (Should Swap to TV) ---
+EXECUTE: Watch video.media_play -> Watch video | Data: {}
+
+--- Test 3: Turn Off Speaker Entity (Should Swap to TV) ---
+EXECUTE: homeassistant.turn_off -> Turn off | Data: {}

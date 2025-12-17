@@ -1922,10 +1922,13 @@ async def handle_media_command(
         # TV Logic: TVs play video ONLY if explicitly video request
         # Fix: Don't force video for ambiguous music requests like "Play Brandon Lake"
         is_tv = any(x in entity_id.lower() for x in ["tv", "chromecast", "shield", "androidtv"])
+        
+        # STRICTER VIDEO CHECK: Only default to video if explicit video intent/keywords exist
         if is_tv and is_video_request:
             ctype = "video"
-        elif not is_video_request and not is_music_request:
-            # Ambiguous request (no keywords): default to music for play_media intent
+        elif not is_video_request:
+            # Ambiguous request (no keywords) or music keywords -> Force Music
+            # This fixes "Play Brandon Lake" on Office TV defaulting to Generic/Video
             ctype = "music"
 
         # Fallback Logic for Non-MA Devices:
@@ -1993,6 +1996,9 @@ async def handle_media_command(
 
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices ---
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices (Delegated) ---
+        # We use a flag to track if MA handled it successfully. If not, we fall through to standard logic.
+        ma_handled = False
+        
         if "music_assistant" in integration:
             try:
                 from app.logic.music_assistant_ops import play_media as ma_play_media
@@ -2006,19 +2012,22 @@ async def handle_media_command(
                      log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
                      result = await ma_play_media(entity_id, clean_title, "search", user_creds)
                 
-                # Maintain compatibility with existing result structure
-                # The existing code expects a certain dict shape for logging, though the core execution is done.
                 if result["status"] == "SUCCESS":
-                    # Mocking the HA service result format for consistency
                     return [{"status": "SUCCESS", "message": result["message"], "service": "ma_play", "entity_id": entity_id}]
                 else: 
+                     # MA tried but failed logically (not crashed). Return failure here to avoid double-playing on standard?
+                     # OR should we fallback to standard cast?
+                     # Let's return failure, as MA is the authority for this device.
                      return {"status": "FAILURE", "message": result["message"], "entity_id": entity_id}
-            
+
             except ImportError:
                  log.error("Failed to import music_assistant_ops. Falling back to inline logic.")
-                 # Fallback inline logic would go here if we were paranoid, but for now we trust the import.
-                 return {"status": "FAILURE", "message": "Internal Logic Error (MA Import)", "entity_id": entity_id}
-        else:
+            except Exception as e:
+                 log.error(f"Error in Music Assistant delegation for {entity_id}: {e}", exc_info=True)
+                 # Fall through to standard logic
+
+        # Standard Media Player Service (Fallback or Non-MA)
+        if not ma_handled:
             # Standard Media Player Service
             
             # --- CRITICAL FIX: SMART POWER SYNC ---

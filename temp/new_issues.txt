@@ -1,0 +1,20 @@
+**NEW ISSUES FROM RECENT LOGS:**
+
+Issue 6: Another Web Search After Successful Command (Lines 7-28):
+- Command: remote.send_command HOME on remote.office_tv
+- HA Response: 200 OK (Line 9)
+- But then: Checked state 5 times, then web search triggered (Line 20)
+- SAME PROBLEM - successful 200 but treated as failure
+
+Issue 7: Polling Non-Existent Entity (Lines 4-19):
+- Polling: remote.office_tv
+- Response: 404 Not Found (entity doesn't exist)
+- System polled it 5 times before giving up
+- Should detect 404 and stop immediately, not retry
+
+Issue 8: Timer Delete Failures (Lines 39, 57, 75, 93):
+- All timer delete commands failing with "Could not find matching timer"
+- Tests are trying to delete timers that don't exist
+- This is test design issue - tests should create timer first, then delete
+
+NO NETFLIX ERROR YET - still monitoring
