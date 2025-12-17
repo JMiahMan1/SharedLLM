@@ -2023,7 +2023,6 @@ async def handle_media_command(
                        if tv_state in ["off", "standby", "unavailable"]:
                             log.info(f"[SmartPowerSync] Sibling TV {tv_sibling} is OFF. Turning ON to support Cast Playback.")
                             await execute_ha_service("media_player", "turn_on", tv_sibling, user_creds, {}, redis_client)
-                            import asyncio
                             await asyncio.sleep(4) # Wait for TV boot
                   except Exception as e:
                        log.warning(f"SmartPowerSync failed for {tv_sibling}: {e}")

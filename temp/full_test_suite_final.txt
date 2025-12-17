@@ -1,0 +1,33 @@
+🚀 Launching Test Suite (9 scripts)...
+
+>>> STARTING test_system_admin.py (Log: temp/remote_test_system_admin.txt) <<<
+✅ PASS: test_system_admin.py (4.0s)
+
+>>> STARTING test_device_routes.py (Log: temp/remote_test_device_routes.txt) <<<
+✅ PASS: test_device_routes.py (2.0s)
+
+>>> STARTING test_media_api.py (Log: temp/remote_test_media_api.txt) <<<
+❌ FAIL: test_media_api.py (2.0s) - Exit Code: 1
+--- LOG TAIL ---
+Media Routing Tests - ACTUAL STATE VERIFICATION
+API: http://192.168.2.211:11435
+Entity: media_player.office_tv_chrome_2
+============================================================
+
+[94m[INFO][0m TEST 1: Turn On Device
+Initial state: off
+Command: 'Turn on Office TV'
+Response (1.14s): Done....
+[91m[FAIL][0m Device did not turn on! State: off
+
+----------------
+
+>>> STARTING test_timers.py (Log: temp/remote_test_timers.txt) <<<
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/integration/run_all_remote.py", line 111, in <module>
+    main()
+    ~~~~^^
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/integration/run_all_remote.py", line 79, in main
+    time.sleep(2)
+    ~~~~~~~~~~^^^
+KeyboardInterrupt

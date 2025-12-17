@@ -1,0 +1,90 @@
+Traceback (most recent call last):
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/backend/hface.py", line 1323, in endheaders
+    self._protocol.submit_headers(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._stream_id,
+        ^^^^^^^^^^^^^^^^
+        self.__headers,
+        ^^^^^^^^^^^^^^^
+        end_stream=should_end_stream,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/contrib/hface/protocols/http1/_h11.py", line 184, in submit_headers
+    self._h11_submit(headers_to_request(headers))
+                     ~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/contrib/hface/protocols/http1/_h11.py", line 91, in headers_to_request
+    return h11.Request(
+           ~~~~~~~~~~~^
+        method=method,  # type: ignore[arg-type]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        headers=regular_headers,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+        target=target,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/usr/lib/python3.14/site-packages/h11/_events.py", line 96, in __init__
+    self, "headers", normalize_and_validate(headers, _parsed=_parsed)
+                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/h11/_headers.py", line 166, in normalize_and_validate
+    validate(_field_value_re, value, "Illegal header value {!r}", value)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/h11/_util.py", line 91, in validate
+    raise LocalProtocolError(msg)
+h11._util.LocalProtocolError: Illegal header value b'Bearer '
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1811, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/util/retry.py", line 499, in increment
+    raise reraise(type(error), error, _stacktrace)
+          ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/util/util.py", line 39, in reraise
+    raise value
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1733, in urlopen
+    response = self._make_request(  # type: ignore[call-overload,misc]
+        conn,
+    ...<15 lines>...
+        extension=extension,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1304, in _make_request
+    rp = conn.request(
+        method,
+    ...<7 lines>...
+        on_upload_body=on_upload_body,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 506, in request
+    rp = self.endheaders(expect_body_afterward=chunks is not None)
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/backend/hface.py", line 1330, in endheaders
+    raise ProtocolError(e) from e  # Defensive:
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.ProtocolError: Illegal header value b'Bearer '
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 6, in <module>
+    resp = requests.get(f'{HA_URL}/api/states', headers=headers, timeout=10)
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 73, in get
+    return request("get", url, params=params, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 659, in send
+    raise ConnectionError(err, request=request)
+requests.exceptions.ConnectionError: Illegal header value b'Bearer '

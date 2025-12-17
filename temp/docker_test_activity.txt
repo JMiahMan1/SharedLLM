@@ -1,0 +1,19 @@
+2025-12-15 22:11:21,515 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 22:11:21,517 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop', 'device_name': 'Office TV'}}
+2025-12-15 22:11:21,518 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV' (Music Mode: False)
+2025-12-15 22:11:21,518 [INFO] DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='stop' Multiple=True
+2025-12-15 22:11:21,534 [INFO] DEBUG: Search returned 30 docs.
+2025-12-15 22:11:21,534 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome_2', metadata={'capabilities': 'turn_off,play_media,turn_on', 'group_id': 'media_player.office_tv_chrome_2', 'group_name': '', 'attributes': '{"volume_level": 0.56, "media_content_type": "music", "app_id": "music_assistant", "shuffle": false, "repeat": "off", "entity_picture_local": "/api/media_player_proxy/media_player.office_tv_chrome_2?token=8da853e7a335fb5414a27725cc4d10e8b282e3dc6a6ca27389b37a1f6ce9e34c&cache=6bdf4d1f8c6d1564", "mass_player_type": "player", "active_queue": "media_player.office_tv_chrome", "device_class": "speaker", "entity_picture": "https://github.com/music-assistant/server/blob/dev/music_assistant/logo.png", "icon": "mdi:speaker", "friendly_name": "Office TV", "supported_features": 7796671}', 'integration': 'cast', 'state': 'playing', 'domain': 'media_player', 'friendly_name': 'Office TV', 'source': 'home_assistant', 'last_updated': '711920.47', 'entity_id': 'media_player.office_tv_chrome_2'}, page_content="Office TV (media_player.office_tv_chrome_2) is a cast device in group ''. Can turn off. Can play media."), 0.8801791071891785)
+2025-12-15 22:11:21,534 [INFO] match found in Group: media_player.office_tv_chrome_2 (via Office TV (media_pla...)
+2025-12-15 22:11:21,536 [INFO] Group media_player.office_tv_chrome_2 has 1 members.
+2025-12-15 22:11:21,536 [INFO] Capability Routing used media_player.office_tv_chrome_2 (cast) for intent stop
+2025-12-15 22:11:21,536 [INFO] [Device Fallback] Resolved 'Office TV' to media_player.office_tv_chrome_2
+2025-12-15 22:11:21,536 [INFO] Sanitized intent from 'stop' to 'stop_media'
+2025-12-15 22:11:21,536 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': "Media command 'stop_media' could not be executed.", 'entity_id': 'media_player.office_tv_chrome_2', 'service': 'stop_media'}]
+2025-12-15 22:11:21,537 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'stop_media' on 'media_player.office_tv_chrome_2' failed. Reason: Media command 'stop_media' could not be executed.
+
+2025-12-15 22:11:21,537 [INFO] DEBUG: Checking Simple Intent 'stop_media' for silent mode. Results: 1
+2025-12-15 22:11:21,537 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2629
+2025-12-15 22:11:21,539 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434

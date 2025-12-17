@@ -1,0 +1,50 @@
+2025-12-16 20:05:52,944 [INFO] Resolution: Skipping binary_sensor.tv_connectivity for intent 'stop_media' because domain 'binary_sensor' is not a media player or remote.
+2025-12-16 20:05:52,944 [INFO] Resolution: Skipping light.office_jarvis_status_led_bar for intent 'stop_media' because domain 'light' is not a media player or remote.
+2025-12-16 20:05:52,944 [INFO] match found in Group: askey:sti6140d360:office (via Office TV (media_pla...)
+2025-12-16 20:05:52,945 [INFO] Group askey:sti6140d360:office has 4 members.
+2025-12-16 20:05:52,945 [INFO] Capability Routing used media_player.office_tv_chrome_2 (cast) for intent stop_media
+2025-12-16 20:05:52,945 [INFO] [Device Fallback] Resolved 'Office TV' to media_player.office_tv_chrome_2
+2025-12-16 20:05:52,964 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:52,991 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1072
+2025-12-16 20:05:52,994 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:53,024 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1072
+2025-12-16 20:05:53,025 [INFO] Transport Short Circuit: Device media_player.office_tv_chrome_2 is active, proceeding directly.
+2025-12-16 20:05:53,026 [INFO] [_execute_transport_command] Intent='stop_media' Entity='media_player.office_tv_chrome_2'
+2025-12-16 20:05:53,027 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:53,045 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1072
+2025-12-16 20:05:53,047 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:53,072 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1072
+2025-12-16 20:05:53,074 [INFO] EXEC HA: media_player.media_stop on media_player.office_tv_chrome_2 | Data: {}
+2025-12-16 20:05:53,075 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:53,148 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/media_stop HTTP/1.1" 200 655
+2025-12-16 20:05:53,218 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 20:05:54,208 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:55,026 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1070
+2025-12-16 20:05:56,137 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:56,159 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1070
+2025-12-16 20:05:57,269 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:57,337 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1070
+2025-12-16 20:05:58,401 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:58,423 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1070
+2025-12-16 20:05:59,527 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:59,558 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1070
+2025-12-16 20:05:59,749 [INFO] Executing Web Search for: Pause Office TV
+2025-12-16 20:05:59,756 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-16 20:05:59,866 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 20:05:59,906 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49336
+/opt/conda/lib/python3.11/json/decoder.py:353: ResourceWarning: unclosed <socket.socket fd=51, family=2, type=1, proto=6, laddr=('172.24.0.3', 34482), raddr=('192.168.1.161', 11434)>
+  obj, end = self.scan_once(s, idx)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+2025-12-16 20:06:04,267 [DEBUG] https://search.sumemail.com:443 "GET /search?q=Pause+Office+TV&format=json HTTP/2.0" 200 9137
+2025-12-16 20:06:04,278 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=5164
+2025-12-16 20:06:04,281 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 20:06:18,302 [DEBUG] [RESPONSE] Final response to user (249 chars): The Office TV is currently on. To launch YouTube, use the remote to navigate to the YouTube app or visit YouTube.com via the TV's browser. If the app isn't installed, you'll need to download it first. Let me know if you'd like step-by-step guidance!
+2025-12-16 20:06:18,302 [DEBUG] [RESPONSE] Returning to client: The Office TV is currently on. To launch YouTube, use the remote to navigate to the YouTube app or visit YouTube.com via the TV's browser. If the app isn't installed, you'll need to download it first.
+INFO:     192.168.2.1:36630 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-16 20:06:18,617 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 20:06:28,912 [DEBUG] [RESPONSE] Final response to user (141 chars): Pausing the Office TV requires using the remote to send a pause command. I'll instruct the remote to pause the TV. Pausing the Office TV now.
+2025-12-16 20:06:28,913 [DEBUG] [RESPONSE] Returning to client: Pausing the Office TV requires using the remote to send a pause command. I'll instruct the remote to pause the TV. Pausing the Office TV now.
+INFO:     192.168.2.1:36638 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-16 20:06:34,006 [DEBUG] Intent Match: 'Resume Office TV' -> 'play_media' (0.55) via 'start the tv'
+2025-12-16 20:06:34,007 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=4246
+2025-12-16 20:06:34,008 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
