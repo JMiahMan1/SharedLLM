@@ -1990,10 +1990,7 @@ async def handle_media_command(
              from app.settings import GlobalResources
              
              # 1. Get metadata for current entity to find its group
-             current_meta = await run_blocking(lambda: next(
-                 (d.metadata for d in GlobalResources.ha_collection.get(ids=[entity_id])["ids"] 
-                  if GlobalResources.ha_collection.get(ids=[entity_id])["metadatas"]), None)
-             )
+             current_meta = None
              
              # Fix: .get() structure from Chroma is complex {ids: [], metadatas: []}
              # Let's try a safer fetch or just similarity search by ID to get the doc
