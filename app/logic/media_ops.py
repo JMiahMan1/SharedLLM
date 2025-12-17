@@ -1058,6 +1058,13 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
             if domain == "media_player":
                 score += 100
                 if "cast" in integration: score += 10 # Slight pref for Cast as it is robust for status
+
+                # Boost TV devices when query mentions TV
+                if "tv" in q_lower and ("androidtv" in integration or "tv" in eid.lower()):
+                    score += 50
+                # Deprioritize speakers when query mentions TV
+                if "tv" in q_lower and ("speaker" in eid.lower() or device_class == "speaker"):
+                    score -= 30
             elif domain == "remote":
                  score -= 50 # Remotes often don't support direct media_pause service calls
         
