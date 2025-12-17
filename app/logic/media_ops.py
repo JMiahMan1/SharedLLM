@@ -1381,7 +1381,7 @@ async def handle_media_command(
     # 3. TRANSPORT REDIRECTION
     log.info(f"[DEBUG_TRANSPORT] Checking Redirection: intent='{intent}' is_transport={is_transport} entity={entity_id}")
     if is_transport:
-        log.info("[DEBUG_TRANSPORT] Entered Transport Redirection Block")
+        log.info(f"[DEBUG_TRANSPORT] Entered Transport Redirection Block for {intent}")
 
         # For transport commands, prioritize: last media entity > active devices > resolved entity
         last_media = get_last_media_entity(redis_client, user_creds.get("user"))
