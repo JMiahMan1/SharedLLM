@@ -544,6 +544,7 @@ async def generate_rag_stream(
             "volume_down", "volume_set", "volume_mute", "timer_add",
             "alarm_add", "timer_delete", "timer_pause", "timer_resume",
             "calendar_add", "calendar_delete", "calendar_update",
+            "dim", "brighten", "set_brightness", "set_color",
             "note_add", "note_append", "note_delete",
             "timer_list", "calendar_list", "calendar_read", "note_list", "note_read", 
             "music_list", "list_playlists", "list_radio"

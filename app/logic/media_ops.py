@@ -198,14 +198,19 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
                         capabilities["has_brightness"] = bool(features & 1)
                         capabilities["has_color_temp"] = bool(features & 2)
                         capabilities["has_color"] = bool(features & 16)
-                        
+
                         # Parse color_modes if present
                         if "supported_color_modes" in metadata:
                             color_modes = json.loads(metadata["supported_color_modes"])
                             capabilities["color_modes"] = color_modes
+                            log.debug(f"[CAPABILITY] ChromaDB color_modes for {entity_id}: {color_modes}")
                             # Override has_color based on color_modes (more authoritative)
                             capabilities["has_color"] = any(m in color_modes for m in ["rgb", "hs", "xy", "rgbw", "rgbww"])
                             capabilities["has_color_temp"] = "color_temp" in color_modes
+                            # If light has color modes, it almost certainly supports brightness
+                            if color_modes:
+                                capabilities["has_brightness"] = True
+                                log.debug(f"[CAPABILITY] ChromaDB set has_brightness=True for {entity_id}")
                     
                     elif capabilities["domain"] == "media_player":
                         capabilities["has_pause"] = bool(features & 1)
@@ -272,12 +277,25 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
             capabilities["has_brightness"] = bool(features & 1)
             capabilities["has_color_temp"] = bool(features & 2)
             capabilities["has_color"] = bool(features & 16)
-            capabilities["color_modes"] = attrs.get("supported_color_modes", [])
-            
+            raw_color_modes = attrs.get("supported_color_modes", [])
+            log.debug(f"[CAPABILITY] Raw supported_color_modes for {entity_id}: {raw_color_modes} (type: {type(raw_color_modes)})")
+            capabilities["color_modes"] = raw_color_modes
+
+            # Additional brightness detection: if light has brightness attribute, it supports brightness
+            if "brightness" in attrs:
+                capabilities["has_brightness"] = True
+                log.debug(f"[CAPABILITY] Set has_brightness=True for {entity_id} due to brightness attribute: {attrs['brightness']}")
+
             # If color_modes is present, it's more authoritative
+            log.debug(f"[CAPABILITY] Checking color_modes for {entity_id}: {capabilities.get('color_modes')} (truthy: {bool(capabilities.get('color_modes'))})")
             if capabilities["color_modes"]:
+                log.debug(f"[CAPABILITY] Applying color_modes logic for {entity_id}")
                 capabilities["has_color"] = any(m in capabilities["color_modes"] for m in ["rgb", "hs", "xy", "rgbw", "rgbww"])
                 capabilities["has_color_temp"] = "color_temp" in capabilities["color_modes"]
+                # If light has color modes, it almost certainly supports brightness
+                capabilities["has_brightness"] = True
+                log.debug(f"[CAPABILITY] Set has_brightness=True for {entity_id} due to color_modes: {capabilities['color_modes']}")
+                log.debug(f"[CAPABILITY] Set has_brightness=True for {entity_id} due to color_modes: {capabilities['color_modes']}")
         
         # Media Player-specific capability detection
         elif capabilities["domain"] == "media_player":
@@ -1544,14 +1562,22 @@ async def handle_media_command(
         log.debug(f"[COLOR/BRIGHTNESS] Capabilities retrieved for {entity_id}")
         friendly_name = caps.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title())
         
-        # Validate color support
+        # Validate capability support
         if intent == "set_color":
             if not caps.get("has_color") and not caps.get("has_color_temp"):
                 return [{
-                    "status": "FAILURE", 
+                    "status": "FAILURE",
                     "message": f"{friendly_name} doesn't support color control. It's a simple on/off or brightness-only light.",
-                    "entity_id": entity_id, 
+                    "entity_id": entity_id,
                     "service": "set_color"
+                }]
+        elif intent in ["dim", "brighten", "set_brightness"]:
+            if not caps.get("has_brightness"):
+                return [{
+                    "status": "FAILURE",
+                    "message": f"{friendly_name} doesn't support brightness control. It's an on/off only light.",
+                    "entity_id": entity_id,
+                    "service": "set_brightness"
                 }]
             
             # Parse requested color
