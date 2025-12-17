@@ -69,21 +69,6 @@ REGEX_INTENT_MAP = {
     r"\b(brightness|bright)\b": "set_brightness",
 }
 
-# Color name to RGB mapping
-COLOR_MAP = {
-    "red": [255, 0, 0],
-    "green": [0, 255, 0],
-    "blue": [0, 0, 255],
-    "yellow": [255, 255, 0],
-    "orange": [255, 165, 0],
-    "purple": [128, 0, 128],
-    "pink": [255, 192, 203],
-    "white": [255, 255, 255],
-    "warm white": [255, 220, 180],
-    "cool white": [200, 220, 255],
-    "cyan": [0, 255, 255],
-    "magenta": [255, 0, 255],
-}
 
 # --------------------------------------
 def _get_last_entity_key(user: str) -> str:
@@ -1556,86 +1541,8 @@ async def handle_media_command(
     # COLOR & BRIGHTNESS CONTROL
     # -------------------------------------------------
     if intent in ["set_color", "set_brightness", "dim", "brighten"]:
-        log.info(f"[COLOR/BRIGHTNESS] ENTERING brightness/color handling for intent='{intent}' entity={entity_id} domain={domain}")
-
-        if domain != "light":
-            log.info(f"[COLOR/BRIGHTNESS] Rejecting {intent} for non-light device {entity_id} (domain={domain})")
-            return [{"status": "FAILURE", "message": f"Color/brightness control only works with lights, not {domain} devices.", "entity_id": entity_id, "service": intent}]
-        
-        # Fetch device capabilities
-        log.debug(f"[COLOR/BRIGHTNESS] Fetching capabilities for {entity_id}...")
-        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-        log.debug(f"[COLOR/BRIGHTNESS] Capabilities retrieved for {entity_id}")
-        friendly_name = caps.get("friendly_name", entity_id.split('.')[-1].replace('_', ' ').title())
-        
-        # Validate capability support
-        if intent == "set_color":
-            if not caps.get("has_color") and not caps.get("has_color_temp"):
-                return [{
-                    "status": "FAILURE",
-                    "message": f"{friendly_name} doesn't support color control. It's a simple on/off or brightness-only light.",
-                    "entity_id": entity_id,
-                    "service": "set_color"
-                }]
-        # Handle brightness commands
-        elif intent in ["set_brightness", "dim", "brighten"]:
-            if not caps.get("has_brightness"):
-                return [{
-                    "status": "FAILURE",
-                    "message": f"{friendly_name} is an on/off only light and doesn't support brightness control.",
-                    "entity_id": entity_id,
-                    "service": "set_brightness"
-                }]
-            
-            brightness = None
-
-            # First, check if brightness was provided by orchestrator
-            if brightness:
-                log.debug(f"[BRIGHTNESS] Using orchestrator brightness: '{brightness}'")
-                if isinstance(brightness, str):
-                    if brightness.endswith('%'):
-                        pct = int(brightness.rstrip('%'))
-                        brightness = int((pct / 100.0) * 255)
-                        log.debug(f"[BRIGHTNESS] Converted {pct}% to brightness {brightness}")
-                    else:
-                        # Assume it's already a numeric value
-                        brightness = int(brightness)
-                        log.debug(f"[BRIGHTNESS] Using numeric brightness {brightness}")
-                else:
-                    brightness = int(brightness)
-            else:
-                # Fallback to parsing from query text
-                log.debug(f"[BRIGHTNESS] Parsing brightness from query: '{query}'")
-                pct_match = re.search(r"(\d+)\s*%", query)
-                if pct_match:
-                    pct = int(pct_match.group(1))
-                    brightness = int((pct / 100.0) * 255)
-                    log.debug(f"[BRIGHTNESS] Found percentage {pct}%, setting brightness to {brightness}")
-                else:
-                    log.debug(f"[BRIGHTNESS] No percentage found in query")
-
-            # Relative adjustments (only if no percentage found)
-            if brightness is None:
-                if intent == "dim":
-                    brightness = 70  # ~30% brightness
-                elif intent == "brighten":
-                    brightness = 255  # Max brightness
-            
-            if brightness is None:
-                brightness = 128  # Default to 50%
-            
-            service = "turn_on"
-            service_data = {"brightness": max(1, min(255, brightness))}
-            log.info(f"Setting {entity_id} brightness to {brightness}")
-
-        else:
-            # This should not happen - fallback
-            log.error(f"[BRIGHTNESS] No brightness logic matched for intent {intent}, falling back to generic service")
-            service = intent  # This will fail, but shows the issue
-            service_data = {}
-
-        log.info(f"[BRIGHTNESS] Executing {domain}.{service} with data {service_data}")
-        return [await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)]
+        from app.logic.light_ops import handle_light_command
+        return await handle_light_command(intent, query, entity_id, user_creds, redis_client)
 
     # -------------------------------------------------
     # POWER, NAVIGATION
