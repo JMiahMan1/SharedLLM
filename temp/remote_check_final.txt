@@ -1,0 +1,26 @@
+
+        # Helper to get current state
+        async def get_state(eid):
+            if not eid: return "unknown"
+            s = await get_ha_state(eid, user_creds, redis_client)
+            return s.get("state", "unknown") if s else "unknown"
+
+        initial_state = await get_state(entity_id)
+
+        if initial_state in ["off", "unavailable"]:
+            await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
+        # --- SMART SWAP: Group-Based Sibling Lookup ---
+        # If we have a TV/Cast entity, try to find the "Music Assistant" or "Speaker" sibling in the SAME GROUP.
+        if ctype != "video" and "music_assistant" not in integration:
+             from app.settings import GlobalResources
+             
+             # 1. Get metadata for current entity to find its group
+             current_meta = await run_blocking(lambda: next(
+                 (d.metadata for d in GlobalResources.ha_collection.get(ids=[entity_id])["ids"] 
+                  if GlobalResources.ha_collection.get(ids=[entity_id])["metadatas"]), None)
+             )
+             
+             # Fix: .get() structure from Chroma is complex {ids: [], metadatas: []}
+             # Let's try a safer fetch or just similarity search by ID to get the doc
+             try:
+                 # Fetch doc by ID to get metadata
