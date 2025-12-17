@@ -62,7 +62,7 @@ REGEX_INTENT_MAP = {
     r"\bgo home\b|\bhome\b": "nav_home",
     r"\bselect\b|\benter\b|\bok\b": "nav_enter",
     # Color control: matches "set/change/make X color" OR "turn X to color"
-    r"\b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
+    r"\b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm white|cool white|warm|cool)": "set_color",
     r"\bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
     r"\b(dim|darken|lower)\b": "dim",
     r"\b(brighten|brighter|increase)\b": "brighten",
