@@ -1347,6 +1347,14 @@ async def handle_media_command(
                 integration = None
                 if entity_id:
                     log.info(f"[Transport] Using last media entity for skipped resolution: {entity_id}")
+                    # Get integration from capabilities
+                    try:
+                        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+                        integration = caps.get("integration", "unknown")
+                        log.info(f"[Transport] Got integration '{integration}' for {entity_id}")
+                    except Exception as e:
+                        log.warning(f"[Transport] Failed to get integration for {entity_id}: {e}")
+                        integration = "unknown"
                 else:
                     log.info("[Transport] No last media entity found for skipped resolution")
                     entity_id, integration = None, None
