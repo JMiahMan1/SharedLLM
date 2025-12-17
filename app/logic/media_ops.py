@@ -2075,7 +2075,16 @@ async def handle_media_command(
         # We use a flag to track if MA handled it successfully. If not, we fall through to standard logic.
         ma_handled = False
         
-        if "music_assistant" in integration:
+        # Check integration OR attributes for MA capability
+        # office_tv_chrome_2 has 'mass_player_type' in attributes but 'cast' integration
+        is_ma_device = "music_assistant" in integration
+        if not is_ma_device and current_meta:
+             attrs_str = str(current_meta.get("attributes", "")).lower()
+             if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
+                 is_ma_device = True
+                 log.info(f"Identified {entity_id} as MA device via attributes.")
+
+        if is_ma_device:
             try:
                 from app.logic.music_assistant_ops import play_media as ma_play_media
                 log.info(f"Delegating Music Assistant Play on {entity_id} to music_assistant_ops")
