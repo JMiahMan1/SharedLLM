@@ -296,11 +296,15 @@ async def handle_light_command(intent: str, query: str, entity_id: str, user_cre
                 "service": "set_color"
             }]
         
-        # Parse color from COLOR_MAP
+        # Parse color from COLOR_MAP (find longest/best match)
         color_found = None
         color_name_found = None
         q_low = query.lower()
-        for color_name, rgb in COLOR_MAP.items():
+
+        # Sort colors by length (longest first) to prefer "warm white" over "white"
+        sorted_colors = sorted(COLOR_MAP.items(), key=lambda x: len(x[0]), reverse=True)
+
+        for color_name, rgb in sorted_colors:
             if color_name in q_low:
                 color_found = rgb
                 color_name_found = color_name
