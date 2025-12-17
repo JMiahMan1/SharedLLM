@@ -220,7 +220,7 @@ async def _llm_orchestrator(
                 correction_prompt
                 + "\n"
                 + ORCHESTRATOR_PROMPT.format(
-                    query=query, intent_name=intent, intent_score=score
+                    query=query, intent_name=intent, intent_score=score, conversation_history=conversation_history
                 ),
                 model,
             )
