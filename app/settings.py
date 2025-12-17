@@ -137,7 +137,7 @@ Available Tools:
 7. 'timer_list' (List active timers/alarms)
 8. 'timer_pause' (Pause a timer)
 9. 'timer_resume' (Resume a timer)
-10. 'media_command' (Handle media/HA control, requires 'intent' and 'device_name')
+10. 'media_command' (Handle media/HA control. Requires 'intent' and 'device_name'. For play_media, can include 'media_title')
 11. 'intent_learn' (Teach the AI a new phrase mapping)
 12. 'web_search' (Use for factual/external queries, if no other tool applies)
 13. 'note_add' (Create a new note. Params: 'title', 'content')
@@ -153,6 +153,10 @@ CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Wake me up at 7" -> timer_add
 - "Schedule a meeting at 8am" -> calendar_add
 - "Add to my calendar" -> calendar_add
+
+MEDIA COMMAND EXAMPLES:
+- "Play Brandon Lake on the Office TV" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "play_media", "device_name": "Office TV", "media_title": "Brandon Lake"}}}}
+- "Turn on the living room light" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "turn_on", "device_name": "living room light"}}}}
 
 If the intent is a clear, confident action, generate the JSON for a tool call.
 If the query is conversational, informational, ambiguous, or requires the user's personal context/RAG (e.g., "What devices are in the office?", "Is the garage door open?"), output 'CONVERSE'.
