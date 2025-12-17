@@ -1389,6 +1389,70 @@ async def handle_media_command(
     service_data = {}
 
     # -------------------------------------------------
+    # SMART ROUTING: Music -> Speaker, Video/Power -> TV
+    # -------------------------------------------------
+    # We attempt to find a sibling entity if the resolved one doesn't match the desired device_class.
+    
+    desired_class = None
+    if intent in ["turn_on", "turn_off"]:
+        desired_class = "tv"
+    elif intent == "play_media":
+        # Check params to guess type
+        # simple heuristic: if 'youtube', 'netflix', 'video' in query or params -> TV
+        # if 'music', 'spotify', 'radio' -> SPEAKER
+        # This is strictly for ambiguous "Office TV" resolution.
+        q_lower = query.lower() if query else ""
+        if any(x in q_lower for x in ["video", "movie", "show", "watch", "youtube", "netflix"]):
+            desired_class = "tv"
+        elif any(x in q_lower for x in ["music", "song", "track", "listen", "play", "spotify"]):
+             desired_class = "speaker"
+
+    if desired_class:
+        # Check current entity class (we need state/attributes, efficiently)
+        # We'll use the sibling lookup logic we used in transport
+        
+        # 1. Identify base name and potential siblings
+        base_id = entity_id.replace("media_player.", "")
+        suffixes = ["_chrome_2", "_chrome", "_cast", "_2", "_speaker"]
+        for suffix in suffixes:
+            if base_id.endswith(suffix):
+                base_id = base_id.replace(suffix, "")
+                break
+        
+        # Potential Candidates
+        candidates = [
+            f"media_player.{base_id}",              # office_tv (TV)
+            f"media_player.{base_id}_chrome_2",     # office_tv_chrome_2 (Speaker)
+            f"media_player.{base_id}_chrome",
+            f"media_player.{base_id}_speaker"
+        ]
+        
+        target_sibling = None
+        current_is_desired = False # We'll assume false and check
+        
+        for cand in candidates:
+             try:
+                 s = await get_entity_state(cand, user_creds)
+                 # We assume:
+                 # Standard TV entity (Android Remote) name usually matches base_id or has no 'chrome/cast' suffix
+                 # Standard Speaker entity has 'chrome' or 'cast' or 'speaker' suffix
+                 
+                 is_speaker_cand = any(x in cand for x in ["chrome", "cast", "speaker"])
+                 is_tv_cand = not is_speaker_cand # Heuristic
+                 
+                 if desired_class == "tv" and is_tv_cand:
+                      if await get_entity_state(cand, user_creds) not in ["unavailable", "unknown", None]:
+                           target_sibling = cand
+                 elif desired_class == "speaker" and is_speaker_cand:
+                      if await get_entity_state(cand, user_creds) not in ["unavailable", "unknown", None]:
+                           target_sibling = cand
+             except: pass
+
+        if target_sibling and target_sibling != entity_id:
+             log.info(f"[SmartRoute] Swapping {entity_id} -> {target_sibling} for {desired_class} intent.")
+             entity_id = target_sibling
+
+    # -------------------------------------------------
     # COLOR & BRIGHTNESS CONTROL
     # -------------------------------------------------
     if intent in ["set_color", "set_brightness", "dim", "brighten"]:
