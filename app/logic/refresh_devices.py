@@ -40,17 +40,61 @@ async def refresh_db():
         log.error(f"Error fetching states: {e}")
         return
 
-    # 2. Filter Relevant Entities
+
+    # 2. Fetch Device Registry Data (Template API)
+    device_map = {}
+    try:
+        # Template to extract: entity_id|device_id|manufacturer|model
+        template = """
+        {% for state in states %}
+        {{ state.entity_id }}|{{ device_attr(state.entity_id, 'id') }}|{{ device_attr(state.entity_id, 'manufacturer') }}|{{ device_attr(state.entity_id, 'model') }}
+        {% endfor %}
+        """
+        
+        tmpl_resp = requests.post(
+            f"{ha_url.rstrip('/')}/api/template",
+            headers={"Authorization": f"Bearer {token}", "content-type": "application/json"},
+            json={"template": template},
+            timeout=15
+        )
+        
+        if tmpl_resp.status_code == 200:
+            lines = tmpl_resp.text.strip().split('\n')
+            for line in lines:
+                parts = line.split('|')
+                if len(parts) >= 4:
+                    eid = parts[0].strip()
+                    did = parts[1].strip()
+                    man = parts[2].strip()
+                    mod = parts[3].strip()
+                    
+                    if did == "None": did = None
+                    if man == "None": man = None
+                    if mod == "None": mod = None
+                    
+                    device_map[eid] = {
+                        "device_id": did,
+                        "manufacturer": man,
+                        "model": mod
+                    }
+            log.info(f"Built Device Map for {len(device_map)} entities.")
+        else:
+            log.warning(f"Failed to fetch Device Registry: {tmpl_resp.status_code}")
+            
+    except Exception as e:
+        log.warning(f"Error fetching Device Registry: {e}")
+
+    # 3. Filter Relevant Entities
     relevant = [
         e for e in all_states 
         if e["entity_id"].split(".")[0] in ["media_player", "remote", "light", "switch", "binary_sensor"]
     ]
     
-    # 3. Group
-    grouped_data = group_entities(relevant)
+    # 4. Group (Pass Device Map)
+    grouped_data = group_entities(relevant, device_map)
     log.info(f"Formed {len(grouped_data)} Device Groups.")
     
-    # 4. Prepare Documents
+    # 5. Prepare Documents
     docs = []
     
     for group_key, groupver in grouped_data.items():
@@ -62,7 +106,11 @@ async def refresh_db():
             eid = m["entity_id"]
             # m is the raw entity state dict from HA (passed via grouping)
             attrs = m.get("attributes", {})
-            integration = infer_integration(eid, attrs) 
+            
+            # Enrich with Registry Data for inference
+            reg_data = device_map.get(eid, {})
+            
+            integration = infer_integration(eid, attrs, reg_data.get("manufacturer"), reg_data.get("model")) 
             
             desc = f"{attrs.get('friendly_name', eid)} ({eid}) is a {integration} device in group '{fname}'."
             if "turn_off" in caps: desc += " Can turn off."
@@ -79,13 +127,15 @@ async def refresh_db():
                 "state": m.get("state", "unknown"),
                 "capabilities": ",".join(caps),
                 "attributes": json.dumps(attrs), # Store attributes for smart capability parsing
+                "manufacturer": reg_data.get("manufacturer") or "",
+                "model": reg_data.get("model") or "",
                 "last_updated": str(asyncio.get_event_loop().time()),
                 "source": "home_assistant"
             }
             
             docs.append(Document(page_content=desc, metadata=metadata, id=eid))
 
-    # 5. Update ChromaDB
+    # 6. Update ChromaDB
     db = GlobalResources.ha_collection 
     
     if docs and db:
