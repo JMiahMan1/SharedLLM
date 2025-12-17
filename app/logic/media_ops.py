@@ -2022,7 +2022,8 @@ async def handle_media_command(
                          s_name = meta.get("friendly_name", "").lower()
                          
                          # Check strict MA Capability (Source of Truth)
-                         is_ma = "music_assistant" in s_integ or "music_assistant" in s_attrs or "mass_player_type" in s_attrs
+                         # Must be explicitly 'music_assistant' integration or have 'mass_player_type'
+                         is_ma = "music_assistant" in s_integ or "mass_player_type" in s_attrs
                          
                          if is_ma:
                              score = 0
@@ -2030,7 +2031,6 @@ async def handle_media_command(
                              if "device_class': 'speaker'" in s_attrs:
                                  score += 5
                                  
-                             # NAME MATCH BOOST REPLACED BY DEVICE INFO MATCH
                              # Check if this candidate is physically the same device (Resulting in Model/Manufacturer match)
                              target_model = current_meta.get("model")
                              target_mfr = current_meta.get("manufacturer")
@@ -2043,14 +2043,24 @@ async def handle_media_command(
                                  score += 50 # Definitive Match (Same Hardware)
                              elif target_mfr and s_mfr and target_mfr == s_mfr:
                                  score += 10 # Likely matches (Same Brand)
+
+                             # Name Match Boost (Restored)
+                             target_name = current_meta.get("friendly_name", "").lower()
+                             if target_name and s_name:
+                                 if target_name in s_name or s_name in target_name:
+                                     score += 20
                                  
-                             candidates.append((score, s_id))
+                             # Strict Threshold: Only swap if we have a significant match (Model, Manufacturer, or Name)
+                             # Prevents swapping "Office TV" to "Office Speaker" (Score would be 0 or 5)
+                             if score >= 10:
+                                 candidates.append((score, s_id))
                  
                  # Pick best candidate
                  if candidates:
                      candidates.sort(key=lambda x: x[0], reverse=True)
                      best_ma_candidate = candidates[0][1]
-                     log.info(f"[Smart Swap] Candidates: {candidates}. Selected: {best_ma_candidate}")
+                     top_score = candidates[0][0]
+                     log.info(f"[Smart Swap] Candidates: {candidates}. Selected: {best_ma_candidate} (Score: {top_score})")
                  if best_ma_candidate:
                      log.info(f"[Smart Swap] Swapping {entity_id} -> {best_ma_candidate} (Group: {group_name})")
                      entity_id = best_ma_candidate
