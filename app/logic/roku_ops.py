@@ -12,7 +12,7 @@ async def launch_app(entity_id: str, app_name_or_id: str, user_creds: dict, redi
     # AUTO-POWER-ON: Check if device is off and turn it on first
     try:
         from app.logic.media_ops import get_entity_state
-        state_data = await get_entity_state(entity_id, user_creds, redis_client)
+        state_data = await get_entity_state(entity_id, user_creds)
         
         if state_data and state_data.get('state') == 'off':
             log.info(f"[Auto-Power-On] Device {entity_id} is OFF. Turning on before app launch...")
