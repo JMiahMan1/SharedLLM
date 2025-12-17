@@ -1136,7 +1136,12 @@ async def handle_media_command(
     if intent not in MEDIA_INTENTS:
         original_intent = intent
         intent_lower = intent.lower()
-        if "resume" in intent_lower or "unpause" in intent_lower:
+
+        # Check if it's already a transport intent
+        transport_intents = ["media_next", "media_previous", "stop_media", "media_pause", "media_play", "resume"]
+        if intent in transport_intents:
+            pass  # Keep transport intents as-is
+        elif "resume" in intent_lower or "unpause" in intent_lower:
             intent = "media_play"
         elif "play" in intent_lower:
             intent = "play_media"
