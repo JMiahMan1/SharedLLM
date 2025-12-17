@@ -104,12 +104,18 @@ def _get_last_media_entity_key(user: str) -> str:
 
 def _set_last_media_entity(redis_client, user: str, entity_id: str):
     if redis_client and entity_id and entity_id.startswith("media_player."):
-        redis_client.setex(_get_last_media_entity_key(user), 86400, entity_id)
+        key = _get_last_media_entity_key(user)
+        log.info(f"[LAST MEDIA ENTITY] Setting {key} = {entity_id}")
+        redis_client.setex(key, 86400, entity_id)
 
 def get_last_media_entity(redis_client, user: str) -> str:
     if redis_client:
-        val = redis_client.get(_get_last_media_entity_key(user))
-        return val.decode('utf-8') if isinstance(val, bytes) else val
+        key = _get_last_media_entity_key(user)
+        val = redis_client.get(key)
+        result = val.decode('utf-8') if isinstance(val, bytes) else val
+        log.info(f"[LAST MEDIA ENTITY] Getting {key} = {result}")
+        return result
+    log.info(f"[LAST MEDIA ENTITY] No redis client")
     return None
 
 async def get_entity_state(entity_id: str, user_creds: dict) -> str:
