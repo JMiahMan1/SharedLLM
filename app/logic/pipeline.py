@@ -345,6 +345,7 @@ async def _handle_single_command(
     try:
         # Get conversation history for contextualization
         from .utils import get_history_context
+        user = user_creds.get("user", "default")
         conversation_history = get_history_context(user)
         history_text = ""
         if conversation_history:
