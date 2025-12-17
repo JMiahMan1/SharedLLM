@@ -1218,7 +1218,6 @@ async def handle_media_command(
 
              # AUTO-POWER-ON: Check if device is off and turn it on first
              try:
-                 from app.logic.media_ops import get_entity_state
                  state_data = await get_entity_state(entity_id, user_creds)
                  
                  if state_data and state_data == 'off':
@@ -1351,7 +1350,6 @@ async def handle_media_command(
         else:
             # AUTO-POWER-ON: Check if device is off and turn it on first
             try:
-                from app.logic.media_ops import get_entity_state
                 state_data = await get_entity_state(entity_id, user_creds)
                 
                 if state_data == "off":
