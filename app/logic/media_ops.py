@@ -2228,7 +2228,7 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
         # CRITICAL FIX: Ensure Audio is Playing before Volume Change
         # User Feedback: "audio must be playing to change volume"
         curr_state = await get_entity_state(target_entity, user_creds)
-        if curr_state not in ["playing", "paused", "buffering", "on"]: # 'on' accepted as some amps report 'on'
+        if curr_state not in ["playing", "on"]: # Strict 'playing' check as requested
              log.warning(f"[Volume] Skipping volume change on {target_entity} because state is {curr_state} (not playing).")
              return {"status": "FAILURE", "message": f"Volume cannot be changed because {target_entity} is not playing audio (State: {curr_state}).", "entity_id": target_entity}
 
