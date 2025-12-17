@@ -2209,7 +2209,6 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     # Fallback to generic service call if intent matches a service name (e.g. media_stop)
     # But usually mapped above.
     return await execute_ha_service("media_player", intent, entity_id, user_creds, {}, redis_client)
-            )
-            return result
+
 
     return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
