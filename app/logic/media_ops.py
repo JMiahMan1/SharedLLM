@@ -1058,13 +1058,6 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
             if domain == "media_player":
                 score += 100
                 if "cast" in integration: score += 10 # Slight pref for Cast as it is robust for status
-
-                # Boost TV devices when query mentions TV
-                if "tv" in q_lower and ("androidtv" in integration or "tv" in eid.lower()):
-                    score += 50
-                # Deprioritize speakers when query mentions TV
-                if "tv" in q_lower and ("speaker" in eid.lower() or device_class == "speaker"):
-                    score -= 30
             elif domain == "remote":
                  score -= 50 # Remotes often don't support direct media_pause service calls
         
@@ -1389,14 +1382,16 @@ async def handle_media_command(
     log.info(f"[DEBUG_TRANSPORT] Checking Redirection: intent='{intent}' is_transport={is_transport} entity={entity_id}")
     if is_transport:
         log.info("[DEBUG_TRANSPORT] Entered Transport Redirection Block")
-        should_scan = False
-        if not entity_id:
-            # First try to get the last media entity used
-            last_media = get_last_media_entity(redis_client, user_creds.get("user"))
-            if last_media:
-                log.info(f"[Transport] Using last media entity: {last_media}")
-                entity_id = last_media
-            else:
+
+        # For transport commands, always prioritize the last media entity
+        last_media = get_last_media_entity(redis_client, user_creds.get("user"))
+        if last_media:
+            log.info(f"[Transport] Using last media entity: {last_media} (ignoring query device)")
+            entity_id = last_media
+            should_scan = False
+        else:
+            should_scan = False
+            if not entity_id:
                 should_scan = True
         else:
             # AUTO-POWER-ON: Check if device is off and turn it on first
