@@ -312,56 +312,57 @@ async def handle_light_command(intent: str, query: str, entity_id: str, user_cre
         # Smart mode selection based on device capabilities
         service = "turn_on"
         color_modes = caps.get("color_modes", [])
-        
-        # Check for any RGB variant (rgb, rgbw, rgbww)
-        has_rgb_mode = any(mode.startswith("rgb") for mode in color_modes)
-        if caps.get("has_color") and has_rgb_mode:
-            # Full RGB color support (works for rgb, rgbw, rgbww modes)
-            service_data = {"rgb_color": color_found}
-            log.info(f"Setting {entity_id} to RGB {color_found}")
-        
-        elif caps.get("has_color") and "hs" in color_modes:
-            # HS color mode (convert RGB to HS)
-            r, g, b = [x/255.0 for x in color_found]
-            max_c = max(r, g, b)
-            min_c = min(r, g, b)
-            diff = max_c - min_c
-            
-            # Hue calculation
-            if diff == 0:
-                h = 0
-            elif max_c == r:
-                h = (60 * ((g - b) / diff) + 360) % 360
-            elif max_c == g:
-                h = (60 * ((b - r) / diff) + 120) % 360
-            else:
-                h = (60 * ((r - g) / diff) + 240) % 360
-            
-            # Saturation calculation
-            s = 0 if max_c == 0 else (diff / max_c) * 100
-            
-            service_data = {"hs_color": [h, s]}
-            log.info(f"Setting {entity_id} to HS [{h:.1f}, {s:.1f}]")
-        
-        elif caps.get("has_color_temp"):
-            # Color temperature mode (map common colors to temperature)
-            temp_map = {
-                "warm white": 2700,
-                "warm": 2700,
-                "soft white": 3000,
-                "white": 4000,
-                "cool white": 5000,
-                "cool": 5000,
-                "daylight": 5500
-            }
-            if color_name_found in temp_map:
-                service_data = {"color_temp_kelvin": temp_map[color_name_found]}
-                log.info(f"Setting {entity_id} to {color_name_found} ({temp_map[color_name_found]}K)")
-            else:
-                return [{"status": "FAILURE", "message": f"{friendly_name} supports color temperature but not RGB colors. Try: warm white, white, cool white, etc.", "entity_id": entity_id, "service": "set_color"}]
-        
+
+        # First, check if this is a temperature-based color (warm white, cool white, etc.)
+        temp_map = {
+            "warm white": 2700,
+            "warm": 2700,
+            "soft white": 3000,
+            "white": 4000,
+            "cool white": 5000,
+            "cool": 5000,
+            "daylight": 5500
+        }
+
+        if color_name_found in temp_map and caps.get("has_color_temp"):
+            # Use color temperature for white variants
+            service_data = {"color_temp_kelvin": temp_map[color_name_found]}
+            log.info(f"Setting {entity_id} to {color_name_found} ({temp_map[color_name_found]}K)")
+
         else:
-            return [{"status": "FAILURE", "message": f"{friendly_name} doesn't support the requested color mode.", "entity_id": entity_id, "service": "set_color"}]
+            # Check for RGB/HS color modes for actual colors
+            # Check for any RGB variant (rgb, rgbw, rgbww)
+            has_rgb_mode = any(mode.startswith("rgb") for mode in color_modes)
+            if caps.get("has_color") and has_rgb_mode:
+                # Full RGB color support (works for rgb, rgbw, rgbww modes)
+                service_data = {"rgb_color": color_found}
+                log.info(f"Setting {entity_id} to RGB {color_found}")
+
+            elif caps.get("has_color") and "hs" in color_modes:
+                # HS color mode (convert RGB to HS)
+                r, g, b = [x/255.0 for x in color_found]
+                max_c = max(r, g, b)
+                min_c = min(r, g, b)
+                diff = max_c - min_c
+
+                # Hue calculation
+                if diff == 0:
+                    h = 0
+                elif max_c == r:
+                    h = (60 * ((g - b) / diff) + 360) % 360
+                elif max_c == g:
+                    h = (60 * ((b - r) / diff) + 120) % 360
+                else:
+                    h = (60 * ((r - g) / diff) + 240) % 360
+
+                # Saturation calculation
+                s = 0 if max_c == 0 else (diff / max_c) * 100
+
+                service_data = {"hs_color": [h, s]}
+                log.info(f"Setting {entity_id} to HS [{h:.1f}, {s:.1f}]")
+
+            else:
+                return [{"status": "FAILURE", "message": f"{friendly_name} doesn't support the requested color mode.", "entity_id": entity_id, "service": "set_color"}]
         
         log.info(f"[COLOR] Executing {domain}.{service} with data {service_data}")
         return [await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)]
