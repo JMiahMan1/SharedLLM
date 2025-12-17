@@ -331,7 +331,11 @@ async def _handle_single_command(
                 result = await _execute_tool_action(
                     action_plan, query, user_creds, model
                 )
-                return [result] if result else None
+                # Result may already be a list (for handlers that return multiple results)
+                if isinstance(result, list):
+                    return result
+                else:
+                    return [result] if result else None
             except Exception as e:
                 log.error(f"[FAST ORCHESTRA] Failed: {e}")
                 # Fallback to LLM if fast path fails?
