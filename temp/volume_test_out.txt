@@ -1,7 +1,0 @@
-Testing Volume on media_player.office_tv_chrome_2
-Setting volume to 25%...
-Response: 400
-{"detail":"No query"}
-JSON Data: {
-  "detail": "No query"
-}
