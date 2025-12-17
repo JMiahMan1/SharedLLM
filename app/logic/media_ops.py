@@ -1330,7 +1330,13 @@ async def handle_media_command(
 
         if not cleaned_for_res:
             # THIS triggers the context memory retrieval
-            entity_id = get_last_entity(redis_client, user_creds.get("user"))
+            # For transport commands, prioritize last media entity
+            if is_transport:
+                entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
+                if not entity_id:
+                    entity_id = get_last_entity(redis_client, user_creds.get("user"))
+            else:
+                entity_id = get_last_entity(redis_client, user_creds.get("user"))
         else:
             resolved_result = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
             if isinstance(resolved_result, list):
