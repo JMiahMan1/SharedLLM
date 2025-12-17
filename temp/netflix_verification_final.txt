@@ -1,6 +1,0 @@
-2025-12-15 21:55:39,292 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2613
-2025-12-15 21:55:39,295 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
-2025-12-15 21:55:45,217 [DEBUG] [RESPONSE] Final response to user (230 chars): The Office TV devices are currently off. I'll turn on the 28 TCL Roku TV first, as it's the primary device for streaming. Once it's on, you can open the Netflix app directly from the TV's home screen. Would you like me to proceed?
-2025-12-15 21:55:45,218 [DEBUG] [RESPONSE] Returning to client: The Office TV devices are currently off. I'll turn on the 28 TCL Roku TV first, as it's the primary device for streaming. Once it's on, you can open the Netflix app directly from the TV's home screen.
-INFO:     192.168.2.1:56488 - "POST /api/chat HTTP/1.1" 200 OK
-2025-12-15 21:55:45,278 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
