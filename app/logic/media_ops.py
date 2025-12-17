@@ -1970,9 +1970,26 @@ async def handle_media_command(
         if not clean_title:
              return {"status": "FAILURE", "message": "I understood the device, but not what to play. Please specify content.", "entity_id": entity_id, "service": "media_command"}
 
-        state = await get_entity_state(entity_id, user_creds)
         if state in ["off", "unavailable"]:
             await execute_ha_service(domain, "turn_on", entity_id, user_creds, redis_client=redis_client)
+
+        # --- SMART SWAP: Use Music Assistant Entity for Music Requests ---
+        # If we have a Cast/Speaker entity that isn't explicitly MA, try to find its MA counterpart
+        if ctype != "video" and "music_assistant" not in integration:
+             # Try finding a device with same name but 'music_assistant' integration
+             from app.settings import GlobalResources
+             # Search for the entity_id or friendly_name with "mass" or "music assistant"
+             # We use the base entity_id to find the MA version
+             base_search = entity_id.replace("media_player.", "").replace("_chrome_2", "").replace("_chrome", "").replace("_cast", "")
+             ma_docs = GlobalResources.ha_collection.similarity_search(f"{base_search} music assistant", k=1)
+             
+             for d in ma_docs:
+                 if d.metadata.get("integration") == "music_assistant":
+                     ma_entity = d.metadata.get("entity_id")
+                     log.info(f"[Smart MA Swap] Swapping {entity_id} ({integration}) -> {ma_entity} (music_assistant) for music playback.")
+                     entity_id = ma_entity
+                     integration = "music_assistant"
+                     break
 
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices ---
         # --- CRITICAL FIX: Use 'music_assistant.play_media' for MA devices (Delegated) ---
