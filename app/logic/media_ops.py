@@ -1045,7 +1045,7 @@ async def handle_media_command(
     strict_resolution = (is_music_request or is_audiobook_request) or (
         (intent == "play_media" or intent == "play") and not is_video_request
     )
-        is_transport = intent in ["media_next", "media_previous", "stop_media", "media_pause", "media_play", "resume", "volume_set", "volume_up", "volume_down", "volume_mute"]
+    is_transport = intent in ["media_next", "media_previous", "stop_media", "media_pause", "media_play", "resume", "volume_set", "volume_up", "volume_down", "volume_mute"]
 
     # --- Device Name Fallback ---
     # If Orchestrator provides device_name but no entity_id, resolve it
