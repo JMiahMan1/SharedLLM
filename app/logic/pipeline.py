@@ -539,7 +539,13 @@ async def generate_rag_stream(
         is_no_search_intent = intent in no_search_intents
 
         # For transport commands, consider them executed even if they fail (e.g., no active devices)
-        transport_executed = action_results and any(r.get("service") in ["media_stop", "media_play", "media_pause", "stop_media"] for r in action_results)
+        transport_executed = action_results and any(
+            "media_stop" in str(r.get("service", "")) or
+            "media_play" in str(r.get("service", "")) or
+            "media_pause" in str(r.get("service", "")) or
+            r.get("service") in ["stop_media", "media_play", "media_pause"]
+            for r in action_results
+        )
 
         log.debug(f"[SEARCH DECISION] intent={intent}, action_succeeded={action_succeeded}, is_no_search_intent={is_no_search_intent}, transport_executed={transport_executed}")
         should_search = not already_searched and not (action_succeeded and is_no_search_intent) and not transport_executed
