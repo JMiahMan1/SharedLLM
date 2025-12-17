@@ -207,10 +207,10 @@ async def contextualize_query(query, user, model):
 
 
 async def _llm_orchestrator(
-    query: str, intent: str, score: float, model: str
+    query: str, intent: str, score: float, model: str, conversation_history: str = ""
 ) -> Dict[str, Any]:
     orchestrator_prompt = ORCHESTRATOR_PROMPT.format(
-        query=query, intent_name=intent, intent_score=score
+        query=query, intent_name=intent, intent_score=score, conversation_history=conversation_history
     )
     last_error = ""
     for attempt in range(2):
@@ -343,8 +343,15 @@ async def _handle_single_command(
 
     # 3. LLM Orchestration
     try:
+        # Get conversation history for contextualization
+        from .utils import get_history_context
+        conversation_history = get_history_context(user)
+        history_text = ""
+        if conversation_history:
+            history_text = f"\nConversation History:\n{conversation_history}"
+
         orchestration_plan = await _llm_orchestrator(
-            query, intent or "unknown", score, model
+            query, intent or "unknown", score, model, history_text
         )
         log.info(f"[PIPELINE DEBUG] Orchestration Plan: {orchestration_plan}")
     except Exception as e:
