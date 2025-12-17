@@ -665,6 +665,56 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         allow_multiple = True
         log.info(f"Detected grouping pattern: {patterns}")
 
+    # 1.5. EXACT NAME MATCHING (Priority Override)
+    # Before doing expensive ChromaDB search, check for exact/prefix matches
+    # This prevents "Office TV" from matching to "Living Room TV"
+    query_lower = query_name.lower().strip()
+    
+    try:
+        # Get ALL entities from ChromaDB for exact matching
+        all_results = await run_blocking(
+            lambda: GlobalResources.ha_collection.get()
+        )
+        
+        if all_results and all_results.get("metadatas"):
+            exact_matches = []
+            prefix_matches = []
+            
+            for meta in all_results["metadatas"]:
+                friendly_name = meta.get("friendly_name", "").lower().strip()
+                entity_id = meta.get("entity_id", "")
+                integration = meta.get("integration", "unknown")
+                domain = entity_id.split('.')[0] if entity_id else ""
+                
+                # Skip non-actionable domains for media intents
+                media_intents = ["play_media", "stop_media", "media_next", "media_previous", "pause", "resume", "open_app", "volume_up", "volume_down", "volume_set", "volume_mute", "media_pause", "media_play"]
+                if intent in media_intents and domain not in ["media_player", "remote"]:
+                    continue
+                
+                # Exact match (highest priority)
+                if friendly_name == query_lower:
+                    exact_matches.append((entity_id, integration))
+                    log.info(f"[EXACT MATCH] '{query_name}' → {entity_id}")
+                # Prefix match (e.g. "Office TV" starts with "Office")
+                elif friendly_name.startswith(query_lower) or query_lower in friendly_name:
+                    prefix_matches.append((entity_id, integration, friendly_name))
+            
+            # Return exact match immediately
+            if exact_matches:
+                log.info(f"Using exact name match for '{query_name}': {exact_matches[0]}")
+                return [exact_matches[0]] if allow_multiple else exact_matches[0]
+            
+            # Return best prefix match if query is specific enough (>= 6 chars)
+            if prefix_matches and len(query_lower) >= 6:
+                # Sort by name length (shorter = more specific)
+                prefix_matches.sort(key=lambda x: len(x[2]))
+                best_match = (prefix_matches[0][0], prefix_matches[0][1])
+                log.info(f"Using prefix match for '{query_name}': {best_match[0]} ({prefix_matches[0][2]})")
+                return [best_match] if allow_multiple else best_match
+                
+    except Exception as e:
+        log.warning(f"Exact match check failed: {e}, continuing with similarity search")
+
     # 2. Similarity Search using Chroma
     # Increase k if looking for a group/pattern to ensure we catch all potential matches
     k = 30 if allow_multiple else 15
