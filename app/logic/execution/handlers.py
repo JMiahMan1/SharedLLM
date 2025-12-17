@@ -16,7 +16,7 @@ from app.logic.note_ops import (
 )
 from app.logic.web_search import tool_web_search
 
-from app.logic.media_ops import handle_media_command
+from app.domains.media import handle_media_command
 from app.logic.music_assistant_ops import tool_list_playlists, tool_list_radio, tool_music_search
 from app.logic.android_remote_ops import tool_remote_command, tool_launch_app_android
 
