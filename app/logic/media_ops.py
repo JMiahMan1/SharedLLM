@@ -1365,6 +1365,7 @@ async def handle_media_command(
 
         # Update Context
         user = user_creds.get("user")
+        log.info(f"[CONTEXT UPDATE] user={user}, entity_id={entity_id}, redis_client={redis_client is not None}")
         if user and entity_id:
              _set_last_entity(redis_client, user, entity_id)
              # Also track last media entity for transport commands
