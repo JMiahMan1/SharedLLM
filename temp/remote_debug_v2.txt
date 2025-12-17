@@ -1,0 +1,200 @@
+2025-12-16 19:38:38,885 [DEBUG] Lock 140698310096336 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/fd1b291129c607e5d49799f87cb219b27f98acdf.lock
+2025-12-16 19:38:38,994 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config_sentence_transformers.json HTTP/2.0" 307 0
+2025-12-16 19:38:39,036 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/config_sentence_transformers.json HTTP/2.0" 200 0
+2025-12-16 19:38:39,137 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/README.md HTTP/2.0" 307 0
+2025-12-16 19:38:39,169 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/README.md HTTP/2.0" 200 0
+2025-12-16 19:38:39,171 [DEBUG] Attempting to acquire lock 140698310091408 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/58d4a9a45664eb9e12de9549c548c09b6134c17f.lock
+2025-12-16 19:38:39,171 [DEBUG] Lock 140698310091408 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/58d4a9a45664eb9e12de9549c548c09b6134c17f.lock
+2025-12-16 19:38:39,196 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/README.md HTTP/2.0" 200 None
+2025-12-16 19:38:39,199 [DEBUG] Attempting to release lock 140698310091408 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/58d4a9a45664eb9e12de9549c548c09b6134c17f.lock
+2025-12-16 19:38:39,199 [DEBUG] Lock 140698310091408 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/58d4a9a45664eb9e12de9549c548c09b6134c17f.lock
+2025-12-16 19:38:39,307 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json HTTP/2.0" 307 0
+2025-12-16 19:38:39,337 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/modules.json HTTP/2.0" 200 0
+2025-12-16 19:38:39,441 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/sentence_bert_config.json HTTP/2.0" 307 0
+2025-12-16 19:38:39,474 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/sentence_bert_config.json HTTP/2.0" 200 0
+2025-12-16 19:38:39,475 [DEBUG] Attempting to acquire lock 140698310145360 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/59d594003bf59880a884c574bf88ef7555bb0202.lock
+2025-12-16 19:38:39,476 [DEBUG] Lock 140698310145360 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/59d594003bf59880a884c574bf88ef7555bb0202.lock
+2025-12-16 19:38:39,506 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/sentence_bert_config.json HTTP/2.0" 200 53
+2025-12-16 19:38:39,508 [DEBUG] Attempting to release lock 140698310145360 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/59d594003bf59880a884c574bf88ef7555bb0202.lock
+2025-12-16 19:38:39,509 [DEBUG] Lock 140698310145360 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/59d594003bf59880a884c574bf88ef7555bb0202.lock
+2025-12-16 19:38:39,612 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/adapter_config.json HTTP/2.0" 404 0
+2025-12-16 19:38:39,718 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json HTTP/2.0" 307 0
+2025-12-16 19:38:39,749 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/config.json HTTP/2.0" 200 0
+2025-12-16 19:38:39,751 [DEBUG] Attempting to acquire lock 140698310233872 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/72b987fd805cfa2b58c4c8c952b274a11bfd5a00.lock
+2025-12-16 19:38:39,751 [DEBUG] Lock 140698310233872 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/72b987fd805cfa2b58c4c8c952b274a11bfd5a00.lock
+2025-12-16 19:38:39,779 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/config.json HTTP/2.0" 200 612
+2025-12-16 19:38:39,782 [DEBUG] Attempting to release lock 140698310233872 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/72b987fd805cfa2b58c4c8c952b274a11bfd5a00.lock
+2025-12-16 19:38:39,782 [DEBUG] Lock 140698310233872 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/72b987fd805cfa2b58c4c8c952b274a11bfd5a00.lock
+2025-12-16 19:38:39,930 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/model.safetensors HTTP/2.0" 302 0
+2025-12-16 19:38:39,933 [DEBUG] Attempting to acquire lock 140698300416336 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db.lock
+2025-12-16 19:38:39,933 [DEBUG] Lock 140698300416336 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db.lock
+2025-12-16 19:38:40,054 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2/xet-read-token/c9745ed1d9f207416be6d2e6f8de32d1f16199bf HTTP/2.0" 200 365
+2025-12-16 19:38:53,662 [DEBUG] Attempting to release lock 140698300416336 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db.lock
+2025-12-16 19:38:53,663 [DEBUG] Lock 140698300416336 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db.lock
+2025-12-16 19:38:53,791 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer_config.json HTTP/2.0" 307 0
+2025-12-16 19:38:53,828 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/tokenizer_config.json HTTP/2.0" 200 0
+2025-12-16 19:38:53,829 [DEBUG] Attempting to acquire lock 140698300559312 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/c79f2b6a0cea6f4b564fed1938984bace9d30ff0.lock
+2025-12-16 19:38:53,829 [DEBUG] Lock 140698300559312 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/c79f2b6a0cea6f4b564fed1938984bace9d30ff0.lock
+2025-12-16 19:38:53,861 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/tokenizer_config.json HTTP/2.0" 200 350
+2025-12-16 19:38:53,864 [DEBUG] Attempting to release lock 140698300559312 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/c79f2b6a0cea6f4b564fed1938984bace9d30ff0.lock
+2025-12-16 19:38:53,864 [DEBUG] Lock 140698300559312 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/c79f2b6a0cea6f4b564fed1938984bace9d30ff0.lock
+2025-12-16 19:38:53,972 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2/tree/main/additional_chat_templates?recursive=False&expand=False HTTP/2.0" 404 64
+2025-12-16 19:38:54,084 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2/tree/main?recursive=True&expand=False HTTP/2.0" 200 6465
+2025-12-16 19:38:54,196 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt HTTP/2.0" 307 0
+2025-12-16 19:38:54,227 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/vocab.txt HTTP/2.0" 200 0
+2025-12-16 19:38:54,229 [DEBUG] Attempting to acquire lock 140698310057680 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/fb140275c155a9c7c5a3b3e0e77a9e839594a938.lock
+2025-12-16 19:38:54,229 [DEBUG] Lock 140698310057680 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/fb140275c155a9c7c5a3b3e0e77a9e839594a938.lock
+2025-12-16 19:38:54,263 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/vocab.txt HTTP/2.0" 200 None
+2025-12-16 19:38:54,323 [DEBUG] Attempting to release lock 140698310057680 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/fb140275c155a9c7c5a3b3e0e77a9e839594a938.lock
+2025-12-16 19:38:54,323 [DEBUG] Lock 140698310057680 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/fb140275c155a9c7c5a3b3e0e77a9e839594a938.lock
+2025-12-16 19:38:54,438 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json HTTP/2.0" 307 0
+2025-12-16 19:38:54,470 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/tokenizer.json HTTP/2.0" 200 0
+2025-12-16 19:38:54,472 [DEBUG] Attempting to acquire lock 140698300936784 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-16 19:38:54,473 [DEBUG] Lock 140698300936784 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-16 19:38:54,504 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/tokenizer.json HTTP/2.0" 200 None
+2025-12-16 19:38:54,569 [DEBUG] Attempting to release lock 140698300936784 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-16 19:38:54,569 [DEBUG] Lock 140698300936784 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-16 19:38:54,675 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/added_tokens.json HTTP/2.0" 404 0
+2025-12-16 19:38:54,783 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/special_tokens_map.json HTTP/2.0" 307 0
+2025-12-16 19:38:54,814 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/special_tokens_map.json HTTP/2.0" 200 0
+2025-12-16 19:38:54,815 [DEBUG] Attempting to acquire lock 140698300984208 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-16 19:38:54,816 [DEBUG] Lock 140698300984208 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-16 19:38:54,844 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/special_tokens_map.json HTTP/2.0" 200 112
+2025-12-16 19:38:54,847 [DEBUG] Attempting to release lock 140698300984208 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-16 19:38:54,847 [DEBUG] Lock 140698300984208 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-16 19:38:54,953 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/chat_template.jinja HTTP/2.0" 404 0
+2025-12-16 19:38:55,096 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/1_Pooling/config.json HTTP/2.0" 307 0
+2025-12-16 19:38:55,126 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 0
+2025-12-16 19:38:55,128 [DEBUG] Attempting to acquire lock 140698310125968 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-16 19:38:55,128 [DEBUG] Lock 140698310125968 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-16 19:38:55,156 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 190
+INFO:     192.168.2.1:50124 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.2.20:37628 - "POST /api/chat HTTP/1.1" 200 OK
+INFO:     192.168.2.20:37640 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-16 19:38:55,160 [DEBUG] Attempting to release lock 140698310125968 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-16 19:38:55,160 [DEBUG] Lock 140698310125968 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-16 19:38:55,284 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2 HTTP/2.0" 200 6797
+2025-12-16 19:38:55,290 [INFO] Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+2025-12-16 19:38:55,538 [INFO] Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2025-12-16 19:38:55,591 [DEBUG] Starting component System
+2025-12-16 19:38:55,591 [DEBUG] Starting component Posthog
+2025-12-16 19:38:55,734 [INFO] ChromaDB Loaded from /data/chroma_db
+2025-12-16 19:38:55,734 [INFO] --- Initializing Semantic Intent Engine ---
+2025-12-16 19:38:55,735 [INFO] Loaded phrasebook from /app/data/phrasebook.json
+2025-12-16 19:38:55,735 [INFO] Vectorizing 187 phrases for Intent Engine...
+2025-12-16 19:38:55,986 [INFO] Intent Engine Ready. Indexed 187 phrases.
+2025-12-16 19:38:55,986 [INFO] Starting Timer/Alarm Scheduler...
+2025-12-16 19:38:55,987 [INFO] Starting Device DB Refresh...
+2025-12-16 19:38:55,989 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:38:56,022 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49011
+2025-12-16 19:38:56,035 [INFO] Fetched 697 entities from HA.
+2025-12-16 19:38:56,037 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:38:56,106 [DEBUG] https://ha.sumemail.com:443 "POST /api/template HTTP/1.1" 200 72279
+2025-12-16 19:38:56,126 [INFO] Built Device Map for 697 entities.
+2025-12-16 19:38:56,135 [INFO] Formed 135 Device Groups.
+2025-12-16 19:38:56,139 [INFO] Upserting 158 documents to ChromaDB...
+2025-12-16 19:38:56,139 [INFO] Preparing Doc: binary_sensor.music_assistant_server_running | Group: music assistant:home assistant add-on:music running | Integ: unknown
+2025-12-16 19:38:56,139 [INFO] Preparing Doc: light.kauf_plug_d67371_kauf_plug | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-16 19:38:56,139 [INFO] Preparing Doc: switch.string_lights_front | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-16 19:38:56,139 [INFO] Preparing Doc: light.downstairs_bathroom_1_light | Group: signify:wiz a19 filament:downstairs bathroom 1 light | Integ: unknown
+2025-12-16 19:38:56,140 [INFO] Preparing Doc: light.downstairs_bathroom_2_light | Group: signify:wiz a19 filament:downstairs bathroom 2 light | Integ: unknown
+2025-12-16 19:38:56,222 [DEBUG] Starting new HTTPS connection (1): us.i.posthog.com:443
+2025-12-16 19:38:56,289 [INFO] Timer Scheduler Started.
+INFO:     Application startup complete.
+2025-12-16 19:38:56,710 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-16 19:38:58,497 [INFO] Upsert OK.
+2025-12-16 19:38:58,498 [INFO] Device DB Refresh Complete.
+2025-12-16 19:47:56,925 [DEBUG] Intent Low Confidence: ' .  .  .  .  .' -> Best: 'general_query' (0.25)
+2025-12-16 19:47:56,925 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=3215
+2025-12-16 19:47:56,927 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 19:48:05,003 [DEBUG] Intent Low Confidence: ' .  .  .  .' -> Best: 'general_query' (0.27)
+2025-12-16 19:48:05,004 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=3212
+2025-12-16 19:48:05,005 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 19:48:16,342 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:48:16,347 [DEBUG] [REGEX OVERRIDE] Matched 'open_app' via pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hu...
+2025-12-16 19:48:16,347 [INFO] [INTENT] Regex override: 'Launch YouTube on Office TV' -> open_app
+2025-12-16 19:48:16,347 [INFO] [PIPELINE DEBUG] Intent detected: open_app (Score: 1.0)
+2025-12-16 19:48:16,347 [INFO] [FAST ORCHESTRA] Bypassing LLM for open_app
+2025-12-16 19:48:16,348 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Launch YouTube on Office TV' (Music Mode: False)
+2025-12-16 19:48:16,348 [INFO] DEBUG: Entering smart_resolve_entity. Q='Launch YouTube on Office TV' Intent='open_app' Multiple=True
+2025-12-16 19:48:16,373 [INFO] DEBUG: Search returned 30 docs.
+2025-12-16 19:48:16,373 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome_2', metadata={'source': 'home_assistant', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'attributes': '{"volume_level": 0.56, "media_content_id": "radiobrowser://radio/339c6a61-4433-44f9-9fad-20998c512ae4", "media_content_type": "music", "media_position": 283, "media_position_updated_at": "2025-12-17T02:34:01.025313+00:00", "media_title": "Youtube", "app_id": "music_assistant", "shuffle": false, "repeat": "off", "entity_picture_local": "/api/media_player_proxy/media_player.office_tv_chrome_2?token=8da853e7a335fb5414a27725cc4d10e8b282e3dc6a6ca27389b37a1f6ce9e34c&cache=f00dd084e6088981", "mass_player_type": "player", "active_queue": "media_player.office_tv_chrome", "device_class": "speaker", "entity_picture": "http://player.181fm.com/?station=181-xtraditional", "icon": "mdi:speaker", "friendly_name": "Office TV", "supported_features": 7796671}', 'group_id': 'askey:sti6140d360:office', 'manufacturer': 'askey', 'domain': 'media_player', 'state': 'idle', 'group_name': 'Office', 'model': 'sti6140d360', 'integration': 'cast', 'last_updated': '789589.29', 'capabilities': 'remote_control,play_media,turn_on,turn_off'}, page_content="Office TV (media_player.office_tv_chrome_2) is a cast device in group 'Office'. Can turn off. Can play media. Is a remote."), 1.0624780654907227)
+2025-12-16 19:48:16,374 [INFO] match found in Group: askey:sti6140d360:office (via Office TV (media_pla...)
+2025-12-16 19:48:16,375 [INFO] Group askey:sti6140d360:office has 4 members.
+2025-12-16 19:48:16,375 [INFO] Capability Routing used media_player.office_tv_chrome_2 (cast) for intent open_app
+2025-12-16 19:48:16,375 [INFO] [Device Fallback] Resolved 'Launch YouTube on Office TV' to media_player.office_tv_chrome_2
+2025-12-16 19:48:16,375 [INFO] [Cast] Launching app 'YouTube' on media_player.office_tv_chrome_2
+2025-12-16 19:48:16,376 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:48:16,394 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-16 19:48:16,395 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'YouTube', 'media_content_type': 'app'}
+2025-12-16 19:48:16,397 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:48:16,529 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-16 19:48:16,851 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 200 10
+2025-12-16 19:48:17,857 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:48:17,889 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-16 19:48:18,894 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:48:18,922 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-16 19:48:19,926 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:48:19,955 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-16 19:48:20,960 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:48:20,992 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-16 19:48:21,998 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:48:22,027 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 891
+2025-12-16 19:48:22,032 [INFO] Executing Web Search for: Launch YouTube on Office TV
+2025-12-16 19:48:22,040 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-16 19:48:22,075 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:48:22,096 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49420
+2025-12-16 19:48:22,662 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-16 19:48:27,100 [DEBUG] https://search.sumemail.com:443 "GET /search?q=Launch+YouTube+on+Office+TV&format=json HTTP/2.0" 200 7635
+2025-12-16 19:48:27,104 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6476
+2025-12-16 19:48:27,107 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 19:48:36,826 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:48:36,934 [DEBUG] Intent Low Confidence: ' .  .  .  .' -> Best: 'general_query' (0.27)
+2025-12-16 19:48:36,934 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2124
+2025-12-16 19:48:36,936 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 19:48:37,639 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:48:54,937 [DEBUG] [RESPONSE] Final response to user (210 chars): Turning on the Office TV Remote to launch YouTube. If the app isn't already installed, you'll need to download it first via the TV's app store. Once installed, use the remote to navigate to YouTube and sign in.
+2025-12-16 19:49:00,582 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:49:00,584 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'CONVERSE'}
+2025-12-16 19:49:00,585 [INFO] Executing Web Search for:  .  .  .  .
+2025-12-16 19:49:00,600 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-16 19:49:00,637 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:49:00,660 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49459
+2025-12-16 19:49:02,522 [DEBUG] https://search.sumemail.com:443 "GET /search?q=+.++.++.++.&format=json HTTP/2.0" 200 54
+2025-12-16 19:49:02,528 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-16 19:49:04,470 [DEBUG] https://search.sumemail.com:443 "GET /search?q=+.++.++.++. HTTP/2.0" 200 None
+2025-12-16 19:49:04,589 [INFO] Engaging Tier 3 (DuckDuckGo) for web search...
+/workspace/app/logic/web_search.py:104: RuntimeWarning: This package (`duckduckgo_search`) has been renamed to `ddgs`! Use `pip install ddgs` instead.
+  with DDGS() as ddgs:
+2025-12-16 19:49:04,596 [DEBUG] Loaded CA certs
+2025-12-16 19:49:04,596 [DEBUG] starting new connection: https://www.bing.com/
+2025-12-16 19:49:04,596 [DEBUG] resolving www.bing.com
+2025-12-16 19:49:04,640 [DEBUG] connecting to 23.35.26.11:443
+2025-12-16 19:49:04,668 [DEBUG] connected to 23.35.26.11:443
+2025-12-16 19:49:04,714 [DEBUG] pooling idle connection for PoolKey { uri: https://www.bing.com/, alpn_protos: None, network: default }
+2025-12-16 19:49:04,856 [DEBUG] inserting secure cookie 'MUID'
+2025-12-16 19:49:04,856 [DEBUG] inserting Set-Cookie 'Cookie { cookie_string: Some("MUIDB=17D6A7AE064660D137EBB16B07B86126; expires=Mon, 11-Jan-2027 02:49:04 GMT; path=/; HttpOnly"), name: Indexed(0, 5), value: Indexed(6, 38), expires: Some(DateTime(2027-01-11 2:49:04.0 +00:00:00)), max_age: None, domain: None, path: Some(Indexed(84, 85)), secure: None, http_only: Some(true), same_site: None, partitioned: None }'
+2025-12-16 19:49:04,857 [DEBUG] inserting Set-Cookie 'Cookie { cookie_string: Some("_EDGE_S=F=1&SID=070EAF02AC4B68020430B9C7ADB56941; domain=.bing.com; path=/; HttpOnly"), name: Indexed(0, 7), value: Indexed(8, 48), expires: None, max_age: None, domain: Some(Indexed(57, 66)), path: Some(Indexed(73, 74)), secure: None, http_only: Some(true), same_site: None, partitioned: None }'
+2025-12-16 19:49:04,857 [DEBUG] inserting Set-Cookie 'Cookie { cookie_string: Some("_EDGE_V=1; domain=.bing.com; expires=Mon, 11-Jan-2027 02:49:04 GMT; path=/; HttpOnly"), name: Indexed(0, 7), value: Indexed(8, 9), expires: Some(DateTime(2027-01-11 2:49:04.0 +00:00:00)), max_age: None, domain: Some(Indexed(18, 27)), path: Some(Indexed(73, 74)), secure: None, http_only: Some(true), same_site: None, partitioned: None }'
+2025-12-16 19:49:04,857 [DEBUG] inserting secure cookie 'USRLOC'
+2025-12-16 19:49:04,857 [DEBUG] inserting secure cookie 'SRCHD'
+2025-12-16 19:49:04,857 [DEBUG] inserting secure cookie 'SRCHUID'
+2025-12-16 19:49:04,858 [DEBUG] inserting secure cookie 'SRCHUSR'
+2025-12-16 19:49:04,858 [DEBUG] inserting secure cookie 'SRCHHPGUSR'
+2025-12-16 19:49:04,858 [DEBUG] inserting secure cookie '_SS'
+2025-12-16 19:49:04,858 [DEBUG] inserting Set-Cookie 'Cookie { cookie_string: Some("ak_bmsc=C44473BEB13761CF26B269B1B2B686D6~000000000000000000000000000000~YAAQrC0tFwJ4JiSbAQAATRA2Kh55tIUEDJAjf0Xf1gq0dnIHhIpN2DTAmqjJhgFkavfqGgOyfxZ/85oZRFWzpZ48LN3mnmIDn+8Vr/6pbIXNzWjjfGamQxMW6US/AhpywtXRnK10P0Ur05wCpluVaTwjlSsUrbAndUpp/sNqdVoj3i1m1zgichcJeohyNDb+zztnaOvxn1YZpBIA+e1pBr6vMxgZcMdpZklzM07D5JkEg3kKld4VhlYfTAlXwlSp7HXaAP6xxFLkvI0OZk5s8XD3AFwC6uP3ItqfTmppaMKDxbQTD1r/DRzu6mUnCo4/pBK574j03NuChHP02o9qQUoFgjA4t8LwOzXJTp1jpNv990U5471+Z5W1vbeXCevbMT8HLQiOouk=; Domain=.bing.com; Path=/; Expires=Wed, 17 Dec 2025 04:49:04 GMT; Max-Age=7200; HttpOnly"), name: Indexed(0, 7), value: Indexed(8, 468), expires: Some(DateTime(2025-12-17 4:49:04.0 +00:00:00)), max_age: Some(Duration { seconds: 7200, nanoseconds: 0 }), domain: Some(Indexed(477, 486)), path: Some(Indexed(493, 494)), secure: None, http_only: Some(true), same_site: None, partitioned: None }'
+2025-12-16 19:49:04,858 [INFO] response: https://www.bing.com/search?q=+.++.++.++. 200
+2025-12-16 19:49:04,859 [DEBUG] _get_url() https://www.bing.com/search?q=+.++.++.++. 200
+2025-12-16 19:49:04,894 [INFO] Engaging Tier 4 (Playwright) for web search...
+2025-12-16 19:49:04,894 [INFO] Launching Playwright for URL: https://search.sumemail.com/search?q= .  .  .  .
+2025-12-16 19:49:10,220 [INFO] Playwright fetched page content length: 29268
+2025-12-16 19:49:10,242 [WARNING] Playwright: Whoogle selectors failed. Trying DuckDuckGo HTML fallback...
+2025-12-16 19:49:11,008 [WARNING] Playwright: DDG failed. Trying Bing HTML fallback...
+2025-12-16 19:49:26,020 [WARNING] Playwright Page Error: Page.goto: Timeout 15000ms exceeded.
+Call log:
+  - navigating to "https://www.bing.com/search?q=%20.%20%20.%20%20.%20%20.", waiting until "networkidle"
+
+2025-12-16 19:49:26,083 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=5193
+2025-12-16 19:49:26,085 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 19:49:26,897 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:49:32,262 [DEBUG] [RESPONSE] Final response to user (151 chars): Hello! How can I assist you today? Whether it's about the home, your questions, or just a friendly chat, I'm here to help. Let me know how I can serve!

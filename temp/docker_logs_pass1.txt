@@ -1,0 +1,100 @@
+2025-12-15 21:19:12,687 [INFO] --- Initializing Semantic Intent Engine ---
+2025-12-15 21:19:12,687 [INFO] Loaded phrasebook from /app/data/phrasebook.json
+2025-12-15 21:19:12,687 [INFO] Vectorizing 187 phrases for Intent Engine...
+INFO:     192.168.2.1:60560 - "POST /api/roku/launch HTTP/1.1" 422 Unprocessable Entity
+INFO:     192.168.2.1:60566 - "POST /api/webos/notify HTTP/1.1" 422 Unprocessable Entity
+INFO:     192.168.2.1:60568 - "POST /api/android/launch HTTP/1.1" 404 Not Found
+2025-12-15 21:19:12,830 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-15 21:19:13,005 [INFO] Intent Engine Ready. Indexed 187 phrases.
+2025-12-15 21:19:13,005 [INFO] RAG Resources Reloaded.
+INFO:     192.168.2.1:60580 - "GET /health HTTP/1.1" 200 OK
+2025-12-15 21:19:14,845 [DEBUG] Intent Match: 'Turn on Office TV' -> 'play_media' (0.61) via 'start the tv'
+2025-12-15 21:19:14,847 [INFO] DEBUG: Entering smart_resolve_entity. Q='office tv' Intent='turn_on' Multiple=False
+2025-12-15 21:19:14,876 [INFO] DEBUG: Search returned 15 docs.
+2025-12-15 21:19:14,876 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv', metadata={'last_updated': '709077.196', 'group_id': 'media_player.office_tv', 'attributes': '{"assumed_state": true, "device_class": "tv", "friendly_name": "Office TV Remote", "supported_features": 153529}', 'capabilities': 'turn_on,turn_off,play_media', 'state': 'off', 'friendly_name': 'Office TV Remote', 'domain': 'media_player', 'entity_id': 'media_player.office_tv', 'group_name': '', 'source': 'home_assistant', 'integration': 'tv'}, page_content="Office TV Remote (media_player.office_tv) is a tv device in group ''. Can turn off. Can play media."), 0.9782088398933411)
+2025-12-15 21:19:14,876 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.office_tv
+2025-12-15 21:19:14,877 [INFO] [CAPABILITY] Redis cache HIT for media_player.office_tv
+2025-12-15 21:19:14,877 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.office_tv_chrome_2
+2025-12-15 21:19:14,877 [INFO] [CAPABILITY] Redis cache HIT for media_player.office_tv_chrome_2
+2025-12-15 21:19:14,877 [DEBUG] [CAPABILITY] Checking Redis cache for remote.office_tv_remote
+2025-12-15 21:19:14,878 [INFO] [CAPABILITY] Redis cache HIT for remote.office_tv_remote
+2025-12-15 21:19:14,878 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.office_speaker
+2025-12-15 21:19:14,878 [INFO] [CAPABILITY] Redis cache HIT for media_player.office_speaker
+2025-12-15 21:19:14,878 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.office_tv_chrome
+2025-12-15 21:19:14,879 [INFO] [CAPABILITY] Redis cache HIT for media_player.office_tv_chrome
+2025-12-15 21:19:14,879 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.living_room_tv_2
+2025-12-15 21:19:14,879 [INFO] [CAPABILITY] Redis cache HIT for media_player.living_room_tv_2
+2025-12-15 21:19:14,879 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.office_jarvis
+2025-12-15 21:19:14,880 [INFO] [CAPABILITY] Redis cache HIT for media_player.office_jarvis
+2025-12-15 21:19:14,880 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.loft_tv
+2025-12-15 21:19:14,880 [INFO] [CAPABILITY] Redis cache HIT for media_player.loft_tv
+2025-12-15 21:19:14,880 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.28_tcl_roku_tv
+2025-12-15 21:19:14,881 [INFO] [CAPABILITY] Redis cache HIT for media_player.28_tcl_roku_tv
+2025-12-15 21:19:14,881 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.living_room_tv
+2025-12-15 21:19:14,882 [INFO] [CAPABILITY] Redis cache HIT for media_player.living_room_tv
+2025-12-15 21:19:14,882 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.loft_tv_2
+2025-12-15 21:19:14,882 [INFO] [CAPABILITY] Redis cache HIT for media_player.loft_tv_2
+2025-12-15 21:19:14,882 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.tv_loft_samsung_q900
+2025-12-15 21:19:14,883 [INFO] [CAPABILITY] Redis cache HIT for media_player.tv_loft_samsung_q900
+2025-12-15 21:19:14,883 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.not_office
+2025-12-15 21:19:14,883 [INFO] [CAPABILITY] Redis cache HIT for media_player.not_office
+2025-12-15 21:19:14,883 [DEBUG] [CAPABILITY] Checking Redis cache for remote.28_tcl_roku_tv
+2025-12-15 21:19:14,884 [INFO] [CAPABILITY] Redis cache HIT for remote.28_tcl_roku_tv
+2025-12-15 21:19:14,884 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.master_bedroom_samsung
+2025-12-15 21:19:14,885 [INFO] [CAPABILITY] Redis cache HIT for media_player.master_bedroom_samsung
+2025-12-15 21:19:14,885 [INFO] Fast HA Path: Resolved 'office tv' -> media_player.office_tv (tv) via smart_resolve_entity
+2025-12-15 21:19:14,886 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:14,903 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 430
+2025-12-15 21:19:14,904 [INFO] EXEC HA: homeassistant.turn_on on media_player.office_tv | Data: {}
+2025-12-15 21:19:14,906 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:14,931 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/homeassistant/turn_on HTTP/1.1" 200 10
+2025-12-15 21:19:15,437 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:15,451 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-15 21:19:15,468 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 557
+2025-12-15 21:19:15,470 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Sent command to turn on the Office TV Remote.', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office TV Remote', 'service': 'homeassistant.turn_on', 'new_state': 'on'}]
+2025-12-15 21:19:15,470 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'homeassistant.turn_on' sent to Office TV Remote. Verified New State: on
+
+2025-12-15 21:19:15,471 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-15 21:19:15,471 [INFO] DEBUG: Entering Silent Mode for intent 'play_media'
+2025-12-15 21:19:15,471 [DEBUG] [RESPONSE] Returning to client: Done.
+INFO:     192.168.2.1:60594 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-15 21:19:15,480 [DEBUG] [REGEX OVERRIDE] Matched 'play_media' via pattern: \b(play)\b...
+2025-12-15 21:19:15,480 [INFO] [INTENT] Regex override: 'Play Brandon Lake on Office TV' -> play_media
+2025-12-15 21:19:15,482 [INFO] [PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+2025-12-15 21:19:15,482 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2146
+2025-12-15 21:19:15,485 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:19:25,560 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:19:25,563 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'Office TV'}}
+2025-12-15 21:19:25,564 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV' (Music Mode: True)
+2025-12-15 21:19:25,564 [INFO] DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='play' Multiple=True
+2025-12-15 21:19:25,588 [INFO] DEBUG: Search returned 30 docs.
+2025-12-15 21:19:25,588 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv', metadata={'last_updated': '709077.196', 'domain': 'media_player', 'friendly_name': 'Office TV Remote', 'attributes': '{"assumed_state": true, "device_class": "tv", "friendly_name": "Office TV Remote", "supported_features": 153529}', 'source': 'home_assistant', 'entity_id': 'media_player.office_tv', 'group_id': 'media_player.office_tv', 'state': 'off', 'group_name': '', 'integration': 'tv', 'capabilities': 'turn_on,turn_off,play_media'}, page_content="Office TV Remote (media_player.office_tv) is a tv device in group ''. Can turn off. Can play media."), 0.9782088398933411)
+2025-12-15 21:19:25,588 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+2025-12-15 21:19:25,588 [INFO] [BATCH] Executing 'play' on 1 entities
+2025-12-15 21:19:25,588 [INFO] Sanitized intent from 'play' to 'play_media'
+2025-12-15 21:19:25,589 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.office_tv_chrome_2
+2025-12-15 21:19:25,589 [INFO] [CAPABILITY] Redis cache HIT for media_player.office_tv_chrome_2
+2025-12-15 21:19:25,591 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:25,611 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-15 21:19:25,614 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:25,633 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 483
+2025-12-15 21:19:25,635 [INFO] EXEC HA: media_player.turn_on on media_player.office_tv_chrome_2 | Data: None
+2025-12-15 21:19:25,637 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:31,164 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:31,193 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/turn_on HTTP/1.1" 200 10
+2025-12-15 21:19:31,738 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:31,763 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 893
+2025-12-15 21:19:31,764 [INFO] Executing Standard Play on media_player.office_tv_chrome_2 Type: music
+2025-12-15 21:19:31,766 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:31,796 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 893
+2025-12-15 21:19:31,797 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+2025-12-15 21:19:31,800 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:32,424 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 200 10
+2025-12-15 21:19:32,929 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:32,955 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:19:33,458 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:33,484 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-15 21:19:33,986 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:19:34,011 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086

@@ -1,0 +1,100 @@
+2025-12-15 21:23:27,560 [INFO] [Device Fallback] Resolved 'Office TV' to media_player.office_tv
+2025-12-15 21:23:27,560 [INFO] [DISPATCH] Dispatching intent: 'nav_home' (Type: <class 'str'>) for entity: media_player.office_tv
+2025-12-15 21:23:27,561 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:27,584 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv HTTP/1.1" 404 39
+2025-12-15 21:23:27,587 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:27,604 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv HTTP/1.1" 404 39
+2025-12-15 21:23:27,605 [INFO] EXEC HA: remote.send_command on remote.office_tv | Data: {'command': 'HOME'}
+2025-12-15 21:23:27,607 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:27,629 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/remote/send_command HTTP/1.1" 200 10
+2025-12-15 21:23:28,174 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:28,201 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv HTTP/1.1" 404 39
+2025-12-15 21:23:28,706 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:28,732 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv HTTP/1.1" 404 39
+2025-12-15 21:23:29,238 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:29,261 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv HTTP/1.1" 404 39
+2025-12-15 21:23:29,765 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:29,798 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv HTTP/1.1" 404 39
+2025-12-15 21:23:30,304 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:30,336 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv HTTP/1.1" 404 39
+2025-12-15 21:23:30,338 [INFO] Executing Web Search for: Press the Home button on the Office TV.
+2025-12-15 21:23:30,352 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-15 21:23:30,390 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:23:30,424 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49357
+2025-12-15 21:23:33,780 [DEBUG] https://search.sumemail.com:443 "GET /search?q=Press+the+Home+button+on+the+Office+TV.&format=json HTTP/2.0" 200 6289
+2025-12-15 21:23:33,784 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6341
+2025-12-15 21:23:33,786 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:23:34,803 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:23:44,080 [DEBUG] [RESPONSE] Final response to user (317 chars): The Home button on the Office TV is not a recognized command in the current Home Assistant setup. The Office TV (mediaplayer.officetvchrome2) is paused with a volume of 56 percent, and the remote (remote.officetvremote) is off. Would you like me to adjust the volume, resume playback, or check anothe
+2025-12-15 21:23:44,081 [DEBUG] [RESPONSE] Returning to client: The Home button on the Office TV is not a recognized command in the current Home Assistant setup. The Office TV (mediaplayer.officetvchrome2) is paused with a volume of 56 percent, and the remote (rem
+INFO:     192.168.2.1:50522 - "POST /api/chat HTTP/1.1" 200 OK
+INFO:     192.168.2.1:59976 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.2.1:59984 - "GET /api/timer/list HTTP/1.1" 200 OK
+2025-12-15 21:23:44,889 [DEBUG] Intent Match: 'Delete the timer Test Short Task' -> 'timer_delete' (0.73) via 'delete the timer'
+2025-12-15 21:23:44,890 [INFO] [PIPELINE DEBUG] Using provided intent: timer_delete (Score: 0.7315289988317655)
+2025-12-15 21:23:44,890 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2150
+2025-12-15 21:23:44,891 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:23:51,186 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:23:51,188 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'timer_delete', 'parameters': {'summary': 'Test Short Task'}}
+2025-12-15 21:23:51,189 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Could not find a matching timer to delete.', 'service': 'timer_delete'}]
+2025-12-15 21:23:51,189 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'timer_delete' on 'N/A' failed. Reason: Could not find a matching timer to delete.
+
+2025-12-15 21:23:51,190 [INFO] DEBUG: Checking Simple Intent 'timer_delete' for silent mode. Results: 1
+2025-12-15 21:23:51,190 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2609
+2025-12-15 21:23:51,192 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:23:51,802 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:23:54,839 [DEBUG] [RESPONSE] Final response to user (138 chars): The timer Test Short Task could not be found. Please verify the name and try again. Let me know if you need assistance with anything else!
+2025-12-15 21:23:54,840 [DEBUG] [RESPONSE] Returning to client: The timer Test Short Task could not be found. Please verify the name and try again. Let me know if you need assistance with anything else!
+INFO:     192.168.2.1:59990 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-15 21:23:54,879 [DEBUG] Intent Match: 'Delete the alarm Test Long Alarm' -> 'timer_delete' (0.87) via 'delete alarm'
+2025-12-15 21:23:54,880 [INFO] [PIPELINE DEBUG] Using provided intent: timer_delete (Score: 0.8720775732090775)
+2025-12-15 21:23:54,880 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2150
+2025-12-15 21:23:54,881 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:24:00,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:24:00,611 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'timer_delete', 'parameters': {'summary': 'Test Long Alarm'}}
+2025-12-15 21:24:00,612 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Could not find a matching timer to delete.', 'service': 'timer_delete'}]
+2025-12-15 21:24:00,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'timer_delete' on 'N/A' failed. Reason: Could not find a matching timer to delete.
+
+2025-12-15 21:24:00,613 [INFO] DEBUG: Checking Simple Intent 'timer_delete' for silent mode. Results: 1
+2025-12-15 21:24:00,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2609
+2025-12-15 21:24:00,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:24:01,222 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:24:05,186 [DEBUG] [RESPONSE] Final response to user (151 chars): The alarm Test Long Alarm could not be deleted. It may no longer exist or the name might be incorrect. Would you like me to assist with something else?
+2025-12-15 21:24:05,186 [DEBUG] [RESPONSE] Returning to client: The alarm Test Long Alarm could not be deleted. It may no longer exist or the name might be incorrect. Would you like me to assist with something else?
+INFO:     192.168.2.1:40016 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-15 21:24:05,218 [DEBUG] Intent Match: 'Delete the alarm Test Long' -> 'timer_delete' (0.81) via 'delete alarm'
+2025-12-15 21:24:05,219 [INFO] [PIPELINE DEBUG] Using provided intent: timer_delete (Score: 0.8096425885829638)
+2025-12-15 21:24:05,219 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2144
+2025-12-15 21:24:05,221 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:24:13,514 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:24:13,516 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'timer_delete', 'parameters': {'summary': 'Test Long'}}
+2025-12-15 21:24:13,517 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Could not find a matching timer to delete.', 'service': 'timer_delete'}]
+2025-12-15 21:24:13,517 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'timer_delete' on 'N/A' failed. Reason: Could not find a matching timer to delete.
+
+2025-12-15 21:24:13,517 [INFO] DEBUG: Checking Simple Intent 'timer_delete' for silent mode. Results: 1
+2025-12-15 21:24:13,518 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2603
+2025-12-15 21:24:13,520 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:24:14,123 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:24:18,993 [DEBUG] [RESPONSE] Final response to user (189 chars): The alarm Test Long could not be found in the timer list. Please verify the name of the alarm you'd like to delete. Would you like to check for similar names or proceed with another action?
+2025-12-15 21:24:18,994 [DEBUG] [RESPONSE] Returning to client: The alarm Test Long could not be found in the timer list. Please verify the name of the alarm you'd like to delete. Would you like to check for similar names or proceed with another action?
+INFO:     192.168.2.1:57298 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-15 21:24:19,025 [DEBUG] Intent Match: 'Delete the alarm for 8am test long' -> 'timer_delete' (0.80) via 'delete alarm'
+2025-12-15 21:24:19,026 [INFO] [PIPELINE DEBUG] Using provided intent: timer_delete (Score: 0.8039495219766539)
+2025-12-15 21:24:19,026 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2152
+2025-12-15 21:24:19,028 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-15 21:24:35,732 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-15 21:24:35,734 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'timer_delete', 'parameters': {'summary': 'test long'}}
+2025-12-15 21:24:35,735 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Could not find a matching timer to delete.', 'service': 'timer_delete'}]
+2025-12-15 21:24:35,735 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'timer_delete' on 'N/A' failed. Reason: Could not find a matching timer to delete.
+
+2025-12-15 21:24:35,736 [INFO] DEBUG: Checking Simple Intent 'timer_delete' for silent mode. Results: 1
+2025-12-15 21:24:35,736 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2611
+2025-12-15 21:24:35,737 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434

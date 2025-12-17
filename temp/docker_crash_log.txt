@@ -1,0 +1,50 @@
+2025-12-17 00:03:15,220 [DEBUG] Attempting to release lock 140101646830608 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-17 00:03:15,220 [DEBUG] Lock 140101646830608 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-17 00:03:15,867 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/added_tokens.json HTTP/2.0" 404 0
+2025-12-17 00:03:15,975 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/special_tokens_map.json HTTP/2.0" 307 0
+2025-12-17 00:03:16,009 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/special_tokens_map.json HTTP/2.0" 200 0
+2025-12-17 00:03:16,010 [DEBUG] Attempting to acquire lock 140101647507152 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-17 00:03:16,011 [DEBUG] Lock 140101647507152 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-17 00:03:16,040 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/special_tokens_map.json HTTP/2.0" 200 112
+2025-12-17 00:03:16,042 [DEBUG] Attempting to release lock 140101647507152 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-17 00:03:16,042 [DEBUG] Lock 140101647507152 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-17 00:03:16,145 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/chat_template.jinja HTTP/2.0" 404 0
+2025-12-17 00:03:16,281 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/1_Pooling/config.json HTTP/2.0" 307 0
+2025-12-17 00:03:16,312 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 0
+2025-12-17 00:03:16,314 [DEBUG] Attempting to acquire lock 140101657207376 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-17 00:03:16,314 [DEBUG] Lock 140101657207376 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-17 00:03:16,344 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 190
+2025-12-17 00:03:16,346 [DEBUG] Attempting to release lock 140101657207376 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-17 00:03:16,347 [DEBUG] Lock 140101657207376 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-17 00:03:16,456 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2 HTTP/2.0" 200 6797
+2025-12-17 00:03:16,462 [INFO] Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+2025-12-17 00:03:16,715 [INFO] Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2025-12-17 00:03:16,768 [DEBUG] Starting component System
+2025-12-17 00:03:16,768 [DEBUG] Starting component Posthog
+2025-12-17 00:03:16,906 [INFO] ChromaDB Loaded from /data/chroma_db
+2025-12-17 00:03:16,906 [INFO] --- Initializing Semantic Intent Engine ---
+2025-12-17 00:03:16,906 [INFO] Loaded phrasebook from /app/data/phrasebook.json
+2025-12-17 00:03:16,906 [INFO] Vectorizing 187 phrases for Intent Engine...
+2025-12-17 00:03:17,196 [INFO] Intent Engine Ready. Indexed 187 phrases.
+2025-12-17 00:03:17,196 [INFO] Starting Timer/Alarm Scheduler...
+2025-12-17 00:03:17,197 [INFO] Starting Device DB Refresh...
+2025-12-17 00:03:17,198 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-17 00:03:17,230 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 48372
+2025-12-17 00:03:17,248 [INFO] Fetched 697 entities from HA.
+2025-12-17 00:03:17,249 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-17 00:03:17,317 [DEBUG] https://ha.sumemail.com:443 "POST /api/template HTTP/1.1" 200 72279
+2025-12-17 00:03:17,336 [INFO] Built Device Map for 697 entities.
+2025-12-17 00:03:17,344 [INFO] Formed 135 Device Groups.
+2025-12-17 00:03:17,347 [INFO] Upserting 158 documents to ChromaDB...
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: binary_sensor.music_assistant_server_running | Group: music assistant:home assistant add-on:music running | Integ: unknown
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: light.kauf_plug_d67371_kauf_plug | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: switch.string_lights_front | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: light.downstairs_bathroom_1_light | Group: signify:wiz a19 filament:downstairs bathroom 1 light | Integ: unknown
+2025-12-17 00:03:17,348 [INFO] Preparing Doc: light.downstairs_bathroom_2_light | Group: signify:wiz a19 filament:downstairs bathroom 2 light | Integ: unknown
+2025-12-17 00:03:17,395 [DEBUG] Starting new HTTPS connection (1): us.i.posthog.com:443
+2025-12-17 00:03:17,491 [INFO] Timer Scheduler Started.
+INFO:     Application startup complete.
+INFO:     Started server process [53]
+INFO:     Waiting for application startup.
+2025-12-17 00:03:18,390 [INFO] Loading Global Resources...
+2025-12-17 00:03:18,392 [INFO] Redis Connected.

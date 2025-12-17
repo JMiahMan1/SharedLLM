@@ -1,0 +1,100 @@
+2025-12-16 19:35:07,438 [INFO] [Android TV] Launching app 'youtube' on remote.office_tv_remote
+2025-12-16 19:35:07,438 [INFO] [Android TV] Launching app 'youtube' (com.google.android.youtube.tv) on remote.office_tv_remote
+2025-12-16 19:35:07,439 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:07,453 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:35:07,454 [WARNING] [Auto-Power-On] Error checking/turning on device: 'str' object has no attribute 'get'. Proceeding anyway...
+2025-12-16 19:35:07,455 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:07,474 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:35:07,475 [INFO] EXEC HA: media_player.play_media on remote.office_tv_remote | Data: {'media_content_id': 'com.google.android.youtube.tv', 'media_content_type': 'app'}
+2025-12-16 19:35:07,477 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:07,497 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 200 10
+2025-12-16 19:35:08,502 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:08,525 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:35:09,530 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:09,552 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:35:09,696 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:35:09,698 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'resume', 'device_name': 'Office TV'}}
+2025-12-16 19:35:09,698 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV' (Music Mode: False)
+2025-12-16 19:35:09,699 [INFO] DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='resume' Multiple=True
+2025-12-16 19:35:09,722 [INFO] DEBUG: Search returned 30 docs.
+2025-12-16 19:35:09,722 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome_2', metadata={'capabilities': 'turn_on,remote_control,play_media,turn_off', 'model': 'sti6140d360', 'entity_id': 'media_player.office_tv_chrome_2', 'last_updated': '789129.287', 'manufacturer': 'askey', 'domain': 'media_player', 'group_id': 'askey:sti6140d360:office', 'group_name': 'Office', 'friendly_name': 'Office TV', 'integration': 'cast', 'source': 'home_assistant', 'attributes': '{"volume_level": 0.56, "media_content_id": "radiobrowser://radio/339c6a61-4433-44f9-9fad-20998c512ae4", "media_content_type": "music", "media_position": 63, "media_position_updated_at": "2025-12-17T02:30:21.749567+00:00", "media_title": "Youtube", "app_id": "music_assistant", "shuffle": false, "repeat": "off", "entity_picture_local": "/api/media_player_proxy/media_player.office_tv_chrome_2?token=8da853e7a335fb5414a27725cc4d10e8b282e3dc6a6ca27389b37a1f6ce9e34c&cache=f00dd084e6088981", "mass_player_type": "player", "active_queue": "media_player.office_tv_chrome", "device_class": "speaker", "entity_picture": "http://player.181fm.com/?station=181-xtraditional", "icon": "mdi:speaker", "friendly_name": "Office TV", "supported_features": 7796671}', 'state': 'playing'}, page_content="Office TV (media_player.office_tv_chrome_2) is a cast device in group 'Office'. Can turn off. Can play media. Is a remote."), 0.7562850713729858)
+2025-12-16 19:35:09,722 [INFO] Resolution: Skipping switch.loft_plug_loft_tv for intent 'resume' because domain 'switch' is not a media player or remote.
+2025-12-16 19:35:09,722 [INFO] Resolution: Skipping switch.not_office_do_not_disturb for intent 'resume' because domain 'switch' is not a media player or remote.
+2025-12-16 19:35:09,722 [INFO] Resolution: Skipping binary_sensor.not_office_connectivity for intent 'resume' because domain 'binary_sensor' is not a media player or remote.
+2025-12-16 19:35:09,722 [INFO] Resolution: Skipping binary_sensor.tv_connectivity for intent 'resume' because domain 'binary_sensor' is not a media player or remote.
+2025-12-16 19:35:09,722 [INFO] Resolution: Skipping light.office_jarvis_status_led_bar for intent 'resume' because domain 'light' is not a media player or remote.
+2025-12-16 19:35:09,722 [INFO] match found in Group: askey:sti6140d360:office (via Office TV (media_pla...)
+2025-12-16 19:35:09,724 [INFO] Group askey:sti6140d360:office has 4 members.
+2025-12-16 19:35:09,724 [INFO] Capability Routing used media_player.office_tv_chrome_2 (cast) for intent resume
+2025-12-16 19:35:09,724 [INFO] [Device Fallback] Resolved 'Office TV' to media_player.office_tv_chrome_2
+2025-12-16 19:35:09,724 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': "Media command 'resume' could not be executed.", 'entity_id': 'media_player.office_tv_chrome_2', 'service': 'resume'}]
+2025-12-16 19:35:09,724 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'resume' on 'media_player.office_tv_chrome_2' failed. Reason: Media command 'resume' could not be executed.
+
+2025-12-16 19:35:09,724 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-16 19:35:09,724 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2643
+2025-12-16 19:35:09,725 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 19:35:10,213 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:35:10,563 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:10,585 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:35:11,706 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:11,719 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:35:12,831 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:12,850 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:35:12,941 [INFO] Executing Web Search for: Launch YouTube on Office TV
+2025-12-16 19:35:12,950 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-16 19:35:13,056 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:35:13,083 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49056
+2025-12-16 19:35:17,739 [DEBUG] https://search.sumemail.com:443 "GET /search?q=Launch+YouTube+on+Office+TV&format=json HTTP/2.0" 200 7635
+2025-12-16 19:35:17,848 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=4317
+2025-12-16 19:35:17,850 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 19:35:17,942 [DEBUG] [RESPONSE] Final response to user (203 chars): The command to resume playback on the Office TV failed. Let me attempt to play YouTube instead. If the TV is on and the app is open, this should work. If not, well need to troubleshoot the device status.
+2025-12-16 19:35:17,942 [DEBUG] [RESPONSE] Returning to client: The command to resume playback on the Office TV failed. Let me attempt to play YouTube instead. If the TV is on and the app is open, this should work. If not, well need to troubleshoot the device stat
+2025-12-16 19:35:18,301 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:35:45,148 [DEBUG] [RESPONSE] Final response to user (218 chars): Launching YouTube on the Office TV. Please ensure the YouTube app is installed or use casting from your phone. Would you like me to proceed with casting via the Chromecast device or check for the YouTube app on the TV?
+2025-12-16 19:35:45,148 [DEBUG] [RESPONSE] Returning to client: Launching YouTube on the Office TV. Please ensure the YouTube app is installed or use casting from your phone. Would you like me to proceed with casting via the Chromecast device or check for the YouT
+2025-12-16 19:36:18,337 [DEBUG] [REGEX OVERRIDE] Matched 'open_app' via pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hu...
+2025-12-16 19:36:18,338 [INFO] [INTENT] Regex override: 'Launch YouTube on Office TV' -> open_app
+2025-12-16 19:36:18,379 [INFO] [PIPELINE DEBUG] Using provided intent: open_app (Score: 1.0)
+2025-12-16 19:36:18,379 [INFO] [FAST ORCHESTRA] Bypassing LLM for open_app
+2025-12-16 19:36:18,380 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Launch YouTube on Office TV' (Music Mode: False)
+2025-12-16 19:36:18,380 [INFO] DEBUG: Entering smart_resolve_entity. Q='Launch YouTube on Office TV' Intent='open_app' Multiple=True
+2025-12-16 19:36:18,404 [INFO] DEBUG: Search returned 30 docs.
+2025-12-16 19:36:18,404 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.office_tv_chrome_2', metadata={'last_updated': '789129.287', 'domain': 'media_player', 'entity_id': 'media_player.office_tv_chrome_2', 'group_name': 'Office', 'attributes': '{"volume_level": 0.56, "media_content_id": "radiobrowser://radio/339c6a61-4433-44f9-9fad-20998c512ae4", "media_content_type": "music", "media_position": 63, "media_position_updated_at": "2025-12-17T02:30:21.749567+00:00", "media_title": "Youtube", "app_id": "music_assistant", "shuffle": false, "repeat": "off", "entity_picture_local": "/api/media_player_proxy/media_player.office_tv_chrome_2?token=8da853e7a335fb5414a27725cc4d10e8b282e3dc6a6ca27389b37a1f6ce9e34c&cache=f00dd084e6088981", "mass_player_type": "player", "active_queue": "media_player.office_tv_chrome", "device_class": "speaker", "entity_picture": "http://player.181fm.com/?station=181-xtraditional", "icon": "mdi:speaker", "friendly_name": "Office TV", "supported_features": 7796671}', 'friendly_name': 'Office TV', 'model': 'sti6140d360', 'manufacturer': 'askey', 'state': 'playing', 'source': 'home_assistant', 'group_id': 'askey:sti6140d360:office', 'capabilities': 'turn_on,remote_control,play_media,turn_off', 'integration': 'cast'}, page_content="Office TV (media_player.office_tv_chrome_2) is a cast device in group 'Office'. Can turn off. Can play media. Is a remote."), 1.0624780654907227)
+2025-12-16 19:36:18,404 [INFO] match found in Group: askey:sti6140d360:office (via Office TV (media_pla...)
+2025-12-16 19:36:18,405 [INFO] Group askey:sti6140d360:office has 4 members.
+2025-12-16 19:36:18,405 [INFO] Capability Routing used remote.office_tv_remote (remote) for intent open_app
+2025-12-16 19:36:18,405 [INFO] [Device Fallback] Resolved 'Launch YouTube on Office TV' to remote.office_tv_remote
+2025-12-16 19:36:18,405 [WARNING] Unknown integration 'remote' for app launch on remote.office_tv_remote. Attempting Android TV fallback.
+2025-12-16 19:36:18,405 [INFO] [Android TV] Launching app 'youtube' on remote.office_tv_remote
+2025-12-16 19:36:18,405 [INFO] [Android TV] Launching app 'youtube' (com.google.android.youtube.tv) on remote.office_tv_remote
+2025-12-16 19:36:18,406 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:18,423 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:36:18,425 [WARNING] [Auto-Power-On] Error checking/turning on device: 'str' object has no attribute 'get'. Proceeding anyway...
+2025-12-16 19:36:18,427 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:18,445 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:36:18,446 [INFO] EXEC HA: media_player.play_media on remote.office_tv_remote | Data: {'media_content_id': 'com.google.android.youtube.tv', 'media_content_type': 'app'}
+2025-12-16 19:36:18,448 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:18,471 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 200 10
+2025-12-16 19:36:19,475 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:19,501 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:36:20,506 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:20,526 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:36:21,531 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:21,554 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:36:22,558 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:22,583 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:36:23,587 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:23,610 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/remote.office_tv_remote HTTP/1.1" 200 429
+2025-12-16 19:36:23,611 [INFO] Executing Web Search for: Launch YouTube on Office TV
+INFO:     192.168.2.1:59340 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-16 19:36:23,618 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-16 19:36:23,639 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 19:36:23,665 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49022
+2025-12-16 19:36:28,247 [DEBUG] https://search.sumemail.com:443 "GET /search?q=Launch+YouTube+on+Office+TV&format=json HTTP/2.0" 200 7013
+2025-12-16 19:36:28,251 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=4263
+2025-12-16 19:36:28,253 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 19:36:28,852 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 19:36:38,590 [DEBUG] [RESPONSE] Final response to user (297 chars): To launch YouTube on the Office TV, first ensure the TV is on. Use the Office TV Remote to navigate to the YouTube app (if available) or open a browser to YouTube.com. If the app isnt installed, follow the steps from the web search results to download it. Let me know if you need further guidance!
+2025-12-16 19:36:38,590 [DEBUG] [RESPONSE] Returning to client: To launch YouTube on the Office TV, first ensure the TV is on. Use the Office TV Remote to navigate to the YouTube app (if available) or open a browser to YouTube.com. If the app isnt installed, follo

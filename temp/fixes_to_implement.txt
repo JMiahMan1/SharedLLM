@@ -1,0 +1,35 @@
+# Critical Fixes Implementation  - Pass 1 Issues
+
+## Fix 1: Move Domain Filtering BEFORE Candidate Scoring
+**File**: `app/logic/media_ops.py` lines 702-720
+**Issue**: Binary sensors score high, get added to raw_candidates, THEN filtered
+**Fix**: Filter happens too late - move domain check INSIDE the loop BEFORE appending
+
+## Fix 2: Handle List Results in Batch Command  
+**File**: `app/logic/media_ops.py` line 602
+**Current**: `success_count = sum(1 for r in results if r.get('status') == 'SUCCESS')`
+**Issue**: Some results are lists, not dicts
+**Fix**: Add type check: `if isinstance(r, dict) and r.get('status') == 'SUCCESS'`
+
+## Fix 3: Detect "Resume" as Transport Command
+**File**: Need to find where media content is processed
+**Issue**: "resume" passed as media_content_id instead of using media_play service
+**Fix**: Detect "resume" query and use `media_player.media_play` instead of `play_media`
+
+## Fix 4: Stop Polling on 404
+**File**: Need to find state polling loop
+**Issue**: Polls non-existent entities 5 times  
+**Fix**: Check for 404 response and break immediately
+
+## Fix 5: Reduce State Polling Frequency
+**File**: State verification loops
+**Current**: 500ms interval
+**Fix**: Change to 1000-1500ms
+
+## Implementation Order:
+1. Fix domain filtering (easiest)
+2. Fix batch results type check
+3. Find and fix all polling locations
+4. Find and fix resume command
+5. Test locally
+6. Commit + Deploy

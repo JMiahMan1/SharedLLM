@@ -1,0 +1,3 @@
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/temp/verify_pause.py", line 40
+    for i in range(20):
+IndentationError: unexpected indent
