@@ -292,8 +292,9 @@ async def _handle_single_command(
 
     # --- FAST PATH ORCHESTRATION ---
     # Skip LLM for simple, high-confidence intents to avoid timeouts
-    log.info(f"[FAST PATH CHECK] is_high_confidence={is_high_confidence}, intent={intent}")
+    log.info(f"[FAST PATH ORCHESTRATION] Starting for intent={intent}, is_high_confidence={is_high_confidence}")
     if is_high_confidence and intent:
+        log.info(f"[FAST PATH] Condition met, processing {intent}")
         action_plan = None
         if intent in ["volume_set", "volume_up", "volume_down", "volume_mute"]:
              # Extract volume from query using regex here or in the tool?
