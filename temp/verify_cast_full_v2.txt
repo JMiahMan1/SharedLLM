@@ -1,8 +1,0 @@
-==================================================
- ROBUST INTEGRATION VERIFICATION: OFICE TV CONTROLS
-==================================================
-Traceback (most recent call last):
-  File "/home/jeremiah/Summers Drive/Code/SharedLLM/test/integration/verify_cast_controls.py", line 95, in <module>
-    log("--- PHASE 1: RESET ---")
-    ^^^
-NameError: name 'log' is not defined
