@@ -165,42 +165,43 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
 
     service_url = f"{ha_url}/api/services/music_assistant/play_media"
 
-    # Fix media_content_id format based on media_type
+    # Fix media_type based on content
     if media_type == "music":
         # Convert "music:query" to proper search format
         if media_id.startswith("music:"):
             media_id = media_id[6:]  # Remove "music:" prefix
-        media_content_type = "search"
-        media_content_id = media_id
+        final_media_type = "artist"  # Use artist for searches
+        final_media_id = media_id
     elif media_type == "search":
-        # Convert "search:query" to proper search format
+        # Convert "search:query" to proper format
         if media_id.startswith("search:"):
             media_id = media_id[7:]  # Remove "search:" prefix
-        media_content_type = "search"
-        media_content_id = media_id
+        final_media_type = "artist"  # Use artist for searches
+        final_media_id = media_id
     elif media_type.startswith("library://"):
         # Already in correct library format
-        media_content_type = "library"
-        media_content_id = media_type
+        final_media_type = "library"
+        final_media_id = media_type
     else:
-        # Default to search for unknown types
-        media_content_type = "search"
-        media_content_id = media_id
+        # Default to artist search for unknown types
+        final_media_type = "artist"
+        final_media_id = media_id
 
     payload = {
         "entity_id": entity_id,
-        "media_content_id": media_content_id,
-        "media_content_type": media_content_type
+        "media_id": final_media_id,
+        "media_type": final_media_type,
+        "enqueue": "play"
     }
 
     try:
-        log.info(f"[MA PLAY] Playing {media_content_type}:{media_content_id} on {entity_id}")
+        log.info(f"[MA PLAY] Playing {final_media_type}:{final_media_id} on {entity_id}")
         response = requests.post(service_url, json=payload, headers=headers, timeout=10)
 
         if response.status_code == 200:
              return {
                 "status": "SUCCESS",
-                "message": f"Playing {media_content_id} on {entity_id}",
+                "message": f"Playing {final_media_id} on {entity_id}",
                 "entity_id": entity_id
             }
         else:
