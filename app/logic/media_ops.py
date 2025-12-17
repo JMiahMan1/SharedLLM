@@ -1338,7 +1338,12 @@ async def handle_media_command(
             else:
                 entity_id = get_last_entity(redis_client, user_creds.get("user"))
         else:
-            resolved_result = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
+            # For transport commands, skip device resolution if cleaned query is too short or generic
+            if is_transport and (len(cleaned_for_res.strip()) < 3 or cleaned_for_res.strip() in ["to", "the", "a", "an"]):
+                log.info(f"[Transport] Skipping device resolution for short/generic query: '{cleaned_for_res}'")
+                resolved_result = None
+            else:
+                resolved_result = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
             if isinstance(resolved_result, list):
                  if resolved_result:
                      log.info(f"[Standard] Resolved {len(resolved_result)} entities. Executing Batch.")
