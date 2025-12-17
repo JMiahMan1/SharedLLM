@@ -1,0 +1,49 @@
+2025-12-16 22:14:02,573 [INFO] [INTENT] Regex override: 'Play Brandon Lake on Office TV' -> play_media
+2025-12-16 22:14:02,574 [INFO] [PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+2025-12-16 22:14:02,574 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2146
+2025-12-16 22:14:02,577 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-16 22:14:10,592 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-16 22:14:10,594 [INFO] [PIPELINE DEBUG] Orchestration Plan: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play', 'device_name': 'Office TV'}}
+2025-12-16 22:14:10,595 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office TV' (Music Mode: True)
+2025-12-16 22:14:10,595 [INFO] DEBUG: Entering smart_resolve_entity. Q='Office TV' Intent='play' Multiple=True
+2025-12-16 22:14:10,617 [INFO] [EXACT MATCH] 'Office TV' → media_player.office_tv_chrome_2
+2025-12-16 22:14:10,618 [INFO] Using exact name match for 'Office TV': ('media_player.office_tv_chrome_2', 'cast')
+2025-12-16 22:14:10,618 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+2025-12-16 22:14:10,618 [INFO] [BATCH] Executing 'play' on 1 entities
+2025-12-16 22:14:10,618 [INFO] Sanitized intent from 'play' to 'play_media'
+2025-12-16 22:14:10,618 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='play_media' is_transport=False entity=media_player.office_tv_chrome_2
+2025-12-16 22:14:10,618 [DEBUG] [CAPABILITY] Checking Redis cache for media_player.office_tv_chrome_2
+2025-12-16 22:14:10,619 [INFO] [CAPABILITY] Redis cache HIT for media_player.office_tv_chrome_2
+2025-12-16 22:14:10,620 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:10,645 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 513
+2025-12-16 22:14:10,648 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:10,675 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 513
+2025-12-16 22:14:10,676 [INFO] EXEC HA: media_player.turn_on on media_player.office_tv_chrome_2 | Data: None
+2025-12-16 22:14:10,678 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:13,873 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/turn_on HTTP/1.1" 200 520
+2025-12-16 22:14:14,919 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:14,947 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 931
+2025-12-16 22:14:14,948 [INFO] Executing Standard Play on media_player.office_tv_chrome_2 Type: music
+2025-12-16 22:14:14,950 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:14,973 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 931
+2025-12-16 22:14:14,975 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+2025-12-16 22:14:14,977 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:15,409 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 200 10
+2025-12-16 22:14:16,416 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:16,448 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1087
+2025-12-16 22:14:17,453 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:17,476 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1087
+2025-12-16 22:14:18,481 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:18,510 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-16 22:14:19,514 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:19,542 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-16 22:14:20,547 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-16 22:14:20,590 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1086
+2025-12-16 22:14:20,592 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV', 'service': 'play', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.play_media', 'new_state': 'playing'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-16 22:14:20,592 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'play' sent to 1 devices. Verified New State: N/A
+
+2025-12-16 22:14:20,592 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-16 22:14:20,592 [INFO] DEBUG: Entering Silent Mode for intent 'play_media'
+2025-12-16 22:14:20,593 [DEBUG] [RESPONSE] Returning to client: Done.

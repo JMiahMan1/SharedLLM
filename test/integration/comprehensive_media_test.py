@@ -505,9 +505,22 @@ def main():
     if not devices_map:
         log("No devices discovered or API failed. Exiting.", "ERROR")
         sys.exit(1)
-        
+      # Pre-flight checks
     log("\nPre-flight checks...", "INFO")
-    check_api_health()
+    
+    # BLOCK until API is healthy
+    api_up = False
+    for i in range(30): # 60 seconds
+         if check_api_health():
+              api_up = True
+              log("API is Healthy.", "SUCCESS")
+              break
+         log(f"Waiting for API to come up... ({i+1}/30)", "WARNING")
+         time.sleep(2)
+         
+    if not api_up:
+        log("FATAL: API did not come up after 60 seconds. Aborting tests.", "ERROR")
+        sys.exit(1)
     capture_docker_logs()
     
     for device_name, config in devices_map.items():

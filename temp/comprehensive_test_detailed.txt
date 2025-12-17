@@ -1,0 +1,606 @@
+DETAILED TEST LOG - 2025-12-16 23:40:22
+================================================================================
+
+[23:40:22.147] INFO: 
+Pre-flight checks...
+[23:40:23.133] INFO: 
+
+################################################################################
+[23:40:23.133] INFO: DEVICE: Office TV (media_player.office_tv_chrome_2)
+[23:40:23.133] INFO: ################################################################################
+[23:40:23.133] INFO: 
+================================================================================
+[23:40:23.133] INFO: MUSIC ASSISTANT TESTS: Office TV
+[23:40:23.133] INFO: ================================================================================
+[23:40:23.133] INFO: Forcing media_player.office_tv_chrome_2 OFF
+[23:40:23.173] SUCCESS: ✅ media_player.office_tv_chrome_2 is OFF
+[23:40:25.173] INFO: 
+--- Office TV - Play Music (Auto-Power-On) ---
+[23:40:25.198] TEST_START: Office TV - Play Music (Auto-Power-On)
+  Data: {
+  "initial_state": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:40:25.198] INFO: Command: 'Play Brandon Lake on Office TV'
+[23:40:46.174] SUCCESS: Response: 200 (21.0s)
+[23:40:46.174] INFO: Waiting for state in ['playing', 'buffering'] (max 30s)
+[23:40:46.195] SUCCESS: ✅ State reached: playing (0.0s)
+[23:40:46.195] PASS: Office TV - Play Music (Auto-Power-On)
+  Data: {
+  "duration": 21.021353483200073,
+  "state": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 2
+  }
+}
+[23:40:49.195] INFO: 
+--- Office TV - Pause Music ---
+[23:40:49.215] TEST_START: Office TV - Pause Music
+  Data: {
+  "initial_state": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 2
+  }
+}
+[23:40:49.215] INFO: Command: 'Pause music on Office TV'
+[23:41:19.955] SUCCESS: Response: 200 (30.7s)
+[23:41:19.955] INFO: Waiting for state in ['paused'] (max 15s)
+[23:41:19.969] SUCCESS: ✅ State reached: paused (0.0s)
+[23:41:19.969] PASS: Office TV - Pause Music
+  Data: {
+  "duration": 30.774497747421265,
+  "state": {
+    "state": "paused",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 32
+  }
+}
+[23:41:21.969] INFO: 
+--- Office TV - Resume Music ---
+[23:41:21.982] TEST_START: Office TV - Resume Music
+  Data: {
+  "initial_state": {
+    "state": "paused",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 32
+  }
+}
+[23:41:21.982] INFO: Command: 'Resume music on Office TV'
+[23:42:22.000] WARNING: Timeout, retrying (1/1)...
+[23:43:00.826] SUCCESS: Response: 200 (36.8s)
+[23:43:00.826] INFO: Waiting for state in ['playing'] (max 15s)
+[23:43:00.840] SUCCESS: ✅ State reached: playing (0.0s)
+[23:43:00.840] PASS: Office TV - Resume Music
+  Data: {
+  "duration": 98.87071752548218,
+  "state": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 34
+  }
+}
+[23:43:02.840] INFO: 
+--- Office TV - Skip Track ---
+[23:43:02.871] TEST_START: Office TV - Skip Track
+  Data: {
+  "initial_state": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 34
+  }
+}
+[23:43:02.871] INFO: Command: 'Skip to next song on Office TV'
+[23:43:08.511] SUCCESS: Response: 200 (5.6s)
+[23:43:08.511] INFO: Waiting for state in ['playing'] (max 15s)
+[23:43:08.523] SUCCESS: ✅ State reached: playing (0.0s)
+[23:43:08.523] PASS: Office TV - Skip Track
+  Data: {
+  "duration": 5.682740688323975,
+  "state": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 34
+  }
+}
+[23:43:10.523] INFO: 
+--- Office TV - Volume Tests ---
+[23:43:10.523] INFO: Command: Set volume to 25% on Office TV
+[23:43:10.523] INFO: Command: 'Set volume to 25% on Office TV'
+[23:43:30.264] SUCCESS: Response: 200 (19.7s)
+[23:43:33.278] FAIL: Office TV - Set Volume 25%
+  Data: {
+  "test": "Office TV - Set Volume 25%",
+  "reason": "Volume mismatch: 0.56",
+  "timestamp": "2025-12-16T23:43:33.278382",
+  "expected": "0.25",
+  "actual": "0.56",
+  "state_info": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 34
+  }
+}
+[23:43:33.278] INFO: Command: Set volume to 35% on Office TV
+[23:43:33.278] INFO: Command: 'Set volume to 35% on Office TV'
+[23:43:44.475] SUCCESS: Response: 200 (11.2s)
+[23:43:47.491] FAIL: Office TV - Set Volume 35%
+  Data: {
+  "test": "Office TV - Set Volume 35%",
+  "reason": "Volume mismatch: 0.56",
+  "timestamp": "2025-12-16T23:43:47.491351",
+  "expected": "0.35",
+  "actual": "0.56",
+  "state_info": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 34
+  }
+}
+[23:43:47.491] INFO: 
+--- Office TV - Stop Music ---
+[23:43:47.503] TEST_START: Office TV - Stop Music
+  Data: {
+  "initial_state": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 34
+  }
+}
+[23:43:47.503] INFO: Command: 'Stop music on Office TV'
+[23:43:57.627] SUCCESS: Response: 200 (10.1s)
+[23:43:57.627] INFO: Waiting for state in ['idle', 'off', 'paused'] (max 15s)
+[23:43:57.642] SUCCESS: ✅ State reached: idle (0.0s)
+[23:43:57.642] PASS: Office TV - Stop Music
+  Data: {
+  "duration": 10.151110172271729,
+  "state": {
+    "state": "idle",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.56,
+    "media_position": 117
+  }
+}
+[23:43:57.642] INFO: Forcing media_player.office_tv_chrome_2 OFF
+[23:43:57.751] SUCCESS: ✅ media_player.office_tv_chrome_2 is OFF
+[23:44:00.421] INFO: 
+================================================================================
+[23:44:00.421] INFO: YOUTUBE VIDEO TESTS: Office TV
+[23:44:00.421] INFO: ================================================================================
+[23:44:00.421] INFO: Forcing media_player.office_tv_chrome_2 OFF
+[23:44:00.491] SUCCESS: ✅ media_player.office_tv_chrome_2 is OFF
+[23:44:02.491] INFO: 
+--- Office TV - Play YouTube Video (Auto-Power-On) ---
+[23:44:02.521] TEST_START: Office TV - Play YouTube Video (Auto-Power-On)
+  Data: {
+  "initial_state": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:44:02.521] INFO: Command: 'Watch Big Buck Bunny on YouTube with Office TV'
+[23:45:02.624] WARNING: Timeout, retrying (1/1)...
+[23:46:04.728] ERROR: Command timed out
+[23:46:04.728] FAIL: Office TV - Play YouTube Video (Auto-Power-On)
+  Data: {
+  "test": "Office TV - Play YouTube Video (Auto-Power-On)",
+  "reason": "API error: HTTP 408",
+  "timestamp": "2025-12-16T23:46:04.728442",
+  "expected": "200",
+  "actual": "408",
+  "state_info": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:46:07.728] SKIP: Office TV - Pause Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:46:09.728] SKIP: Office TV - Resume Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:46:11.729] SKIP: Office TV - Stop Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:46:11.729] INFO: Forcing media_player.office_tv_chrome_2 OFF
+[23:46:11.873] SUCCESS: ✅ media_player.office_tv_chrome_2 is OFF
+[23:46:14.334] INFO: 
+
+################################################################################
+[23:46:14.334] INFO: DEVICE: Master Bedroom TV (media_player.master_bedroom_tv_2)
+[23:46:14.334] INFO: ################################################################################
+[23:46:14.334] INFO: 
+================================================================================
+[23:46:14.334] INFO: MUSIC ASSISTANT TESTS: Master Bedroom TV
+[23:46:14.335] INFO: ================================================================================
+[23:46:14.335] INFO: Forcing media_player.master_bedroom_tv_2 OFF
+[23:46:14.363] SUCCESS: ✅ media_player.master_bedroom_tv_2 is OFF
+[23:46:16.364] INFO: 
+--- Master Bedroom TV - Play Music (Auto-Power-On) ---
+[23:46:16.377] TEST_START: Master Bedroom TV - Play Music (Auto-Power-On)
+  Data: {
+  "initial_state": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:46:16.377] INFO: Command: 'Play Brandon Lake on Master Bedroom TV'
+[23:47:12.360] SUCCESS: Response: 200 (56.0s)
+[23:47:12.360] INFO: Waiting for state in ['playing', 'buffering'] (max 30s)
+[23:47:12.371] SUCCESS: ✅ State reached: playing (0.0s)
+[23:47:12.371] PASS: Master Bedroom TV - Play Music (Auto-Power-On)
+  Data: {
+  "duration": 56.0072386264801,
+  "state": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 2
+  }
+}
+[23:47:15.371] INFO: 
+--- Master Bedroom TV - Pause Music ---
+[23:47:15.402] TEST_START: Master Bedroom TV - Pause Music
+  Data: {
+  "initial_state": {
+    "state": "playing",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 2
+  }
+}
+[23:47:15.408] INFO: Command: 'Pause music on Master Bedroom TV'
+[23:47:35.689] SUCCESS: Response: 200 (20.3s)
+[23:47:35.689] INFO: Waiting for state in ['paused'] (max 15s)
+[23:47:51.258] WARNING: ❌ Timeout after 15.6s. State: idle
+[23:47:51.258] FAIL: Master Bedroom TV - Pause Music
+  Data: {
+  "test": "Master Bedroom TV - Pause Music",
+  "reason": "State mismatch",
+  "timestamp": "2025-12-16T23:47:51.258579",
+  "expected": "['paused']",
+  "actual": "idle",
+  "state_info": {
+    "state": "idle",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:47:53.258] INFO: 
+--- Master Bedroom TV - Resume Music ---
+[23:47:53.272] TEST_START: Master Bedroom TV - Resume Music
+  Data: {
+  "initial_state": {
+    "state": "idle",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:47:53.272] INFO: Command: 'Resume music on Master Bedroom TV'
+[23:48:17.659] SUCCESS: Response: 200 (24.4s)
+[23:48:17.660] INFO: Waiting for state in ['playing'] (max 15s)
+[23:48:32.940] WARNING: ❌ Timeout after 15.3s. State: paused
+[23:48:32.941] FAIL: Master Bedroom TV - Resume Music
+  Data: {
+  "test": "Master Bedroom TV - Resume Music",
+  "reason": "State mismatch",
+  "timestamp": "2025-12-16T23:48:32.941026",
+  "expected": "['playing']",
+  "actual": "paused",
+  "state_info": {
+    "state": "paused",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:48:34.941] INFO: 
+--- Master Bedroom TV - Skip Track ---
+[23:48:34.954] TEST_START: Master Bedroom TV - Skip Track
+  Data: {
+  "initial_state": {
+    "state": "paused",
+    "media_title": "Brandon Lake - Hard Fought Hallelujah",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:48:34.954] INFO: Command: 'Skip to next song on Master Bedroom TV'
+[23:48:40.700] SUCCESS: Response: 200 (5.7s)
+[23:48:40.700] INFO: Waiting for state in ['playing'] (max 15s)
+[23:48:57.835] WARNING: ❌ Timeout after 17.1s. State: paused
+[23:48:57.835] FAIL: Master Bedroom TV - Skip Track
+  Data: {
+  "test": "Master Bedroom TV - Skip Track",
+  "reason": "State mismatch",
+  "timestamp": "2025-12-16T23:48:57.835872",
+  "expected": "['playing']",
+  "actual": "paused",
+  "state_info": {
+    "state": "paused",
+    "media_title": "Casualties",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:48:59.836] INFO: 
+--- Master Bedroom TV - Volume Tests ---
+[23:48:59.836] INFO: Command: Set volume to 25% on Master Bedroom TV
+[23:48:59.836] INFO: Command: 'Set volume to 25% on Master Bedroom TV'
+[23:49:16.432] SUCCESS: Response: 200 (16.6s)
+[23:49:19.447] FAIL: Master Bedroom TV - Set Volume 25%
+  Data: {
+  "test": "Master Bedroom TV - Set Volume 25%",
+  "reason": "Volume mismatch: 0.0",
+  "timestamp": "2025-12-16T23:49:19.446996",
+  "expected": "0.25",
+  "actual": "0.0",
+  "state_info": {
+    "state": "paused",
+    "media_title": "Casualties",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:49:19.447] INFO: Command: Set volume to 35% on Master Bedroom TV
+[23:49:19.447] INFO: Command: 'Set volume to 35% on Master Bedroom TV'
+[23:50:04.010] ERROR: Command failed: None
+[23:50:07.031] FAIL: Master Bedroom TV - Set Volume 35%
+  Data: {
+  "test": "Master Bedroom TV - Set Volume 35%",
+  "reason": "Volume mismatch: 0.0",
+  "timestamp": "2025-12-16T23:50:07.031318",
+  "expected": "0.35",
+  "actual": "0.0",
+  "state_info": {
+    "state": "paused",
+    "media_title": "Casualties",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:50:07.031] INFO: 
+--- Master Bedroom TV - Stop Music ---
+[23:50:07.044] TEST_START: Master Bedroom TV - Stop Music
+  Data: {
+  "initial_state": {
+    "state": "paused",
+    "media_title": "Casualties",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:50:07.044] INFO: Command: 'Stop music on Master Bedroom TV'
+[23:50:07.168] ERROR: Command failed: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f446ebd3d90>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[23:50:07.168] FAIL: Master Bedroom TV - Stop Music
+  Data: {
+  "test": "Master Bedroom TV - Stop Music",
+  "reason": "API error: HTTP 500",
+  "timestamp": "2025-12-16T23:50:07.168185",
+  "expected": "200",
+  "actual": "500",
+  "state_info": {
+    "state": "paused",
+    "media_title": "Casualties",
+    "app_id": "music_assistant",
+    "volume": 0.0,
+    "media_position": 10
+  }
+}
+[23:50:07.168] INFO: Forcing media_player.master_bedroom_tv_2 OFF
+[23:50:07.601] SUCCESS: ✅ media_player.master_bedroom_tv_2 is OFF
+[23:50:10.051] INFO: 
+================================================================================
+[23:50:10.051] INFO: YOUTUBE VIDEO TESTS: Master Bedroom TV
+[23:50:10.051] INFO: ================================================================================
+[23:50:10.051] INFO: Forcing media_player.master_bedroom_tv_2 OFF
+[23:50:10.081] SUCCESS: ✅ media_player.master_bedroom_tv_2 is OFF
+[23:50:12.081] INFO: 
+--- Master Bedroom TV - Play YouTube Video (Auto-Power-On) ---
+[23:50:12.094] TEST_START: Master Bedroom TV - Play YouTube Video (Auto-Power-On)
+  Data: {
+  "initial_state": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:50:12.094] INFO: Command: 'Watch Big Buck Bunny on YouTube with Master Bedroom TV'
+[23:50:12.100] ERROR: Command failed: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f446ebd2e90>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[23:50:12.101] FAIL: Master Bedroom TV - Play YouTube Video (Auto-Power-On)
+  Data: {
+  "test": "Master Bedroom TV - Play YouTube Video (Auto-Power-On)",
+  "reason": "API error: HTTP 500",
+  "timestamp": "2025-12-16T23:50:12.101009",
+  "expected": "200",
+  "actual": "500",
+  "state_info": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:50:15.101] SKIP: Master Bedroom TV - Pause Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:50:17.101] SKIP: Master Bedroom TV - Resume Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:50:19.101] SKIP: Master Bedroom TV - Stop Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:50:19.101] INFO: Forcing media_player.master_bedroom_tv_2 OFF
+[23:50:19.331] SUCCESS: ✅ media_player.master_bedroom_tv_2 is OFF
+[23:50:23.131] INFO: 
+
+################################################################################
+[23:50:23.132] INFO: DEVICE: Gracie's TV (media_player.28_tcl_roku_tv)
+[23:50:23.132] INFO: ################################################################################
+[23:50:23.132] INFO: 
+================================================================================
+[23:50:23.132] INFO: MUSIC ASSISTANT TESTS: Gracie's TV
+[23:50:23.132] INFO: ================================================================================
+[23:50:23.132] INFO: Forcing media_player.28_tcl_roku_tv OFF
+[23:50:24.248] SUCCESS: ✅ media_player.28_tcl_roku_tv is OFF
+[23:50:26.248] INFO: 
+--- Gracie's TV - Play Music (Auto-Power-On) ---
+[23:50:26.262] TEST_START: Gracie's TV - Play Music (Auto-Power-On)
+  Data: {
+  "initial_state": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:50:26.262] INFO: Command: 'Play Brandon Lake on Gracie's TV'
+[23:50:26.291] ERROR: Command failed: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f446ebd0410>: Failed to establish a new connection: [Errno 111] Connection refused'))
+[23:50:26.291] FAIL: Gracie's TV - Play Music (Auto-Power-On)
+  Data: {
+  "test": "Gracie's TV - Play Music (Auto-Power-On)",
+  "reason": "API error: HTTP 500",
+  "timestamp": "2025-12-16T23:50:26.291170",
+  "expected": "200",
+  "actual": "500",
+  "state_info": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:50:29.291] SKIP: Gracie's TV - Pause Music
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:50:31.291] SKIP: Gracie's TV - Resume Music
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:50:33.291] SKIP: Gracie's TV - Skip Track
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:50:35.291] SKIP: Gracie's TV - Volume Control
+  Data: {
+  "reason": "Dependency failed"
+}
+[23:50:35.291] SKIP: Gracie's TV - Stop Music
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:50:35.291] INFO: Forcing media_player.28_tcl_roku_tv OFF
+[23:50:40.515] SUCCESS: ✅ media_player.28_tcl_roku_tv is OFF
+[23:50:43.273] INFO: 
+================================================================================
+[23:50:43.273] INFO: YOUTUBE VIDEO TESTS: Gracie's TV
+[23:50:43.273] INFO: ================================================================================
+[23:50:43.273] INFO: Forcing media_player.28_tcl_roku_tv OFF
+[23:50:48.423] SUCCESS: ✅ media_player.28_tcl_roku_tv is OFF
+[23:50:50.423] INFO: 
+--- Gracie's TV - Play YouTube Video (Auto-Power-On) ---
+[23:50:50.512] TEST_START: Gracie's TV - Play YouTube Video (Auto-Power-On)
+  Data: {
+  "initial_state": {
+    "state": "off",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:50:50.512] INFO: Command: 'Watch Big Buck Bunny on YouTube with Gracie's TV'
+[23:51:42.834] SUCCESS: Response: 200 (52.3s)
+[23:51:42.834] INFO: Waiting for state in ['playing', 'buffering', 'on'] (max 35s)
+[23:52:21.354] WARNING: ❌ Timeout after 38.5s. State: idle
+[23:52:21.354] FAIL: Gracie's TV - Play YouTube Video (Auto-Power-On)
+  Data: {
+  "test": "Gracie's TV - Play YouTube Video (Auto-Power-On)",
+  "reason": "State mismatch",
+  "timestamp": "2025-12-16T23:52:21.354585",
+  "expected": "['playing', 'buffering', 'on']",
+  "actual": "idle",
+  "state_info": {
+    "state": "idle",
+    "media_title": null,
+    "app_id": null,
+    "volume": null,
+    "media_position": null
+  }
+}
+[23:52:24.354] SKIP: Gracie's TV - Pause Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:52:26.355] SKIP: Gracie's TV - Resume Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:52:28.355] SKIP: Gracie's TV - Stop Video
+  Data: {
+  "reason": "Dependency failed (preceding Play command failed)"
+}
+[23:52:28.355] INFO: Forcing media_player.28_tcl_roku_tv OFF
+[23:52:29.455] SUCCESS: ✅ media_player.28_tcl_roku_tv is OFF
+[23:52:32.133] INFO: 
+Capturing final logs...

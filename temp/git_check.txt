@@ -1,0 +1,33 @@
+On branch timer
+Your branch is ahead of 'origin/timer' by 1 commit.
+  (use "git push" to publish your local commits)
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	temp/git_check.txt
+
+nothing added to commit but untracked files present (use "git add" to track)
+---LOG---
+commit bef32d7a4be72ce6bd629520634b58dd8858c62d
+Author: Agent <agent@example.com>
+Date:   Tue Dec 16 19:03:41 2025 -0700
+
+    feat(device-groups): implement dynamic device unification based on manufacturer/model and normalized name
+
+ app/logic/discovery/device_grouper.py     |  83 +++++++----
+ app/logic/discovery/integration_helper.py |  28 +++-
+ app/logic/refresh_devices.py              |  62 ++++++++-
+ temp/deploy_final_check.txt               |  73 +++++++++-
+ temp/deploy_fixes.txt                     |  34 ++---
+ temp/final_test_output_v2.txt             |  28 ++++
+ temp/full_test_suite_final.txt            |  63 +++------
+ temp/remote_test_advanced_features.txt    |  13 +-
+ temp/remote_test_calendar.txt             |   8 +-
+ temp/remote_test_media_api.txt            |  21 +--
+ temp/remote_test_music_info.txt           |   4 +-
+ temp/remote_test_notes.txt                |  18 +--
+ temp/remote_test_timers.txt               |   8 +-
+ temp/remote_test_web_search.txt           |   2 +-
+ temp/test_office_tv_full.py               | 222 ++++++++++++++++++++++++++++++
+ test/integration/test_timers.py           |   4 +-
+ 16 files changed, 522 insertions(+), 149 deletions(-)

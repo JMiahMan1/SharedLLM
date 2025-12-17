@@ -1,0 +1,47 @@
+2025-12-15 21:25:52,183 [INFO] ALARM TRIGGERED: test short task (ID: 3155fb72-369d-45d7-acf3-bbf174c5de7e)
+2025-12-15 21:25:52,224 [INFO] Timer 3155fb72-369d-45d7-acf3-bbf174c5de7e removed from DB (processing started).
+2025-12-15 21:25:52,224 [WARNING] Alarm Origin Device 'remote.office_tv' is NOT a media_player. Falling back.
+2025-12-15 21:25:52,225 [INFO] Alarm Target: Defaulting to last known entity: media_player.office_tv_chrome_2
+2025-12-15 21:25:52,226 [INFO] Triggering Alarm 'test short task' on ['media_player.office_tv_chrome_2']. Sound: default_alarm.wav x3
+2025-12-15 21:25:52,228 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:52,253 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1057
+2025-12-15 21:25:52,255 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'Attention. Alarm for test short task.', 'media_content_type': 'text'}
+2025-12-15 21:25:52,257 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:52,634 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+2025-12-15 21:25:52,637 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-15 21:25:52,637 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2025-12-15 21:25:52,637 [WARNING] TTS Failed on media_player.office_tv_chrome_2. Continuing to sound...
+2025-12-15 21:25:56,641 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:56,663 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1057
+2025-12-15 21:25:56,665 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'https://ha.sumemail.com/local/alarm_sounds/default_alarm.wav', 'media_content_type': 'music'}
+2025-12-15 21:25:56,667 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:56,702 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 200 10
+2025-12-15 21:25:57,246 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:57,267 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 882
+2025-12-15 21:25:57,770 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:57,807 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
+2025-12-15 21:25:58,312 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:58,337 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
+2025-12-15 21:25:58,841 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:58,873 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
+2025-12-15 21:25:59,378 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:25:59,401 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
+2025-12-15 21:26:02,406 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:26:02,428 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
+2025-12-15 21:26:02,430 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome_2 | Data: {'media_content_id': 'https://ha.sumemail.com/local/alarm_sounds/default_alarm.wav', 'media_content_type': 'music'}
+2025-12-15 21:26:02,432 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:26:02,467 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 200 10
+2025-12-15 21:26:02,974 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:26:03,005 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 882
+2025-12-15 21:26:03,510 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:26:03,531 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
+2025-12-15 21:26:04,035 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:26:04,057 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
+2025-12-15 21:26:04,562 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:26:04,586 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
+2025-12-15 21:26:05,090 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-15 21:26:05,113 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 879
