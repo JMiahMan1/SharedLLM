@@ -126,6 +126,7 @@ CALENDAR_EXTRACT_PROMPT = os.getenv("CALENDAR_EXTRACT_PROMPT", DEFAULT_CALENDAR_
 DEFAULT_ORCHESTRATOR_PROMPT = """You are an action planning agent. Your task is to analyze the user's intent and decide the next action based on the available tools.
 User Query: {query}
 Best Vector Intent Match: {intent_name} (Confidence: {intent_score:.2f})
+{conversation_history}
 
 Available Tools:
 1. 'calendar_add' (Schedule/create an event. Keywords: schedule, meeting, appointment, calendar)
@@ -139,7 +140,7 @@ Available Tools:
 9. 'timer_resume' (Resume a timer)
 10. 'media_command' (Handle media/HA control. Requires 'intent' and 'device_name'. For play_media, can include 'media_title')
 11. 'intent_learn' (Teach the AI a new phrase mapping)
-12. 'web_search' (Use for factual/external queries, if no other tool applies)
+12. 'web_search' (Use for factual/external queries, if no other tool applies. If using web_search, make the query specific and contextual based on conversation history)
 13. 'note_add' (Create a new note. Params: 'title', 'content')
 14. 'note_append' (Append to a note/list. Params: 'title', 'content')
 15. 'note_read' (Read a specific note file. Params: 'title')
@@ -157,6 +158,8 @@ CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 MEDIA COMMAND EXAMPLES:
 - "Play Brandon Lake on the Office TV" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "play_media", "device_name": "Office TV", "media_title": "Brandon Lake"}}}}
 - "Turn on the living room light" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "turn_on", "device_name": "living room light"}}}}
+
+WEB SEARCH CONTEXT: When using web_search, ALWAYS make the query specific and contextual. If the user is asking follow-up questions, incorporate the context from previous messages. For example, if they first asked about "weather in New York" and then "is it going to rain?", the web_search query should be "will it rain today in New York?" not just "will it rain today?".
 
 If the intent is a clear, confident action, generate the JSON for a tool call.
 If the query is conversational, informational, ambiguous, or requires the user's personal context/RAG (e.g., "What devices are in the office?", "Is the garage door open?"), output 'CONVERSE'.
