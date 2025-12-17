@@ -1998,7 +1998,7 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
         if not is_mass and result.get("status") == "FAILURE":
             if await _has_remote(remote_id):
                 log.info(f"Next track failed on {entity_id}. Falling back to remote: {remote_id}")
-                result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "DPAD_RIGHT"}, redis_client)
+                result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "MEDIA_NEXT"}, redis_client)
 
         return result
 
@@ -2011,7 +2011,7 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
         if not is_mass and result.get("status") == "FAILURE":
             if await _has_remote(remote_id):
                 log.info(f"Previous track failed on {entity_id}. Falling back to remote: {remote_id}")
-                result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "DPAD_LEFT"}, redis_client)
+                result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": "MEDIA_PREVIOUS"}, redis_client)
 
         return result
 
