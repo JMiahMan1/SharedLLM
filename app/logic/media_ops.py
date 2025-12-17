@@ -1388,12 +1388,7 @@ async def handle_media_command(
         if last_media:
             log.info(f"[Transport] Using last media entity: {last_media} (ignoring query device)")
             entity_id = last_media
-            should_scan = False
-        else:
-            should_scan = False
-            if not entity_id:
-                should_scan = True
-        else:
+        # No else needed - if no last media entity, use the resolved entity_id
             # AUTO-POWER-ON: Check if device is off and turn it on first
             try:
                 state_data = await get_entity_state(entity_id, user_creds)
