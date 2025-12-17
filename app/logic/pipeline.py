@@ -315,7 +315,7 @@ async def _handle_single_command(
                 "tool_name": "media_command",
                 "parameters": {"intent": intent, "device_name": query if device_in_query else None}
             }
-             log.debug(f"[FAST PATH] action_plan set: {action_plan}")
+            log.info(f"[FAST PATH] action_plan set: {action_plan}")
         elif intent in ["open_app"]:
              action_plan = {
                 "action": "tool_call",
