@@ -1106,7 +1106,11 @@ async def handle_media_command(
     """
     q_low = query.lower()
     log.info(f"[HANDLE_MEDIA_COMMAND] Called with intent={intent}, entity_id={entity_id}, device_name={device_name}")
-    
+
+    # Debug: Check if this is a brightness command
+    if intent in ["set_color", "set_brightness", "dim", "brighten"]:
+        log.info(f"[DEBUG] {intent} detected as brightness/color command")
+
     # [IntentOverride] Force upgrade for ambiguous "Watch" commands (e.g. "Watch on Roku" classified as turn_on)
     if re.search(r"\b(watch|view)\b", q_low) and intent not in ["watch_video", "view_content", "play_media"]:
          # Note: We exclude 'play_media' from forced upgrade here if we want to let play_media logic handle it?
@@ -1551,9 +1555,10 @@ async def handle_media_command(
     # COLOR & BRIGHTNESS CONTROL
     # -------------------------------------------------
     if intent in ["set_color", "set_brightness", "dim", "brighten"]:
-        log.debug(f"[COLOR/BRIGHTNESS] Handling intent='{intent}' for {entity_id}")
-        
+        log.info(f"[COLOR/BRIGHTNESS] ENTERING brightness/color handling for intent='{intent}' entity={entity_id} domain={domain}")
+
         if domain != "light":
+            log.info(f"[COLOR/BRIGHTNESS] Rejecting {intent} for non-light device {entity_id} (domain={domain})")
             return [{"status": "FAILURE", "message": f"Color/brightness control only works with lights, not {domain} devices.", "entity_id": entity_id, "service": intent}]
         
         # Fetch device capabilities
