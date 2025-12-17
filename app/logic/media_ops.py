@@ -1976,8 +1976,9 @@ async def handle_media_command(
         # Helper to get current state
         async def get_state(eid):
             if not eid: return "unknown"
-            s = await get_ha_state(eid, user_creds, redis_client)
-            return s.get("state", "unknown") if s else "unknown"
+            # Fix: Use get_entity_state which returns string directly
+            s = await get_entity_state(eid, user_creds)
+            return s if s else "unknown"
 
         initial_state = await get_state(entity_id)
 
