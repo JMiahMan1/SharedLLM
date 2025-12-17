@@ -1,0 +1,76 @@
+--- VERIFYING PAUSE/RESUME ROUTING FIX ---
+
+1. Ensuring Playback (Launch YouTube)...
+   Attempt 1/3: Sending Launch Command...
+Sending: 'Launch YouTube on Office TV'...
+Response: 200 - To launch YouTube on the Office TV, first ensure the TV is on. Use the Office TV Remote to navigate ...
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   Launch timed out or failed. Retrying...
+   Attempt 2/3: Sending Launch Command...
+Sending: 'Launch YouTube on Office TV'...
+Response: 200 - Turning on the Office TV. To launch YouTube, use the remote to navigate to the YouTube app or websit...
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   Launch timed out or failed. Retrying...
+   Attempt 3/3: Sending Launch Command...
+Sending: 'Launch YouTube on Office TV'...
+Error: None
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: idle
+   State: off
+   State: off
+   State: off
+   State: off
+   State: off
+   Launch timed out or failed. Retrying...
+❌ FAILED: Could not get device to 'playing' state. Cannot test pause.

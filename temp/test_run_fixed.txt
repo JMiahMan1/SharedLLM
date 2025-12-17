@@ -1,0 +1,16 @@
+
+============================================================
+Media Routing Tests - ACTUAL STATE VERIFICATION
+API: http://localhost:11435
+Entity: media_player.office_tv_chrome_2
+============================================================
+
+[94m[INFO][0m TEST 1: Turn On Device
+Initial state: idle
+Command: 'Turn on Office TV'
+Response (34.57s): To turn on an Office TV, the method depends on its setup. Here are the most relevant solutions based...
+[92m[PASS][0m Device verified ON
+[94m[INFO][0m TEST 2: Play Music
+Command: 'Play Brandon Lake on Office TV'
+Response (29.27s): It seems there might be some confusion or a typo in your request. Heres how I can help based on the ...
+[91m[FAIL][0m Media not playing! State: off
