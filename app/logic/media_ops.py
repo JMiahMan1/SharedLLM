@@ -1620,7 +1620,14 @@ async def handle_media_command(
             service = "turn_on"
             service_data = {"brightness": max(1, min(255, brightness))}
             log.info(f"Setting {entity_id} brightness to {brightness}")
-        
+
+        else:
+            # This should not happen - fallback
+            log.error(f"[BRIGHTNESS] No brightness logic matched for intent {intent}, falling back to generic service")
+            service = intent  # This will fail, but shows the issue
+            service_data = {}
+
+        log.info(f"[BRIGHTNESS] Executing {domain}.{service} with data {service_data}")
         return [await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)]
 
     # -------------------------------------------------
