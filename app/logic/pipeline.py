@@ -452,6 +452,23 @@ async def generate_rag_stream(
     t_action = time.time()
     action_results = await try_handle_compound_command(refined, creds, model, intent, score, is_high_confidence)
 
+    # Handle failed no-search intents directly (don't call LLM)
+    no_search_intents = [
+        "turn_on", "turn_off", "toggle", "play_media", "stop_media",
+        "media_next", "media_previous", "open_app", "volume_up",
+        "volume_down", "volume_set", "volume_mute", "timer_add",
+        "alarm_add", "timer_delete", "timer_pause", "timer_resume",
+        "calendar_add", "calendar_delete", "calendar_update",
+        "dim", "brighten", "set_brightness", "set_color",
+        "note_add", "note_append", "note_delete",
+        "timer_list", "calendar_list", "calendar_read", "note_list", "note_read",
+        "music_list", "list_playlists", "list_radio"
+    ]
+    if action_results is None and intent in no_search_intents:
+        # All actions failed for a no-search intent, return a generic failure message
+        log.info(f"[NO LLM] All actions failed for no-search intent '{intent}', returning direct failure")
+        yield f"I couldn't perform that action. The device may not support this feature or there might be a connection issue."
+
     action_context = ""
     run_knowledge_retrieval = True
 
