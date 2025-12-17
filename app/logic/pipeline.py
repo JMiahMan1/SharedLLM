@@ -398,14 +398,19 @@ async def try_handle_compound_command(
     if not tasks:
         return None
     results = await asyncio.gather(*tasks)
+    log.info(f"[COMPOUND] asyncio.gather returned: {results}")
     valid_results = []
     for r_list in results:
+        log.info(f"[COMPOUND] Processing r_list: {r_list}, type: {type(r_list)}")
         if isinstance(r_list, list):
             valid_results.extend([r for r in r_list if isinstance(r, dict)])
         elif isinstance(r_list, dict):
             valid_results.append(r_list)
+    log.info(f"[COMPOUND] valid_results: {valid_results}")
     if not valid_results:
+        log.info("[COMPOUND] Returning None - no valid results")
         return None
+    log.info(f"[COMPOUND] Returning: {valid_results}")
     return valid_results
 
 
