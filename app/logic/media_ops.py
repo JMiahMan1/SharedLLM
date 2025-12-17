@@ -1101,7 +1101,8 @@ async def handle_media_command(
 
         if intent != original_intent:
             log.info(f"Sanitized intent from '{original_intent}' to '{intent}'")
-    # ------------------------------------------------------------------------
+            # CRITICAL FIX: Update is_transport after sanitization
+            is_transport = intent in ["media_next", "media_previous", "stop_media", "volume_set", "volume_up", "volume_down", "volume_mute", "media_pause", "media_play", "play_media"]
 
     # --- TRANSPORT SHORT CIRCUIT (High Confidence/Explicit Target) ---
     if is_transport:
@@ -1279,7 +1280,9 @@ async def handle_media_command(
          return {"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}
 
     # 3. TRANSPORT REDIRECTION
+    log.info(f"[DEBUG_TRANSPORT] Checking Redirection: intent='{intent}' is_transport={is_transport} entity={entity_id}")
     if is_transport:
+        log.info("[DEBUG_TRANSPORT] Entered Transport Redirection Block")
         should_scan = False
         if not entity_id:
             should_scan = True
@@ -1869,9 +1872,11 @@ async def handle_media_command(
 
 async def _execute_transport_command(intent: str, entity_id: str, domain: str, user_creds: dict, integration: str, redis_client, query: str = ""):
     """Executes media transport command with self-healing fallback prioritizing remote control. Returns structured dict."""
-    log.info(f"[_execute_transport_command] Intent='{intent}' Entity='{entity_id}'")
+    intent = intent.strip()
+    log.info(f"[_execute_transport_command] Intent='{intent}' (repr={repr(intent)}) Entity='{entity_id}'")
 
     if intent == "stop_media":
+        log.info(f"[Transport] Match stop_media for {entity_id}")
         # Check state first to avoid 500 error on off devices
         state = await get_entity_state(entity_id, user_creds)
         if state in ["off", "unavailable", "idle"]:
