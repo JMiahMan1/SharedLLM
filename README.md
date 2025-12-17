@@ -213,10 +213,55 @@ Key environment variables:
 - `HA_TOKEN` - Home Assistant API token
 - `NEXTCLOUD_URL` - Nextcloud instance URL
 - `NEXTCLOUD_USER` / `NEXTCLOUD_PASS` - Nextcloud credentials
+- `AUDIOBOOKSHELF_URL` / `AUDIOBOOKSHELF_USER` / `AUDIOBOOKSHELF_PASS` - AudioBookShelf credentials
 - `CHROMA_PERSIST_DIR` - ChromaDB storage path (default: `/data/chroma_db`)
 - `REDIS_URL` - Redis connection string (default: `redis://redis:6379/0`)
 - `DEFAULT_MODEL` - LLM model (default: `qwen2.5:latest`)
 - `WHOOGLE_URL` - Search engine URL
+
+### Multi-User Support
+
+The system supports multiple users with isolated data and credentials:
+
+**Default User (Shared Data):**
+- Uses the main environment variables above
+- Provides shared knowledge base and device access
+- All users can access this shared data
+
+**User-Specific Configuration:**
+Users can have their own credentials using environment variables with the format:
+- `USER_{USERNAME}_{SETTING}` (recommended)
+- Or `{USERNAME}_{SETTING}` (alternative)
+
+Example:
+```bash
+# User John with custom credentials
+USER_JOHN_DISPLAY_NAME=John Doe
+USER_JOHN_NEXTCLOUD_USER=john@cloud.example.com
+USER_JOHN_NEXTCLOUD_PASS=johns_password
+USER_JOHN_HA_TOKEN=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+USER_JOHN_AUDIOBOOKSHELF_USER=john
+USER_JOHN_AUDIOBOOKSHELF_PASS=johns_book_password
+
+# User Jane
+USER_JANE_DISPLAY_NAME=Jane Smith
+USER_JANE_NEXTCLOUD_USER=jane@cloud.example.com
+USER_JANE_HA_TOKEN=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+```
+
+**User-Specific Data Isolation:**
+- Conversation history
+- Device preferences (last used device)
+- Personal settings and context
+- All stored separately per user in Redis/ChromaDB
+
+**API Usage:**
+Set the `X-RAG-User` header to specify which user context to use:
+```bash
+curl -H "X-RAG-User: john" -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Play some music"}]}' \
+  http://localhost:11435/api/chat
+```
 
 ## Deployment
 
