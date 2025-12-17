@@ -292,7 +292,7 @@ async def _handle_single_command(
 
     # --- FAST PATH ORCHESTRATION ---
     # Skip LLM for simple, high-confidence intents to avoid timeouts
-    log.debug(f"[FAST PATH CHECK] is_high_confidence={is_high_confidence}, intent={intent}")
+    log.info(f"[FAST PATH CHECK] is_high_confidence={is_high_confidence}, intent={intent}")
     if is_high_confidence and intent:
         action_plan = None
         if intent in ["volume_set", "volume_up", "volume_down", "volume_mute"]:
