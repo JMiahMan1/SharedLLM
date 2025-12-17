@@ -1342,9 +1342,14 @@ async def handle_media_command(
             cleaned_stripped = cleaned_for_res.strip()
             if is_transport and (len(cleaned_stripped) < 3 or cleaned_stripped in ["to", "the", "a", "an", "to song", "song"] or "song" in cleaned_stripped):
                 log.info(f"[Transport] Skipping device resolution for short/generic query: '{cleaned_for_res}'")
-                resolved_result = None
-                # For transport commands with skipped resolution, set entity_id to None to trigger transport redirection
-                entity_id, integration = None, None
+                # For transport commands, try to use last media entity directly
+                entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
+                integration = None
+                if entity_id:
+                    log.info(f"[Transport] Using last media entity for skipped resolution: {entity_id}")
+                else:
+                    log.info("[Transport] No last media entity found for skipped resolution")
+                    entity_id, integration = None, None
             else:
                 resolved_result = await smart_resolve_entity(cleaned_for_res, intent, ha_collection, is_music=strict_resolution, is_video=is_video_request)
                 if isinstance(resolved_result, list):
