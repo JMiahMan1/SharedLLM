@@ -1383,12 +1383,15 @@ async def handle_media_command(
     if is_transport:
         log.info("[DEBUG_TRANSPORT] Entered Transport Redirection Block")
 
-        # For transport commands, always prioritize the last media entity
+        # For transport commands, prioritize: last media entity > active devices > resolved entity
         last_media = get_last_media_entity(redis_client, user_creds.get("user"))
         if last_media:
-            log.info(f"[Transport] Using last media entity: {last_media} (ignoring query device)")
+            log.info(f"[Transport] Using last media entity: {last_media}")
             entity_id = last_media
-        # No else needed - if no last media entity, use the resolved entity_id
+        else:
+            # No last media entity - scan for active devices
+            log.info("[Transport] No last media entity, scanning for active devices")
+            should_scan = True
             # AUTO-POWER-ON: Check if device is off and turn it on first
             try:
                 state_data = await get_entity_state(entity_id, user_creds)
