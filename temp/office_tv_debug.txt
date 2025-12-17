@@ -1,0 +1,52 @@
+Running state check via app imports...
+
+--- Active Players ---
+['media_player.office_tv_chrome_2', 'media_player.office_tv_chrome']
+
+--- Detailed States ---
+
+ENTITY: media_player.office_tv_chrome_2
+State: paused
+Attributes: {
+  "volume_level": 0.56,
+  "media_content_id": "library://track/233",
+  "media_content_type": "music",
+  "media_duration": 329,
+  "media_position": 41,
+  "media_position_updated_at": "2025-12-17T06:19:50.921502+00:00",
+  "media_title": "Brandon Lake - Hard Fought Hallelujah",
+  "media_artist": "Brandon Lake",
+  "media_album_name": "Singles",
+  "media_album_artist": "Brandon Lake",
+  "app_id": "music_assistant",
+  "shuffle": false,
+  "repeat": "off",
+  "mass_player_type": "player",
+  "active_queue": "media_player.office_tv_chrome",
+  "device_class": "speaker",
+  "entity_picture": "/api/media_player_proxy/media_player.office_tv_chrome_2?token=8da853e7a335fb5414a27725cc4d10e8b282e3dc6a6ca27389b37a1f6ce9e34c&cache=518503240ff650fd",
+  "icon": "mdi:speaker",
+  "friendly_name": "Office TV",
+  "supported_features": 7796671
+}
+
+ENTITY: media_player.office_tv
+State: on
+Attributes: {
+  "volume_level": 0.56,
+  "is_volume_muted": false,
+  "app_id": "com.google.android.apps.mediashell",
+  "app_name": "com.google.android.apps.mediashell",
+  "assumed_state": true,
+  "device_class": "tv",
+  "friendly_name": "Office TV Remote",
+  "supported_features": 153529
+}
+
+ENTITY: media_player.mass_office_tv_chrome_2 - Not Found (HTTP 404)
+
+ENTITY: media_player.mass_office_tv - Not Found (HTTP 404)
+
+ENTITY: remote.office_tv_chrome_2 - Not Found (HTTP 404)
+
+ENTITY: remote.office_tv - Not Found (HTTP 404)

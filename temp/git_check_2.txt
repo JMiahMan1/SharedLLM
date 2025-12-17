@@ -1,0 +1,31 @@
+On branch timer
+Your branch is up to date with 'origin/timer'.
+
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	modified:   app/logic/discovery/device_grouper.py
+	modified:   app/logic/discovery/integration_helper.py
+	modified:   app/logic/refresh_devices.py
+	modified:   test/integration/test_timers.py
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   temp/deploy_final_check.txt
+	modified:   temp/deploy_fixes.txt
+	modified:   temp/full_test_suite_final.txt
+	modified:   temp/remote_test_advanced_features.txt
+	modified:   temp/remote_test_calendar.txt
+	modified:   temp/remote_test_media_api.txt
+	modified:   temp/remote_test_music_info.txt
+	modified:   temp/remote_test_notes.txt
+	modified:   temp/remote_test_timers.txt
+	modified:   temp/remote_test_web_search.txt
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	temp/final_test_output_v2.txt
+	temp/git_check.txt
+	temp/git_check_2.txt
+	temp/test_office_tv_full.py
+

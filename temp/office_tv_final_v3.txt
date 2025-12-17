@@ -1,0 +1,106 @@
+..
+============================================================
+Target: Office TV (media_player.office_tv_chrome_2)
+Strategy: Launch App First -> Verify Wake -> Test Controls
+============================================================
+
+ℹ️  TEST 1: Wake & Launch YouTube
+    Initial State: playing
+  > Sending: 'Launch YouTube on Office TV'
+    Response: The Office TV is currently on. To launch YouTube, use the remote to navigate to the YouTube app. If ...
+    Verifying device wake-up...
+✅ PASS: Device is Active (State: playing)
+
+ℹ️  TEST 2: Volume Verification
+    Current Vol: 0.56, Target: 0.5
+  > Sending: 'Set volume on Office TV to 50%'
+    Response: I couldn't adjust the volume on the Office TV. Let me know if you'd like to try a different approach...
+❌ FAIL: Volume mismatch. Expected 0.5, Got 0.56
+
+ℹ️  TEST 3: Mute Toggle
+  > Sending: 'Mute Office TV'
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/temp/test_office_tv_full.py", line 222, in <module>
+    unittest.main(testRunner=runner, exit=False)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/main.py", line 104, in __init__
+    self.runTests()
+    ~~~~~~~~~~~~~^^
+  File "/usr/lib64/python3.14/unittest/main.py", line 270, in runTests
+    self.result = testRunner.run(self.test)
+                  ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/runner.py", line 257, in run
+    test(result)
+    ~~~~^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+           ~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/suite.py", line 122, in run
+    test(result)
+    ~~~~^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+           ~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/suite.py", line 122, in run
+    test(result)
+    ~~~~^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/case.py", line 725, in __call__
+    return self.run(*args, **kwds)
+           ~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/case.py", line 669, in run
+    self._callTestMethod(testMethod)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/unittest/case.py", line 615, in _callTestMethod
+    result = method()
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/temp/test_office_tv_full.py", line 155, in test_03_mute_toggle
+    send_command(f"Mute {DEVICE_NAME}")
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/temp/test_office_tv_full.py", line 71, in send_command
+    resp = requests.post(
+        f"{API_URL}/api/chat",
+    ...<2 lines>...
+        timeout=CMD_TIMEOUT
+    )
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 115, in post
+    return request("post", url, data=data, json=json, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1733, in urlopen
+    response = self._make_request(  # type: ignore[call-overload,misc]
+        conn,
+    ...<15 lines>...
+        extension=extension,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1360, in _make_request
+    response = conn.getresponse(
+        police_officer=self.pool, early_response_callback=on_early_response
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 634, in getresponse
+    low_response = super().getresponse(
+        promise=promise,
+        early_response_callback=early_response_handler,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/backend/hface.py", line 1532, in getresponse
+    head_event: HeadersReceived | EarlyHeadersReceived = self.__exchange_until(  # type: ignore[assignment]
+                                                         ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (
+        ^
+    ...<9 lines>...
+        stream_id=stream_id,
+        ^^^^^^^^^^^^^^^^^^^^
+    ).pop()
+    ^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/backend/hface.py", line 908, in __exchange_until
+    data_in = self.sock.recv(self.blocksize)
+KeyboardInterrupt

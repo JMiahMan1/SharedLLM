@@ -1,0 +1,215 @@
+
+================================================================================
+COMPREHENSIVE MEDIA PLAYBACK TEST SUITE - ENHANCED
+================================================================================
+Start Time: 2025-12-16 21:41:11
+API: http://192.168.2.211:11435
+HA: https://ha.sumemail.com
+Devices: Office TV, Master Bedroom TV
+================================================================================
+[94m[INFO][0m 
+Pre-flight checks...
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m DEVICE: Office TV (media_player.office_tv_chrome_2)
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: Office TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.office_tv_chrome_2 OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv_chrome_2 is OFF
+[94m[INFO][0m 
+--- Office TV - Play Music (Auto-Power-On) ---
+[94m[INFO][0m Command: 'Play Brandon Lake on Office TV'
+[92m[SUCCESS][0m Response: 200 (17.2s)
+[94m[INFO][0m Waiting for state in ['playing', 'buffering'] (max 30s)
+[93m[WARNING][0m ❌ Timeout after 33.1s. State: off
+[91m❌ FAIL[0m Office TV - Play Music (Auto-Power-On)
+       [91mState mismatch[0m
+       Expected: ['playing', 'buffering'], Got: off
+[94m[INFO][0m 
+--- Office TV - Pause Music ---
+[94m[INFO][0m Command: 'Pause music on Office TV'
+[92m[SUCCESS][0m Response: 200 (40.0s)
+[94m[INFO][0m Waiting for state in ['paused'] (max 15s)
+[92m[SUCCESS][0m ✅ State reached: paused (0.0s)
+[92m✅ PASS[0m Office TV - Pause Music (40.1s)
+[94m[INFO][0m 
+--- Office TV - Resume Music ---
+[94m[INFO][0m Command: 'Resume music on Office TV'
+[92m[SUCCESS][0m Response: 200 (29.1s)
+[94m[INFO][0m Waiting for state in ['playing'] (max 15s)
+[93m[WARNING][0m ❌ Timeout after 17.4s. State: paused
+[91m❌ FAIL[0m Office TV - Resume Music
+       [91mState mismatch[0m
+       Expected: ['playing'], Got: paused
+[94m[INFO][0m 
+--- Office TV - Skip Track ---
+[94m[INFO][0m Command: 'Skip to next song on Office TV'
+[92m[SUCCESS][0m Response: 200 (5.6s)
+[94m[INFO][0m Waiting for state in ['playing'] (max 15s)
+[93m[WARNING][0m ❌ Timeout after 15.6s. State: paused
+[91m❌ FAIL[0m Office TV - Skip Track
+       [91mState mismatch[0m
+       Expected: ['playing'], Got: paused
+[94m[INFO][0m 
+--- Office TV - Stop Music ---
+[94m[INFO][0m Command: 'Stop music on Office TV'
+[92m[SUCCESS][0m Response: 200 (10.0s)
+[94m[INFO][0m Waiting for state in ['idle', 'off', 'paused'] (max 15s)
+[92m[SUCCESS][0m ✅ State reached: idle (0.0s)
+[92m✅ PASS[0m Office TV - Stop Music (10.0s)
+[94m[INFO][0m Forcing media_player.office_tv_chrome_2 OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv_chrome_2 is OFF
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m YOUTUBE VIDEO TESTS: Office TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.office_tv_chrome_2 OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv_chrome_2 is OFF
+[94m[INFO][0m 
+--- Office TV - Play YouTube Video (Auto-Power-On) ---
+[94m[INFO][0m Command: 'Watch Big Buck Bunny on YouTube with Office TV'
+[92m[SUCCESS][0m Response: 200 (55.4s)
+[94m[INFO][0m Waiting for state in ['playing', 'buffering'] (max 35s)
+[93m[WARNING][0m ❌ Timeout after 37.0s. State: off
+[91m❌ FAIL[0m Office TV - Play YouTube Video (Auto-Power-On)
+       [91mState mismatch[0m
+       Expected: ['playing', 'buffering'], Got: off
+[94m[INFO][0m 
+--- Office TV - Pause Video ---
+[94m[INFO][0m Command: 'Pause video on Office TV'
+[92m[SUCCESS][0m Response: 200 (58.4s)
+[94m[INFO][0m Waiting for state in ['paused'] (max 15s)
+[92m[SUCCESS][0m ✅ State reached: paused (0.0s)
+[92m✅ PASS[0m Office TV - Pause Video (58.5s)
+[94m[INFO][0m 
+--- Office TV - Resume Video ---
+[94m[INFO][0m Command: 'Resume video on Office TV'
+[93m[WARNING][0m Timeout, retrying (1/1)...
+[91m[ERROR][0m Command timed out
+[91m❌ FAIL[0m Office TV - Resume Video
+       [91mAPI error: HTTP 408[0m
+       Expected: 200, Got: 408
+[94m[INFO][0m 
+--- Office TV - Stop Video ---
+[94m[INFO][0m Command: 'Stop video on Office TV'
+[92m[SUCCESS][0m Response: 200 (42.7s)
+[94m[INFO][0m Waiting for state in ['idle', 'off', 'paused'] (max 15s)
+[92m[SUCCESS][0m ✅ State reached: idle (0.0s)
+[92m✅ PASS[0m Office TV - Stop Video (42.7s)
+[94m[INFO][0m Forcing media_player.office_tv_chrome_2 OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv_chrome_2 is OFF
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m DEVICE: Master Bedroom TV (media_player.master_bedroom_tv_2)
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: Master Bedroom TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.master_bedroom_tv_2 OFF
+[92m[SUCCESS][0m ✅ media_player.master_bedroom_tv_2 is OFF
+[94m[INFO][0m 
+--- Master Bedroom TV - Play Music (Auto-Power-On) ---
+[94m[INFO][0m Command: 'Play Brandon Lake on Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (26.1s)
+[94m[INFO][0m Waiting for state in ['playing', 'buffering'] (max 30s)
+[93m[WARNING][0m ❌ Timeout after 32.2s. State: off
+[91m❌ FAIL[0m Master Bedroom TV - Play Music (Auto-Power-On)
+       [91mState mismatch[0m
+       Expected: ['playing', 'buffering'], Got: off
+[94m[INFO][0m 
+--- Master Bedroom TV - Pause Music ---
+[94m[INFO][0m Command: 'Pause music on Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (33.1s)
+[94m[INFO][0m Waiting for state in ['paused'] (max 15s)
+[93m[WARNING][0m ❌ Timeout after 16.5s. State: idle
+[91m❌ FAIL[0m Master Bedroom TV - Pause Music
+       [91mState mismatch[0m
+       Expected: ['paused'], Got: idle
+[94m[INFO][0m 
+--- Master Bedroom TV - Resume Music ---
+[94m[INFO][0m Command: 'Resume music on Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (29.9s)
+[94m[INFO][0m Waiting for state in ['playing'] (max 15s)
+[93m[WARNING][0m ❌ Timeout after 15.3s. State: idle
+[91m❌ FAIL[0m Master Bedroom TV - Resume Music
+       [91mState mismatch[0m
+       Expected: ['playing'], Got: idle
+[94m[INFO][0m 
+--- Master Bedroom TV - Skip Track ---
+[94m[INFO][0m Command: 'Skip to next song on Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (7.0s)
+[94m[INFO][0m Waiting for state in ['playing'] (max 15s)
+[92m[SUCCESS][0m ✅ State reached: playing (0.2s)
+[92m✅ PASS[0m Master Bedroom TV - Skip Track (7.2s)
+[94m[INFO][0m 
+--- Master Bedroom TV - Stop Music ---
+[94m[INFO][0m Command: 'Stop music on Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (10.4s)
+[94m[INFO][0m Waiting for state in ['idle', 'off', 'paused'] (max 15s)
+[92m[SUCCESS][0m ✅ State reached: idle (0.0s)
+[92m✅ PASS[0m Master Bedroom TV - Stop Music (10.5s)
+[94m[INFO][0m Forcing media_player.master_bedroom_tv_2 OFF
+[92m[SUCCESS][0m ✅ media_player.master_bedroom_tv_2 is OFF
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m YOUTUBE VIDEO TESTS: Master Bedroom TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.master_bedroom_tv_2 OFF
+[92m[SUCCESS][0m ✅ media_player.master_bedroom_tv_2 is OFF
+[94m[INFO][0m 
+--- Master Bedroom TV - Play YouTube Video (Auto-Power-On) ---
+[94m[INFO][0m Command: 'Watch Big Buck Bunny on YouTube with Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (39.9s)
+[94m[INFO][0m Waiting for state in ['playing', 'buffering'] (max 35s)
+[93m[WARNING][0m ❌ Timeout after 37.2s. State: off
+[91m❌ FAIL[0m Master Bedroom TV - Play YouTube Video (Auto-Power-On)
+       [91mState mismatch[0m
+       Expected: ['playing', 'buffering'], Got: off
+[94m[INFO][0m 
+--- Master Bedroom TV - Pause Video ---
+[94m[INFO][0m Command: 'Pause video on Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (60.1s)
+[94m[INFO][0m Waiting for state in ['paused'] (max 15s)
+[93m[WARNING][0m ❌ Timeout after 17.4s. State: off
+[91m❌ FAIL[0m Master Bedroom TV - Pause Video
+       [91mState mismatch[0m
+       Expected: ['paused'], Got: off
+[94m[INFO][0m 
+--- Master Bedroom TV - Resume Video ---
+[94m[INFO][0m Command: 'Resume video on Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (43.4s)
+[94m[INFO][0m Waiting for state in ['playing'] (max 15s)
+[93m[WARNING][0m ❌ Timeout after 16.5s. State: off
+[91m❌ FAIL[0m Master Bedroom TV - Resume Video
+       [91mState mismatch[0m
+       Expected: ['playing'], Got: off
+[94m[INFO][0m 
+--- Master Bedroom TV - Stop Video ---
+[94m[INFO][0m Command: 'Stop video on Master Bedroom TV'
+[92m[SUCCESS][0m Response: 200 (26.3s)
+[94m[INFO][0m Waiting for state in ['idle', 'off', 'paused'] (max 15s)
+[92m[SUCCESS][0m ✅ State reached: off (0.0s)
+[92m✅ PASS[0m Master Bedroom TV - Stop Video (26.3s)
+[94m[INFO][0m Forcing media_player.master_bedroom_tv_2 OFF
+[92m[SUCCESS][0m ✅ media_player.master_bedroom_tv_2 is OFF
+[94m[INFO][0m 
+Capturing final logs...
+
+[93m[INFO][0m Errors written to temp/comprehensive_test_errors.txt
+[93m[INFO][0m Detailed log written to temp/comprehensive_test_detailed.txt
+
+================================================================================
+COMPREHENSIVE TEST SUMMARY
+================================================================================
+Duration: 949.7s
+Total Tests: 18
+Passed: [92m7[0m
+Failed: [91m11[0m
+Success Rate: [91m38.9%[0m
+================================================================================

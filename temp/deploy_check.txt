@@ -1,0 +1,30 @@
+#12 DONE 0.3s
+
+#13 [8/8] COPY data/ /data/
+#13 DONE 0.6s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 0.3s done
+#14 writing image sha256:43003c3790dcc9c6666bd281230427b7a5204917adc13b74c7b4fbfd043f65d9
+#14 writing image sha256:43003c3790dcc9c6666bd281230427b7a5204917adc13b74c7b4fbfd043f65d9 0.3s done
+#14 naming to docker.io/library/sharedllm-rag-api
+#14 naming to docker.io/library/sharedllm-rag-api 0.0s done
+#14 DONE 0.7s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ sharedllm-rag-api  Built
+ Container unified_rag_redis  Recreate
+ Container unified_rag_redis  Recreated
+ Container unified_rag_api  Recreate
+time="2025-12-15T21:53:31-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+ Container unified_rag_api  Recreated
+ Container unified_rag_redis  Starting
+ Container unified_rag_redis  Started
+ Container unified_rag_api  Starting
+ Container unified_rag_api  Started
+Waiting for application startup...
+..............[OK] Application started successfully!
+
+[OK] Deployment Verification Successful.

@@ -1,0 +1,54 @@
+
+================================================================================
+COMPREHENSIVE MEDIA PLAYBACK TEST SUITE - ENHANCED
+================================================================================
+Start Time: 2025-12-16 23:15:53
+API: http://192.168.2.211:11435
+HA: https://ha.sumemail.com
+Devices: Office TV, Master Bedroom TV, Gracie's TV
+================================================================================
+[94m[INFO][0m 
+Pre-flight checks...
+[94m[INFO][0m 
+
+################################################################################
+[94m[INFO][0m DEVICE: Office TV (media_player.office_tv_chrome_2)
+[94m[INFO][0m ################################################################################
+[94m[INFO][0m 
+================================================================================
+[94m[INFO][0m MUSIC ASSISTANT TESTS: Office TV
+[94m[INFO][0m ================================================================================
+[94m[INFO][0m Forcing media_player.office_tv_chrome_2 OFF
+[92m[SUCCESS][0m ✅ media_player.office_tv_chrome_2 is OFF
+[94m[INFO][0m 
+--- Office TV - Play Music (Auto-Power-On) ---
+[94m[INFO][0m Command: 'Play Brandon Lake on Office TV'
+[92m[SUCCESS][0m Response: 200 (15.9s)
+[94m[INFO][0m Waiting for state in ['playing', 'buffering'] (max 30s)
+[92m[SUCCESS][0m ✅ State reached: playing (0.0s)
+[92m✅ PASS[0m Office TV - Play Music (Auto-Power-On) (16.0s)
+[94m[INFO][0m 
+--- Office TV - Pause Music ---
+[94m[INFO][0m Command: 'Pause music on Office TV'
+[92m[SUCCESS][0m Response: 200 (39.9s)
+[94m[INFO][0m Waiting for state in ['paused'] (max 15s)
+[92m[SUCCESS][0m ✅ State reached: paused (0.0s)
+[92m✅ PASS[0m Office TV - Pause Music (39.9s)
+[94m[INFO][0m 
+--- Office TV - Resume Music ---
+[94m[INFO][0m Command: 'Resume music on Office TV'
+[93m[WARNING][0m 
+
+Test interrupted by user
+[93m[INFO][0m Detailed log written to temp/comprehensive_test_detailed.txt
+
+================================================================================
+COMPREHENSIVE TEST SUMMARY
+================================================================================
+Duration: 88.5s
+Total Tests: 2
+Passed: [92m2[0m
+Failed: [91m0[0m
+Skipped: [93m0[0m
+Success Rate (of attempted): [92m100.0%[0m
+================================================================================
