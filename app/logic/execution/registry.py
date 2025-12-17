@@ -36,10 +36,12 @@ class ActionDispatcher:
                 "message": f"Action requested unhandled tool: {tool_name}",
                 "service": tool_name,
             }
-        
+
         try:
-            # log.debug(f"Dispatching tool: {tool_name}")
-            return await handler(**kwargs)
+            log.info(f"[ACTION DISPATCH] Calling handler for {tool_name}")
+            result = await handler(**kwargs)
+            log.info(f"[ACTION DISPATCH] Handler returned: {result}")
+            return result
         except Exception as e:
             log.exception(f"Error executing tool '{tool_name}': {e}")
             return {
