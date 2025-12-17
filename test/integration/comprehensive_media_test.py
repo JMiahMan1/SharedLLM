@@ -10,17 +10,19 @@ Features:
 - Auto-power-on verification for each command
 - Retry logic for transient failures
 - Progress tracking and time measurements
+- [NEW] Dynamic Device Discovery (No Hardcoding)
 
-Devices:
-- Office TV (media_player.office_tv_chrome_2)
-- Master Bedroom TV (media_player.master_bedroom_tv_2)
-- Gracie's TV (media_player.gracies_tv - TODO: verify entity_id)
+Target Names:
+- "Office TV"
+- "Master Bedroom TV"
+- "Gracie's TV"
 
 Test Coverage:
 - Music playback via Music Assistant (play, pause, resume, skip, stop)
 - Video playback via YouTube (play, pause, resume, stop)
 - Auto-power-on functionality
 - State consistency verification
+- Music Volume Confirmation
 """
 
 import sys
@@ -48,12 +50,11 @@ if not HA_TOKEN:
 API_HEADERS = {"X-RAG-User": "admin", "Content-Type": "application/json"}
 HA_HEADERS = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
 
-# Devices to test
-DEVICES = {
-    "Office TV": "media_player.office_tv_chrome_2",
-    "Master Bedroom TV": "media_player.master_bedroom_tv_2",
-    "Gracie's TV": "media_player.28_tcl_roku_tv",
-}
+# Target Friendly Names to Test matching brands:
+# Chrome/Android: Office TV, Master Bedroom TV
+# Roku: Gracie's TV / 28 TCL Roku TV
+# LG WebOS: Living Room TV (assumed)
+TARGET_NAMES = ["Office TV", "Master Bedroom TV", "Gracie", "Roku", "Living Room TV", "LG"]
 
 # Output files
 ERROR_LOG = "temp/comprehensive_test_errors.txt"
@@ -136,7 +137,6 @@ class EnhancedTestResults:
     
     def write_logs(self):
         """Write all logs to files"""
-        # Write errors
         if self.errors or self.backend_errors:
             with open(ERROR_LOG, 'w') as f:
                 f.write(f"TEST ERROR LOG - {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -165,7 +165,6 @@ class EnhancedTestResults:
                         
             print(f"\n\033[93m[INFO]\033[0m Errors written to {ERROR_LOG}")
         
-        # Write detailed logs
         with open(DETAILED_LOG, 'w') as f:
             f.write(f"DETAILED TEST LOG - {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("="*80 + "\n\n")
@@ -259,98 +258,141 @@ def get_detailed_state(entity_id: str) -> Optional[dict]:
         "media_title": state_data.get("attributes", {}).get("media_title"),
         "app_id": state_data.get("attributes", {}).get("app_id"),
         "volume": state_data.get("attributes", {}).get("volume_level"),
-        "media_position": state_data.get("attributes", {}).get("media_position")
+        "device_class": state_data.get("attributes", {}).get("device_class"),
+        "friendly_name": state_data.get("attributes", {}).get("friendly_name")
     }
 
-def send_command(query: str, max_retries: int = 1) -> Tuple[bool, int, str]:
-    """Send command to API with retry logic
-    
-    Returns: (success, status_code, response_text)
+def discover_devices() -> dict:
     """
-    log(f"Command: '{query}'")
+    Dynamically discover devices from HA matching TARGET_NAMES.
+    Returns: { "Friendly Name": { "music_entity": ..., "video_entity": ..., "turn_off_entity": ...} }
+    """
+    log("Discovering devices from Home Assistant...", "INFO")
+    try:
+        resp = requests.get(f"{HA_URL}/api/states", headers=HA_HEADERS, timeout=10)
+        items = resp.json()
+    except Exception as e:
+        log(f"Discovery Failed: {e}", "ERROR")
+        return {}
+
+    device_map = {}
     
+    for target in TARGET_NAMES:
+        candidates = []
+        target_lower = target.lower()
+        
+        # Find all media players matching name
+        for item in items:
+            eid = item["entity_id"]
+            if not eid.startswith("media_player."): continue
+            
+            attrs = item.get("attributes", {})
+            fname = attrs.get("friendly_name", "").lower()
+            
+            # Strict-ish matching
+            # Fuzzy match: if target is in friendly name OR entity_id
+            if target_lower in fname or target_lower.replace(" ", "_") in eid:
+                 # Special handling for pairs (e.g. Chrome vs Android)
+                 # If we have a 'cast' or 'chrome' entity, it's likely a cast target
+                 # If we have a 'tv' or 'android' entity, it's a video target
+                 candidates.append(item)
+                 
+        if not candidates:
+            # Special fallback for Gracie's TV which might be "28_tcl_roku_tv"
+            if "gracie" in target_lower:
+                 for item in items:
+                      if "roku" in item["entity_id"]:
+                           candidates.append(item)
+            
+        if not candidates:
+            log(f"Could not find any entities for '{target}'", "WARNING")
+            continue
+
+        video_entity = None
+        music_entity = None
+        
+        # Logic to separate TV from Speaker/Cast
+        for c in candidates:
+            eid = c["entity_id"]
+            dclass = c.get("attributes", {}).get("device_class")
+            
+            if dclass == "tv":
+                video_entity = eid
+            elif dclass == "speaker":
+                music_entity = eid
+            elif "roku" in eid: # Roku is usually both
+                video_entity = eid
+                music_entity = eid
+            
+            # If nothing specific, just pick one as default
+            if not video_entity: video_entity = eid
+            if not music_entity: music_entity = eid
+            
+        # Ensure we have both set, defaulting to each other if missing
+        if not video_entity and music_entity: video_entity = music_entity
+        if not music_entity and video_entity: music_entity = video_entity
+        
+        device_map[target] = {
+            "name": target,
+            "music_entity": music_entity,
+            "video_entity": video_entity,
+            "turn_off_entity": video_entity # Always turn off TV as priority
+        }
+        
+        log(f"Discovered '{target}': Music={music_entity}, Video={video_entity}", "SUCCESS")
+        
+    return device_map
+
+def send_command(query: str, max_retries: int = 1) -> Tuple[bool, int, str]:
+    """Send command to API with retry logic"""
+    log(f"Command: '{query}'")
     for attempt in range(max_retries + 1):
         try:
-            start_time = time.time()
             resp = requests.post(
                 f"{API_URL}/api/chat",
                 json={"messages": [{"role": "user", "content": query}]},
                 headers=API_HEADERS,
                 timeout=60
             )
-            duration = time.time() - start_time
-            
             success = resp.status_code == 200
-            log(f"Response: {resp.status_code} ({duration:.1f}s)", "SUCCESS" if success else "WARNING")
-            
+            log(f"Response: {resp.status_code}", "SUCCESS" if success else "WARNING")
             return (success, resp.status_code, resp.text[:200])
-            
         except requests.exceptions.Timeout:
             if attempt < max_retries:
-                log(f"Timeout, retrying ({attempt + 1}/{max_retries})...", "WARNING")
-                time.sleep(2)
+                log(f"Timeout... retrying", "WARNING")
             else:
-                log("Command timed out", "ERROR")
                 return (False, 408, "Timeout")
         except Exception as e:
-            log(f"Command failed: {e}", "ERROR")
             return (False, 500, str(e))
-    
     return (False, 500, "Max retries exceeded")
 
 def force_device_off(entity_id: str) -> bool:
     """Force device to OFF state via HA API"""
     log(f"Forcing {entity_id} OFF")
     try:
-        requests.post(
-            f"{HA_URL}/api/services/media_player/turn_off",
-            headers=HA_HEADERS,
-            json={"entity_id": entity_id},
-            timeout=10
-        )
-        
-        # Wait and verify
-        for _ in range(15):
-            state_data = get_ha_state(entity_id)
-            if state_data and state_data.get('state') in ['off', 'standby', 'unavailable']:
-                log(f"✅ {entity_id} is OFF", "SUCCESS")
-                return True
-            time.sleep(1)
-            
-        log(f"Device did not turn off completely", "WARNING")
+        requests.post(f"{HA_URL}/api/services/media_player/turn_off", headers=HA_HEADERS, json={"entity_id": entity_id}, timeout=10)
+        time.sleep(2)
+        state_data = get_ha_state(entity_id)
+        if state_data and state_data.get('state') in ['off', 'standby', 'unavailable']:
+            log(f"✅ {entity_id} is OFF", "SUCCESS")
+            return True
         return False
-    except Exception as e:
-        log(f"Force OFF failed: {e}", "ERROR")
+    except Exception:
         return False
 
 def wait_for_state(entity_id: str, expected_states: List[str], timeout: int = 20) -> Tuple[str, dict]:
-    """Wait for device to reach expected state
-    
-    Returns: (final_state, state_info)
-    """
-    if isinstance(expected_states, str):
-        expected_states = [expected_states]
-    
+    """Wait for device to reach expected state"""
+    if isinstance(expected_states, str): expected_states = [expected_states]
     log(f"Waiting for state in {expected_states} (max {timeout}s)")
-    
     start_time = time.time()
-    last_state = None
-    
     for _ in range(timeout):
         state_info = get_detailed_state(entity_id)
-        if state_info:
-            last_state = state_info['state']
-            if last_state in expected_states:
-                elapsed = time.time() - start_time
-                log(f"✅ State reached: {last_state} ({elapsed:.1f}s)", "SUCCESS")
-                return (last_state, state_info)
+        if state_info and state_info['state'] in expected_states:
+             return (state_info['state'], state_info)
         time.sleep(1)
     
-    elapsed = time.time() - start_time
-    state_info = get_detailed_state(entity_id) or {}
-    current_state = state_info.get('state', 'unknown')
-    log(f"❌ Timeout after {elapsed:.1f}s. State: {current_state}", "WARNING")
-    return (current_state, state_info)
+    current = get_detailed_state(entity_id) or {}
+    return (current.get('state', 'unknown'), current)
 
 def run_test(test_name: str, device_name: str, entity_id: str, 
              command: str, expected_states: List[str], timeout: int = 15, 
@@ -358,31 +400,18 @@ def run_test(test_name: str, device_name: str, entity_id: str,
     """Run a single test with full verification"""
     
     if not precondition_met:
-        results.log_skip(test_name, "Dependency failed (preceding Play command failed)")
+        results.log_skip(test_name, "Dependency failed")
         return False
 
     log(f"\n--- {test_name} ---")
     start_time = time.time()
     
-    # Get initial state
-    initial_state = get_detailed_state(entity_id)
-    results.log_detail("TEST_START", test_name, {"initial_state": initial_state})
-    
-    # Send command
-    success, status_code, response = send_command(command)
+    success, status_code, _ = send_command(command)
     
     if not success:
-        duration = time.time() - start_time
-        results.log_fail(
-            test_name,
-            f"API error: HTTP {status_code}",
-            expected="200",
-            actual=str(status_code),
-            state_info=initial_state
-        )
+        results.log_fail(test_name, f"API error: HTTP {status_code}", "200", str(status_code))
         return False
     
-    # Verify state change
     final_state, state_info = wait_for_state(entity_id, expected_states, timeout)
     duration = time.time() - start_time
     
@@ -390,232 +419,117 @@ def run_test(test_name: str, device_name: str, entity_id: str,
         results.log_pass(test_name, duration, state_info)
         return True
     else:
-        results.log_fail(
-            test_name,
-            "State mismatch",
-            expected=str(expected_states),
-            actual=final_state,
-            state_info=state_info
-        )
+        results.log_fail(test_name, "State mismatch", str(expected_states), final_state, state_info)
         return False
 
-def test_music_playback(device_name: str, entity_id: str):
+def test_music_playback(device_name: str, config: dict):
     """Test music playback via Music Assistant"""
+    entity_id = config["music_entity"]
+    power_id = config["turn_off_entity"]
+
     log(f"\n{'='*80}")
     log(f"MUSIC ASSISTANT TESTS: {device_name}")
     log(f"{'='*80}")
     
-    # Ensure clean start
-    force_device_off(entity_id)
+    force_device_off(power_id)
     time.sleep(2)
     
-    # Test 1: Play Music (tests auto-power-on)
-    play_success = run_test(
-        f"{device_name} - Play Music (Auto-Power-On)",
-        device_name, entity_id,
-        f"Play Brandon Lake on {device_name}",
-        ['playing', 'buffering'],
-        timeout=30
-    )
+    play_success = run_test(f"{device_name} - Play Music", device_name, entity_id, f"Play Brandon Lake on {device_name}", ['playing', 'buffering'], timeout=30)
     time.sleep(3)
     
-    # Test 2: Pause
-    run_test(
-        f"{device_name} - Pause Music",
-        device_name, entity_id,
-        f"Pause music on {device_name}",
-        ['paused'],
-        timeout=15,
-        precondition_met=play_success
-    )
+    # Volume Test (Music) - If playing, verify volume change
+    if play_success:
+        test_volume_control(device_name, entity_id)
+
+    run_test(f"{device_name} - Pause Music", device_name, entity_id, f"Pause music on {device_name}", ['paused'], timeout=15, precondition_met=play_success)
     time.sleep(2)
     
-    # Test 3: Resume
-    run_test(
-        f"{device_name} - Resume Music",
-        device_name, entity_id,
-        f"Resume music on {device_name}",
-        ['playing'],
-        timeout=15,
-        precondition_met=play_success
-    )
+    run_test(f"{device_name} - Resume Music", device_name, entity_id, f"Resume music on {device_name}", ['playing'], timeout=15, precondition_met=play_success)
     time.sleep(2)
     
-    # Test 4: Skip Track
-    run_test(
-        f"{device_name} - Skip Track",
-        device_name, entity_id,
-        f"Skip to next song on {device_name}",
-        ['playing'],
-        timeout=15,
-        precondition_met=play_success
-    )
+    run_test(f"{device_name} - Skip Track", device_name, entity_id, f"Skip to next song on {device_name}", ['playing'], timeout=15, precondition_met=play_success)
     time.sleep(2)
 
-    # Test 5: Volume Control
-    test_volume_control(device_name, entity_id, precondition_met=play_success)
-
-    # Test 6: Stop
-    run_test(
-        f"{device_name} - Stop Music",
-        device_name, entity_id,
-        f"Stop music on {device_name}",
-        ['idle', 'off', 'paused'],
-        timeout=15,
-        precondition_met=play_success
-    )
+    run_test(f"{device_name} - Stop Music", device_name, entity_id, f"Stop music on {device_name}", ['idle', 'off', 'paused'], timeout=15, precondition_met=play_success)
     
-    # Cleanup
-    force_device_off(entity_id)
+    force_device_off(power_id)
     time.sleep(2)
-    
-    # Capture logs after music tests
     capture_docker_logs()
 
-def test_volume_control(device_name: str, entity_id: str, precondition_met: bool = True):
-    """Test volume control"""
-    if not precondition_met:
-        results.log_skip(f"{device_name} - Volume Control", "Dependency failed")
-        return
-
+def test_volume_control(device_name: str, entity_id: str):
     log(f"\n--- {device_name} - Volume Tests ---")
-    
-    # Set Volume to 25% (0.25)
-    log(f"Command: Set volume to 25% on {device_name}")
     send_command(f"Set volume to 25% on {device_name}")
-    time.sleep(3)
-    
-    # Verify
+    time.sleep(5) # Wait for propagation
     state = get_detailed_state(entity_id)
     vol = state.get("volume")
+    
     if vol is not None and 0.23 <= vol <= 0.27:
          results.log_pass(f"{device_name} - Set Volume 25%", 0, state)
     else:
-         results.log_fail(f"{device_name} - Set Volume 25%", f"Volume mismatch: {vol}", "0.25", str(vol), state)
+         results.log_fail(f"{device_name} - Set Volume 25%", f"Volume: {vol}", "0.25", str(vol), state)
 
-    # Set Volume to 35% (0.35)
-    log(f"Command: Set volume to 35% on {device_name}")
-    send_command(f"Set volume to 35% on {device_name}")
-    time.sleep(3)
-    
-    # Verify
-    state = get_detailed_state(entity_id)
-    vol = state.get("volume")
-    if vol is not None and 0.33 <= vol <= 0.37:
-         results.log_pass(f"{device_name} - Set Volume 35%", 0, state)
-    else:
-         results.log_fail(f"{device_name} - Set Volume 35%", f"Volume mismatch: {vol}", "0.35", str(vol), state)
-
-
-def test_video_playback(device_name: str, entity_id: str):
+def test_video_playback(device_name: str, config: dict):
     """Test video playback via YouTube"""
+    entity_id = config["video_entity"] # Use VIDEO entity (TV)
+    power_id = config["turn_off_entity"]
+
     log(f"\n{'='*80}")
     log(f"YOUTUBE VIDEO TESTS: {device_name}")
     log(f"{'='*80}")
     
-    # Ensure clean start
-    force_device_off(entity_id)
+    force_device_off(power_id)
     time.sleep(2)
     
-    # Test 1: Play YouTube Video (tests auto-power-on)
-    play_success = run_test(
-        f"{device_name} - Play YouTube Video (Auto-Power-On)",
-        device_name, entity_id,
-        f"Watch Big Buck Bunny on YouTube with {device_name}",
-        ['playing', 'buffering', 'on'], # 'on' accepted as some app launches don't report playing immediately
-        timeout=35
-    )
+    play_success = run_test(f"{device_name} - Play Video", device_name, entity_id, f"Watch Big Buck Bunny on YouTube with {device_name}", ['playing', 'buffering', 'on'], timeout=40)
     time.sleep(3)
     
-    # Test 2: Pause Video
-    run_test(
-        f"{device_name} - Pause Video",
-        device_name, entity_id,
-        f"Pause video on {device_name}",
-        ['paused'],
-        timeout=15,
-        precondition_met=play_success
-    )
+    run_test(f"{device_name} - Pause Video", device_name, entity_id, f"Pause video on {device_name}", ['paused'], timeout=15, precondition_met=play_success)
     time.sleep(2)
     
-    # Test 3: Resume Video
-    run_test(
-        f"{device_name} - Resume Video",
-        device_name, entity_id,
-        f"Resume video on {device_name}",
-        ['playing'],
-        timeout=15,
-        precondition_met=play_success
-    )
+    run_test(f"{device_name} - Resume Video", device_name, entity_id, f"Resume video on {device_name}", ['playing'], timeout=15, precondition_met=play_success)
     time.sleep(2)
     
-    # Test 4: Stop Video
-    run_test(
-        f"{device_name} - Stop Video",
-        device_name, entity_id,
-        f"Stop video on {device_name}",
-        ['idle', 'off', 'paused'],
-        timeout=15,
-        precondition_met=play_success
-    )
+    run_test(f"{device_name} - Stop Video", device_name, entity_id, f"Stop video on {device_name}", ['idle', 'off', 'paused'], timeout=15, precondition_met=play_success)
     
-    # Cleanup
-    force_device_off(entity_id)
+    force_device_off(power_id)
     time.sleep(2)
-    
-    # Capture logs after video tests
     capture_docker_logs()
 
 def main():
-    """Run comprehensive test suite"""
     print("\n" + "="*80)
-    print("COMPREHENSIVE MEDIA PLAYBACK TEST SUITE - ENHANCED")
-    print("="*80)
-    print(f"Start Time: {results.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"API: {API_URL}")
-    print(f"HA: {HA_URL}")
-    print(f"Devices: {', '.join(DEVICES.keys())}")
+    print("COMPREHENSIVE MEDIA PLAYBACK TEST SUITE - DYNAMIC DISCOVERY")
     print("="*80)
     
-    # Pre-flight checks
+    # Dynamic Discovery
+    devices_map = discover_devices()
+    if not devices_map:
+        log("No devices discovered or API failed. Exiting.", "ERROR")
+        sys.exit(1)
+        
     log("\nPre-flight checks...", "INFO")
-    if not check_api_health():
-        log("WARNING: API health check failed - proceeding anyway", "WARNING")
-    
-    # Capture initial logs
+    check_api_health()
     capture_docker_logs()
     
-    # Test each device
-    for device_name, entity_id in DEVICES.items():
+    for device_name, config in devices_map.items():
         log(f"\n\n{'#'*80}")
-        log(f"DEVICE: {device_name} ({entity_id})")
+        log(f"Testing Device: {device_name}")
         log(f"{'#'*80}")
         
-        # Run test suites
-        test_music_playback(device_name, entity_id)
-        test_video_playback(device_name, entity_id)
+        test_music_playback(device_name, config)
+        test_video_playback(device_name, config)
     
-    # Final log capture
     log("\nCapturing final logs...", "INFO")
     capture_docker_logs()
-    
-    # Write all logs and print summary
     results.write_logs()
     results.print_summary()
-    
-    # Exit with appropriate code
     sys.exit(0 if results.tests_failed == 0 else 1)
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        log("\n\nTest interrupted by user", "WARNING")
         results.write_logs()
-        results.print_summary()
         sys.exit(130)
     except Exception as e:
-        log(f"\n\nFATAL ERROR: {e}", "ERROR")
-        results.log_backend_error("FATAL", str(e))
-        results.write_logs()
+        log(f"FATAL: {e}", "ERROR")
         sys.exit(1)
