@@ -1,0 +1,31 @@
+**CRITICAL ISSUES FOUND IN LOGS:**
+
+1. ROKU ROUTING STILL BROKEN (Line 11-16):
+   - Query: "Scroll down on the 28-inch TCL Roku TV"
+   - Resolved to: binary_sensor.28_tcl_roku_tv_supports_ethernet
+   - Should be: media_player.28_tcl_roku_tv or remote.28_tcl_roku_tv
+   - Fix is NOT working - binary_sensor still being selected
+
+2. UNNECESSARY WEB SEARCH AFTER NAV COMMAND (Line 33):
+   - Nav_down was executed successfully (200 OK) 
+   - But web search still triggered
+   - This is the issue you mentioned - command executed but we still searched
+
+3. CODE BUG - AttributeError (Lines 158-169):
+   - File: /workspace/app/logic/media_ops.py:602
+   - Error: 'list' object has no attribute 'get'
+   - Happens in execute_batch_command when counting results
+   - Some result is a list instead of dict
+
+4. HA 500 ERRORS ON CAST DEVICE (Lines 97-116):
+   - Device: media_player.office_tv_chrome_2
+   - Command: play_media with media_content_id='resume'
+   - Both 'music' and 'video' types fail with HTTP 500
+   - This is a HA/Cast integration issue, not our code
+
+5. EFFICIENCY - EXCESSIVE STATE POLLING:
+   - Lines 95-101, 148-193: Continuous GET /api/states calls
+   - Every 500ms fetching same device state
+   - Should reduce polling frequency or use HA websockets
+
+done
