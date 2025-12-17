@@ -1666,9 +1666,10 @@ async def handle_media_command(
                 log.debug(f"[BRIGHTNESS] Found percentage {pct}%, setting brightness to {brightness}")
             else:
                 log.debug(f"[BRIGHTNESS] No percentage found in query")
-            
-            # Relative adjustments
-            elif intent == "dim":
+
+            # Relative adjustments (only if no percentage found)
+            if brightness is None:
+                if intent == "dim":
                 brightness = 70  # ~30% brightness
             elif intent == "brighten":
                 brightness = 255  # Max brightness
