@@ -967,6 +967,20 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
         elif intent.startswith("nav_") or intent == "open_app":
             if domain == "remote": score += 100
             elif integration == "androidtv_remote": score += 90
+
+        # PLAYBACK CONTROLS (Pause, Resume, Stop, Next, Prev)
+        # Prioritize media_player entities over remotes/others
+        elif intent in ["pause", "resume", "media_pause", "media_play", "media_stop", "stop_media", "media_next_track", "media_previous_track"]:
+            if domain == "media_player":
+                score += 100
+                if "cast" in integration: score += 10 # Slight pref for Cast as it is robust for status
+            elif domain == "remote":
+                 score -= 50 # Remotes often don't support direct media_pause service calls
+        
+        # VOLUME CONTROLS
+        elif intent in ["volume_up", "volume_down", "volume_mute", "volume_set"]:
+             if domain == "media_player": score += 100
+             elif domain == "remote": score += 50 # Remotes can often do volume
         
         scored.append((score, m))
     
