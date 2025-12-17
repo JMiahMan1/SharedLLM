@@ -2012,6 +2012,7 @@ async def handle_media_command(
                  )
                  
                  candidates = []
+                 best_ma_candidate = None
                  if siblings and siblings.get("metadatas"):
                      for meta in siblings["metadatas"]:
                          s_id = meta.get("entity_id")
