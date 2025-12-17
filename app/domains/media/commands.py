@@ -119,20 +119,52 @@ async def handle_media_command(
 
     # [Standard Resolution Path - simplified]
     if not entity_id:
-        cleaned_for_res = q_low
-        for p in ["turn on", "turn off", "toggle", "play", "stop", "open", "launch", "the", " on ", " please ",
-                  "skip", "next", "previous", "back", "pause", "resume",
-                  "this song", "the song", "current song", "track", "music"]:
-            cleaned_for_res = cleaned_for_res.replace(p, " ")
-        cleaned_for_res = cleaned_for_res.strip()
-
-        if not cleaned_for_res:
-            if is_transport:
-                entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
-                if not entity_id:
-                    entity_id = get_last_entity(redis_client, user_creds.get("user"))
-            else:
+        # For commands without explicit device names, first check last used devices
+        if is_transport:
+            entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
+            if not entity_id:
                 entity_id = get_last_entity(redis_client, user_creds.get("user"))
+        else:
+            # For play commands, prefer last media entity over general last entity
+            entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
+            if not entity_id:
+                entity_id = get_last_entity(redis_client, user_creds.get("user"))
+
+        # If still no entity found, try to resolve from query content
+        if not entity_id:
+            cleaned_for_res = q_low
+            for p in ["turn on", "turn off", "toggle", "play", "stop", "open", "launch", "the", " on ", " please ",
+                      "skip", "next", "previous", "back", "pause", "resume",
+                      "this song", "the song", "current song", "track", "music"]:
+                cleaned_for_res = cleaned_for_res.replace(p, " ")
+            cleaned_for_res = cleaned_for_res.strip()
+
+            if cleaned_for_res:
+                # Try to resolve the cleaned query as a device name
+                try:
+                    resolved = await smart_resolve_entity(
+                        cleaned_for_res,
+                        intent,
+                        ha_collection,
+                        is_music=strict_resolution,
+                        is_video=is_video_request,
+                        allow_multiple=True
+                    )
+
+                    if isinstance(resolved, list):
+                        if resolved:
+                            log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
+                            return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
+                        else:
+                             log.info(f"[Device Fallback] No devices found for {cleaned_for_res}")
+                    elif isinstance(resolved, tuple):
+                         entity_id, integration = resolved
+                         log.info(f"[Device Fallback] Resolved '{cleaned_for_res}' to {entity_id}")
+                    elif resolved:
+                         entity_id = resolved
+                         log.info(f"[Device Fallback] Resolved '{cleaned_for_res}' to {entity_id}")
+                except Exception as e:
+                    log.error(f"[Device Fallback] Error resolving '{cleaned_for_res}': {e}", exc_info=True)
 
         if entity_id:
             user = user_creds.get("user")
@@ -192,8 +224,68 @@ async def handle_media_command(
         # [Music Assistant Integration]
         if "music_assistant" in integration:
             try:
-                # Music Assistant playback logic would go here
-                pass
+                # Get device metadata to check for Music Assistant attributes
+                from app.settings import GlobalResources
+                try:
+                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    current_meta = docs.get("metadatas", [{}])[0] if docs else {}
+                except Exception:
+                    current_meta = {}
+
+                # Check integration OR attributes for MA capability
+                is_ma_device = "music_assistant" in integration
+                if not is_ma_device and current_meta:
+                    attrs_str = str(current_meta.get("attributes", "")).lower()
+                    if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
+                        is_ma_device = True
+                        log.info(f"Identified {entity_id} as MA device via attributes.")
+
+                if is_ma_device:
+                    log.info(f"Delegating Music Assistant Play on {entity_id} to music_assistant_ops")
+
+                    # Determine content type
+                    ctype = "music" if is_music_request else "video"
+
+                    # Clean the title (based on original logic)
+                    clean_title = query.lower()
+
+                    # Remove device name from query
+                    if entity_id:
+                        from app.domains.media.devices import get_device_capabilities
+                        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+                        fname = caps.get("friendly_name", "").lower()
+                        ename = entity_id.split(".")[-1].replace("_", " ").lower()
+
+                        # Remove "on {name}" patterns
+                        for name in [fname, ename, "office tv", "master bedroom tv", "gracie tv"]:
+                            if name and name in clean_title:
+                                clean_title = re.sub(f"\\b(on|in|at)?\\s*{re.escape(name)}\\b", " ", clean_title)
+
+                    # Remove action/control words
+                    clean_title = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean_title)
+
+                    # Remove content type keywords for music requests
+                    if is_music_request:
+                        clean_title = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean_title)
+
+                    # Clean up extra spaces and strip
+                    clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+
+                    # Attempt Music Assistant delegation
+                    result = await music_assistant_ops.play_media(entity_id, clean_title, ctype, user_creds)
+
+                    if result and result.get("status") == "SUCCESS":
+                        log.info("Music Assistant delegation succeeded")
+                        return [result]
+                    else:
+                        log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
+                        result = await music_assistant_ops.play_media(entity_id, clean_title, "search", user_creds)
+
+                    if result and result.get("status") == "SUCCESS":
+                        log.info("Music Assistant delegation succeeded on retry")
+                        return [result]
+                    else:
+                        log.warning("Music Assistant delegation failed, falling back to standard media player")
             except Exception as e:
                 log.error(f"Error in Music Assistant delegation: {e}")
 
