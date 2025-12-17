@@ -2143,6 +2143,12 @@ async def handle_media_command(
                      result = await ma_play_media(entity_id, clean_title, "search", user_creds)
                 
                 if result["status"] == "SUCCESS":
+                    # Update context for successful MA play
+                    user = user_creds.get("user")
+                    if user and entity_id:
+                        _set_last_entity(redis_client, user, entity_id)
+                        if entity_id.startswith("media_player."):
+                            _set_last_media_entity(redis_client, user, entity_id)
                     return [{"status": "SUCCESS", "message": result["message"], "service": "ma_play", "entity_id": entity_id}]
                 else: 
                      # MA tried but failed logically (not crashed). Return failure here to avoid double-playing on standard?
