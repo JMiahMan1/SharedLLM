@@ -1840,7 +1840,13 @@ async def handle_media_command(
                 video_id = vid_match.group(1)
 
             # 1. Android TV Deep Link (YouTube App)
-            if "android" in integration or "google_cast" in integration:
+            # CRITICAL FIX: Add 'androidtv_remote' and generic TV fallback
+            is_android_tv = "android" in (integration or "") or "google_cast" in (integration or "")
+            if not is_android_tv and "tv" in entity_id and "roku" not in (integration or "") and "webos" not in (integration or ""):
+                 # Fallback for "Office TV" if integration is missing but name implies TV
+                 is_android_tv = True
+
+            if is_android_tv:
                 # Attempt to find remote entity
                 remote_id = entity_id.replace("media_player", "remote")
                 
@@ -2076,6 +2082,34 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
                   tv_sibling = vs
                   break
         
+        # ---------------------------------------------------------
+        # SMART REDIRECTION: Check Active State
+        # ---------------------------------------------------------
+        # Don't blindly redirect to TV if the Speaker is the one playing music.
+        if tv_sibling:
+             try:
+                 # Check states
+                 tv_state = await get_entity_state(tv_sibling, user_creds)
+                 origin_state = await get_entity_state(entity_id, user_creds)
+                 
+                 # If origin (Speaker) is playing/paused, keep command there!
+                 if origin_state in ["playing", "paused", "buffering"]:
+                      log.info(f"[Transport] Origin {entity_id} is active ({origin_state}). NOT redirecting to {tv_sibling}.")
+                      tv_sibling = None
+                 
+                 # If TV is playing, definitely redirect
+                 elif tv_state in ["playing", "paused", "buffering"]:
+                      log.info(f"[Transport] TV {tv_sibling} is active ({tv_state}). Redirecting.")
+                      # tv_sibling stays set
+                 
+                 # If neither, default to TV for Power/Input commands, but maybe not for Skip?
+                 else:
+                      if intent in ["media_next", "media_previous", "media_play", "media_pause"]:
+                           # If nothing playing, probably don't redirect strict transport unless it's a TV remote command
+                           pass
+             except Exception as e:
+                 log.warning(f"State check failed during redirection: {e}")
+
         if tv_sibling:
              log.info(f"[Transport] Redirecting {intent} from {entity_id} to TV Sibling: {tv_sibling}")
              # For Turn OFF: definitive
