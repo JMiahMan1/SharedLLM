@@ -415,7 +415,12 @@ async def try_handle_compound_command(
     for r_list in results:
         log.info(f"[COMPOUND] Processing r_list: {r_list}, type: {type(r_list)}")
         if isinstance(r_list, list):
-            valid_results.extend([r for r in r_list if isinstance(r, dict)])
+            # Handle nested lists (flatten them)
+            for item in r_list:
+                if isinstance(item, list):
+                    valid_results.extend([r for r in item if isinstance(r, dict)])
+                elif isinstance(item, dict):
+                    valid_results.append(item)
         elif isinstance(r_list, dict):
             valid_results.append(r_list)
     log.info(f"[COMPOUND] valid_results: {valid_results}")
