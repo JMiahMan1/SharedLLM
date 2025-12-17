@@ -1966,7 +1966,7 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     intent = intent.strip()
     log.info(f"[_execute_transport_command] Intent='{intent}' (repr={repr(intent)}) Entity='{entity_id}'")
 
-    elif intent == "stop_media":
+    if intent == "stop_media":
         log.info(f"[Transport] Match stop_media for {entity_id}")
         # Check state first to avoid 500 error on off devices
         state = await get_entity_state(entity_id, user_creds)
