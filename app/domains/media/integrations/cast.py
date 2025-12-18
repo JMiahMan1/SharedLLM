@@ -80,17 +80,17 @@ class CastIntegration(StandardIntegration):
                  
                  # [Strategy 1: Direct Stream Extraction (Bypass App/Login)]
                  if BYPASS_YOUTUBE_APP:
-                     # Try to extract direct stream URL to avoid "Who is watching?" prompts
-                     direct_stream = await self._extract_direct_stream_url(query)
-                     if direct_stream:
-                         log.info(f"[CastIntegration] Extracted direct stream. Bypassing YouTube App.")
+                     # Download video locally and serve via HTTP for stable Cast streaming
+                     local_url = await self._download_and_serve_video(query)
+                     if local_url:
+                         log.info(f"[CastIntegration] Video ready for streaming at: {local_url}")
                          return await execute_ha_service(
                              "media_player", 
                              "play_media", 
                              entity_id, 
                              user_creds, 
                              {
-                                 "media_content_id": direct_stream,
+                                 "media_content_id": local_url,
                                  "media_content_type": "video" 
                              }, 
                              kwargs.get("redis_client")
@@ -139,6 +139,38 @@ class CastIntegration(StandardIntegration):
         return None
 
         return None
+
+    async def _download_and_serve_video(self, url: str) -> Optional[str]:
+        """
+        Download video locally and return HTTP URL for streaming.
+        
+        Uses progressive download - returns as soon as initial buffer is ready.
+        """
+        try:
+            from app.utils.video_cache import download_video_progressive, get_video_id
+            from app.settings import HA_URL
+            
+            # Get unique video ID
+            video_id = get_video_id(url)
+            log.info(f"[CastIntegration] Starting progressive download for video {video_id}")
+            
+            # Download with initial buffer
+            file_path, ready = await download_video_progressive(url, video_id)
+            
+            if not ready or not file_path:
+                log.error(f"[CastIntegration] Progressive download failed for {url}")
+                return None
+            
+            # Return local streaming URL
+            # Using server's external IP so Cast device can access it
+            local_url = f"http://192.168.2.211:11435/cast_video/{video_id}.mp4"
+            log.info(f"[CastIntegration] Video ready at: {local_url}")
+            
+            return local_url
+            
+        except Exception as e:
+            log.error(f"[CastIntegration] Download and serve error: {e}")
+            return None
 
     async def _extract_direct_stream_url(self, url: str) -> str:
         """Attempts to extract a direct mp4 stream using yt-dlp."""

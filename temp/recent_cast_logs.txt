@@ -1,0 +1,200 @@
+2025-12-18 13:47:34,165 [INFO] [REGEX OVERRIDE] Matched 'play_media' via pattern: \bplay\b...
+2025-12-18 13:47:34,165 [INFO] [INTENT] Regex override: 'Play Big Buck Bunny video on the Office TV' -> play_media
+2025-12-18 13:47:34,207 [INFO] [PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+2025-12-18 13:47:34,207 [INFO] [FAST PATH ORCHESTRATION] Starting for intent=play_media, is_high_confidence=True
+2025-12-18 13:47:34,208 [INFO] [FAST PATH] Condition met, processing play_media
+2025-12-18 13:47:34,208 [INFO] [FAST PATH] Matched transport intent: play_media
+2025-12-18 13:47:34,209 [INFO] [FAST PATH] device_in_query: True, query: Play Big Buck Bunny video on the Office TV
+2025-12-18 13:47:34,209 [INFO] [FAST PATH] action_plan set: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play_media', 'device_name': 'Office Tv'}}
+2025-12-18 13:47:34,209 [INFO] [FAST ORCHESTRA] Bypassing LLM for play_media
+2025-12-18 13:47:34,210 [INFO] [ACTION DISPATCH] Calling handler for media_command
+2025-12-18 13:47:34,210 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=play_media, entity_id=None, device_name=Office Tv, integration=unknown
+2025-12-18 13:47:34,210 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office Tv' (Music Mode: False)
+2025-12-18 13:47:34,210 [INFO] DEBUG: Entering smart_resolve_entity. Q='Office Tv' Intent='play_media' Multiple=True
+2025-12-18 13:47:34,233 [INFO] [EXACT MATCH] 'Office Tv' → media_player.office_tv_chrome_2
+2025-12-18 13:47:34,233 [INFO] Using exact name match for 'Office Tv': ('media_player.office_tv_chrome_2', 'cast')
+2025-12-18 13:47:34,233 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+2025-12-18 13:47:34,233 [INFO] [BATCH] Executing 'play_media' on 1 entities
+2025-12-18 13:47:34,234 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=play_media, entity_id=media_player.office_tv_chrome_2, device_name=None, integration=cast
+2025-12-18 13:47:34,234 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='play_media' is_transport=False entity=media_player.office_tv_chrome_2
+2025-12-18 13:47:34,235 [INFO] [TV Swap] Video request on cast device. group_id=unknown manufacturer:sti6140d360:office, searching for TV...
+2025-12-18 13:47:34,239 [INFO] [Router] Delegating to Integration: cast for media_player.office_tv_chrome_2
+2025-12-18 13:47:34,241 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-18 13:47:34,292 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1184
+2025-12-18 13:47:34,295 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-18 13:47:34,347 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1184
+2025-12-18 13:47:34,348 [INFO] [MASS Unwrap] Detected Music Assistant wrapper 'media_player.office_tv_chrome_2'. Using underlying Cast device: media_player.office_tv_chrome
+2025-12-18 13:47:34,349 [INFO] [SmartPowerSync] Searching for TV in group unknown manufacturer:sti6140d360:office
+2025-12-18 13:47:34,351 [INFO] [SmartPowerSync] Found TV sibling via group: media_player.office_tv_chrome_2
+2025-12-18 13:47:34,354 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-18 13:47:34,394 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1184
+2025-12-18 13:47:34,396 [INFO] [SmartPowerSync] TV media_player.office_tv_chrome_2 is already idle
+2025-12-18 13:47:34,398 [INFO] [StandardIntegration] Searching Whoogle for 'big buck bunny video youtube'...
+2025-12-18 13:47:34,398 [INFO] Executing Web Search for: big buck bunny video youtube
+2025-12-18 13:47:34,401 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-18 13:47:38,764 [DEBUG] https://search.sumemail.com:443 "GET /search?q=big+buck+bunny+video+youtube&format=json HTTP/2.0" 200 4815
+2025-12-18 13:47:38,767 [INFO] [StandardIntegration] Resolved to https://www.youtube.com/watch?v=aqz-KE-bpKQ
+2025-12-18 13:47:38,767 [INFO] [CastIntegration] Pre-resolved video query to: https://www.youtube.com/watch?v=aqz-KE-bpKQ
+2025-12-18 13:47:38,807 [INFO] [CastIntegration] Attempting yt-dlp extraction...
+2025-12-18 13:47:40,278 [DEBUG] [8eb51d01bfe13596] TLS: Advertising to peer post-quantum algorithm using X25519ML768 (0x11EC)
+2025-12-18 13:47:40,279 [DEBUG] [8eb51d01bfe13596] TLS CLIENT_HANDSHAKE_START -> CLIENT_EXPECT_SERVER_HELLO
+2025-12-18 13:47:40,306 [DEBUG] [8eb51d01bfe13596] FIRSTFLIGHT -> CONNECTED
+2025-12-18 13:47:40,307 [DEBUG] [8eb51d01bfe13596] TLS: Post-quantum safety achieved using X25519ML768 (key-exchange)
+2025-12-18 13:47:40,308 [DEBUG] [8eb51d01bfe13596] Negotiated protocol version 0x00000001 (VERSION_1)
+2025-12-18 13:47:40,309 [DEBUG] [8eb51d01bfe13596] TLS CLIENT_EXPECT_SERVER_HELLO -> CLIENT_EXPECT_ENCRYPTED_EXTENSIONS
+2025-12-18 13:47:40,312 [DEBUG] [8eb51d01bfe13596] TLS CLIENT_EXPECT_ENCRYPTED_EXTENSIONS -> CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE
+2025-12-18 13:47:40,312 [DEBUG] [8eb51d01bfe13596] Discarding epoch 0
+2025-12-18 13:47:40,341 [DEBUG] [8eb51d01bfe13596] TLS CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE -> CLIENT_EXPECT_CERTIFICATE_VERIFY
+2025-12-18 13:47:40,422 [DEBUG] [8eb51d01bfe13596] TLS CLIENT_EXPECT_CERTIFICATE_VERIFY -> CLIENT_EXPECT_FINISHED
+2025-12-18 13:47:40,423 [DEBUG] [8eb51d01bfe13596] TLS CLIENT_EXPECT_FINISHED -> CLIENT_POST_HANDSHAKE
+2025-12-18 13:47:40,423 [DEBUG] [8eb51d01bfe13596] ALPN negotiated protocol h3
+2025-12-18 13:47:40,423 [DEBUG] [8eb51d01bfe13596] Stream 3 created by peer
+2025-12-18 13:47:40,424 [DEBUG] [8eb51d01bfe13596] Duplicate CRYPTO data received for epoch 2
+2025-12-18 13:47:40,451 [DEBUG] [8eb51d01bfe13596] Discarding epoch 2
+2025-12-18 13:47:40,609 [DEBUG] [8eb51d01bfe13596] Stream 11 created by peer
+2025-12-18 13:47:40,614 [DEBUG] [8eb51d01bfe13596] Stream 0 discarded
+2025-12-18 13:47:40,655 [DEBUG] [8eb51d01bfe13596] Stream 7 created by peer
+2025-12-18 13:47:40,769 [DEBUG] [8eb51d01bfe13596] Stream 4 discarded
+2025-12-18 13:47:41,326 [DEBUG] [8eb51d01bfe13596] Connection close sent (code 0x0, reason )
+2025-12-18 13:47:41,326 [DEBUG] [8eb51d01bfe13596] CONNECTED -> CLOSING
+2025-12-18 13:47:41,327 [INFO] [CastIntegration] Extracted direct stream. Bypassing YouTube App.
+2025-12-18 13:47:41,410 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome | Data: {'media_content_id': 'https://manifest.googlevideo.com/api/manifest/hls_playlist/expire/1766112460/ei/bGhEadrzJ7fZsfIPjvjLyAY/ip/184.190.1.22/id/6aacfe284f9ba4a4/itag/301/source/youtube/requiressl/yes/ratebypass/yes/pfa/1/sgoap/clen%3D10271496%3Bdur%3D634.624%3Bgir%3Dyes%3Bitag%3D140%3Blmt%3D1719185020722767/sgovp/clen%3D257619653%3Bdur%3D634.566%3Bgir%3Dyes%3Bitag%3D299%3Blmt%3D1719195290537273/rqh/1/hls_chunk_host/rr2---sn-a5meknzk.googlevideo.com/xpc/EgVo2aDSNQ%3D%3D/cps/43/met/1766090860,/mh/aP/mm/31,29/mn/sn-a5meknzk,sn-a5mlrnll/ms/au,rdu/mv/m/mvi/2/pl/21/rms/au,au/initcwndbps/2082500/bui/AYUSA3AZzg0b2Te3PoAqu34TtWSueR0_lewFEPVXr7aKtdGWNiyhlCxDjAaxAW_2oOauf4Mpk3ehOVtt/spc/wH4Qq4HAZZN9upeaI7FDnRwva5utNJgIeEpMXsh7dn8PBdNquOGaMunSjcH4ZpVinsTBJw/vprv/1/ns/BBDXpTZJqZLQSc5gBUGcFhoR/playlist_type/CLEAN/dover/11/txp/4532434/mt/1766090475/fvip/3/keepalive/yes/fexp/51355912,51552689,51565115,51565681,51580968/n/gc0w_sJb1o0VQq6cQM/sparams/expire,ei,ip,id,itag,source,requiressl,ratebypass,pfa,sgoap,sgovp,rqh,xpc,bui,spc,vprv,ns,playlist_type/sig/AJfQdSswRAIgRPmXHsFhm9inQX3nOX_3JgWcUMfEG2AHrwvMRZ5M5JUCIFKyicX_nJk86lriIKSGwkhZt09V9SBTm7S9k2DTEBLt/lsparams/hls_chunk_host,cps,met,mh,mm,mn,ms,mv,mvi,pl,rms,initcwndbps/lsig/APaTxxMwRgIhAKPHJ4T7LeznhfhCtqV_b6C4hkKn3FkqPISiNfZCr3OxAiEAx25oqBkJOpo4Rah77zMLBDsh5MpHue4-7RftDQRv2KQ%3D/playlist/index.m3u8', 'media_content_type': 'video'}
+2025-12-18 13:47:47,098 [INFO] [ACTION DISPATCH] Handler returned: {'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}
+2025-12-18 13:47:47,099 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]]
+2025-12-18 13:47:47,099 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}], type: <class 'list'>
+2025-12-18 13:47:47,099 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-18 13:47:47,099 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-18 13:47:47,100 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-18 13:47:47,100 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'play_media' sent to 1 devices. Verified New State: N/A
+
+2025-12-18 13:47:47,101 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-18 13:47:47,101 [INFO] DEBUG: Entering Silent Mode for intent 'play_media'
+2025-12-18 13:47:47,101 [DEBUG] [RESPONSE] Returning to client: Done.
+2025-12-18 13:47:55,258 [INFO] [INTENT] get_intent called with query: 'Watch a fireplace video on the Office TV'
+2025-12-18 13:47:55,258 [INFO] [REGEX START] apply_regex_override called with: 'Watch a fireplace video on the Office TV'
+2025-12-18 13:47:55,259 [INFO] [REGEX CHECK] Checking query: 'watch a fireplace video on the office tv'
+2025-12-18 13:47:55,259 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+2025-12-18 13:47:55,259 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-18 13:47:55,260 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+2025-12-18 13:47:55,260 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+2025-12-18 13:47:55,260 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+2025-12-18 13:47:55,261 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+2025-12-18 13:47:55,261 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+2025-12-18 13:47:55,262 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+2025-12-18 13:47:55,262 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+2025-12-18 13:47:55,262 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+2025-12-18 13:47:55,262 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+2025-12-18 13:47:55,262 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+2025-12-18 13:47:55,262 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+2025-12-18 13:47:55,262 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+2025-12-18 13:47:55,262 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 13:47:55,263 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 13:47:55,263 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+2025-12-18 13:47:55,263 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+2025-12-18 13:47:55,263 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+2025-12-18 13:47:55,263 [INFO] [REGEX CHECK] No regex matches for: 'watch a fireplace video on the office tv'
+2025-12-18 13:47:55,263 [INFO] [INTENT] Falling back to vector engine for: 'Watch a fireplace video on the Office TV'
+2025-12-18 13:47:55,263 [INFO] [REGEX CHECK] Intent engine checking query: 'Watch a fireplace video on the Office TV'
+2025-12-18 13:47:55,263 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+2025-12-18 13:47:55,263 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+2025-12-18 13:47:55,264 [INFO] [REGEX CHECK] No regex matches for: 'watch a fireplace video on the office tv'
+2025-12-18 13:47:55,285 [DEBUG] Intent Low Confidence: 'Watch a fireplace video on the Office TV' -> Best: 'play_media' (0.44)
+2025-12-18 13:47:55,286 [INFO] [INTENT] Vector result: (None, 0.442811637429006, True)
+2025-12-18 13:47:55,286 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=4129
+2025-12-18 13:48:12,095 [INFO] [INTENT] get_intent called with query: 'Play fireplace video on the Office TV'
+2025-12-18 13:48:12,095 [INFO] [REGEX START] apply_regex_override called with: 'Play fireplace video on the Office TV'
+2025-12-18 13:48:12,095 [INFO] [REGEX CHECK] Checking query: 'play fireplace video on the office tv'
+2025-12-18 13:48:12,095 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+2025-12-18 13:48:12,095 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-18 13:48:12,096 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+2025-12-18 13:48:12,096 [INFO] [REGEX OVERRIDE] Matched 'play_media' via pattern: \bplay\b...
+2025-12-18 13:48:12,096 [INFO] [INTENT] Regex override: 'Play fireplace video on the Office TV' -> play_media
+2025-12-18 13:48:12,096 [INFO] [PIPELINE DEBUG] Intent detected: play_media (Score: 1.0)
+2025-12-18 13:48:12,097 [INFO] [FAST PATH ORCHESTRATION] Starting for intent=play_media, is_high_confidence=True
+2025-12-18 13:48:12,097 [INFO] [FAST PATH] Condition met, processing play_media
+2025-12-18 13:48:12,097 [INFO] [FAST PATH] Matched transport intent: play_media
+2025-12-18 13:48:12,097 [INFO] [FAST PATH] device_in_query: True, query: Play fireplace video on the Office TV
+2025-12-18 13:48:12,097 [INFO] [FAST PATH] action_plan set: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play_media', 'device_name': 'Office Tv'}}
+2025-12-18 13:48:12,098 [INFO] [FAST ORCHESTRA] Bypassing LLM for play_media
+2025-12-18 13:48:12,098 [INFO] [ACTION DISPATCH] Calling handler for media_command
+2025-12-18 13:48:12,098 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=play_media, entity_id=None, device_name=Office Tv, integration=unknown
+2025-12-18 13:48:12,098 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office Tv' (Music Mode: False)
+2025-12-18 13:48:12,098 [INFO] DEBUG: Entering smart_resolve_entity. Q='Office Tv' Intent='play_media' Multiple=True
+2025-12-18 13:48:12,121 [INFO] [EXACT MATCH] 'Office Tv' → media_player.office_tv_chrome_2
+2025-12-18 13:48:12,121 [INFO] Using exact name match for 'Office Tv': ('media_player.office_tv_chrome_2', 'cast')
+2025-12-18 13:48:12,121 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+2025-12-18 13:48:12,121 [INFO] [BATCH] Executing 'play_media' on 1 entities
+2025-12-18 13:48:12,121 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=play_media, entity_id=media_player.office_tv_chrome_2, device_name=None, integration=cast
+2025-12-18 13:48:12,121 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='play_media' is_transport=False entity=media_player.office_tv_chrome_2
+2025-12-18 13:48:12,122 [INFO] [TV Swap] Video request on cast device. group_id=unknown manufacturer:sti6140d360:office, searching for TV...
+2025-12-18 13:48:12,124 [INFO] [Router] Delegating to Integration: cast for media_player.office_tv_chrome_2
+2025-12-18 13:48:12,197 [INFO] [MASS Unwrap] Detected Music Assistant wrapper 'media_player.office_tv_chrome_2'. Using underlying Cast device: media_player.office_tv_chrome
+2025-12-18 13:48:12,199 [INFO] [SmartPowerSync] Searching for TV in group unknown manufacturer:sti6140d360:office
+2025-12-18 13:48:12,200 [INFO] [SmartPowerSync] Found TV sibling via group: media_player.office_tv_chrome_2
+2025-12-18 13:48:12,239 [INFO] [SmartPowerSync] TV media_player.office_tv_chrome_2 is already idle
+2025-12-18 13:48:12,240 [INFO] [StandardIntegration] Searching Whoogle for 'fireplace video youtube'...
+2025-12-18 13:48:12,240 [INFO] Executing Web Search for: fireplace video youtube
+2025-12-18 13:48:16,045 [INFO] [StandardIntegration] Resolved to https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 13:48:16,046 [INFO] [CastIntegration] Pre-resolved video query to: https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 13:48:16,046 [INFO] [CastIntegration] Attempting yt-dlp extraction...
+2025-12-18 13:48:17,358 [DEBUG] [3a5444a9fa683960] TLS: Advertising to peer post-quantum algorithm using X25519ML768 (0x11EC)
+2025-12-18 13:48:17,358 [DEBUG] [3a5444a9fa683960] TLS CLIENT_HANDSHAKE_START -> CLIENT_EXPECT_SERVER_HELLO
+2025-12-18 13:48:17,393 [DEBUG] [3a5444a9fa683960] FIRSTFLIGHT -> CONNECTED
+2025-12-18 13:48:17,395 [DEBUG] [3a5444a9fa683960] TLS: Post-quantum safety achieved using X25519ML768 (key-exchange)
+2025-12-18 13:48:17,395 [DEBUG] [3a5444a9fa683960] Negotiated protocol version 0x00000001 (VERSION_1)
+2025-12-18 13:48:17,396 [DEBUG] [3a5444a9fa683960] TLS CLIENT_EXPECT_SERVER_HELLO -> CLIENT_EXPECT_ENCRYPTED_EXTENSIONS
+2025-12-18 13:48:17,397 [DEBUG] [3a5444a9fa683960] TLS CLIENT_EXPECT_ENCRYPTED_EXTENSIONS -> CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE
+2025-12-18 13:48:17,398 [DEBUG] [3a5444a9fa683960] Discarding epoch 0
+2025-12-18 13:48:17,431 [DEBUG] [3a5444a9fa683960] TLS CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE -> CLIENT_EXPECT_CERTIFICATE_VERIFY
+2025-12-18 13:48:17,434 [DEBUG] [3a5444a9fa683960] TLS CLIENT_EXPECT_CERTIFICATE_VERIFY -> CLIENT_EXPECT_FINISHED
+2025-12-18 13:48:17,435 [DEBUG] [3a5444a9fa683960] TLS CLIENT_EXPECT_FINISHED -> CLIENT_POST_HANDSHAKE
+2025-12-18 13:48:17,435 [DEBUG] [3a5444a9fa683960] ALPN negotiated protocol h3
+2025-12-18 13:48:17,435 [DEBUG] [3a5444a9fa683960] Stream 3 created by peer
+2025-12-18 13:48:17,462 [DEBUG] [3a5444a9fa683960] Discarding epoch 2
+2025-12-18 13:48:17,595 [DEBUG] [3a5444a9fa683960] Stream 11 created by peer
+2025-12-18 13:48:17,600 [DEBUG] [3a5444a9fa683960] Stream 0 discarded
+2025-12-18 13:48:17,635 [DEBUG] [3a5444a9fa683960] Stream 7 created by peer
+2025-12-18 13:48:18,070 [DEBUG] [3a5444a9fa683960] Stream 4 discarded
+2025-12-18 13:48:18,580 [DEBUG] [3a5444a9fa683960] Connection close sent (code 0x0, reason )
+2025-12-18 13:48:18,580 [DEBUG] [3a5444a9fa683960] CONNECTED -> CLOSING
+2025-12-18 13:48:18,581 [INFO] [CastIntegration] Extracted direct stream. Bypassing YouTube App.
+2025-12-18 13:48:18,625 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome | Data: {'media_content_id': 'https://manifest.googlevideo.com/api/manifest/hls_playlist/expire/1766112497/ei/kWhEaefxJva-sfIP9_H2iAM/ip/184.190.1.22/id/1c5e8b49b30abebc/itag/301/source/youtube/requiressl/yes/ratebypass/yes/pfa/1/sgoap/clen%3D694248848%3Bdur%3D42897.470%3Bgir%3Dyes%3Bitag%3D140%3Blmt%3D1757380413711873/sgovp/clen%3D30976951656%3Bdur%3D42897.365%3Bgir%3Dyes%3Bitag%3D299%3Blmt%3D1757383250511828/rqh/1/hls_chunk_host/rr2---sn-a5msen7z.googlevideo.com/xpc/EgVo2aDSNQ%3D%3D/cps/3/met/1766090897,/mh/CZ/mm/31,26/mn/sn-a5msen7z,sn-n4v7snlr/ms/au,onr/mv/m/mvi/2/pl/21/rms/au,au/force_finished/1/pcm2/yes/initcwndbps/2040000/bui/AYUSA3B6Tp2DdAhaGpJQ7v1DrgkCcfJrfN4v_cUxdKOLALfbrNaTXYMuxMK02NTFkX6bdlJ9Hr-3qrbP/spc/wH4Qq9wXTXeLMQdB7LOl_zTFeGkvQIPkvf_BoDE6tnyma1ZkMI_V-7kC11pdgaBJyQqRMWsBW4ycmQJepfcliUdo/vprv/1/ns/BTK3p_cu536_Jzj1v9zNVloR/playlist_type/CLEAN/dover/11/txp/5432534/mt/1766090475/fvip/2/keepalive/yes/fexp/51355912,51552689,51565115,51565682,51580968/n/foTVZ6NWlFEnpAz1Xv/sparams/expire,ei,ip,id,itag,source,requiressl,ratebypass,pfa,sgoap,sgovp,rqh,xpc,force_finished,pcm2,bui,spc,vprv,ns,playlist_type/sig/AJfQdSswRgIhAOVA5z4cSzk2gBm13pnJnuJbmWxGWIDq9uJkRSFBTC1KAiEAtDbucssHfU0tp9-1BjC89SZRgL10V7X1ofKWjDgOExU%3D/lsparams/hls_chunk_host,cps,met,mh,mm,mn,ms,mv,mvi,pl,rms,initcwndbps/lsig/APaTxxMwRQIhANIUJG7TY1bOxpqv-830w77OiNA7Rfg9cToyAHJrqdYGAiBgs_OAd4GjXPC67GEmV0tdydzk6PhXZPx1x5nAHsTWHw%3D%3D/playlist/index.m3u8', 'media_content_type': 'video'}
+2025-12-18 13:48:24,292 [INFO] [ACTION DISPATCH] Handler returned: {'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}
+2025-12-18 13:48:24,292 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]]
+2025-12-18 13:48:24,292 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}], type: <class 'list'>
+2025-12-18 13:48:24,293 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-18 13:48:24,293 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-18 13:48:24,293 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-18 13:48:24,294 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'play_media' sent to 1 devices. Verified New State: N/A
+
+2025-12-18 13:48:24,294 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2589
+2025-12-18 13:48:27,929 [DEBUG] [RESPONSE] Final response to user (41 chars): Playing fireplace video on the Office TV.
+2025-12-18 13:48:27,929 [DEBUG] [RESPONSE] Returning to client: Playing fireplace video on the Office TV.
+[DEBUG] FAST PATH ORCHESTRATION Starting for intent=play_media, is_high_confidence=True
+[DEBUG] FAST PATH Condition met, processing play_media
+[DEBUG] try_handle_compound_command returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+INFO:     192.168.2.1:41274 - "POST /api/chat HTTP/1.1" 200 OK
+[DEBUG] FAST PATH ORCHESTRATION Starting for intent=play_media, is_high_confidence=True
+[DEBUG] FAST PATH Condition met, processing play_media
+[DEBUG] try_handle_compound_command returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
