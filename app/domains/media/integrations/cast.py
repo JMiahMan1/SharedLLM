@@ -199,12 +199,20 @@ class CastIntegration(StandardIntegration):
                             
                             if group_docs and group_docs.get("metadatas"):
                                 for metadata in group_docs["metadatas"]:
-                                    candidate_id = metadata.get("entity_id")
-                                    friendly_name = metadata.get("friendly_name", "").lower()
+                                    candidate_id = metadata.get("entity_id"")
                                     candidate_integration = metadata.get("integration", "")
                                     
-                                    # Find device with "tv" in name OR non-MA integration
-                                    if (("tv" in friendly_name or "tv" in candidate_id) and 
+                                    # Parse attributes to check device_class
+                                    attrs_str = metadata.get("attributes", "{}")
+                                    try:
+                                        import json
+                                        attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
+                                        device_class = attrs.get("device_class")
+                                    except:
+                                        device_class = None
+                                    
+                                    # Find actual TV device (device_class == "tv"), not Cast or MA devices
+                                    if (device_class == "tv" and 
                                         candidate_integration != "music_assistant" and
                                         candidate_id != entity_id):
                                         tv_sibling = candidate_id
