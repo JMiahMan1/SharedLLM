@@ -2,133 +2,148 @@ import requests
 import time
 import re
 import sys
+import json
 
 BASE_URL = "http://192.168.2.211:11435"
 HEADERS = {"X-RAG-User": "admin"}
 
-def get_logs(lines=50):
+# Map friendly names to likely entity_ids (will verify/discover)
+DEVICE_MAP = {
+    "Office TV": ["media_player.office_tv", "media_player.office_tv_chrome_2"],
+    "Master Bedroom TV": ["media_player.master_bedroom_tv", "media_player.master_bedroom_tv_adb"],
+    "Gracies TV": ["media_player.gracies_tv", "media_player.gracie_s_tv"]
+}
+
+def get_ha_state(entity_id):
+    """Fetch state from RAG API proxy."""
     try:
-        resp = requests.get(f"{BASE_URL}/api/admin/logs?lines={lines}", headers=HEADERS, timeout=5)
+        resp = requests.get(f"{BASE_URL}/api/ha/state/{entity_id}", headers=HEADERS, timeout=5)
         if resp.status_code == 200:
-            return resp.json().get("logs", [])
+            return resp.json()
     except Exception as e:
-        print(f"  [WARN] Failed to fetch logs: {e}")
-    return []
+        print(f"  [WARN] Failed to fetch state for {entity_id}: {e}")
+    return None
 
-def verify_log_content(pre_logs, expected_pattern):
-    """Check if new logs contain the expected pattern."""
-    post_logs = get_logs(100)
-    # Filter only new lines
-    new_lines = [l for l in post_logs if l not in pre_logs]
-    
-    for line in new_lines:
-        if re.search(expected_pattern, line, re.IGNORECASE):
-            return True, line.strip()
-    return False, None
+def find_best_entity(friendly_name):
+    """Try to find the working entity_id for a friendly name."""
+    candidates = DEVICE_MAP.get(friendly_name, [])
+    for eid in candidates:
+        state = get_ha_state(eid)
+        if state and "error" not in state:
+            return eid, state
+    return None, None
 
-def run_test(command, description, expected_log_pattern=None):
-    print(f"\n--- Testing: {description} ---")
-    print(f"Command: '{command}'")
+def check_device_status(friendly_name):
+    print(f"  [CHECK] Status for '{friendly_name}'...")
+    eid, state = find_best_entity(friendly_name)
+    if not eid:
+        print(f"  [FAIL] Could not find valid entity for {friendly_name}")
+        return None, None
     
-    pre_logs = get_logs(100)
+    val = state.get("state")
+    print(f"    Found: {eid} | State: {val} | Attrs: {state.get('attributes', {}).get('media_title', 'No Media')}")
+    return eid, val
+
+def run_test_strict(command, device_name, action_type, expected_state=None):
+    print(f"\n--- Testing: {command} ---")
     
+    # 1. Pre-Check
+    eid, pre_state = check_device_status(device_name)
+    if not eid:
+        print("  [SKIP] Device not found/available. Cannot test.")
+        return False
+
+    # 2. Execute
+    print(f"  [EXEC] Sending command...")
+    start = time.time()
     try:
-        start_time = time.time()
-        resp = requests.post(
-            f"{BASE_URL}/api/chat", 
-            json={"query": command}, 
-            headers=HEADERS, 
-            timeout=30
-        )
-        duration = time.time() - start_time
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            response_text = data.get("message", {}).get("content", "") or data.get("response", "")
-            print(f"  [API OK] ({duration:.2f}s) Response: {response_text[:100]}...")
-            
-            if expected_log_pattern:
-                print(f"  [VERIFY] Checking logs for pattern: '{expected_log_pattern}'...")
-                # Retrying log check for a few seconds as logs might be async
-                found = False
-                for _ in range(5):
-                    found, line = verify_log_content(pre_logs, expected_log_pattern)
-                    if found:
-                        print(f"  [PASS] Log Confirmation: {line}")
-                        return True
-                    time.sleep(1)
-                
-                print(f"  [FAIL] Log pattern not found in recent logs.")
-                print("  Recent logs:")
-                for l in get_logs(20)[-5:]:
-                    print(f"    {l.strip()}")
-                return False
+        resp = requests.post(f"{BASE_URL}/api/chat", json={"query": command}, headers=HEADERS, timeout=30)
+        dur = time.time() - start
+    except Exception as e:
+        print(f"  [FAIL] Request Error: {e}")
+        return False
+
+    if resp.status_code != 200:
+        print(f"  [FAIL] HTTP {resp.status_code}: {resp.text}")
+        return False
+
+    data = resp.json()
+    msg = data.get("message", {}).get("content", "") or data.get("response", "")
+    print(f"  [API] Response ({dur:.2f}s): {msg[:100]}...")
+    
+    # Check for negative LLM responses
+    if any(x in msg.lower() for x in ["fail", "error", "connect", "unreachable", "offline", "cannot"]):
+        print(f"  [FAIL] LLM reported failure: {msg}")
+        return False
+
+    # 3. Post-Check & Verify
+    # Wait a moment for state update
+    time.sleep(3)
+    _, post_state = check_device_status(device_name)
+    
+    if action_type == "play":
+        # Expect playing or buffering
+        if post_state in ["playing", "buffering"]:
+            print(f"  [PASS] Device is {post_state}.")
             return True
-            
+        elif post_state == "idle" and pre_state == "off":
+             print(f"  [WARN] Device turned on but is idle (maybe loading?).")
+             return True # Partial pass
         else:
-            print(f"  [FAIL] API Error {resp.status_code}: {resp.text}")
+            print(f"  [FAIL] Expected playing, got {post_state}.")
             return False
             
-    except Exception as e:
-        print(f"  [ERROR] Exception during test: {e}")
-        return False
+    elif action_type == "stop":
+        # Expect idle, paused, or off
+        if post_state in ["idle", "paused", "off", "standby"]:
+            print(f"  [PASS] Device is {post_state}.")
+            return True
+        else:
+            print(f"  [FAIL] Expected stop/idle, got {post_state}.")
+            return False
+
+    return True
 
 def main():
     print(f"Target: {BASE_URL}")
     
-    # 1. Music Assistant Tests
-    # Note: "Sent command to play_media" is the success message from execute_ha_service
-    # Or "Music Assistant delegation succeeded" from commands.py
+    # Check Devices First
+    print("\n--- Device Discovery ---")
+    for name in DEVICE_MAP:
+        check_device_status(name)
+        
+    # Test Loop
+    passes = 0
+    fails = 0
     
-    if not run_test(
-        "Play Brandon Lake on Office TV", 
-        "Music Assistant - Office TV",
-        r"(Music Assistant delegation succeeded|Sent command to play_media)"
-    ):
-        print("Test 1 Failed. Continuing...")
-
+    # 1. Office TV
+    if run_test_strict("Play Brandon Lake on Office TV", "Office TV", "play"): passes += 1
+    else: fails += 1
+    
     time.sleep(5)
     
-    if not run_test(
-        "Stop Office TV", 
-        "Stop Music",
-        r"(Sent command to media stop|media_stop|SUCCESS)"
-    ):
-        print("Test 2 Failed.")
-        
-    # 2. Video Tests (YouTube)
-    # Pattern: "intent='watch_video'" or "Sent command to play_media" with video
+    if run_test_strict("Stop Office TV", "Office TV", "stop"): passes += 1
+    else: fails += 1
     
-    time.sleep(2)
-    if not run_test(
-        "Play Big Buck Bunny video on Master Bedroom TV", 
-        "YouTube Video - Master Bedroom",
-        r"(Sent command to play_media|SUCCESS)"
-    ):
-        print("Test 3 Failed.")
-        
-    time.sleep(10) # Let it play
+    # 2. Master Bedroom
+    if run_test_strict("Play Big Buck Bunny video on Master Bedroom TV", "Master Bedroom TV", "play"): passes += 1
+    else: fails += 1
     
-    if not run_test(
-        "Pause Master Bedroom TV", 
-        "Pause Video",
-        r"(Sent command to media pause|SUCCESS)"
-    ):
-        print("Test 4 Failed.")
-        
-    # 3. Gracies TV
-    time.sleep(2)
-    if not run_test(
-        "Play generic music on Gracies TV", 
-        "Music - Gracies TV",
-        r"(Music Assistant delegation succeeded|Sent command to play_media)"
-    ):
-        print("Test 5 Failed.")
-        
-    time.sleep(2)
-    run_test("Stop Gracies TV", "Stop Gracie")
+    time.sleep(5)
+    
+    if run_test_strict("Stop Master Bedroom TV", "Master Bedroom TV", "stop"): passes += 1
+    else: fails += 1
 
-    print("\nVerification Run Complete.")
+    # 3. Gracie
+    if run_test_strict("Play generic music on Gracies TV", "Gracies TV", "play"): passes += 1
+    else: fails += 1
+    
+    time.sleep(2)
+    if run_test_strict("Stop Gracies TV", "Gracies TV", "stop"): passes += 1
+    else: fails += 1
+
+    print(f"\nSummary: {passes} Passed, {fails} Failed.")
+    if fails > 0: sys.exit(1)
 
 if __name__ == "__main__":
     main()
