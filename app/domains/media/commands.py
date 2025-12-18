@@ -386,11 +386,14 @@ async def handle_media_command(
         # [Music Assistant Integration]
         # Check if device supports Music Assistant OR if this is a natural language music search
         is_ma_device = "music_assistant" in integration
-        ma_target_entity = entity_id  # Track the actual entity to use for MA calls
         
-        if not is_ma_device:
+        # CRITICAL: Only use active_queue if device is ALREADY MA integration
+        # Cast devices with MA sync should NOT use MA - they should have been swapped by MASS Swap
+        ma_target_entity = entity_id  # Default to same entity
+        
+        if is_ma_device:
             try:
-                # Get device metadata to check for Music Assistant attributes
+                # Get device metadata to check for active_queue
                 from app.settings import GlobalResources
                 try:
                     docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
@@ -398,31 +401,19 @@ async def handle_media_command(
                 except Exception:
                     current_meta = {}
 
-                # Check attributes for MA capability
+                # CRITICAL: Check for active_queue - synced players must use their queue
+                # active_queue points to the actual MA player entity
                 if current_meta:
-                    attrs_str = str(current_meta.get("attributes", "")).lower()
-                    if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
-                        is_ma_device = True
-                        log.info(f"Identified {entity_id} as MA device via attributes.")
-                        
-                        # CRITICAL: Check for active_queue - synced players must use their queue
-                        # active_queue points to the actual MA player entity
-                        try:
-                            import json
-                            attrs = json.loads(current_meta.get("attributes", "{}"))
-                            if "active_queue" in attrs and attrs["active_queue"]:
-                                ma_target_entity = attrs["active_queue"]
-                                log.info(f"[MA] Synced player detected. Using active_queue: {ma_target_entity} instead of {entity_id}")
-                        except Exception as e:
-                            log.warning(f"[MA] Could not parse active_queue: {e}")
+                    try:
+                        import json
+                        attrs = json.loads(current_meta.get("attributes", "{}"))
+                        if "active_queue" in attrs and attrs["active_queue"]:
+                            ma_target_entity = attrs["active_queue"]
+                            log.info(f"[MA] Synced player detected. Using active_queue: {ma_target_entity} instead of {entity_id}")
+                    except Exception as e:
+                        log.warning(f"[MA] Could not parse active_queue: {e}")
             except Exception:
                 pass
-
-        # AGGRESSIVE MA FALLBACK: If it's a natural language music request (not a URL), try MA
-        # This allows "Play Brandon Lake on Office TV" to go through MA's search
-        if not is_ma_device and strict_resolution and not query.startswith(("http", "spotify:", "app:")):
-            log.info(f"Request is NL Music Search ('{query}'). Attempting to use Music Assistant for resolution.")
-            is_ma_device = True
 
         if is_ma_device:
             try:
