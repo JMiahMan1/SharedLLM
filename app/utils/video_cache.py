@@ -67,8 +67,8 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
     # Use best MP4 video+audio, but limit to 1080p to ensure cast compatibility and speed
     ydl_opts = {
         # MUST use single file format (best[ext=mp4]) for progressive streaming.
-        # bestvideo+bestaudio causes two separate downloads + merge, which blocks until finished.
-        'format': 'best[ext=mp4]/best',
+        # Limit to 1080p to assure it's not a 128GB 4K file.
+        'format': 'best[ext=mp4][height<=1080]/best[ext=mp4]/best',
         'outtmpl': str(file_path),
         'quiet': True,
         'no_warnings': True,
