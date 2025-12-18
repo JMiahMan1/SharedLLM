@@ -368,20 +368,28 @@ async def handle_media_command(
             # Cast logic would go here
             pass
 
-        # [AUTO-POWER-ON] Turn on device if it's off before playing media
-        # This matches the working commit's logic
-        if entity_id:
+        # [SmartPowerSync] If playing on a Cast device, find and power on the hardware TV
+        # Cast devices (_chrome, _chrome_2, etc.) are virtual and can't be powered on
+        # We need to find the actual TV hardware and power that on
+        if "cast" in integration or "_chrome" in entity_id:
             try:
                 from app.domains.media.devices import get_entity_state
-                state_data = await get_entity_state(entity_id, user_creds)
                 
-                if state_data == "off":
-                    log.info(f"[AUTO-POWER-ON] Device {entity_id} is OFF. Turning on before media playback.")
-                    await execute_ha_service("homeassistant", "turn_on", entity_id, user_creds, {}, redis_client)
-                    await asyncio.sleep(2)  # Give device time to power on
-                    log.info(f"[AUTO-POWER-ON] Device {entity_id} should now be ready.")
+                # Find TV sibling by stripping cast suffixes
+                tv_sibling = entity_id.replace("_chrome_2", "").replace("_chrome", "").replace("_cast", "").replace("_speaker", "")
+                
+                if tv_sibling != entity_id and tv_sibling:
+                    try:
+                        tv_state = await get_entity_state(tv_sibling, user_creds)
+                        if tv_state in ["off", "standby", "unavailable"]:
+                            log.info(f"[SmartPowerSync] Sibling TV {tv_sibling} is OFF. Turning ON to support Cast Playback.")
+                            await execute_ha_service("media_player", "turn_on", tv_sibling, user_creds, {}, redis_client)
+                            await asyncio.sleep(4)  # Wait for TV boot
+                            log.info(f"[SmartPowerSync] TV {tv_sibling} should now be ready.")
+                    except Exception as e:
+                        log.warning(f"[SmartPowerSync] Failed for {tv_sibling}: {e}")
             except Exception as e:
-                log.warning(f"[AUTO-POWER-ON] Failed for {entity_id}: {e}")
+                log.warning(f"[SmartPowerSync] Error: {e}")
 
         # [Music Assistant Integration]
         # Check if device supports Music Assistant OR if this is a natural language music search
