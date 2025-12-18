@@ -460,7 +460,6 @@ async def handle_media_command(
              found_url = None
              try:
                  from app.logic.web_search import tool_web_search
-                 import re
                  
                  print(f"Starting Whoogle search for: {search_query} youtube")
                  search_results = await tool_web_search(f"{search_query} youtube")
