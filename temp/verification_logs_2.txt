@@ -1,1 +1,0 @@
-INFO:     192.168.2.1:57778 - "GET /api/ha/state/media_player.office_tv HTTP/1.1" 200 OK

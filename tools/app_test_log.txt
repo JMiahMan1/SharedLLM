@@ -1,5 +1,0 @@
-INFO:VERIFY_FIREPLACE:--- Starting Live Fireplace Verification ---
-INFO:unified-rag:Loading Global Resources...
-INFO:unified-rag:Redis Connected.
-INFO:sentence_transformers.SentenceTransformer:Use pytorch device_name: cpu
-INFO:sentence_transformers.SentenceTransformer:Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
