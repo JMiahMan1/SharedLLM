@@ -44,9 +44,11 @@ def main():
             print(f"  Entity ID:     {metadata.get('entity_id', 'N/A')}")
             print(f"  Friendly Name: {metadata.get('friendly_name', 'N/A')}")
             print(f"  Integration:   {metadata.get('integration', 'N/A')}")
+            print(f"  Group ID:      {metadata.get('group_id', 'N/A')}")
+            print(f"  Group Name:    {metadata.get('group_name', 'N/A')}")
+            print(f"  Model:         {metadata.get('model', 'N/A')}")
             print(f"  Device Type:   {metadata.get('device_type', 'N/A')}")
             print(f"  Domain:        {metadata.get('domain', 'N/A')}")
-            print(f"  All Keys:      {list(metadata.keys())}")
     else:
         print("No results found!")
 
