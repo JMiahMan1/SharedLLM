@@ -376,49 +376,62 @@ async def handle_media_command(
                 from app.settings import GlobalResources
                 from app.domains.media.devices import get_entity_state
                 
-                # Get current device's group_id
-                current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
-                if current_docs and current_docs.get("metadatas"):
-                    current_group_id = current_docs["metadatas"][0].get("group_id")
-                    
-                    if current_group_id:
-                        log.info(f"[SmartPowerSync] Searching for TV in group {current_group_id}")
+                tv_sibling = None
+                
+                # Strategy 1: Try ChromaDB group lookup
+                try:
+                    current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    if current_docs and current_docs.get("metadatas"):
+                        current_group_id = current_docs["metadatas"][0].get("group_id")
                         
-                        # Find all devices in same group
-                        group_docs = GlobalResources.ha_collection._collection.get(
-                            where={"group_id": current_group_id},
-                            include=["metadatas"]
-                        )
-                        
-                        tv_sibling = None
-                        if group_docs and group_docs.get("metadatas"):
-                            for metadata in group_docs["metadatas"]:
-                                candidate_id = metadata.get("entity_id")
-                                friendly_name = metadata.get("friendly_name", "").lower()
-                                candidate_integration = metadata.get("integration", "")
-                                
-                                # Find device with "tv" in name OR non-MA integration
-                                if (("tv" in friendly_name or "tv" in candidate_id) and 
-                                    candidate_integration != "music_assistant" and
-                                    candidate_id != entity_id):
-                                    tv_sibling = candidate_id
-                                    log.info(f"[SmartPowerSync] Found TV sibling: {tv_sibling}")
-                                    break
-                        
-                        if tv_sibling:
-                            try:
-                                tv_state = await get_entity_state(tv_sibling, user_creds)
-                                if tv_state in ["off", "standby", "unavailable"]:
-                                    log.info(f"[SmartPowerSync] TV {tv_sibling} is OFF. Turning ON.")
-                                    await execute_ha_service("media_player", "turn_on", tv_sibling, user_creds, {}, redis_client)
-                                    await asyncio.sleep(4)  # Wait for TV boot
-                                    log.info(f"[SmartPowerSync] TV {tv_sibling} should now be ready.")
-                                else:
-                                    log.info(f"[SmartPowerSync] TV {tv_sibling} is already {tv_state}")
-                            except Exception as e:
-                                log.warning(f"[SmartPowerSync] Failed to power on {tv_sibling}: {e}")
+                        if current_group_id and current_group_id != "unknown":
+                            log.info(f"[SmartPowerSync] Searching for TV in group {current_group_id}")
+                            
+                            # Find all devices in same group
+                            group_docs = GlobalResources.ha_collection._collection.get(
+                                where={"group_id": current_group_id},
+                                include=["metadatas"]
+                            )
+                            
+                            if group_docs and group_docs.get("metadatas"):
+                                for metadata in group_docs["metadatas"]:
+                                    candidate_id = metadata.get("entity_id")
+                                    friendly_name = metadata.get("friendly_name", "").lower()
+                                    candidate_integration = metadata.get("integration", "")
+                                    
+                                    # Find device with "tv" in name OR non-MA integration
+                                    if (("tv" in friendly_name or "tv" in candidate_id) and 
+                                        candidate_integration != "music_assistant" and
+                                        candidate_id != entity_id):
+                                        tv_sibling = candidate_id
+                                        log.info(f"[SmartPowerSync] Found TV sibling via group: {tv_sibling}")
+                                        break
+                except Exception as e:
+                    log.warning(f"[SmartPowerSync] ChromaDB lookup failed: {e}")
+                
+                # Strategy 2: Fallback to suffix stripping (like working commit)
+                if not tv_sibling:
+                    log.info(f"[SmartPowerSync] ChromaDB lookup failed, trying suffix stripping")
+                    tv_sibling = entity_id.replace("_chrome_2", "").replace("_chrome", "").replace("_cast", "").replace("_speaker", "")
+                    if tv_sibling == entity_id:
+                        tv_sibling = None  # No suffix was stripped
+                    else:
+                        log.info(f"[SmartPowerSync] Found TV sibling via suffix stripping: {tv_sibling}")
+                
+                if tv_sibling:
+                    try:
+                        tv_state = await get_entity_state(tv_sibling, user_creds)
+                        if tv_state in ["off", "standby", "unavailable"]:
+                            log.info(f"[SmartPowerSync] TV {tv_sibling} is OFF. Turning ON.")
+                            await execute_ha_service("media_player", "turn_on", tv_sibling, user_creds, {}, redis_client)
+                            await asyncio.sleep(4)  # Wait for TV boot
+                            log.info(f"[SmartPowerSync] TV {tv_sibling} should now be ready.")
                         else:
-                            log.warning(f"[SmartPowerSync] No TV sibling found in group {current_group_id}")
+                            log.info(f"[SmartPowerSync] TV {tv_sibling} is already {tv_state}")
+                    except Exception as e:
+                        log.warning(f"[SmartPowerSync] Failed to power on {tv_sibling}: {e}")
+                else:
+                    log.warning(f"[SmartPowerSync] No TV sibling found for {entity_id}")
             except Exception as e:
                 log.warning(f"[SmartPowerSync] Error: {e}")
 
