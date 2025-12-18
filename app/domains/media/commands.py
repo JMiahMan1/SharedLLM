@@ -117,54 +117,54 @@ async def handle_media_command(
         except Exception as e:
             log.error(f"[Device Fallback] Error resolving '{device_name}': {e}", exc_info=True)
 
-    # [Standard Resolution Path - simplified]
+    # [Standard Resolution Path]
     if not entity_id:
-        # For commands without explicit device names, first check last used devices
-        if is_transport:
-            entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
-            if not entity_id:
-                entity_id = get_last_entity(redis_client, user_creds.get("user"))
-        else:
-            # For play commands, prefer last media entity over general last entity
-            entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
-            if not entity_id:
-                entity_id = get_last_entity(redis_client, user_creds.get("user"))
+        # 1. First, try to resolve from query content (Explicit in-query device)
+        cleaned_for_res = q_low
+        for p in ["turn on", "turn off", "toggle", "play", "stop", "open", "launch", "the", " on ", " please ",
+                  "skip", "next", "previous", "back", "pause", "resume",
+                  "this song", "the song", "current song", "track", "music"]:
+            cleaned_for_res = cleaned_for_res.replace(p, " ")
+        cleaned_for_res = cleaned_for_res.strip()
 
-        # If still no entity found, try to resolve from query content
+        if cleaned_for_res:
+            # Try to resolve the cleaned query as a device name
+            try:
+                resolved = await smart_resolve_entity(
+                    cleaned_for_res,
+                    intent,
+                    ha_collection,
+                    is_music=strict_resolution,
+                    is_video=is_video_request,
+                    allow_multiple=True
+                )
+
+                if isinstance(resolved, list):
+                    if resolved:
+                        log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
+                        return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
+                    else:
+                         log.info(f"[Device Fallback] No devices found for {cleaned_for_res}")
+                elif isinstance(resolved, tuple):
+                     entity_id, integration = resolved
+                     log.info(f"[Device Fallback] Resolved '{cleaned_for_res}' to {entity_id}")
+                elif resolved:
+                     entity_id = resolved
+                     log.info(f"[Device Fallback] Resolved '{cleaned_for_res}' to {entity_id}")
+            except Exception as e:
+                log.error(f"[Device Fallback] Error resolving '{cleaned_for_res}': {e}", exc_info=True)
+
+        # 2. Second, fallback to last used devices (Contextual/Implicit)
         if not entity_id:
-            cleaned_for_res = q_low
-            for p in ["turn on", "turn off", "toggle", "play", "stop", "open", "launch", "the", " on ", " please ",
-                      "skip", "next", "previous", "back", "pause", "resume",
-                      "this song", "the song", "current song", "track", "music"]:
-                cleaned_for_res = cleaned_for_res.replace(p, " ")
-            cleaned_for_res = cleaned_for_res.strip()
-
-            if cleaned_for_res:
-                # Try to resolve the cleaned query as a device name
-                try:
-                    resolved = await smart_resolve_entity(
-                        cleaned_for_res,
-                        intent,
-                        ha_collection,
-                        is_music=strict_resolution,
-                        is_video=is_video_request,
-                        allow_multiple=True
-                    )
-
-                    if isinstance(resolved, list):
-                        if resolved:
-                            log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
-                            return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
-                        else:
-                             log.info(f"[Device Fallback] No devices found for {cleaned_for_res}")
-                    elif isinstance(resolved, tuple):
-                         entity_id, integration = resolved
-                         log.info(f"[Device Fallback] Resolved '{cleaned_for_res}' to {entity_id}")
-                    elif resolved:
-                         entity_id = resolved
-                         log.info(f"[Device Fallback] Resolved '{cleaned_for_res}' to {entity_id}")
-                except Exception as e:
-                    log.error(f"[Device Fallback] Error resolving '{cleaned_for_res}': {e}", exc_info=True)
+             if is_transport:
+                entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
+                if not entity_id:
+                    entity_id = get_last_entity(redis_client, user_creds.get("user"))
+             else:
+                # For play commands, prefer last media entity over general last entity
+                entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
+                if not entity_id:
+                    entity_id = get_last_entity(redis_client, user_creds.get("user"))
 
         if entity_id:
             user = user_creds.get("user")
@@ -186,14 +186,16 @@ async def handle_media_command(
     if is_transport:
         log.info(f"[DEBUG_TRANSPORT] Entered Transport Redirection Block for {intent}")
 
-        # Simplified transport logic - prioritize last media entity
-        last_media = get_last_media_entity(redis_client, user_creds.get("user"))
-        if last_media:
-            log.info(f"[Transport] Using last media entity: {last_media}")
-            entity_id = last_media
+        # Only use transport redirection if we STILL don't have an entity
+        if not entity_id:
+             last_media = get_last_media_entity(redis_client, user_creds.get("user"))
+             if last_media:
+                 log.info(f"[Transport] Using last media entity: {last_media}")
+                 entity_id = last_media
 
-        domain = entity_id.split('.')[0]
-        return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query)]
+        if entity_id:
+             domain = entity_id.split('.')[0]
+             return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query)]
 
     if not entity_id:
          return [{"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}]
