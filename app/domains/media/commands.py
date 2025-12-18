@@ -12,9 +12,8 @@ from typing import List, Dict, Optional, Tuple
 from app.settings import run_blocking, HA_URL, DEFAULT_MODEL, GlobalResources
 from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
 from app.domains.shared import execute_ha_service
-from app.domains.media.devices import (
     get_device_capabilities, get_active_media_players, get_available_media_players,
-    smart_resolve_entity, resolve_multiple_entities_with_pattern, execute_batch_command,
+    smart_resolve_entity, resolve_multiple_entities_with_pattern,
     _set_last_entity, get_last_entity, get_last_media_entity
 )
 from app.domains.media.integrations import APP_PACKAGES
@@ -323,3 +322,82 @@ async def handle_media_command(
 
     log.info(f"[HANDLE_MEDIA_COMMAND] Returning final failure for intent {intent}")
     return {"status": "FAILURE", "message": f"Media command '{intent}' could not be executed.", "entity_id": entity_id, "service": intent}
+
+
+async def execute_batch_command(
+    entities: List[Tuple[str, str]],
+    intent: str,
+    query: str,
+    user_creds: dict,
+    ha_collection,
+    redis_client
+) -> dict:
+    """
+    Execute same command on multiple entities and aggregate results.
+    """
+    if not entities:
+        return {
+            'status': 'FAILURE',
+            'message': 'No matching devices found for pattern',
+            'service': intent
+        }
+
+    log.info(f"[BATCH] Executing '{intent}' on {len(entities)} entities")
+
+    results = []
+    for entity_id, integration in entities:
+        try:
+            result = await handle_media_command(
+                intent, query, entity_id, user_creds, ha_collection, redis_client
+            )
+            results.append(result)
+        except Exception as e:
+            log.error(f"[BATCH] Error executing on {entity_id}: {e}")
+            results.append({
+                'status': 'FAILURE',
+                'message': str(e),
+                'entity_id': entity_id,
+                'service': intent
+            })
+
+    # Flatten nested lists (handle_media_command can return lists)
+    flattened_results = []
+    for r in results:
+        if isinstance(r, list):
+            flattened_results.extend(r)
+        else:
+            flattened_results.append(r)
+
+    # Aggregate results - handle both dict and list results
+    success_count = sum(1 for r in flattened_results if isinstance(r, dict) and r.get('status') == 'SUCCESS')
+    failure_count = len(flattened_results) - success_count
+
+    # Get list of successful/failed devices
+    successful_devices = [r.get('friendly_name', r.get('entity_id', '?'))
+                         for r in flattened_results if isinstance(r, dict) and r.get('status') == 'SUCCESS']
+    failed_devices = [r.get('friendly_name', r.get('entity_id', '?'))
+                     for r in flattened_results if isinstance(r, dict) and r.get('status') != 'SUCCESS']
+
+    if success_count == len(flattened_results):
+        message = f"Successfully controlled {success_count} devices: {', '.join(successful_devices)}"
+        status = 'SUCCESS'
+    elif success_count > 0:
+        message = f"Controlled {success_count}/{len(flattened_results)} devices. "
+        message += f"Success: {', '.join(successful_devices)}. "
+        if failed_devices:
+            message += f"Failed: {', '.join(failed_devices)}"
+        status = 'SUCCESS'  # Partial success still counts as success
+    else:
+        message = f"Failed to control all {len(flattened_results)} devices: {', '.join(failed_devices)}"
+        status = 'FAILURE'
+
+    return {
+        'status': status,
+        'message': message,
+        'service': intent,
+        'batch_results': flattened_results,
+        'success_count': success_count,
+        'failure_count': failure_count,
+        'friendly_name': f"{success_count} devices",
+        'entity_id': 'batch_command'
+    }
