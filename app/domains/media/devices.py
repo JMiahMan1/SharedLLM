@@ -9,7 +9,7 @@ import requests
 import asyncio
 from typing import List, Dict, Optional, Tuple
 from app.settings import run_blocking, HA_URL, GlobalResources
-from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
+# from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern (Moved inside methods)
 
 log = logging.getLogger(__name__)
 
@@ -340,6 +340,7 @@ async def resolve_multiple_entities_with_pattern(
     Otherwise returns single best match.
     """
     # Detect entity patterns (returns list of type/data tuples)
+    from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
     detected_patterns = detect_number_pattern(query)
 
     if not detected_patterns:
@@ -454,6 +455,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     try:
         from app.settings import GlobalResources, run_blocking
         from langchain_chroma import Chroma
+        from app.logic.pattern_matching import detect_number_pattern
     except ImportError:
         log.error("Could not import dependencies for resolution.")
         return [] if allow_multiple else (None, None)

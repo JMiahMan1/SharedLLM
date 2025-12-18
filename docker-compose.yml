@@ -8,8 +8,8 @@ services:
     env_file:
       - .env
     environment:
-      # CRITICAL: Configure Redis to use the internal service name
-      - REDIS_URL=redis://redis:6379/0
+      # CRITICAL: Configure Redis to use Localhost since we are in Host Mode
+      - REDIS_URL=redis://127.0.0.1:6379/0
       # CRITICAL: Preserve the OLLAMA_URL configuration passed from .env
       - OLLAMA_URL=${OLLAMA_URL}
       - DEFAULT_MODEL=${DEFAULT_MODEL}
@@ -38,14 +38,15 @@ services:
       - ./data/nextcloud_temp:/data/nextcloud_temp:z
 
     ports:
-      - "11435:11435"
+      # - "11435:11435" # Removed for Host Mode
     working_dir: /workspace
     entrypoint: []
     command: [ "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "11435", "--workers", "1", "--reload", "--log-level", "debug" ]
     depends_on:
       - redis # CRITICAL: Depend on Redis service
-    networks:
-      - ragnet
+    network_mode: "host" # Use Host Networking for Cast Discovery
+    # networks:
+    #   - ragnet
 
   # --- 2. Redis Service (Shared Cache/Memory) ---
   redis:
@@ -55,6 +56,8 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - rag_redis:/data # Volume for Redis persistence
+    ports:
+      - "6379:6379" # Expose to Host so successful Host Mode API can reach it
     networks:
       - ragnet
 

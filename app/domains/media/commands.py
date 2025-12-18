@@ -10,7 +10,8 @@ import requests
 import asyncio
 from typing import List, Dict, Optional, Tuple
 from app.settings import run_blocking, HA_URL, DEFAULT_MODEL, GlobalResources
-from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
+from app.settings import run_blocking, HA_URL, DEFAULT_MODEL, GlobalResources
+# from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern (Moved inside function)
 from app.domains.shared import execute_ha_service
 from app.domains.media.devices import (
     get_device_capabilities, get_active_media_players, get_available_media_players,
@@ -18,7 +19,7 @@ from app.domains.media.devices import (
     _set_last_entity, get_last_entity, get_last_media_entity
 )
 from app.domains.media.integrations import APP_PACKAGES
-from app.logic import music_assistant_ops, android_tv_ops, roku_ops, webos_ops
+# from app.logic import music_assistant_ops, android_tv_ops, roku_ops, webos_ops
 
 log = logging.getLogger(__name__)
 
@@ -65,14 +66,12 @@ async def handle_media_command(
     Handles media command and ensures a structured dictionary is returned.
     Supports multi-device pattern matching (even/odd/range/list/all).
     """
+    from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
     q_low = query.lower()
     log.info(f"[HANDLE_MEDIA_COMMAND] Called with intent={intent}, entity_id={entity_id}, device_name={device_name}, integration={integration}")
 
-    # [IntentOverride] Force upgrade for ambiguous "Watch" commands
-    if re.search(r"\b(watch|view)\b", q_low) and intent not in ["watch_video", "view_content", "play_media"]:
-        if intent not in ["stop_media", "volume_up", "volume_down", "volume_mute", "volume_set"]:
-            log.info(f"[IntentOverride] Detected 'watch' keyword. Upgrading intent '{intent}' -> 'watch_video'")
-            intent = "watch_video"
+    # [IntentOverride] Removed regex override for 'watch' as it is now a first-class intent.
+    # if re.search(r"\b(watch|view)\b", q_low) ... (Logic moved to Intent Engine)
 
     # integration is now passed in, no need to reset unless we wish to override
     if integration is None:
@@ -355,7 +354,7 @@ async def handle_media_command(
     # [EXECUTE MEDIA PLAYBACK]
     if intent in ["play_media", "open_app", "watch_video", "view_content"]:
         # Determine content type (defaulting logic extracted to integrations, but router can hint)
-        ctype = "video" if is_video_request else "music"
+        ctype = "video" if (is_video_request or intent in ["watch_video", "view_content"]) else "music"
         
         # [Integration Delegation]
         try:
