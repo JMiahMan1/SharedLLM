@@ -174,6 +174,15 @@ class CastIntegration(StandardIntegration):
     async def _ensure_tv_on(self, entity_id: str, user_creds: Dict):
         """
         Finds the physical TV sibling for this Cast device and turns it on if needed.
+        
+        NOTE: This SmartPowerSync logic is designed for Android TV integration.
+        Other TV platforms (Roku, Samsung, LG/WebOS) may have different:
+        - Entity structures
+        - Integration names ("roku", "samsungtv", "webostv" vs "androidtv")
+        - Device grouping patterns
+        
+        The device_class="tv" check works reliably for Android TV but may need
+        platform-specific adjustments for other TV types.
         """
         try:
             from app.settings import GlobalResources
