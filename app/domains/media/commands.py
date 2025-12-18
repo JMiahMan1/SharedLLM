@@ -455,18 +455,23 @@ async def handle_media_command(
                         include=["metadatas"]
                     )
                     
+                    sibling_metas = siblings.get("metadatas", [])
+                    log.info(f"[Smart Swap] Found {len(sibling_metas)} siblings in group '{group_name}'")
+                    
                     candidates = []
-                    if siblings and siblings.get("metadatas"):
-                        for meta in siblings["metadatas"]:
+                    if sibling_metas:
+                        for meta in sibling_metas:
                             s_id = meta.get("entity_id")
+                            s_integ = meta.get("integration", "")
+                            
                             if s_id == entity_id:
                                 continue
                             
-                            s_integ = meta.get("integration", "")
                             s_attrs = str(meta.get("attributes", "")).lower()
                             
                             # Check if Music Assistant capable
                             is_ma = "music_assistant" in s_integ or "mass_player_type" in s_attrs
+                            log.debug(f"[Smart Swap] Checking sibling {s_id} | Integ: {s_integ} | MA: {is_ma}")
                             
                             if is_ma:
                                 score = 0
@@ -493,10 +498,14 @@ async def handle_media_command(
                                 if "device_class': 'speaker'" in s_attrs:
                                     score += 5
                                 
+                                log.debug(f"[Smart Swap] Scored {s_id}: {score}")
+                                
                                 # Only consider if score >= 10 (prevents random swaps)
                                 if score >= 10:
                                     candidates.append((score, s_id, s_integ))
-                    
+                    else:
+                         log.warning(f"[Smart Swap] No siblings found in ChromaDB for group '{group_name}'!")
+
                     # Pick best candidate
                     if candidates:
                         candidates.sort(key=lambda x: x[0], reverse=True)
