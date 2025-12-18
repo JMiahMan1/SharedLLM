@@ -274,6 +274,39 @@ async def handle_media_command(
             except Exception as e:
                 log.warning(f"[MASS Swap] Error: {e}")
 
+        # [**TV INTELLIGENCE SWAP**] - For VIDEO requests, swap speaker/cast to actual TV
+        # If we have a video request but resolved to a speaker/cast, find the TV in the same group
+        if is_video_request and integration in ["cast", "music_assistant"]:
+            try:
+                # Get the current device's friendly name to find the group
+                search_name = device_name
+                if not search_name and entity_id:
+                    from app.domains.media.devices import get_device_capabilities
+                    caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+                    search_name = caps.get("friendly_name", "").replace(" Chrome", "").replace(" Remote", "").replace(" Speaker", "")
+                
+                if search_name:
+                    log.info(f"[TV Swap] Video request on speaker/cast device. Checking for TV in '{search_name}' group...")
+                    # Search for TV device in same group
+                    from app.settings import GlobalResources
+                    tv_docs = GlobalResources.ha_collection.similarity_search(search_name, k=5)
+                    for d in tv_docs:
+                        tv_integration = d.metadata.get("integration", "")
+                        # Look for actual TV integrations
+                        if tv_integration in ["androidtv", "webostv", "roku"]:
+                            found_id = d.metadata.get("entity_id")
+                            found_name = d.metadata.get("friendly_name", "")
+                            
+                            # Ensure it's in the same group (name similarity)
+                            if search_name.lower() in found_name.lower():
+                                log.info(f"[TV Swap] Swapping {entity_id} ({integration}) -> TV {found_id} ({tv_integration})")
+                                entity_id = found_id
+                                integration = tv_integration
+                                domain = entity_id.split('.')[0]
+                                break
+            except Exception as e:
+                log.warning(f"[TV Swap] Error: {e}")
+
     # [SMART ROUTING: Music -> Speaker, Video/Power -> TV]
     # Simplified version - the full logic from media_ops.py would go here
 
