@@ -831,10 +831,20 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
 
         # PLAYBACK CONTROLS (Pause, Resume, Stop, Next, Prev)
         # Prioritize media_player entities over remotes/others
+        # PLAYBACK CONTROLS (Pause, Resume, Stop, Next, Prev)
+        # Prioritize media_player entities over remotes/others
         elif intent in ["pause", "resume", "media_pause", "media_play", "media_stop", "stop_media", "media_next_track", "media_previous_track"]:
             if domain == "media_player":
                 score += 100
-                if "cast" in integration: score += 10 # Slight pref for Cast as it is robust for status
+                
+                # Prioritize Hardware TVs (Android, WebOS, Roku) over generic Cast
+                # This ensures "Stop Office TV" targets the TV integration, not the Chromecast dongle
+                HW_INTEGRATIONS_TV = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv"]
+                if any(x in integration for x in HW_INTEGRATIONS_TV):
+                     score += 50 
+                elif "cast" in integration: 
+                     score += 10 # Cast is valid secondary
+                     
             elif domain == "remote":
                  score -= 50 # Remotes often don't support direct media_pause service calls
 
