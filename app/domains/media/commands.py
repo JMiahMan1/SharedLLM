@@ -284,10 +284,26 @@ async def handle_media_command(
                                 if candidate_id:
                                     candidate_base = re.sub(r'_?\d+$', '', candidate_id)
                                     
-                                    # Check if entity IDs match (ignoring trailing numbers)
+                                    # Fuzzy match: check if IDs are "super close"
+                                    # Match if exact, or if one contains the other, or 80%+ similar
+                                    is_match = False
                                     if current_entity_base == candidate_base:
+                                        is_match = True
+                                    elif current_entity_base in candidate_base or candidate_base in current_entity_base:
+                                        is_match = True
+                                    else:
+                                        # Calculate similarity (rough Levenshtein-like)
+                                        longer = max(len(current_entity_base), len(candidate_base))
+                                        if longer > 0:
+                                            # Count matching characters in order
+                                            common = sum(a == b for a, b in zip(current_entity_base, candidate_base))
+                                            similarity = common / longer
+                                            if similarity >= 0.8:
+                                                is_match = True
+                                    
+                                    if is_match:
                                         found_ma_player = candidate_id
-                                        log.info(f"[MASS Swap] Found MA player via entity ID similarity: {found_ma_player}")
+                                        log.info(f"[MASS Swap] Found MA player via fuzzy entity ID match: {found_ma_player} (base: {candidate_base} ~ {current_entity_base})")
                                         break
                     
                     if found_ma_player:
