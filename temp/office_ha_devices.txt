@@ -1,0 +1,10 @@
+media_player.office_tv_chrome: Office TV Chrome (N/A) - off
+media_player.office_tv: Office TV Remote (tv) - on
+remote.office_tv_remote: Office TV Remote (N/A) - on
+binary_sensor.not_office_connectivity: Not Office Connectivity (connectivity) - on
+binary_sensor.jeremiah_s_echo_dot_office_connectivity: Jeremiah's Echo Dot - Office Connectivity (connectivity) - on
+notify.jeremiah_s_echo_dot_office_speak: Jeremiah's Echo Dot - Office Speak (N/A) - unknown
+notify.not_office_announce: Not Office Announce (N/A) - unknown
+notify.jeremiah_s_echo_dot_office_announce: Jeremiah's Echo Dot - Office Announce (N/A) - unknown
+sensor.not_office_next_alarm: Not Office Next alarm (timestamp) - unavailable
+sensor.jeremiah_s_echo_dot_office_next_alarm: Jeremiah's Echo Dot - Office Next alarm (timestamp) - unavailable

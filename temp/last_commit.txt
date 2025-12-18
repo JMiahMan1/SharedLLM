@@ -1,0 +1,46 @@
+commit a6de03ba0e261ed8abb635b7e32c555519a2fd8a
+Author: Agent <agent@example.com>
+Date:   Thu Dec 18 09:51:30 2025 -0700
+
+    feat: Modular media integration
+
+.env.example
+.gitignore
+app/domains/media/commands.py
+app/domains/media/integrations/__init__.py
+app/domains/media/integrations/base.py
+app/domains/media/integrations/cast.py
+app/domains/media/integrations/factory.py
+app/domains/media/integrations/music_assistant.py
+app/domains/media/integrations/standard.py
+refresh.py
+temp/git_status_debug.txt
+temp/logs_3.txt
+temp/remote_server_logs.txt
+temp/verification_logs.txt
+temp/verification_logs_2.txt
+temp/verify_cleanup.txt
+temp/verify_cleanup_2.txt
+test_caps.py
+tools/README.md
+tools/debug_resolution.py
+tools/debug_resolution_direct.py
+tools/diagnostics/inspect_all_players.py
+tools/diagnostics/inspect_entity.py
+tools/diagnostics/inspect_ma_players.py
+tools/diagnostics/list_devices_by_group.py
+tools/final_output.txt
+tools/final_results.txt
+tools/final_results_v2.txt
+tools/legacy/working_commit_commands.py
+tools/profile_pipeline.py
+tools/run_capture.py
+tools/test_media.py
+tools/test_ollama_from_server.sh
+tools/tests/test_ha_connectivity.py
+tools/tests/test_ma_types.py
+tools/tests/test_media_playback.py
+tools/tests/test_volume.py
+tools/utils/deploy_remote.sh
+tools/utils/fetch_logs.py
+tools/utils/reset_chroma_db.py

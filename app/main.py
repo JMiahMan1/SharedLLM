@@ -92,6 +92,10 @@ app.include_router(music_assistant.router)
 from app.routers import android_tv
 from app.routers import webos
 from app.routers import roku
+from app.endpoints import cast_video
+# Cast video streaming endpoint
+app.include_router(cast_video.router, tags=["cast"])
+# TV Integration Routers
 app.include_router(android_tv.router)
 app.include_router(webos.router)
 app.include_router(roku.router)
