@@ -292,8 +292,8 @@ async def handle_media_command(
                     tv_docs = GlobalResources.ha_collection.similarity_search(search_name, k=5)
                     for d in tv_docs:
                         tv_integration = d.metadata.get("integration", "")
-                        # Look for actual TV integrations
-                        if tv_integration in ["androidtv", "webostv", "roku"]:
+                        # Look for actual TV integrations (including generic 'tv')
+                        if tv_integration in ["androidtv", "webostv", "roku", "tv"]:
                             found_id = d.metadata.get("entity_id")
                             found_name = d.metadata.get("friendly_name", "")
                             
