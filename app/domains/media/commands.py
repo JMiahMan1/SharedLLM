@@ -506,6 +506,28 @@ async def handle_media_command(
                     else:
                          log.warning(f"[Smart Swap] No siblings found in ChromaDB for group '{group_name}'!")
 
+                    # [FALLBACK] If no candidates in group, search globally for MA devices with similar name
+                    if not candidates:
+                        log.info(f"[Smart Swap] No MA candidates in group. Searching globally for Music Assistant entities matching '{current_meta.get('friendly_name')}'")
+                        ma_devices = GlobalResources.ha_collection._collection.get(
+                            where={"integration": "music_assistant"},
+                            include=["metadatas"]
+                        )
+                        
+                        target_name = current_meta.get("friendly_name", "").lower()
+                        ma_metas = ma_devices.get("metadatas", [])
+                        
+                        if ma_metas:
+                            for meta in ma_metas:
+                                s_id = meta.get("entity_id")
+                                s_name = meta.get("friendly_name", "").lower()
+                                
+                                # Strict name matching for fallback
+                                if target_name and s_name and (target_name in s_name or s_name in target_name):
+                                    # Higher threshold for global match
+                                    candidates.append((30, s_id, "music_assistant"))
+                                    log.info(f"[Smart Swap] Found global MA match: {s_id} (Name: {s_name})")
+
                     # Pick best candidate
                     if candidates:
                         candidates.sort(key=lambda x: x[0], reverse=True)
