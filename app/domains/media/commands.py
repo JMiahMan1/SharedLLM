@@ -353,11 +353,32 @@ async def handle_media_command(
         else:
              cleaned_std_query = query
         
-        # Self-Correction: If query is not a URL and type is video, it will likely fail on generic players
-        # So force music if it looks like a search query and not a URL
+        # Self-Correction: If query is not a URL and type is video, try to find a URL via Search
         if ctype == "video" and not query.startswith(("http", "www", "spotify", "app")):
-             log.warning("[Standard Play] Video request with non-URL query. Aborting to prevent 500 error.")
-             return [{"status": "FAILURE", "message": "Video playback requires a direct URL or specific app. Please provide a link.", "entity_id": entity_id, "service": "play_media"}]
+             log.info(f"[Standard Play] No direct URL for '{query}'. Searching DuckDuckGo for YouTube link...")
+             found_url = None
+             try:
+                 from duckduckgo_search import DDGS
+                 def _do_search():
+                     with DDGS() as ddgs:
+                         return list(ddgs.text(f"{query} youtube", max_results=2))
+                 
+                 results = await run_blocking(_do_search)
+                 if results:
+                     for r in results:
+                         u = r.get("href", "")
+                         if "youtube.com" in u or "youtu.be" in u:
+                             found_url = u
+                             break
+             except Exception as e:
+                 log.warning(f"[Standard Play] Search error: {e}")
+            
+             if found_url:
+                 log.info(f"[Standard Play] Resolved '{query}' -> {found_url}")
+                 cleaned_std_query = found_url
+             else:
+                 log.warning("[Standard Play] Video request with non-URL query. Aborting to prevent 500 error.")
+                 return [{"status": "FAILURE", "message": "Video playback requires a direct URL or specific app. Please provide a link.", "entity_id": entity_id, "service": "play_media"}]
              
         std_service_data = {
             "media_content_id": cleaned_std_query,
