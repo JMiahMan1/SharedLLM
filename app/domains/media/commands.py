@@ -57,15 +57,16 @@ async def handle_media_command(
     user_creds: dict,
     ha_collection,
     redis_client,
-    device_name: str = None,  # Optional: Explicit device name from Orchestrator
-    brightness: str = None,   # Optional: Explicit brightness from Orchestrator
+    device_name: str = None,
+    brightness: str = None,
+    integration: str = "unknown", 
 ):
     """
     Handles media command and ensures a structured dictionary is returned.
     Supports multi-device pattern matching (even/odd/range/list/all).
     """
     q_low = query.lower()
-    log.info(f"[HANDLE_MEDIA_COMMAND] Called with intent={intent}, entity_id={entity_id}, device_name={device_name}")
+    log.info(f"[HANDLE_MEDIA_COMMAND] Called with intent={intent}, entity_id={entity_id}, device_name={device_name}, integration={integration}")
 
     # [IntentOverride] Force upgrade for ambiguous "Watch" commands
     if re.search(r"\b(watch|view)\b", q_low) and intent not in ["watch_video", "view_content", "play_media"]:
@@ -73,7 +74,9 @@ async def handle_media_command(
             log.info(f"[IntentOverride] Detected 'watch' keyword. Upgrading intent '{intent}' -> 'watch_video'")
             intent = "watch_video"
 
-    integration = "unknown"
+    # integration is now passed in, no need to reset unless we wish to override
+    if integration is None:
+        integration = "unknown"
 
     # 1. EARLY MUSIC/CONTENT DETECTION
     music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
@@ -421,7 +424,8 @@ async def execute_batch_command(
     for entity_id, integration in entities:
         try:
             result = await handle_media_command(
-                intent, query, entity_id, user_creds, ha_collection, redis_client
+                intent, query, entity_id, user_creds, ha_collection, redis_client,
+                integration=integration
             )
             results.append(result)
         except Exception as e:
