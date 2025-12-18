@@ -189,7 +189,7 @@ async def handle_media_command(
                          # Fetch friendly name
                          from app.domains.media.devices import get_device_capabilities
                          caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-                         search_name = caps.get("friendly_name", "").replace(" TV", "").replace(" Speaker", "")
+                         search_name = caps.get("friendly_name", "").replace(" TV", "").replace(" Speaker", "").replace(" Remote", "")
                     
                     if search_name:
                          log.info(f"[MASS Swap] Checking for Music Assistant player matching '{search_name}'...")
@@ -280,7 +280,7 @@ async def handle_media_command(
 
                 # AGGRESSIVE MA FALLBACK: If it's a natural language music request (not a URL), try MA
                 # This allows "Play Brandon Lake on Office TV" (AndroidTV) to go through MA's search
-                if not is_ma_device and is_music_request and not query.startswith(("http", "spotify:", "app:")):
+                if not is_ma_device and strict_resolution and not query.startswith(("http", "spotify:", "app:")):
                      log.info(f"Request is NL Music Search ('{query}'). Attempting to use Music Assistant for resolution.")
                      is_ma_device = True
 
