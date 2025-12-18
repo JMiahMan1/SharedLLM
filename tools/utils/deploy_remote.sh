@@ -10,7 +10,13 @@ fi
 # Fallback or Override
 # Prioritize Argument -> RAG_ADDRESS -> Hardcoded Default
 ARG_HOST=$1
-TARGET_IP=${RAG_ADDRESS:-192.168.2.211}
+# Default to RAG_ADDRESS from env, but fail if not set
+if [ -z "$RAG_ADDRESS" ] && [ -z "$ARG_HOST" ]; then
+    echo "ERROR: RAG_ADDRESS not set in .env and no host argument provided."
+    echo "Usage: ./deploy_remote.sh [user@machine_ip] [path_to_app]"
+    exit 1
+fi
+TARGET_IP=${RAG_ADDRESS}
 HOST="${ARG_HOST:-jeremiah@$TARGET_IP}"
 DIR="${2:-/home/jeremiah/SharedLLM}"
 

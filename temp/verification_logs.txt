@@ -1,0 +1,7 @@
+INFO:     192.168.2.1:48986 - "GET /api/ha/state/media_player.office_tv HTTP/1.1" 200 OK
+INFO:     192.168.2.1:48994 - "GET /api/ha/state/media_player.master_bedroom_tv HTTP/1.1" 200 OK
+INFO:     192.168.2.1:49006 - "GET /api/ha/state/media_player.gracies_tv HTTP/1.1" 200 OK
+INFO:     192.168.2.1:49018 - "GET /api/ha/state/media_player.gracie_s_tv HTTP/1.1" 200 OK
+INFO:     192.168.2.1:49034 - "GET /api/ha/state/media_player.office_tv HTTP/1.1" 200 OK
+[DEBUG] FAST PATH ORCHESTRATION Starting for intent=play_media, is_high_confidence=True
+[DEBUG] FAST PATH Condition met, processing play_media

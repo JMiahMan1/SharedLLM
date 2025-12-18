@@ -1,0 +1,400 @@
+2025-12-18 09:47:57,181 [DEBUG] [CAPABILITY] Fetching from HA API: media_player.media_player_office_tv
+
+2025-12-18 09:47:57,183 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:47:57,214 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.media_player_office_tv HTTP/1.1" 200 660
+
+2025-12-18 09:47:57,215 [DEBUG] [CAPABILITY] HA API response: 200 for media_player.media_player_office_tv
+
+2025-12-18 09:47:57,217 [DEBUG] [CAPABILITY] Cached capabilities for media_player.media_player_office_tv
+
+2025-12-18 09:47:57,217 [INFO] [CAPABILITY] Parsed: media_player.media_player_office_tv → domain=media_player, features=7795251, has_color=False, has_brightness=False
+
+2025-12-18 09:47:57,218 [INFO] [Standard Play Cleaning] Original: 'Play Brandon Lake on Office TV' -> Cleaned: 'brandon lake'
+
+2025-12-18 09:47:57,218 [INFO] [Standard Play] Call media_player.play_media on media_player.media_player_office_tv | Type: music | Content: brandon lake
+
+2025-12-18 09:47:57,220 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:47:57,247 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.media_player_office_tv HTTP/1.1" 200 660
+
+2025-12-18 09:47:57,248 [INFO] EXEC HA: media_player.play_media on media_player.media_player_office_tv | Data: {'media_content_id': 'brandon lake', 'media_content_type': 'music'}
+
+2025-12-18 09:47:57,250 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:47:59,026 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+
+2025-12-18 09:47:59,029 [WARNING] HA 500 Error: 500 Internal Server Error
+
+
+
+Server got itself in trouble
+
+2025-12-18 09:47:59,029 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+
+
+Server got itself in trouble
+
+2025-12-18 09:47:59,030 [INFO] [ACTION DISPATCH] Handler returned: {'status': 'FAILURE', 'message': 'Failed to control all 1 devices: Media Player Office Tv', 'service': 'play_media', 'batch_results': [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.media_player_office_tv', 'friendly_name': 'Media Player Office Tv', 'service': 'media_player.play_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}
+
+2025-12-18 09:47:59,030 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: Media Player Office Tv', 'service': 'play_media', 'batch_results': [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.media_player_office_tv', 'friendly_name': 'Media Player Office Tv', 'service': 'media_player.play_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}]]
+
+2025-12-18 09:47:59,030 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: Media Player Office Tv', 'service': 'play_media', 'batch_results': [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.media_player_office_tv', 'friendly_name': 'Media Player Office Tv', 'service': 'media_player.play_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}], type: <class 'list'>
+
+2025-12-18 09:47:59,030 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: Media Player Office Tv', 'service': 'play_media', 'batch_results': [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.media_player_office_tv', 'friendly_name': 'Media Player Office Tv', 'service': 'media_player.play_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}]
+
+2025-12-18 09:47:59,030 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: Media Player Office Tv', 'service': 'play_media', 'batch_results': [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.media_player_office_tv', 'friendly_name': 'Media Player Office Tv', 'service': 'media_player.play_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}]
+
+2025-12-18 09:47:59,031 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed to control all 1 devices: Media Player Office Tv', 'service': 'play_media', 'batch_results': [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.media_player_office_tv', 'friendly_name': 'Media Player Office Tv', 'service': 'media_player.play_media'}], 'success_count': 0, 'failure_count': 1, 'friendly_name': '0 devices', 'entity_id': 'batch_command'}]
+
+2025-12-18 09:47:59,031 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+
+- FAILURE: Command 'play_media' on 'batch_command' failed. Reason: Failed to control all 1 devices: Media Player Office Tv
+
+
+
+2025-12-18 09:47:59,032 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+
+2025-12-18 09:47:59,032 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2630
+
+2025-12-18 09:47:59,034 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+
+2025-12-18 09:48:01,378 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+
+2025-12-18 09:48:19,088 [DEBUG] [RESPONSE] Final response to user (844 chars): Turning on the office TV. Okay, let's try playing Brandon Lake on the office TV. First, I'll make sure the TV is on and ready. If that works, I'll attempt to play the music. Wait, the TV is on, but there's no response from the media player. Maybe the TV isn't connected to a music service or the volu
+
+2025-12-18 09:48:19,089 [DEBUG] [RESPONSE] Returning to client: Turning on the office TV. Okay, let's try playing Brandon Lake on the office TV. First, I'll make sure the TV is on and ready. If that works, I'll attempt to play the music. Wait, the TV is on, but th
+
+2025-12-18 09:48:22,286 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:22,310 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 537
+
+2025-12-18 09:48:22,326 [INFO] [INTENT] get_intent called with query: 'Stop Office TV'
+
+2025-12-18 09:48:22,326 [INFO] [REGEX START] apply_regex_override called with: 'Stop Office TV'
+
+2025-12-18 09:48:22,327 [INFO] [REGEX CHECK] Checking query: 'stop office tv'
+
+2025-12-18 09:48:22,327 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+
+2025-12-18 09:48:22,327 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+
+2025-12-18 09:48:22,327 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+
+2025-12-18 09:48:22,327 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+
+2025-12-18 09:48:22,328 [INFO] [REGEX OVERRIDE] Matched 'stop_media' via pattern: \b(stop|pause)\b...
+
+2025-12-18 09:48:22,328 [INFO] [INTENT] Regex override: 'Stop Office TV' -> stop_media
+
+2025-12-18 09:48:22,370 [INFO] [PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
+
+2025-12-18 09:48:22,370 [INFO] [FAST PATH ORCHESTRATION] Starting for intent=stop_media, is_high_confidence=True
+
+2025-12-18 09:48:22,370 [INFO] [FAST PATH] Condition met, processing stop_media
+
+2025-12-18 09:48:22,370 [INFO] [FAST PATH] Matched transport intent: stop_media
+
+2025-12-18 09:48:22,371 [INFO] [FAST PATH] device_in_query: False, query: Stop Office TV
+
+2025-12-18 09:48:22,371 [INFO] [FAST PATH] action_plan set: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': None}}
+
+2025-12-18 09:48:22,371 [INFO] [FAST ORCHESTRA] Bypassing LLM for stop_media
+
+2025-12-18 09:48:22,371 [INFO] [ACTION DISPATCH] Calling handler for media_command
+
+2025-12-18 09:48:22,371 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=stop_media, entity_id=None, device_name=None, integration=unknown
+
+2025-12-18 09:48:22,372 [INFO] DEBUG: Entering smart_resolve_entity. Q='office tv' Intent='stop_media' Multiple=True
+
+2025-12-18 09:48:22,396 [INFO] [EXACT MATCH] 'office tv' → media_player.office_tv_chrome_2
+
+2025-12-18 09:48:22,396 [INFO] Using exact name match for 'office tv': ('media_player.office_tv_chrome_2', 'cast')
+
+2025-12-18 09:48:22,396 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+
+2025-12-18 09:48:22,396 [INFO] [BATCH] Executing 'stop_media' on 1 entities
+
+2025-12-18 09:48:22,396 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=stop_media, entity_id=media_player.office_tv_chrome_2, device_name=None, integration=cast
+
+2025-12-18 09:48:22,396 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='stop_media' is_transport=True entity=media_player.office_tv_chrome_2
+
+2025-12-18 09:48:22,396 [INFO] [DEBUG_TRANSPORT] Entered Transport Redirection Block for stop_media
+
+2025-12-18 09:48:22,396 [INFO] [_execute_transport_command] Intent='stop_media' (repr='stop_media') Entity='media_player.office_tv_chrome_2'
+
+2025-12-18 09:48:22,396 [INFO] [Transport] Match stop_media for media_player.office_tv_chrome_2
+
+2025-12-18 09:48:22,398 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:22,421 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1553
+
+2025-12-18 09:48:22,424 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:22,444 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1553
+
+2025-12-18 09:48:22,446 [INFO] EXEC HA: media_player.media_stop on media_player.office_tv_chrome_2 | Data: {}
+
+2025-12-18 09:48:22,448 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:22,521 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/media_stop HTTP/1.1" 200 965
+
+2025-12-18 09:48:23,528 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:23,553 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1581
+
+2025-12-18 09:48:24,558 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:24,585 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1581
+
+2025-12-18 09:48:25,589 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:25,635 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1581
+
+2025-12-18 09:48:26,638 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:26,657 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1581
+
+2025-12-18 09:48:27,662 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:27,733 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1581
+
+2025-12-18 09:48:27,735 [INFO] [Transport] Returning result: {'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}
+
+2025-12-18 09:48:27,735 [INFO] [ACTION DISPATCH] Handler returned: {'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}
+
+2025-12-18 09:48:27,735 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]]
+
+2025-12-18 09:48:27,735 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}], type: <class 'list'>
+
+2025-12-18 09:48:27,736 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+
+2025-12-18 09:48:27,736 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+
+2025-12-18 09:48:27,736 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to media stop the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+
+2025-12-18 09:48:27,736 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+
+- SUCCESS: Command 'stop_media' sent to 1 devices. Verified New State: N/A
+
+
+
+2025-12-18 09:48:27,736 [INFO] DEBUG: Checking Simple Intent 'stop_media' for silent mode. Results: 1
+
+2025-12-18 09:48:27,736 [INFO] DEBUG: Entering Silent Mode for intent 'stop_media'
+
+2025-12-18 09:48:27,737 [DEBUG] [RESPONSE] Returning to client: Done.
+
+2025-12-18 09:48:30,882 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:30,902 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 537
+
+2025-12-18 09:48:31,012 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+
+2025-12-18 09:48:31,032 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 537
+
+2025-12-18 09:48:31,041 [INFO] [INTENT] get_intent called with query: 'Watch Big Buck Bunny on Office TV'
+
+2025-12-18 09:48:31,041 [INFO] [REGEX START] apply_regex_override called with: 'Watch Big Buck Bunny on Office TV'
+
+2025-12-18 09:48:31,041 [INFO] [REGEX CHECK] Checking query: 'watch big buck bunny on office tv'
+
+2025-12-18 09:48:31,041 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+
+2025-12-18 09:48:31,041 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+
+2025-12-18 09:48:31,042 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+
+2025-12-18 09:48:31,042 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+
+2025-12-18 09:48:31,042 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+
+2025-12-18 09:48:31,042 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+
+2025-12-18 09:48:31,043 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+
+2025-12-18 09:48:31,043 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+
+2025-12-18 09:48:31,043 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+
+2025-12-18 09:48:31,045 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+
+2025-12-18 09:48:31,045 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] No regex matches for: 'watch big buck bunny on office tv'
+
+2025-12-18 09:48:31,046 [INFO] [INTENT] Falling back to vector engine for: 'Watch Big Buck Bunny on Office TV'
+
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] Intent engine checking query: 'Watch Big Buck Bunny on Office TV'
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] No regex matches for: 'watch big buck bunny on office tv'
+
+2025-12-18 09:48:31,067 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on Office TV' -> Best: 'play_media' (0.29)
+
+2025-12-18 09:48:31,067 [INFO] [INTENT] Vector result: (None, 0.2943079863159326, True)
+
+2025-12-18 09:48:31,068 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=5272
+
+2025-12-18 09:48:31,069 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+
+2025-12-18 09:48:39,483 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+
+2025-12-18 09:48:39,488 [INFO] [INTENT] get_intent called with query: 'Watch Big Buck Bunny on Office TV'
+
+2025-12-18 09:48:39,488 [INFO] [REGEX START] apply_regex_override called with: 'Watch Big Buck Bunny on Office TV'
+
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] Checking query: 'watch big buck bunny on office tv'
+
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] No regex matches for: 'watch big buck bunny on office tv'
+
+2025-12-18 09:48:39,490 [INFO] [INTENT] Falling back to vector engine for: 'Watch Big Buck Bunny on Office TV'
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Intent engine checking query: 'Watch Big Buck Bunny on Office TV'
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] No regex matches for: 'watch big buck bunny on office tv'
+
+2025-12-18 09:48:39,512 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on Office TV' -> Best: 'play_media' (0.29)
+
+2025-12-18 09:48:39,512 [INFO] [INTENT] Vector result: (None, 0.2943079863159326, True)
+
+2025-12-18 09:48:39,512 [INFO] [FAST PATH ORCHESTRATION] Starting for intent=None, is_high_confidence=True
+
+2025-12-18 09:48:39,513 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=7602
+
+2025-12-18 09:48:39,514 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+

@@ -12,7 +12,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-RAG_API_URL = os.getenv("RAG_API_URL", "http://192.168.2.211:11435/api/chat")
+RAG_API_URL = os.getenv("RAG_API_URL")
+if not RAG_API_URL:
+    # Fallback to constructing from RAG_ADDRESS if available
+    addr = os.getenv("RAG_ADDRESS")
+    if addr:
+        RAG_API_URL = f"http://{addr}:11435/api/chat"
+    else:
+        print("ERROR: RAG_API_URL or RAG_ADDRESS not set in .env")
+        sys.exit(1)
 
 async def profile_request(query: str):
     """Profile a single request to identify bottlenecks"""

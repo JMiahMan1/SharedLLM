@@ -5,7 +5,10 @@
 echo "Testing Ollama connectivity from RAG server..."
 echo "================================================"
 
-OLLAMA_URL="${OLLAMA_URL:-http://192.168.1.161:11434}"
+if [ -z "$OLLAMA_URL" ]; then
+    echo "ERROR: OLLAMA_URL not set"
+    exit 1
+fi
 
 echo "1. Testing basic connectivity..."
 if curl -s --max-time 5 "${OLLAMA_URL}/api/tags" > /dev/null; then

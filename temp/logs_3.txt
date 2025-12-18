@@ -1,0 +1,100 @@
+2025-12-18 09:48:31,041 [INFO] [REGEX START] apply_regex_override called with: 'Watch Big Buck Bunny on Office TV'
+2025-12-18 09:48:31,041 [INFO] [REGEX CHECK] Checking query: 'watch big buck bunny on office tv'
+2025-12-18 09:48:31,041 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+2025-12-18 09:48:31,041 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-18 09:48:31,042 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+2025-12-18 09:48:31,042 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+2025-12-18 09:48:31,042 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+2025-12-18 09:48:31,042 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+2025-12-18 09:48:31,043 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+2025-12-18 09:48:31,043 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+2025-12-18 09:48:31,043 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+2025-12-18 09:48:31,044 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+2025-12-18 09:48:31,045 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 09:48:31,045 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] No regex matches for: 'watch big buck bunny on office tv'
+2025-12-18 09:48:31,046 [INFO] [INTENT] Falling back to vector engine for: 'Watch Big Buck Bunny on Office TV'
+2025-12-18 09:48:31,046 [INFO] [REGEX CHECK] Intent engine checking query: 'Watch Big Buck Bunny on Office TV'
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+[DEBUG] FAST PATH ORCHESTRATION Starting for intent=None, is_high_confidence=True
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+2025-12-18 09:48:31,047 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+2025-12-18 09:48:31,048 [INFO] [REGEX CHECK] No regex matches for: 'watch big buck bunny on office tv'
+2025-12-18 09:48:31,067 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on Office TV' -> Best: 'play_media' (0.29)
+2025-12-18 09:48:31,067 [INFO] [INTENT] Vector result: (None, 0.2943079863159326, True)
+2025-12-18 09:48:31,068 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=5272
+2025-12-18 09:48:31,069 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-18 09:48:39,483 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-18 09:48:39,488 [INFO] [INTENT] get_intent called with query: 'Watch Big Buck Bunny on Office TV'
+2025-12-18 09:48:39,488 [INFO] [REGEX START] apply_regex_override called with: 'Watch Big Buck Bunny on Office TV'
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] Checking query: 'watch big buck bunny on office tv'
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+2025-12-18 09:48:39,488 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+2025-12-18 09:48:39,489 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] No regex matches for: 'watch big buck bunny on office tv'
+2025-12-18 09:48:39,490 [INFO] [INTENT] Falling back to vector engine for: 'Watch Big Buck Bunny on Office TV'
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Intent engine checking query: 'Watch Big Buck Bunny on Office TV'
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+2025-12-18 09:48:39,490 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
+2025-12-18 09:48:39,491 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
+2025-12-18 09:48:39,492 [INFO] [REGEX CHECK] No regex matches for: 'watch big buck bunny on office tv'
+2025-12-18 09:48:39,512 [DEBUG] Intent Low Confidence: 'Watch Big Buck Bunny on Office TV' -> Best: 'play_media' (0.29)
+2025-12-18 09:48:39,512 [INFO] [INTENT] Vector result: (None, 0.2943079863159326, True)
+2025-12-18 09:48:39,512 [INFO] [FAST PATH ORCHESTRATION] Starting for intent=None, is_high_confidence=True
+2025-12-18 09:48:39,513 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=7602
+2025-12-18 09:48:39,514 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
