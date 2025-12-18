@@ -164,144 +164,141 @@ async def _scrape_with_playwright(url) -> list[dict]:
                 headless=True, 
                 args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
             )
-            # Create context with User Agent to avoid bot detection
             context = await browser.new_context(user_agent=SEARCH_HEADERS["User-Agent"])
-            page = await context.new_page()
             
-            soup = None # Initialize scope
-
+            # --- Primary Navigation ---
+            page = await context.new_page()
+            soup = None
+            
             try:
-                # --- Primary Navigation (Robust) ---
-                try:
-                    # Wait for network idle to ensure dynamic content loads
-                    await page.goto(url, timeout=15000, wait_until="networkidle")
-                    content = await page.content()
-                    log.info(f"Playwright fetched page content length: {len(content)}")
-                    
-                    soup = BeautifulSoup(content, "html.parser")
-                    selectors = [".result", "#main .result", ".result-content", "article", ".g"]
-                    
-                    found_nodes = []
-                    for sel in selectors:
-                        found_nodes = soup.select(sel)
-                        if found_nodes: break
-                    
-                    for res in found_nodes[:5]:
-                        title = res.select_one("h3, a, h2")
-                        body = res.select_one(".content, .st, p, .result-body")
-                        if title and body:
-                            results.append({
-                                "title": title.get_text(strip=True),
-                                "url": title.get("href") or "",
-                                "snippet": body.get_text(strip=True),
-                                "source": "Playwright Whoogle"
-                            })
-                except Exception as pg_err:
-                     log.warning(f"Playwright Primary URL Failed: {pg_err}. Proceeding to Fallback.")
-                     # Clear soup explicitly to avoid stale matching
-                     soup = None
+                # Wait for network idle to ensure dynamic content loads
+                await page.goto(url, timeout=15000, wait_until="networkidle")
+                content = await page.content()
+                log.info(f"Playwright fetched page content length: {len(content)}")
+                
+                soup = BeautifulSoup(content, "html.parser")
+                selectors = [".result", "#main .result", ".result-content", "article", ".g"]
+                
+                found_nodes = []
+                for sel in selectors:
+                    found_nodes = soup.select(sel)
+                    if found_nodes: break
+                
+                for res in found_nodes[:5]:
+                    title = res.select_one("h3, a, h2")
+                    body = res.select_one(".content, .st, p, .result-body")
+                    if title and body:
+                        results.append({
+                            "title": title.get_text(strip=True),
+                            "url": title.get("href") or "",
+                            "snippet": body.get_text(strip=True),
+                            "source": "Playwright Whoogle"
+                        })
+            except Exception as pg_err:
+                    log.warning(f"Playwright Primary URL Failed: {pg_err}. Proceeding to Fallback.")
+                    soup = None
 
-                # --- Fallback Logic ---
-                # If no structured results found (or primary failed), grab the body text or try backup providers
-                if not results:
-                     log.warning("Playwright: Whoogle selectors failed or URL down. Trying DuckDuckGo HTML fallback...")
-                     
-                     # Reset page to avoid navigation interruption errors
-                     try: await page.goto("about:blank")
-                     except: pass
+            # --- Fallback Logic ---
+            if not results:
+                    log.warning("Playwright: Whoogle selectors failed or URL down. Trying DuckDuckGo HTML fallback...")
+                    
+                    # RECYCLE PAGE: Close and Recreate to avoid nav interruptions
+                    try: await page.close()
+                    except: pass
+                    try: page = await context.new_page()
+                    except: pass
 
-                     # Extract query from URL safely
-                     try:
-                         query_part = url.split('q=')[-1].split('&')[0]
-                     except Exception:
+                    try:
+                        query_part = url.split('q=')[-1].split('&')[0]
+                    except Exception:
+                        query_part = "unknown"
+
+                    ddg_url = f"https://html.duckduckgo.com/html/?q={query_part}"
+                    
+                    try:
+                        await page.goto(ddg_url, timeout=15000, wait_until="networkidle")
+                        content = await page.content()
+                        soup = BeautifulSoup(content, "html.parser")
+                        
+                        ddg_selectors = [".result", ".web-result"]
+                        found_nodes = []
+                        for sel in ddg_selectors:
+                            found_nodes = soup.select(sel)
+                            if found_nodes: break
+                            
+                        for res in found_nodes[:5]:
+                            title = res.select_one(".result__title, .result__a")
+                            body = res.select_one(".result__snippet, .result__snippet")
+                            if title:
+                                t_text = title.get_text(strip=True)
+                                link_tag = title.find("a")
+                                link = link_tag.get("href") if link_tag else title.get("href")
+                                b_text = body.get_text(strip=True) if body else ""
+                                
+                                if t_text and link:
+                                    results.append({
+                                        "title": t_text,
+                                        "url": link,
+                                        "snippet": b_text,
+                                        "source": "Playwright DDG"
+                                    })
+
+                    except Exception as ddg_err:
+                        log.warning(f"Playwright DDG Fallback Failed: {ddg_err}")
+
+            # Double Fallback: Try Bing
+            if not results:
+                    log.warning("Playwright: DDG failed. Trying Bing HTML fallback...")
+                    
+                    # RECYCLE PAGE
+                    try: await page.close()
+                    except: pass
+                    try: page = await context.new_page()
+                    except: pass
+                    
+                    try:
+                        query_part = url.split('q=')[-1].split('&')[0]
+                    except Exception:
                          query_part = "unknown"
 
-                     ddg_url = f"https://html.duckduckgo.com/html/?q={query_part}"
-                     
-                     try:
-                         await page.goto(ddg_url, timeout=15000, wait_until="networkidle")
-                         content = await page.content()
-                         soup = BeautifulSoup(content, "html.parser")
-                         
-                         # DDG HTML Selectors
-                         ddg_selectors = [".result", ".web-result"]
-                         found_nodes = []
-                         for sel in ddg_selectors:
-                             found_nodes = soup.select(sel)
-                             if found_nodes: break
-                             
-                         for res in found_nodes[:5]:
-                             title = res.select_one(".result__title, .result__a")
-                             body = res.select_one(".result__snippet, .result__snippet")
-                             if title:
-                                 t_text = title.get_text(strip=True)
-                                 link_tag = title.find("a")
-                                 link = link_tag.get("href") if link_tag else title.get("href")
-                                 b_text = body.get_text(strip=True) if body else ""
-                                 
-                                 if t_text and link:
-                                     results.append({
-                                         "title": t_text,
-                                         "url": link,
-                                         "snippet": b_text,
-                                         "source": "Playwright DDG"
-                                     })
+                    bing_url = f"https://www.bing.com/search?q={query_part}"
+                    
+                    try:
+                        await page.goto(bing_url, timeout=15000, wait_until="networkidle")
+                        content = await page.content()
+                        soup = BeautifulSoup(content, "html.parser")
+                        
+                        bing_results = soup.select(".b_algo")
+                        for res in bing_results[:5]:
+                            title = res.select_one("h2 a")
+                            body = res.select_one(".b_caption p, .b_algoSlug")
+                            if title:
+                                t_text = title.get_text(strip=True)
+                                link = title.get("href")
+                                b_text = body.get_text(strip=True) if body else ""
+                                if link:
+                                    results.append({
+                                        "title": t_text,
+                                        "url": link,
+                                        "snippet": b_text,
+                                        "source": "Playwright Bing"
+                                    })
+                    except Exception as bing_err:
+                        log.warning(f"Playwright Bing Fallback Failed: {bing_err}")
 
-                     except Exception as ddg_err:
-                         log.warning(f"Playwright DDG Fallback Failed: {ddg_err}")
-
-                # Double Fallback: Try Bing
-                if not results:
-                     log.warning("Playwright: DDG failed. Trying Bing HTML fallback...")
-                     # Reset page
-                     try: await page.goto("about:blank")
-                     except: pass
-                     
-                     try:
-                         query_part = url.split('q=')[-1].split('&')[0]
-                     except Exception:
-                         query_part = "unknown"
-
-                     bing_url = f"https://www.bing.com/search?q={query_part}"
-                     
-                     try:
-                         await page.goto(bing_url, timeout=15000, wait_until="networkidle")
-                         content = await page.content()
-                         soup = BeautifulSoup(content, "html.parser")
-                         
-                         bing_results = soup.select(".b_algo")
-                         for res in bing_results[:5]:
-                             title = res.select_one("h2 a")
-                             body = res.select_one(".b_caption p, .b_algoSlug")
-                             if title:
-                                  t_text = title.get_text(strip=True)
-                                  link = title.get("href")
-                                  b_text = body.get_text(strip=True) if body else ""
-                                  if link:
-                                      results.append({
-                                          "title": t_text,
-                                          "url": link,
-                                          "snippet": b_text,
-                                          "source": "Playwright Bing"
-                                      })
-                     except Exception as bing_err:
-                         log.warning(f"Playwright Bing Fallback Failed: {bing_err}")
-
-                if not results:
-                     log.info("Playwright: All selectors failed, grabbing generalized body text.")
-                     if soup and soup.body:
-                         text = soup.body.get_text(separator=' ', strip=True)[:2000]
-                         results.append({
-                             "title": "Page Text Dump",
-                             "url": url,
-                             "snippet": text,
-                             "source": "Playwright Text Dump"
-                         })
-                     
-            except Exception as inner_e:
-                log.warning(f"Playwright Page Logic Error: {inner_e}")
-            finally:
-                await browser.close()
+            if not results:
+                    log.info("Playwright: All selectors failed, grabbing generalized body text.")
+                    if soup and soup.body:
+                        text = soup.body.get_text(separator=' ', strip=True)[:2000]
+                        results.append({
+                            "title": "Page Text Dump",
+                            "url": url,
+                            "snippet": text,
+                            "source": "Playwright Text Dump"
+                        })
+            
+            # Clean up browser
+            await browser.close()
                 
     except Exception as e:
         log.error(f"Playwright Engine Error: {e}")
