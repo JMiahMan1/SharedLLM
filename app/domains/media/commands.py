@@ -12,6 +12,7 @@ from typing import List, Dict, Optional, Tuple
 from app.settings import run_blocking, HA_URL, DEFAULT_MODEL, GlobalResources
 from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
 from app.domains.shared import execute_ha_service
+from app.domains.media.devices import (
     get_device_capabilities, get_active_media_players, get_available_media_players,
     smart_resolve_entity, resolve_multiple_entities_with_pattern,
     _set_last_entity, get_last_entity, get_last_media_entity
