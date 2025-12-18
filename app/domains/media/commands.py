@@ -290,14 +290,28 @@ async def handle_media_command(
                 log.error(f"Error in Music Assistant delegation: {e}")
 
         # [Standard Media Player Service]
-        ctype = "music" if is_music_request else "video"
+        # Default to music if ambiguous, as video usually requires specific "watch" intent
+        ctype = "video" if is_video_request else "music"
+        
+        # Self-Correction: If query is not a URL and type is video, it will likely fail on generic players
+        # So force music if it looks like a search query and not a URL
+        if ctype == "video" and not query.startswith(("http", "www", "spotify", "app")):
+             log.warning("Video request detected but query is not a URL. This might fail on some devices.")
+             
         std_service_data = {
             "media_content_id": query,
             "media_content_type": ctype
         }
-        result = await execute_ha_service(domain, "play_media", entity_id, user_creds, std_service_data, redis_client)
-
-        return [result]
+        
+        # Enhanced Logging for debugging 500 errors
+        log.info(f"[Standard Play] Call {domain}.play_media on {entity_id} | Type: {ctype} | Content: {query}")
+        
+        try:
+            result = await execute_ha_service(domain, "play_media", entity_id, user_creds, std_service_data, redis_client)
+            return [result]
+        except Exception as e:
+            log.error(f"[Standard Play] Failed: {e}")
+            return [{"status": "FAILURE", "message": f"Failed to play media: {e}", "entity_id": entity_id, "service": "play_media"}]
 
     # [Power/Navigation Commands]
     if intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
