@@ -247,7 +247,6 @@ async def handle_media_command(
         if (is_music_request or (intent == "play_media" and not is_video_request)) and integration != "music_assistant":
             try:
                 from app.settings import GlobalResources
-                import re
                 
                 # Get current device's group_id and entity_id
                 current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
