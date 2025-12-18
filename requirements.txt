@@ -65,3 +65,4 @@ playwright
 langchain-huggingface
 duckduckgo-search
 PyMuPDF
+yt-dlp

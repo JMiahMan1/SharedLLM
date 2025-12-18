@@ -48,7 +48,7 @@ DEFAULT_PHRASES = {
         "play artist",
         "queue up",
     ],
-    "open_app": ["open", "launch", "start app", "go to app", "switch to", "watch"],
+    "open_app": ["open", "launch", "start app", "go to app", "switch to"],
     "stop_media": [
         "stop music",
         "pause",
@@ -254,6 +254,16 @@ DEFAULT_PHRASES = {
         "check shopping list",
     ],
     "note_delete": ["delete note", "remove note", "trash note", "delete my list"],
+    # -------------------------
+    "watch_video": [
+        "watch",
+        "play video",
+        "start video",
+        "cast video",
+        "view",
+        "put on",
+        "show me",
+    ],
 }
 
 
