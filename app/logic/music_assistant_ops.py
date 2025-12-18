@@ -147,10 +147,7 @@ async def tool_music_search(query: str, user_creds: dict, redis_client=None) -> 
 async def play_media(entity_id: str, media_id: str, media_type: str, user_creds: dict) -> dict:
     """
     Play media on a specific Music Assistant entity.
-
-    For Music Assistant, the correct formats are:
-    - Search: media_content_type="search", media_content_id="search term"
-    - Library: media_content_type="library", media_content_id="library://type/item"
+    Implements retry logic across media types (Artist -> Track -> Playlist) for generic queries.
     """
     ha_url = user_creds.get("ha_url")
     token = user_creds.get("ha_token")
@@ -165,54 +162,69 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
 
     service_url = f"{ha_url}/api/services/music_assistant/play_media"
 
-    # Fix media_type based on content
-    if media_type == "music":
-        # Convert "music:query" to proper search format
-        if media_id.startswith("music:"):
-            media_id = media_id[6:]  # Remove "music:" prefix
-        final_media_type = "artist"  # Use artist for searches
-        final_media_id = media_id
-    elif media_type == "search":
-        # Convert "search:query" to proper format
-        if media_id.startswith("search:"):
-            media_id = media_id[7:]  # Remove "search:" prefix
-        final_media_type = "artist"  # Use artist for searches
-        final_media_id = media_id
-    elif media_type.startswith("library://"):
-        # Already in correct library format
-        final_media_type = "library"
-        final_media_id = media_type
+    # Clean prefixes
+    if media_id.startswith(("music:", "search:")):
+        media_id = media_id.split(":", 1)[1]
+
+    # Determine types to try
+    # If generic request, try robust sequence. If specific URI, use as is.
+    types_to_try = []
+    
+    if media_type.startswith("library://"):
+        types_to_try = ["library"]
+    elif media_type in ["music", "search"]:
+        # Priority: Artist > Track > Playlist > Radio
+        types_to_try = ["artist", "track", "playlist", "radio"]
     else:
-        # Default to artist search for unknown types
-        final_media_type = "artist"
-        final_media_id = media_id
+        # Explicit type passed? Try that, then fallback if it looks like a search
+        types_to_try = [media_type]
+        if media_type == "artist":
+             types_to_try.extend(["track", "playlist"])
+    
+    log.info(f"[MA PLAY] Strategy: Trying types {types_to_try} for '{media_id}' on {entity_id}")
+    
+    last_error = "No attempts made"
+    
+    for current_type in types_to_try:
+        # For library types, media_id is the full URI, media_type is 'library' (usually handled by caller)
+        # But here we handle strict types vs search types
+        final_type = current_type
+        final_id = media_id
+        
+        if current_type == "library":
+             final_id = media_type # Argument passed was the URI
+             
+        payload = {
+            "entity_id": entity_id,
+            "media_id": final_id,
+            "media_type": final_type,
+            "enqueue": "play"
+        }
 
-    payload = {
-        "entity_id": entity_id,
-        "media_id": final_media_id,
-        "media_type": final_media_type,
-        "enqueue": "play"
+        try:
+            log.info(f"[MA PLAY] Attempting '{final_id}' as type '{final_type}'...")
+            response = requests.post(service_url, json=payload, headers=headers, timeout=10)
+
+            if response.status_code == 200:
+                log.info(f"[MA PLAY] SUCCESS playing as {final_type}")
+                return {
+                    "status": "SUCCESS",
+                    "message": f"Playing {final_id} ({final_type}) on {entity_id}",
+                    "entity_id": entity_id
+                }
+            else:
+                last_error = f"HTTP {response.status_code}: {response.text[:100]}"
+                log.warning(f"[MA PLAY] Failed attempt as {final_type}: {last_error}")
+                
+        except Exception as e:
+            last_error = str(e)
+            log.warning(f"[MA PLAY] Exception attempting {final_type}: {e}")
+
+    log.error(f"[MA PLAY] All attempts failed. Last error: {last_error}")
+    return {
+        "status": "FAILURE",
+        "message": f"Failed to play media on Music Assistant. Last error: {last_error}"
     }
-
-    try:
-        log.info(f"[MA PLAY] Playing {final_media_type}:{final_media_id} on {entity_id}")
-        response = requests.post(service_url, json=payload, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-             return {
-                "status": "SUCCESS",
-                "message": f"Playing {final_media_id} on {entity_id}",
-                "entity_id": entity_id
-            }
-        else:
-             log.error(f"[MA PLAY] Failed: {response.status_code} - {response.text}")
-             return {
-                "status": "FAILURE",
-                "message": f"Failed to play media: {response.status_code} - {response.text[:100]}"
-            }
-    except Exception as e:
-        log.error(f"[MA PLAY] Error: {e}")
-        return {"status": "FAILURE", "message": str(e)}
 
 async def control_player(entity_id: str, command: str, user_creds: dict) -> dict:
     """
