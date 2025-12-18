@@ -11,9 +11,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL")
+if not OLLAMA_URL:
+    # Try local fallback only if explicitly allowed, otherwise stricter
+    # User said NO env info hardcoded. So "localhost" is maybe okay but IP isn't.
+    OLLAMA_URL = "http://localhost:11434" 
+
 HA_URL = os.getenv("HA_URL")
-RAG_API_URL = os.getenv("RAG_API_URL", "http://192.168.2.211:11435/api/chat")
+RAG_API_URL = os.getenv("RAG_API_URL")
+
+if not RAG_API_URL:
+    addr = os.getenv("RAG_ADDRESS")
+    if addr:
+        RAG_API_URL = f"http://{addr}:11435/api/chat"
 
 def test_ollama_connectivity():
     """Test if Ollama is reachable"""

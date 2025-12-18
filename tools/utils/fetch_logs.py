@@ -4,7 +4,21 @@ import json
 import os
 import sys
 
-API_URL = os.getenv("API_URL", "http://192.168.2.211:11435")
+from dotenv import load_dotenv
+
+load_dotenv()
+API_URL = os.getenv("RAG_ADDRESS")
+
+if not API_URL:
+    print("ERROR: RAG_ADDRESS not set in .env")
+    sys.exit(1)
+
+# Ensure http prefix
+if not API_URL.startswith("http"):
+    API_URL = f"http://{API_URL}:11435"
+else:
+    API_URL = f"{API_URL}:11435"
+
 HEADERS = {
     "Content-Type": "application/json",
     "X-RAG-User": "admin",
