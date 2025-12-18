@@ -60,6 +60,10 @@ async def lifespan(app: FastAPI):
     log.info("Starting Timer/Alarm Scheduler...")
     scheduler_task = asyncio.create_task(start_scheduler())
 
+    # Start Video Cache Cleanup
+    from app.utils.video_cache import schedule_periodic_cleanup
+    asyncio.create_task(schedule_periodic_cleanup())
+
     yield
 
     # Shutdown
