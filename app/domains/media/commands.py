@@ -175,6 +175,39 @@ async def handle_media_command(
                      from app.domains.media.devices import _set_last_media_entity
                      _set_last_media_entity(redis_client, user, entity_id)
 
+            # [MASS INTELLIGENCE SWAP] - Restored from historical logic
+            # If we resolved a hardware device (e.g., Office TV) but it's a music request,
+            # checks if there is a 'Shadow' Music Assistant player to use instead.
+            if (is_music_request or intent == "play_media") and integration != "music_assistant" and not is_video_request:
+                try:
+                    # Determine name to search: explicit device_name OR friendly name of resolved entity
+                    search_name = device_name
+                    if not search_name:
+                         # Fetch friendly name
+                         from app.domains.media.devices import get_device_capabilities
+                         caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+                         search_name = caps.get("friendly_name", "").replace(" TV", "").replace(" Speaker", "")
+                    
+                    if search_name:
+                         log.info(f"[MASS Swap] Checking for Music Assistant player matching '{search_name}'...")
+                         # Search specifically for MA integration
+                         ma_docs = GlobalResources.ha_collection.similarity_search(f"{search_name} music assistant", k=3)
+                         for d in ma_docs:
+                             if d.metadata.get("integration") == "music_assistant":
+                                 # Verify it's related (string match)
+                                 # If search was "Office", and we found "mass_office_tv", good.
+                                 found_id = d.metadata.get("entity_id")
+                                 found_name = d.metadata.get("friendly_name", "")
+                                 
+                                 # Safety: Ensure the found MA player roughly matches the target name
+                                 if search_name.lower() in found_name.lower() or search_name.lower() in found_id.lower():
+                                      log.info(f"[MASS Swap] Swapping hardware {entity_id} -> MA Player {found_id}")
+                                      entity_id = found_id
+                                      integration = "music_assistant"
+                                      break
+                except Exception as e:
+                    log.warning(f"[MASS Swap] Error checking for MA player: {e}")
+
     if entity_id:
         domain = entity_id.split('.')[0]
 
