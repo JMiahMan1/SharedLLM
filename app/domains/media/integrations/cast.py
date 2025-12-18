@@ -208,7 +208,7 @@ class CastIntegration(StandardIntegration):
                             
                             if group_docs and group_docs.get("metadatas"):
                                 for metadata in group_docs["metadatas"]:
-                                    candidate_id = metadata.get("entity_id"")
+                                    candidate_id = metadata.get("entity_id")
                                     candidate_integration = metadata.get("integration", "")
                                     
                                     # Parse attributes to check device_class
