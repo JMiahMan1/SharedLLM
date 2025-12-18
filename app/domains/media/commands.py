@@ -350,7 +350,10 @@ async def handle_media_command(
             pass
 
         # [Music Assistant Integration]
-        if "music_assistant" in integration:
+        # Check if device supports Music Assistant OR if this is a natural language music search
+        is_ma_device = "music_assistant" in integration
+        
+        if not is_ma_device:
             try:
                 # Get device metadata to check for Music Assistant attributes
                 from app.settings import GlobalResources
@@ -360,71 +363,73 @@ async def handle_media_command(
                 except Exception:
                     current_meta = {}
 
-                # Check integration OR attributes for MA capability
-                is_ma_device = "music_assistant" in integration
-                if not is_ma_device and current_meta:
+                # Check attributes for MA capability
+                if current_meta:
                     attrs_str = str(current_meta.get("attributes", "")).lower()
                     if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
                         is_ma_device = True
                         log.info(f"Identified {entity_id} as MA device via attributes.")
+            except Exception:
+                pass
 
-                # AGGRESSIVE MA FALLBACK: If it's a natural language music request (not a URL), try MA
-                # This allows "Play Brandon Lake on Office TV" (AndroidTV) to go through MA's search
-                if not is_ma_device and strict_resolution and not query.startswith(("http", "spotify:", "app:")):
-                     log.info(f"Request is NL Music Search ('{query}'). Attempting to use Music Assistant for resolution.")
-                     is_ma_device = True
+        # AGGRESSIVE MA FALLBACK: If it's a natural language music request (not a URL), try MA
+        # This allows "Play Brandon Lake on Office TV" to go through MA's search
+        if not is_ma_device and strict_resolution and not query.startswith(("http", "spotify:", "app:")):
+            log.info(f"Request is NL Music Search ('{query}'). Attempting to use Music Assistant for resolution.")
+            is_ma_device = True
 
-                if is_ma_device:
-                    log.info(f"Delegating Music Assistant Play on {entity_id} to music_assistant_ops")
+        if is_ma_device:
+            try:
+                log.info(f"Delegating Music Assistant Play on {entity_id} to music_assistant_ops")
 
-                    # Determine content type
-                    ctype = "music" if is_music_request else "video"
+                # Determine content type
+                ctype = "music" if is_music_request else "video"
 
-                    # CLEAN QUERY - Extract the actual search term
-                    clean_title = query.lower()
+                # CLEAN QUERY - Extract the actual search term
+                clean_title = query.lower()
 
-                    # 1. Remove device name from query (e.g. "on office tv")
-                    if entity_id:
-                        from app.domains.media.devices import get_device_capabilities
-                        caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-                        fname = caps.get("friendly_name", "").lower()
-                        ename = entity_id.split(".")[-1].replace("_", " ").lower()
-                        
-                        # Remove "on {name}" patterns
-                        # Add generic "tv" or "speaker" removal if they appear at the end
-                        targets_to_remove = [fname, ename, "office tv", "master bedroom tv", "gracie tv", "tv", "speaker"]
-                        for name in targets_to_remove:
-                            if name and name in clean_title:
-                                # regex to remove "on the office tv" or just "office tv"
-                                clean_title = re.sub(f"\\b(on|in|at|to)?\\s*(the)?\\s*{re.escape(name)}\\b", " ", clean_title)
-
-                    # 2. Remove action/control words
-                    clean_title = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean_title)
-
-                    # 3. Remove content type keywords for music requests
-                    if is_music_request:
-                        clean_title = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean_title)
-
-                    # 4. Clean up extra spaces
-                    clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+                # 1. Remove device name from query (e.g. "on office tv")
+                if entity_id:
+                    from app.domains.media.devices import get_device_capabilities
+                    caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+                    fname = caps.get("friendly_name", "").lower()
+                    ename = entity_id.split(".")[-1].replace("_", " ").lower()
                     
-                    log.info(f"[MA CLEANING] Original: '{query}' -> Cleaned: '{clean_title}'")
+                    # Remove "on {name}" patterns
+                    # Add generic "tv" or "speaker" removal if they appear at the end
+                    targets_to_remove = [fname, ename, "office tv", "master bedroom tv", "gracie tv", "tv", "speaker"]
+                    for name in targets_to_remove:
+                        if name and name in clean_title:
+                            # regex to remove "on the office tv" or just "office tv"
+                            clean_title = re.sub(f"\\b(on|in|at|to)?\\s*(the)?\\s*{re.escape(name)}\\b", " ", clean_title)
 
-                    # Attempt Music Assistant delegation
-                    result = await music_assistant_ops.play_media(entity_id, clean_title, ctype, user_creds)
+                # 2. Remove action/control words
+                clean_title = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean_title)
 
-                    if result and result.get("status") == "SUCCESS":
-                        log.info("Music Assistant delegation succeeded")
-                        return [result]
-                    else:
-                        log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
-                        result = await music_assistant_ops.play_media(entity_id, clean_title, "search", user_creds)
+                # 3. Remove content type keywords for music requests
+                if is_music_request:
+                    clean_title = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean_title)
 
-                    if result and result.get("status") == "SUCCESS":
-                        log.info("Music Assistant delegation succeeded on retry")
-                        return [result]
-                    else:
-                        log.warning("Music Assistant delegation failed, falling back to standard media player")
+                # 4. Clean up extra spaces
+                clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+                
+                log.info(f"[MA CLEANING] Original: '{query}' -> Cleaned: '{clean_title}'")
+
+                # Attempt Music Assistant delegation
+                result = await music_assistant_ops.play_media(entity_id, clean_title, ctype, user_creds)
+
+                if result and result.get("status") == "SUCCESS":
+                    log.info("Music Assistant delegation succeeded")
+                    return [result]
+                else:
+                    log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
+                    result = await music_assistant_ops.play_media(entity_id, clean_title, "search", user_creds)
+
+                if result and result.get("status") == "SUCCESS":
+                    log.info("Music Assistant delegation succeeded on retry")
+                    return [result]
+                else:
+                    log.warning("Music Assistant delegation failed, falling back to standard media player")
             except Exception as e:
                 log.error(f"Error in Music Assistant delegation: {e}")
 
