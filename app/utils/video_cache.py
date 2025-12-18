@@ -71,6 +71,7 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
+        'nopart': True, # Write directly to file so we can read it while downloading
     }
     
     # Start download in asyncio executor
