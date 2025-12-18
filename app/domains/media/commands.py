@@ -397,28 +397,28 @@ async def handle_media_command(
                  search_query = search_query.replace(phrase, " ")
              search_query = " ".join(search_query.split()).strip()
              
-             msg = f"[Standard Play] No direct URL for '{query}'. Searching for '{search_query}' on YouTube..."
+             msg = f"[Standard Play] No direct URL for '{query}'. Searching Whoogle for '{search_query} youtube'..."
              log.info(msg)
              print(msg)
              
              found_url = None
              try:
-                 from duckduckgo_search import DDGS
-                 def _do_search():
-                     with DDGS() as ddgs:
-                         # Search for just the content name + youtube
-                         return list(ddgs.text(f"{search_query} youtube", max_results=3))
+                 from app.logic.web_search import tool_web_search
+                 import re
                  
-                 print(f"Starting DDG search for: {search_query} youtube")
-                 results = await run_blocking(_do_search)
-                 print(f"DDG Results count: {len(results) if results else 0}")
+                 print(f"Starting Whoogle search for: {search_query} youtube")
+                 search_results = await tool_web_search(f"{search_query} youtube")
+                 print(f"Whoogle Results: {search_results[:200]}...")
                  
-                 if results:
-                     for r in results:
-                         u = r.get("href", "")
-                         print(f"  - Result URL: {u}")
-                         if "youtube.com" in u or "youtu.be" in u:
-                             found_url = u
+                 # Parse results for YouTube URLs
+                 if search_results:
+                     # Extract URLs using regex
+                     url_pattern = r'URL:\s*(https?://[^\s\n]+)'
+                     urls = re.findall(url_pattern, search_results)
+                     
+                     for url in urls:
+                         if "youtube.com" in url or "youtu.be" in url:
+                             found_url = url
                              break
              except Exception as e:
                  err_msg = f"[Standard Play] Search error: {e}"
