@@ -296,7 +296,8 @@ async def handle_media_command(
         # Self-Correction: If query is not a URL and type is video, it will likely fail on generic players
         # So force music if it looks like a search query and not a URL
         if ctype == "video" and not query.startswith(("http", "www", "spotify", "app")):
-             log.warning("Video request detected but query is not a URL. This might fail on some devices.")
+             log.warning("[Standard Play] Video request with non-URL query. Aborting to prevent 500 error.")
+             return [{"status": "FAILURE", "message": "Video playback requires a direct URL or specific app. Please provide a link.", "entity_id": entity_id, "service": "play_media"}]
              
         std_service_data = {
             "media_content_id": query,
