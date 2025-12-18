@@ -18,7 +18,7 @@ CACHE_DIR = Path("/workspace/temp/cast_videos")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configuration
-INITIAL_BUFFER_MB = 5  # Wait for 5MB before returning URL
+INITIAL_BUFFER_MB = 1  # Wait for 1MB before returning URL
 MAX_FILE_AGE_HOURS = 1  # Delete files older than 1 hour
 
 
