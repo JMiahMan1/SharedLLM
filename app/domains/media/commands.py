@@ -278,32 +278,34 @@ async def handle_media_command(
         # If we have a video request but resolved to a speaker/cast, find the TV in the same group
         if is_video_request and integration in ["cast", "music_assistant"]:
             try:
-                # Get the current device's friendly name to find the group
-                search_name = device_name
-                if not search_name and entity_id:
-                    from app.domains.media.devices import get_device_capabilities
-                    caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-                    search_name = caps.get("friendly_name", "").replace(" Chrome", "").replace(" Remote", "").replace(" Speaker", "")
-                
-                if search_name:
-                    log.info(f"[TV Swap] Video request on speaker/cast device. Checking for TV in '{search_name}' group...")
-                    # Search for TV device in same group
-                    from app.settings import GlobalResources
-                    tv_docs = GlobalResources.ha_collection.similarity_search(search_name, k=5)
-                    for d in tv_docs:
-                        tv_integration = d.metadata.get("integration", "")
-                        # Look for actual TV integrations (including generic 'tv')
-                        if tv_integration in ["androidtv", "webostv", "roku", "tv"]:
-                            found_id = d.metadata.get("entity_id")
-                            found_name = d.metadata.get("friendly_name", "")
-                            
-                            # Ensure it's in the same group (name similarity)
-                            if search_name.lower() in found_name.lower():
-                                log.info(f"[TV Swap] Swapping {entity_id} ({integration}) -> TV {found_id} ({tv_integration})")
-                                entity_id = found_id
-                                integration = tv_integration
-                                domain = entity_id.split('.')[0]
-                                break
+                # Get the current device's group_id from ChromaDB
+                from app.settings import GlobalResources
+                current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if current_docs and current_docs.get("metadatas"):
+                    current_group_id = current_docs["metadatas"][0].get("group_id")
+                    current_group_name = current_docs["metadatas"][0].get("group_name", "")
+                   
+                    if current_group_id:
+                        log.info(f"[TV Swap] Video request on {integration} device. group_id={current_group_id}, searching for TV...")
+                        
+                        # Get all devices in ChromaDB and filter by group_id
+                        all_docs = GlobalResources.ha_collection._collection.get(
+                            where={"group_id": current_group_id},
+                            include=["metadatas"]
+                        )
+                        
+                        if all_docs and all_docs.get("metadatas"):
+                            for metadata in all_docs["metadatas"]:
+                                tv_integration = metadata.get("integration", "")
+                                # Look for actual TV integrations
+                                if tv_integration in ["androidtv", "webostv", "roku", "tv"]:
+                                    found_id = metadata.get("entity_id")
+                                    log.info(f"[TV Swap] Found TV in same group: {found_id} ({tv_integration})")
+                                    log.info(f"[TV Swap] Swapping {entity_id} ({integration}) -> TV {found_id}")
+                                    entity_id = found_id
+                                    integration = tv_integration
+                                    domain = entity_id.split('.')[0]
+                                    break
             except Exception as e:
                 log.warning(f"[TV Swap] Error: {e}")
 
