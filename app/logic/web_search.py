@@ -164,9 +164,12 @@ async def _scrape_with_playwright(url) -> list[dict]:
                 headless=True, 
                 args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
             )
+            # Create context with User Agent to avoid bot detection
             context = await browser.new_context(user_agent=SEARCH_HEADERS["User-Agent"])
             page = await context.new_page()
             
+            soup = None # Initialize scope
+
             try:
                 # --- Primary Navigation (Robust) ---
                 try:
@@ -195,13 +198,20 @@ async def _scrape_with_playwright(url) -> list[dict]:
                             })
                 except Exception as pg_err:
                      log.warning(f"Playwright Primary URL Failed: {pg_err}. Proceeding to Fallback.")
+                     # Clear soup explicitly to avoid stale matching
+                     soup = None
 
                 # --- Fallback Logic ---
+                # If no structured results found (or primary failed), grab the body text or try backup providers
                 if not results:
                      log.warning("Playwright: Whoogle selectors failed or URL down. Trying DuckDuckGo HTML fallback...")
                      
+                     # Reset page to avoid navigation interruption errors
+                     try: await page.goto("about:blank")
+                     except: pass
+
+                     # Extract query from URL safely
                      try:
-                         # Extract query from URL safely
                          query_part = url.split('q=')[-1].split('&')[0]
                      except Exception:
                          query_part = "unknown"
@@ -213,6 +223,7 @@ async def _scrape_with_playwright(url) -> list[dict]:
                          content = await page.content()
                          soup = BeautifulSoup(content, "html.parser")
                          
+                         # DDG HTML Selectors
                          ddg_selectors = [".result", ".web-result"]
                          found_nodes = []
                          for sel in ddg_selectors:
@@ -242,6 +253,10 @@ async def _scrape_with_playwright(url) -> list[dict]:
                 # Double Fallback: Try Bing
                 if not results:
                      log.warning("Playwright: DDG failed. Trying Bing HTML fallback...")
+                     # Reset page
+                     try: await page.goto("about:blank")
+                     except: pass
+                     
                      try:
                          query_part = url.split('q=')[-1].split('&')[0]
                      except Exception:
