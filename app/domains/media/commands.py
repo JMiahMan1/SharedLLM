@@ -241,6 +241,38 @@ async def handle_media_command(
     service = intent
     service_data = {}
 
+    # [**UNIVERSAL** MASS INTELLIGENCE SWAP] - Run for ALL music requests
+    # If we have a music request but resolved to a non-MA device, try to swap to MA player
+    if intent in ["play_media", "open_app", "watch_video", "view_content"]:
+        if (is_music_request or (intent == "play_media" and not is_video_request)) and integration != "music_assistant":
+            try:
+                # Determine search name
+                search_name = device_name
+                if not search_name and entity_id:
+                    # Fetch friendly name from capabilities
+                    from app.domains.media.devices import get_device_capabilities
+                    caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+                    search_name = caps.get("friendly_name", "").replace(" TV", "").replace(" Speaker", "").replace(" Remote", "")
+                
+                if search_name:
+                    log.info(f"[MASS Swap] Music request on non-MA device. Checking for MA player matching '{search_name}'...")
+                    # Search for MA integration
+                    ma_docs = GlobalResources.ha_collection.similarity_search(f"{search_name} music assistant", k=3)
+                    for d in ma_docs:
+                        if d.metadata.get("integration") == "music_assistant":
+                            found_id = d.metadata.get("entity_id")
+                            found_name = d.metadata.get("friendly_name", "")
+                            
+                            # Ensure match
+                            if search_name.lower() in found_name.lower() or search_name.lower() in found_id.lower():
+                                log.info(f"[MASS Swap] Swapping {entity_id} ({integration}) -> MA Player {found_id}")
+                                entity_id = found_id
+                                integration = "music_assistant"
+                                domain = entity_id.split('.')[0]
+                                break
+            except Exception as e:
+                log.warning(f"[MASS Swap] Error: {e}")
+
     # [SMART ROUTING: Music -> Speaker, Video/Power -> TV]
     # Simplified version - the full logic from media_ops.py would go here
 
