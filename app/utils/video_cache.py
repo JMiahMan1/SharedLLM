@@ -64,8 +64,9 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
         return None, False
     
     # yt-dlp options for progressive download
+    # Use best MP4 video+audio, but limit to 1080p to ensure cast compatibility and speed
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
         'outtmpl': str(file_path),
         'quiet': True,
         'no_warnings': True,
@@ -85,26 +86,22 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
     # Start download task in background
     download_task = asyncio.create_task(run_download())
     
-    # Wait for initial buffer
-    buffer_bytes = INITIAL_BUFFER_MB * 1024 * 1024
-    max_wait_seconds = 30
+    # Wait for initial buffer - ANY data is enough to start streaming
+    # The client (Cast device) will buffer on its own.
+    # We just need the file to exist and have > 0 bytes.
+    max_wait_seconds = 45 # Increased wait time for slow starts
     start_time = time.time()
     
     while time.time() - start_time < max_wait_seconds:
         if file_path.exists():
             size = file_path.stat().st_size
-            if size >= buffer_bytes:
-                log.info(f"[VideoCache] Initial buffer ready: {size / 1024 / 1024:.1f}MB")
+            if size > 1024: # Just wait for 1KB header
+                log.info(f"[VideoCache] File created and streaming ready: {size} bytes")
                 return file_path, True
         
         await asyncio.sleep(0.5)
     
-    # If we got here, either file is downloading slowly or failed
-    if file_path.exists() and file_path.stat().st_size > 0:
-        log.warning(f"[VideoCache] Buffer not ready but file exists, proceeding anyway")
-        return file_path, True
-    
-    log.error(f"[VideoCache] Download failed or too slow for {url}")
+    log.error(f"[VideoCache] Download failed to start within {max_wait_seconds}s for {url}")
     return None, False
 
 
