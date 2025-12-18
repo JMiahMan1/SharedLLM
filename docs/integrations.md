@@ -27,7 +27,7 @@ This modularity ensures that adding features for one device type (like turning o
 | Feature | Natural Speech Example | What Happens |
 | :--- | :--- | :--- |
 | **SmartPowerSync** | "Play Brandon Lake on the Office TV" | 1. System finds `media_player.office_tv_chrome` (Cast).<br>2. Finds sibling `media_player.office_tv_chrome` (TV).<br>3. TV is OFF? **Turns it ON**.<br>4. Waits 4s.<br>5. Plays music. |
-| **Standard Play** | "Play a fireplace video on the Living Room TV" | Plays video content directly. |
+| **Auto-Search Video** | "Watch a fireplace video on the Living Room TV" | **System searches YouTube** for "fireplace video", extracts the first URL, and plays it automatically. No URL needed! |
 | **Power Control** | "Turn on the Chromecast" | Turns on the device (and likely the TV via CEC). |
 
 ---
