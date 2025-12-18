@@ -15,3 +15,6 @@ data/chroma/
 *.sqlite
 
 
+
+temp/
+videos/

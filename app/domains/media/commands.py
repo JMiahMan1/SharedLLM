@@ -108,6 +108,17 @@ async def handle_media_command(
             if isinstance(resolved, list):
                 if resolved:
                     log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
+                    # Force context update for the first resolved entity (primary target)
+                    if len(resolved) > 0:
+                        first_entity = resolved[0][0]
+                        user = user_creds.get("user")
+                        if user and first_entity:
+                            log.info(f"[CONTEXT FORCE] Pre-batch update for user={user} -> {first_entity}")
+                            _set_last_entity(redis_client, user, first_entity)
+                            if first_entity.startswith("media_player."):
+                                 from app.domains.media.devices import _set_last_media_entity
+                                 _set_last_media_entity(redis_client, user, first_entity)
+
                     return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
                 else:
                      log.info(f"[Device Fallback] No devices found for {device_name}")
@@ -145,6 +156,17 @@ async def handle_media_command(
                 if isinstance(resolved, list):
                     if resolved:
                         log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
+                        # Force context update for the first resolved entity (primary target)
+                        if len(resolved) > 0:
+                            first_entity = resolved[0][0]
+                            user = user_creds.get("user")
+                            if user and first_entity:
+                                log.info(f"[CONTEXT FORCE] Pre-batch update for user={user} -> {first_entity}")
+                                _set_last_entity(redis_client, user, first_entity)
+                                if first_entity.startswith("media_player."):
+                                     from app.domains.media.devices import _set_last_media_entity
+                                     _set_last_media_entity(redis_client, user, first_entity)
+                        
                         return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
                     else:
                          log.info(f"[Device Fallback] No devices found for {cleaned_for_res}")
