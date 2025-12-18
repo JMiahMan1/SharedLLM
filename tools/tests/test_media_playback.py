@@ -4,7 +4,17 @@ import re
 import sys
 import json
 
-BASE_URL = "http://192.168.2.211:11435"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+RAG_ADDRESS = os.getenv("RAG_ADDRESS")
+
+if not RAG_ADDRESS:
+    print("ERROR: RAG_ADDRESS not found in .env")
+    sys.exit(1)
+
+BASE_URL = f"http://{RAG_ADDRESS}:11435"
 HEADERS = {"X-RAG-User": "admin"}
 
 # Map friendly names to likely entity_ids (will verify/discover)
@@ -116,7 +126,7 @@ def main():
     passes = 0
     fails = 0
     
-    # 1. Office TV
+    # 1. Office TV - Music
     if run_test_strict("Play Brandon Lake on Office TV", "Office TV", "play"): passes += 1
     else: fails += 1
     
@@ -125,13 +135,13 @@ def main():
     if run_test_strict("Stop Office TV", "Office TV", "stop"): passes += 1
     else: fails += 1
     
-    # 2. Master Bedroom
-    if run_test_strict("Watch Big Buck Bunny on Master Bedroom TV", "Master Bedroom TV", "play"): passes += 1
+    # 2. Office TV - Video
+    if run_test_strict("Watch Big Buck Bunny on Office TV", "Office TV", "play"): passes += 1
     else: fails += 1
     
     time.sleep(5)
     
-    if run_test_strict("Stop Master Bedroom TV", "Master Bedroom TV", "stop"): passes += 1
+    if run_test_strict("Stop Office TV", "Office TV", "stop"): passes += 1
     else: fails += 1
 
     # 3. Gracie
