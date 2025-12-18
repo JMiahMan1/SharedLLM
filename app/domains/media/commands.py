@@ -349,6 +349,21 @@ async def handle_media_command(
             # Cast logic would go here
             pass
 
+        # [AUTO-POWER-ON] Turn on device if it's off before playing media
+        # This matches the working commit's logic
+        if entity_id:
+            try:
+                from app.domains.media.devices import get_entity_state
+                state_data = await get_entity_state(entity_id, user_creds)
+                
+                if state_data == "off":
+                    log.info(f"[AUTO-POWER-ON] Device {entity_id} is OFF. Turning on before media playback.")
+                    await execute_ha_service("homeassistant", "turn_on", entity_id, user_creds, {}, redis_client)
+                    await asyncio.sleep(2)  # Give device time to power on
+                    log.info(f"[AUTO-POWER-ON] Device {entity_id} should now be ready.")
+            except Exception as e:
+                log.warning(f"[AUTO-POWER-ON] Failed for {entity_id}: {e}")
+
         # [Music Assistant Integration]
         # Check if device supports Music Assistant OR if this is a natural language music search
         is_ma_device = "music_assistant" in integration
