@@ -37,6 +37,11 @@ All interfaces share the same memory, context, and personality:
 - REST API clients
 - Future CLI / mobile clients
 
+## System Documentation
+- [System Architecture](docs/architecture.md) - High-level design, lifecycle, diagrams, and intent resolution pipeline.
+- [Integration Architecture](docs/integrations.md) - Details on Media Integrations (Cast, Music Assistant), features (SmartPowerSync), and intent mappings.
+- [Future Roadmap](docs/roadmap.md) - Planned features, TODOs, and backlog (Multi-Room Audio, Vision, etc.).
+
 ## Current Code Structure
 
 ```
