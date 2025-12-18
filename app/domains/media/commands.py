@@ -80,8 +80,8 @@ async def handle_media_command(
     # 1. EARLY MUSIC/CONTENT DETECTION
     music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
     audiobook_keywords = ["read", "book", "chapter", "audiobook"]
-    # ONLY watch/view should trigger video - not generic "video" keyword
-    video_keywords = ["watch", "view"]
+    # ONLY watch/view/video should trigger video mode - not generic music keywords
+    video_keywords = ["watch", "view", "video"]
 
     is_music_request = any(x in q_low for x in music_keywords)
     is_audiobook_request = any(x in q_low for x in audiobook_keywords)
