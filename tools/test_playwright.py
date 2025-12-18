@@ -13,38 +13,40 @@ from app.settings import log
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 async def main():
-    print("--- STARTING PLAYWRIGHT FALLBACK TEST ---")
+    print("--- STARTING PLAYWRIGHT FALLBACK TEST (Structured v2) ---")
 
     # Test 1: Simulate connection failure (Invalid URL)
-    # Expected: Should fail and return empty (skipping fallbacks) due to Logic Flaw?
+    # Expected: Should fail Primary, log warning, and Fallback to DDG/Bing -> RETURN RESULTS
     print("\n[TEST 1] Testing Connection Failure (Bad URL)")
     bad_url = "http://localhost:9999/search?q=test_connection_failure"
     results = await _scrape_with_playwright(bad_url)
     print(f"Results Count: {len(results)}")
+    
     if not results:
-        print(">> FAIL (Expected behavior if flaw exists): No results returned from connection failure.")
+        print(">> FAIL: No results returned. Fallback Log logic might be broken.")
     else:
-        print(">> SUCCESS: Got results (Fallback worked?)")
-        for r in results: print(r[:100] + "...")
+        print(">> SUCCESS: Got results despite connection failure!")
+        for r in results:
+            print(f" - {r.get('source', 'Unknown source')}: {r.get('title', 'No Title')}")
 
     # Test 2: Simulate "No Selectors" (Valid URL, wrong content)
-    # Expected: Should trigger fallback to DuckDuckGo/Bing
+    # Expected: Should trigger fallback and return results
     print("\n[TEST 2] Testing Content Fallback (Example.com)")
-    # Using example.com which won't match '.result' selectors
     trigger_url = "https://example.com/search?q=spacex" 
     results = await _scrape_with_playwright(trigger_url)
     print(f"Results Count: {len(results)}")
     
     found_fallback = False
     for r in results:
-        if "DuckDuckGo" in r or "Bing" in r or "URL" in r:
+        src = r.get('source', '')
+        if "DuckDuckGo" in src or "Bing" in src or "Text Dump" in src:
             found_fallback = True
-        print(r[:100] + "...")
+        print(f" - {r.get('source')}: {r.get('title')}")
         
     if found_fallback or len(results) > 0:
-        print(">> SUCCESS: Fallback logic engaged (returned results from DDG/Bing or Text body).")
+        print(">> SUCCESS: Fallback logic engaged.")
     else:
-        print(">> FAIL: No results returned even after fallback attempt.")
+        print(">> FAIL: No results returned.")
 
 if __name__ == "__main__":
     asyncio.run(main())
