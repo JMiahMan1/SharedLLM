@@ -47,6 +47,22 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
     
     file_path = get_video_path(video_id)
     
+    # First, check if it's a livestream (don't download those - they're huge!)
+    ydl_info_opts = {
+        'quiet': True,
+        'no_warnings': True,
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_info_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if info.get('is_live') or info.get('was_live'):
+                log.warning(f"[VideoCache] Skipping livestream: {url}")
+                return None, False
+    except Exception as e:
+        log.warning(f"[VideoCache] Failed to check if livestream: {e}")
+        return None, False
+    
     # yt-dlp options for progressive download
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
