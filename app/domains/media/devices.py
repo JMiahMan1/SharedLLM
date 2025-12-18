@@ -492,6 +492,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 media_intents = ["play_media", "stop_media", "media_next", "media_previous", "pause", "resume", "open_app", "volume_up", "volume_down", "volume_set", "volume_mute", "media_pause", "media_play"]
                 if intent in media_intents and domain not in ["media_player", "remote"]:
                     continue
+                
+                # Skip Music Assistant devices for video requests (go straight to Cast/TV devices)
+                if is_video and integration == "music_assistant":
+                    log.info(f"[Video Filter] Skipping Music Assistant device: {entity_id}")
+                    continue
 
                 # Exact match (highest priority)
                 if friendly_name == query_lower:
