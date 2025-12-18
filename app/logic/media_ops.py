@@ -18,8 +18,6 @@ def safe_similarity_search(collection, query: str, k: int = 5):
     return docs
 
 
-from app.domains.media.commands import execute_batch_command
-
 # --- Media Intent Definitions ---
 
 # App Package IDs for Android TV Smart Routing
@@ -489,6 +487,8 @@ async def resolve_multiple_entities_with_pattern(
     If pattern detected (even/odd/range/list/all), returns all matching entities.
     Otherwise returns single best match.
     """
+    from app.domains.media.commands import execute_batch_command
+
     # Detect entity patterns (returns list of type/data tuples)
     detected_patterns = detect_number_pattern(query)
     
