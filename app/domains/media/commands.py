@@ -437,16 +437,33 @@ async def handle_media_command(
         # Default to music if ambiguous, as video usually requires specific "watch" intent
         ctype = "video" if is_video_request else "music"
         
-        # CLEAN QUERY for Standard Players too (Spotify et al expect just the song name)
-        # Reuse logic? For now, apply simple cleaning if we didn't use MA
-        cleaned_std_query = query.lower()
-        if ctype == "music":
-             cleaned_std_query = re.sub(r"\b(play|please|listen to)\b", "", cleaned_std_query).strip()
-             # If we have a detected device name in query, try to strip it?
-             # Ideally we use the same robust cleaning as above.
-             # For now, let's minimally start with the intent strip.
+        # CRITICAL: If MA cleaning already happened, reuse that cleaned query
+        # Otherwise we'll send the dirty query ("brandon lake on office tv") instead of clean ("brandon lake")
+        if is_ma_device and 'clean_title' in locals():
+            cleaned_std_query = clean_title  # Reuse MA's cleaned query
+            log.info(f"[Standard Play Fallback] Reusing MA-cleaned query: '{cleaned_std_query}'")
         else:
-             cleaned_std_query = query
+            # CLEAN QUERY for Standard Players (Spotify et al expect just the song name)
+            cleaned_std_query = query.lower()
+            if ctype == "music":
+                # Remove device names from query
+                if entity_id:
+                    from app.domains.media.devices import get_device_capabilities
+                    caps = await get_device_capabilities(entity_id, user_creds, redis_client)
+                    fname = caps.get("friendly_name", "").lower()
+                    ename = entity_id.split(".")[-1].replace("_", " ").lower()
+                    
+                    targets_to_remove = [fname, ename, "office tv", "master bedroom tv", "gracie tv", "tv", "speaker"]
+                    for name in targets_to_remove:
+                        if name and name in cleaned_std_query:
+                            cleaned_std_query = re.sub(f"\\b(on|in|at|to)?\\s*(the)?\\s*{re.escape(name)}\\b", " ", cleaned_std_query)
+                
+                # Remove action/control words
+                cleaned_std_query = re.sub(r"\b(play|please|from|on|listen to)\b", "", cleaned_std_query).strip()
+                cleaned_std_query = re.sub(r'\s+', ' ', cleaned_std_query).strip()
+                log.info(f"[Standard Play Cleaning] Original: '{query}' -> Cleaned: '{cleaned_std_query}'")
+            else:
+                cleaned_std_query = query
         
         # Self-Correction: If query is not a URL and type is video, try to find a URL via Search
         if ctype == "video" and not query.startswith(("http", "www", "spotify", "app")):
