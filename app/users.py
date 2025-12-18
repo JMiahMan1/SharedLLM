@@ -14,7 +14,7 @@ DEFAULT_USER = {
     "nextcloud_user": os.getenv("NEXTCLOUD_USER"),
     "nextcloud_pass": os.getenv("NEXTCLOUD_PASS"),
     "ha_url": os.getenv("HA_URL"),
-    "ha_token": os.getenv("HA_ENV_TOKEN"),
+    "ha_token": os.getenv("HA_TOKEN"),
     "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL"),
     "audiobookshelf_user": os.getenv("AUDIOBOOKSHELF_USER"),
     "audiobookshelf_pass": os.getenv("AUDIOBOOKSHELF_PASS"),
