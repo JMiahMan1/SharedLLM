@@ -246,31 +246,53 @@ async def handle_media_command(
     if intent in ["play_media", "open_app", "watch_video", "view_content"]:
         if (is_music_request or (intent == "play_media" and not is_video_request)) and integration != "music_assistant":
             try:
-                # Determine search name
-                search_name = device_name
-                if not search_name and entity_id:
-                    # Fetch friendly name from capabilities
-                    from app.domains.media.devices import get_device_capabilities
-                    caps = await get_device_capabilities(entity_id, user_creds, redis_client)
-                    search_name = caps.get("friendly_name", "").replace(" TV", "").replace(" Speaker", "").replace(" Remote", "")
+                from app.settings import GlobalResources
+                import re
                 
-                if search_name:
-                    log.info(f"[MASS Swap] Music request on non-MA device. Checking for MA player matching '{search_name}'...")
-                    # Search for MA integration
-                    from app.settings import GlobalResources
-                    ma_docs = GlobalResources.ha_collection.similarity_search(f"{search_name} music assistant", k=3)
-                    for d in ma_docs:
-                        if d.metadata.get("integration") == "music_assistant":
-                            found_id = d.metadata.get("entity_id")
-                            found_name = d.metadata.get("friendly_name", "")
-                            
-                            # Ensure match
-                            if search_name.lower() in found_name.lower() or search_name.lower() in found_id.lower():
-                                log.info(f"[MASS Swap] Swapping {entity_id} ({integration}) -> MA Player {found_id}")
-                                entity_id = found_id
-                                integration = "music_assistant"
-                                domain = entity_id.split('.')[0]
-                                break
+                # Get current device's group_id and entity_id
+                current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if current_docs and current_docs.get("metadatas"):
+                    current_group_id = current_docs["metadatas"][0].get("group_id")
+                    current_entity_base = re.sub(r'_?\d+$', '', entity_id)  # Strip trailing numbers
+                    
+                    found_ma_player = None
+                    
+                    # Strategy 1: Try exact group_id match
+                    if current_group_id:
+                        log.info(f"[MASS Swap] Looking for MA player in group_id={current_group_id}")
+                        group_docs = GlobalResources.ha_collection._collection.get(
+                            where={"group_id": current_group_id},
+                            include=["metadatas"]
+                        )
+                        if group_docs and group_docs.get("metadatas"):
+                            for metadata in group_docs["metadatas"]:
+                                if metadata.get("integration") == "music_assistant":
+                                    found_ma_player = metadata.get("entity_id")
+                                    log.info(f"[MASS Swap] Found MA player in same group: {found_ma_player}")
+                                    break
+                    
+                    # Strategy 2: If no MA in group, try entity ID similarity
+                    if not found_ma_player:
+                        log.info(f"[MASS Swap] No MA in group. Checking entity ID similarity for base: {current_entity_base}")
+                        # Search for similar entity names
+                        search_name = device_name or current_docs["metadatas"][0].get("friendly_name", "")
+                        ma_docs = GlobalResources.ha_collection.similarity_search(search_name, k=5)
+                        for d in ma_docs:
+                            if d.metadata.get("integration") == "music_assistant":
+                                candidate_id = d.metadata.get("entity_id")
+                                candidate_base = re.sub(r'_?\d+$', '', candidate_id)
+                                
+                                # Check if entity IDs match (ignoring trailing numbers)
+                                if current_entity_base == candidate_base:
+                                    found_ma_player = candidate_id
+                                    log.info(f"[MASS Swap] Found MA player via entity ID similarity: {found_ma_player}")
+                                    break
+                    
+                    if found_ma_player:
+                        log.info(f"[MASS Swap] Swapping {entity_id} ({integration}) -> MA {found_ma_player}")
+                        entity_id = found_ma_player
+                        integration = "music_assistant"
+                        domain = entity_id.split('.')[0]
             except Exception as e:
                 log.warning(f"[MASS Swap] Error: {e}")
 
