@@ -273,19 +273,22 @@ async def handle_media_command(
                     # Strategy 2: If no MA in group, try entity ID similarity
                     if not found_ma_player:
                         log.info(f"[MASS Swap] No MA in group. Checking entity ID similarity for base: {current_entity_base}")
-                        # Search for similar entity names
-                        search_name = device_name or current_docs["metadatas"][0].get("friendly_name", "")
-                        ma_docs = GlobalResources.ha_collection.similarity_search(search_name, k=5)
-                        for d in ma_docs:
-                            if d.metadata.get("integration") == "music_assistant":
-                                candidate_id = d.metadata.get("entity_id")
-                                candidate_base = re.sub(r'_?\d+$', '', candidate_id)
-                                
-                                # Check if entity IDs match (ignoring trailing numbers)
-                                if current_entity_base == candidate_base:
-                                    found_ma_player = candidate_id
-                                    log.info(f"[MASS Swap] Found MA player via entity ID similarity: {found_ma_player}")
-                                    break
+                        # Get ALL music_assistant devices and check for entity ID match
+                        ma_docs = GlobalResources.ha_collection._collection.get(
+                            where={"integration": "music_assistant"},
+                            include=["metadatas"]
+                        )
+                        if ma_docs and ma_docs.get("metadatas"):
+                            for metadata in ma_docs["metadatas"]:
+                                candidate_id = metadata.get("entity_id")
+                                if candidate_id:
+                                    candidate_base = re.sub(r'_?\d+$', '', candidate_id)
+                                    
+                                    # Check if entity IDs match (ignoring trailing numbers)
+                                    if current_entity_base == candidate_base:
+                                        found_ma_player = candidate_id
+                                        log.info(f"[MASS Swap] Found MA player via entity ID similarity: {found_ma_player}")
+                                        break
                     
                     if found_ma_player:
                         log.info(f"[MASS Swap] Swapping {entity_id} ({integration}) -> MA {found_ma_player}")
