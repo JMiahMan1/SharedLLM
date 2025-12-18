@@ -66,12 +66,14 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
     # yt-dlp options for progressive download
     # Use best MP4 video+audio, but limit to 1080p to ensure cast compatibility and speed
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
+        # MUST use single file format (best[ext=mp4]) for progressive streaming.
+        # bestvideo+bestaudio causes two separate downloads + merge, which blocks until finished.
+        'format': 'best[ext=mp4]/best',
         'outtmpl': str(file_path),
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
-        'nopart': True, # Write directly to file so we can read it while downloading
+        'nopart': True, 
     }
     
     # Start download in asyncio executor
