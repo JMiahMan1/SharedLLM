@@ -435,6 +435,82 @@ async def handle_media_command(
             except Exception as e:
                 log.warning(f"[SmartPowerSync] Error: {e}")
 
+        # [SMART SWAP] Find Music Assistant sibling in same group using group_name
+        # This runs for music requests on non-MA devices to find the MA player in the same group
+        if intent == "play_media" and not is_video_request and integration != "music_assistant":
+            try:
+                from app.settings import GlobalResources
+                
+                # Get current entity metadata
+                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                current_meta = docs.get("metadatas", [{}])[0] if docs else {}
+                
+                if current_meta and current_meta.get("group_name"):
+                    group_name = current_meta["group_name"]
+                    log.info(f"[Smart Swap] Looking for Music sibling in group: '{group_name}'")
+                    
+                    # Find all siblings in same group_name
+                    siblings = GlobalResources.ha_collection._collection.get(
+                        where={"group_name": group_name},
+                        include=["metadatas"]
+                    )
+                    
+                    candidates = []
+                    if siblings and siblings.get("metadatas"):
+                        for meta in siblings["metadatas"]:
+                            s_id = meta.get("entity_id")
+                            if s_id == entity_id:
+                                continue
+                            
+                            s_integ = meta.get("integration", "")
+                            s_attrs = str(meta.get("attributes", "")).lower()
+                            
+                            # Check if Music Assistant capable
+                            is_ma = "music_assistant" in s_integ or "mass_player_type" in s_attrs
+                            
+                            if is_ma:
+                                score = 0
+                                
+                                # Model match (definitive - same hardware)
+                                target_model = current_meta.get("model")
+                                s_model = meta.get("model")
+                                if target_model and s_model and target_model == s_model:
+                                    score += 50
+                                
+                                # Manufacturer match
+                                target_mfr = current_meta.get("manufacturer")
+                                s_mfr = meta.get("manufacturer")
+                                if target_mfr and s_mfr and target_mfr == s_mfr:
+                                    score += 10
+                                
+                                # Name similarity
+                                target_name = current_meta.get("friendly_name", "").lower()
+                                s_name = meta.get("friendly_name", "").lower()
+                                if target_name and s_name and (target_name in s_name or s_name in target_name):
+                                    score += 20
+                                
+                                # Speaker device class
+                                if "device_class': 'speaker'" in s_attrs:
+                                    score += 5
+                                
+                                # Only consider if score >= 10 (prevents random swaps)
+                                if score >= 10:
+                                    candidates.append((score, s_id, s_integ))
+                    
+                    # Pick best candidate
+                    if candidates:
+                        candidates.sort(key=lambda x: x[0], reverse=True)
+                        best_score, best_id, best_integ = candidates[0]
+                        log.info(f"[Smart Swap] Candidates: {[(s, id) for s, id, _ in candidates]}. Selected: {best_id} (Score: {best_score})")
+                        log.info(f"[Smart Swap] Swapping {entity_id} -> {best_id} (Group: {group_name})")
+                        
+                        # SWAP entity_id to MA player
+                        entity_id = best_id
+                        integration = best_integ
+                        domain = entity_id.split('.')[0]
+            except Exception as e:
+                log.warning(f"[Smart Swap] Error: {e}")
+
         # [Music Assistant Integration]
         # Check if device supports Music Assistant OR if this is a natural language music search
         is_ma_device = "music_assistant" in integration
