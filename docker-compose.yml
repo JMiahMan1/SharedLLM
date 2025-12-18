@@ -37,8 +37,6 @@ services:
       # Adding the necessary temp dir for Nextcloud ingestion
       - ./data/nextcloud_temp:/data/nextcloud_temp:z
 
-    ports:
-      # - "11435:11435" # Removed for Host Mode
     working_dir: /workspace
     entrypoint: []
     command: [ "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "11435", "--workers", "1", "--reload", "--log-level", "debug" ]
