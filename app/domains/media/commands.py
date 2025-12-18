@@ -409,8 +409,8 @@ async def handle_media_command(
             try:
                 log.info(f"Delegating Music Assistant Play on {entity_id} (target:{ma_target_entity}) to music_assistant_ops")
 
-                # Determine content type
-                ctype = "music" if is_music_request else "video"
+                # Determine content type - DEFAULT TO MUSIC unless video keywords present
+                ctype = "video" if is_video_request else "music"
 
                 # CLEAN QUERY - Extract the actual search term
                 clean_title = query.lower()
