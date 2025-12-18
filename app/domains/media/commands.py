@@ -81,7 +81,8 @@ async def handle_media_command(
     # 1. EARLY MUSIC/CONTENT DETECTION
     music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
     audiobook_keywords = ["read", "book", "chapter", "audiobook"]
-    video_keywords = ["movie", "film", "show", "video", "youtube", "netflix", "watch"]
+    # ONLY watch/view should trigger video - not generic "video" keyword
+    video_keywords = ["watch", "view"]
 
     is_music_request = any(x in q_low for x in music_keywords)
     is_audiobook_request = any(x in q_low for x in audiobook_keywords)
@@ -354,9 +355,16 @@ async def handle_media_command(
              cleaned_std_query = query
         
         # Self-Correction: If query is not a URL and type is video, try to find a URL via Search
-        # Self-Correction: If query is not a URL and type is video, try to find a URL via Search
         if ctype == "video" and not query.startswith(("http", "www", "spotify", "app")):
-             msg = f"[Standard Play] No direct URL for '{query}'. Searching DuckDuckGo for YouTube link..."
+             # Extract just the content name for search (remove device names, intents, etc.)
+             search_query = query.lower()
+             # Remove common phrases
+             for phrase in ["on the", "on", "in the", "to the", "watch", "play", "view", "video", "youtube", 
+                           "office tv", "master bedroom tv", "tv", "television"]:
+                 search_query = search_query.replace(phrase, " ")
+             search_query = " ".join(search_query.split()).strip()
+             
+             msg = f"[Standard Play] No direct URL for '{query}'. Searching for '{search_query}' on YouTube..."
              log.info(msg)
              print(msg)
              
@@ -365,15 +373,17 @@ async def handle_media_command(
                  from duckduckgo_search import DDGS
                  def _do_search():
                      with DDGS() as ddgs:
-                         return list(ddgs.text(f"{query} youtube", max_results=2))
+                         # Search for just the content name + youtube
+                         return list(ddgs.text(f"{search_query} youtube", max_results=3))
                  
-                 print("Starting DDG search...")
+                 print(f"Starting DDG search for: {search_query} youtube")
                  results = await run_blocking(_do_search)
-                 print(f"DDG Results: {results}")
+                 print(f"DDG Results count: {len(results) if results else 0}")
                  
                  if results:
                      for r in results:
                          u = r.get("href", "")
+                         print(f"  - Result URL: {u}")
                          if "youtube.com" in u or "youtu.be" in u:
                              found_url = u
                              break
@@ -383,7 +393,7 @@ async def handle_media_command(
                  print(err_msg)
             
              if found_url:
-                 log.info(f"[Standard Play] Resolved '{query}' -> {found_url}")
+                 log.info(f"[Standard Play] Resolved '{search_query}' -> {found_url}")
                  print(f"Resolved to {found_url}")
                  cleaned_std_query = found_url
              else:
