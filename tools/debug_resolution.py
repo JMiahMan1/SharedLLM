@@ -2,10 +2,16 @@ import asyncio
 import os
 import sys
 import logging
+import asyncio
+import os
+import sys
+import logging
 import json
 
-# Setup paths to allow imports
-sys.path.append("/app")
+# [FIX] Container has /app/__init__.py, making /app a package.
+# To allow 'from app.settings', we must have '/' in python path so 'app' is found.
+if "/" not in sys.path:
+    sys.path.append("/")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
