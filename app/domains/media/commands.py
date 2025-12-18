@@ -354,8 +354,12 @@ async def handle_media_command(
              cleaned_std_query = query
         
         # Self-Correction: If query is not a URL and type is video, try to find a URL via Search
+        # Self-Correction: If query is not a URL and type is video, try to find a URL via Search
         if ctype == "video" and not query.startswith(("http", "www", "spotify", "app")):
-             log.info(f"[Standard Play] No direct URL for '{query}'. Searching DuckDuckGo for YouTube link...")
+             msg = f"[Standard Play] No direct URL for '{query}'. Searching DuckDuckGo for YouTube link..."
+             log.info(msg)
+             print(msg)
+             
              found_url = None
              try:
                  from duckduckgo_search import DDGS
@@ -363,7 +367,10 @@ async def handle_media_command(
                      with DDGS() as ddgs:
                          return list(ddgs.text(f"{query} youtube", max_results=2))
                  
+                 print("Starting DDG search...")
                  results = await run_blocking(_do_search)
+                 print(f"DDG Results: {results}")
+                 
                  if results:
                      for r in results:
                          u = r.get("href", "")
@@ -371,13 +378,17 @@ async def handle_media_command(
                              found_url = u
                              break
              except Exception as e:
-                 log.warning(f"[Standard Play] Search error: {e}")
+                 err_msg = f"[Standard Play] Search error: {e}"
+                 log.warning(err_msg)
+                 print(err_msg)
             
              if found_url:
                  log.info(f"[Standard Play] Resolved '{query}' -> {found_url}")
+                 print(f"Resolved to {found_url}")
                  cleaned_std_query = found_url
              else:
                  log.warning("[Standard Play] Video request with non-URL query. Aborting to prevent 500 error.")
+                 print("Aborting video request")
                  return [{"status": "FAILURE", "message": "Video playback requires a direct URL or specific app. Please provide a link.", "entity_id": entity_id, "service": "play_media"}]
              
         std_service_data = {
