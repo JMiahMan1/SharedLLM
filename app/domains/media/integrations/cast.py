@@ -70,6 +70,12 @@ class CastIntegration(StandardIntegration):
         # We must invoke the YouTube App (AppID: 233637DE) with the Video ID.
         if media_type == "video" and ("youtube.com" in query or "youtu.be" in query):
              video_id = self._extract_youtube_id(query)
+             
+             # If no video ID found but it's a playlist, resolve it
+             if not video_id and "list=" in query:
+                 log.info("[CastIntegration] Detected playlist, resolving first video...")
+                 video_id = await self._resolve_playlist_to_video(query)
+                 
              if video_id:
                  import json
                  
@@ -121,6 +127,30 @@ class CastIntegration(StandardIntegration):
         # Proceed with Standard Playback
         # If we updated 'query' to a URL, super() will skip search and just play it.
         return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
+
+    async def _resolve_playlist_to_video(self, url: str) -> Optional[str]:
+        """Resolves a playlist URL to the first video ID."""
+        try:
+            import yt_dlp
+            
+            def extract_playlist_first_video():
+                ydl_opts = {
+                    'extract_flat': 'in_playlist', # Just get metadata, don't download
+                    'playlistend': 1, # Only get first item
+                    'quiet': True,
+                    'no_warnings': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    if 'entries' in info and len(info['entries']) > 0:
+                        return info['entries'][0]['id']
+                    return None
+
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, extract_playlist_first_video)
+        except Exception as e:
+            log.warning(f"[CastIntegration] Failed to resolve playlist: {e}")
+            return None
 
     def _extract_youtube_id(self, url: str) -> str:
         """Extracts video ID from various YouTube URL formats."""
