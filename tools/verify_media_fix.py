@@ -126,7 +126,7 @@ def main():
     else: fails += 1
     
     # 2. Master Bedroom
-    if run_test_strict("Play Big Buck Bunny video on Master Bedroom TV", "Master Bedroom TV", "play"): passes += 1
+    if run_test_strict("Watch Big Buck Bunny on Master Bedroom TV", "Master Bedroom TV", "play"): passes += 1
     else: fails += 1
     
     time.sleep(5)
