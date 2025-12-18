@@ -17,7 +17,11 @@ def safe_similarity_search(collection, query: str, k: int = 5):
         log.warning(f"No docs returned from ChromaDB for query '{query}'.")
     return docs
 
+
+from app.domains.media.commands import execute_batch_command
+
 # --- Media Intent Definitions ---
+
 # App Package IDs for Android TV Smart Routing
 APP_PACKAGES = {
     "youtube": "com.google.android.youtube.tv",
@@ -585,83 +589,7 @@ async def resolve_multiple_entities_with_pattern(
     return matching_entities
 
 
-async def execute_batch_command(
-    entities: List[Tuple[str, str]],
-    intent: str,
-    query: str,
-    user_creds: dict,
-    ha_collection,
-    redis_client
-) -> dict:
-    """
-    Execute same command on multiple entities and aggregate results.
-    """
-    if not entities:
-        return {
-            'status': 'FAILURE',
-            'message': 'No matching devices found for pattern',
-            'service': intent
-        }
-    
-    log.info(f"[BATCH] Executing '{intent}' on {len(entities)} entities")
-    
-    results = []
-    for entity_id, integration in entities:
-        try:
-            result = await handle_media_command(
-                intent, query, entity_id, user_creds, ha_collection, redis_client
-            )
-            results.append(result)
-        except Exception as e:
-            log.error(f"[BATCH] Error executing on {entity_id}: {e}")
-            results.append({
-                'status': 'FAILURE',
-                'message': str(e),
-                'entity_id': entity_id,
-                'service': intent
-            })
-    
-    # Flatten nested lists (handle_media_command can return lists)
-    flattened_results = []
-    for r in results:
-        if isinstance(r, list):
-            flattened_results.extend(r)
-        else:
-            flattened_results.append(r)
-    
-    # Aggregate results - handle both dict and list results
-    success_count = sum(1 for r in flattened_results if isinstance(r, dict) and r.get('status') == 'SUCCESS')
-    failure_count = len(flattened_results) - success_count
-    
-    # Get list of successful/failed devices
-    successful_devices = [r.get('friendly_name', r.get('entity_id', '?')) 
-                         for r in flattened_results if isinstance(r, dict) and r.get('status') == 'SUCCESS']
-    failed_devices = [r.get('friendly_name', r.get('entity_id', '?'))
-                     for r in flattened_results if isinstance(r, dict) and r.get('status') != 'SUCCESS']
-    
-    if success_count == len(flattened_results):
-        message = f"Successfully controlled {success_count} devices: {', '.join(successful_devices)}"
-        status = 'SUCCESS'
-    elif success_count > 0:
-        message = f"Controlled {success_count}/{len(flattened_results)} devices. "
-        message += f"Success: {', '.join(successful_devices)}. "
-        if failed_devices:
-            message += f"Failed: {', '.join(failed_devices)}"
-        status = 'SUCCESS'  # Partial success still counts as success
-    else:
-        message = f"Failed to control all {len(flattened_results)} devices: {', '.join(failed_devices)}"
-        status = 'FAILURE'
-    
-    return {
-        'status': status,
-        'message': message,
-        'service': intent,
-        'batch_results': flattened_results,
-        'success_count': success_count,
-        'failure_count': failure_count,
-        'friendly_name': f"{success_count} devices",  # For LLM context formatting
-        'entity_id': 'batch_command'  # Identify as batch in context
-    }
+
 async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False, is_video: bool = False, allow_multiple: bool = False) -> list:
     """
     Resolves the best entity (or entities) based on query and intent.
