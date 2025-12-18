@@ -19,8 +19,21 @@ class CastIntegration(StandardIntegration):
 
     async def play_media(self, entity_id: str, query: str, media_type: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
-        Play media on Cast device, ensuring TV sibling is valid and powered on.
+        Play media on Cast device, ensuring TV sibling is powered on.
         """
+        # [Music Assistant Wrapper Detection]
+        # If targeting a Music Assistant wrapper (e.g., media_player.office_tv_chrome_2),
+        # swap to the underlying Cast device (e.g., media_player.office_tv_chrome)
+        entity_state = await self._get_entity_state(entity_id, user_creds)
+        if entity_state and entity_state.get("attributes", {}).get("mass_player_type"):
+            # This is a Music Assistant wrapper
+            active_queue = entity_state["attributes"].get("active_queue")
+            if active_queue:
+                log.info(f"[MASS Unwrap] Detected Music Assistant wrapper '{entity_id}'. Using underlying Cast device: {active_queue}")
+                entity_id = active_queue  # Replace with real Cast device
+            else:
+                log.warning(f"[MASS Unwrap] Entity {entity_id} is a MASS wrapper but has no active_queue. Proceeding anyway.")
+        
         # [SmartPowerSync]
         await self._ensure_tv_on(entity_id, user_creds)
 
