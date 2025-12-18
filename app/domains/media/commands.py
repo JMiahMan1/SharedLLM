@@ -257,6 +257,7 @@ async def handle_media_command(
                 if search_name:
                     log.info(f"[MASS Swap] Music request on non-MA device. Checking for MA player matching '{search_name}'...")
                     # Search for MA integration
+                    from app.settings import GlobalResources
                     ma_docs = GlobalResources.ha_collection.similarity_search(f"{search_name} music assistant", k=3)
                     for d in ma_docs:
                         if d.metadata.get("integration") == "music_assistant":
