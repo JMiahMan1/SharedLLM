@@ -352,6 +352,7 @@ async def handle_media_command(
         # [Music Assistant Integration]
         # Check if device supports Music Assistant OR if this is a natural language music search
         is_ma_device = "music_assistant" in integration
+        ma_target_entity = entity_id  # Track the actual entity to use for MA calls
         
         if not is_ma_device:
             try:
@@ -369,6 +370,17 @@ async def handle_media_command(
                     if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
                         is_ma_device = True
                         log.info(f"Identified {entity_id} as MA device via attributes.")
+                        
+                        # CRITICAL: Check for active_queue - synced players must use their queue
+                        # active_queue points to the actual MA player entity
+                        try:
+                            import json
+                            attrs = json.loads(current_meta.get("attributes", "{}"))
+                            if "active_queue" in attrs and attrs["active_queue"]:
+                                ma_target_entity = attrs["active_queue"]
+                                log.info(f"[MA] Synced player detected. Using active_queue: {ma_target_entity} instead of {entity_id}")
+                        except Exception as e:
+                            log.warning(f"[MA] Could not parse active_queue: {e}")
             except Exception:
                 pass
 
@@ -380,7 +392,7 @@ async def handle_media_command(
 
         if is_ma_device:
             try:
-                log.info(f"Delegating Music Assistant Play on {entity_id} to music_assistant_ops")
+                log.info(f"Delegating Music Assistant Play on {entity_id} (target:{ma_target_entity}) to music_assistant_ops")
 
                 # Determine content type
                 ctype = "music" if is_music_request else "video"
@@ -416,14 +428,14 @@ async def handle_media_command(
                 log.info(f"[MA CLEANING] Original: '{query}' -> Cleaned: '{clean_title}'")
 
                 # Attempt Music Assistant delegation
-                result = await music_assistant_ops.play_media(entity_id, clean_title, ctype, user_creds)
+                result = await music_assistant_ops.play_media(ma_target_entity, clean_title, ctype, user_creds)
 
                 if result and result.get("status") == "SUCCESS":
                     log.info("Music Assistant delegation succeeded")
                     return [result]
                 else:
                     log.info("MA play_media failed with specific type. Retrying with media_type='search'...")
-                    result = await music_assistant_ops.play_media(entity_id, clean_title, "search", user_creds)
+                    result = await music_assistant_ops.play_media(ma_target_entity, clean_title, "search", user_creds)
 
                 if result and result.get("status") == "SUCCESS":
                     log.info("Music Assistant delegation succeeded on retry")
