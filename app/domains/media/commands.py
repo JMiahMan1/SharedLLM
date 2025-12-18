@@ -242,36 +242,47 @@ async def handle_media_command(
                         is_ma_device = True
                         log.info(f"Identified {entity_id} as MA device via attributes.")
 
+                # AGGRESSIVE MA FALLBACK: If it's a natural language music request (not a URL), try MA
+                # This allows "Play Brandon Lake on Office TV" (AndroidTV) to go through MA's search
+                if not is_ma_device and is_music_request and not query.startswith(("http", "spotify:", "app:")):
+                     log.info(f"Request is NL Music Search ('{query}'). Attempting to use Music Assistant for resolution.")
+                     is_ma_device = True
+
                 if is_ma_device:
                     log.info(f"Delegating Music Assistant Play on {entity_id} to music_assistant_ops")
 
                     # Determine content type
                     ctype = "music" if is_music_request else "video"
 
-                    # Clean the title (based on original logic)
+                    # CLEAN QUERY - Extract the actual search term
                     clean_title = query.lower()
 
-                    # Remove device name from query
+                    # 1. Remove device name from query (e.g. "on office tv")
                     if entity_id:
                         from app.domains.media.devices import get_device_capabilities
                         caps = await get_device_capabilities(entity_id, user_creds, redis_client)
                         fname = caps.get("friendly_name", "").lower()
                         ename = entity_id.split(".")[-1].replace("_", " ").lower()
-
+                        
                         # Remove "on {name}" patterns
-                        for name in [fname, ename, "office tv", "master bedroom tv", "gracie tv"]:
+                        # Add generic "tv" or "speaker" removal if they appear at the end
+                        targets_to_remove = [fname, ename, "office tv", "master bedroom tv", "gracie tv", "tv", "speaker"]
+                        for name in targets_to_remove:
                             if name and name in clean_title:
-                                clean_title = re.sub(f"\\b(on|in|at)?\\s*{re.escape(name)}\\b", " ", clean_title)
+                                # regex to remove "on the office tv" or just "office tv"
+                                clean_title = re.sub(f"\\b(on|in|at|to)?\\s*(the)?\\s*{re.escape(name)}\\b", " ", clean_title)
 
-                    # Remove action/control words
+                    # 2. Remove action/control words
                     clean_title = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean_title)
 
-                    # Remove content type keywords for music requests
+                    # 3. Remove content type keywords for music requests
                     if is_music_request:
                         clean_title = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean_title)
 
-                    # Clean up extra spaces and strip
+                    # 4. Clean up extra spaces
                     clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+                    
+                    log.info(f"[MA CLEANING] Original: '{query}' -> Cleaned: '{clean_title}'")
 
                     # Attempt Music Assistant delegation
                     result = await music_assistant_ops.play_media(entity_id, clean_title, ctype, user_creds)
@@ -295,6 +306,17 @@ async def handle_media_command(
         # Default to music if ambiguous, as video usually requires specific "watch" intent
         ctype = "video" if is_video_request else "music"
         
+        # CLEAN QUERY for Standard Players too (Spotify et al expect just the song name)
+        # Reuse logic? For now, apply simple cleaning if we didn't use MA
+        cleaned_std_query = query.lower()
+        if ctype == "music":
+             cleaned_std_query = re.sub(r"\b(play|please|listen to)\b", "", cleaned_std_query).strip()
+             # If we have a detected device name in query, try to strip it?
+             # Ideally we use the same robust cleaning as above.
+             # For now, let's minimally start with the intent strip.
+        else:
+             cleaned_std_query = query
+        
         # Self-Correction: If query is not a URL and type is video, it will likely fail on generic players
         # So force music if it looks like a search query and not a URL
         if ctype == "video" and not query.startswith(("http", "www", "spotify", "app")):
@@ -302,12 +324,12 @@ async def handle_media_command(
              return [{"status": "FAILURE", "message": "Video playback requires a direct URL or specific app. Please provide a link.", "entity_id": entity_id, "service": "play_media"}]
              
         std_service_data = {
-            "media_content_id": query,
+            "media_content_id": cleaned_std_query,
             "media_content_type": ctype
         }
         
         # Enhanced Logging for debugging 500 errors
-        log.info(f"[Standard Play] Call {domain}.play_media on {entity_id} | Type: {ctype} | Content: {query}")
+        log.info(f"[Standard Play] Call {domain}.play_media on {entity_id} | Type: {ctype} | Content: {cleaned_std_query}")
         
         try:
             result = await execute_ha_service(domain, "play_media", entity_id, user_creds, std_service_data, redis_client)
