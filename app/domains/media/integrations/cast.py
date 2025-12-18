@@ -61,8 +61,9 @@ class CastIntegration(StandardIntegration):
                  import json
                  
                  # Toggle Strategy: Set True to use yt-dlp (Bypass), False to use App (Login)
-                 # Reverted to False: yt-dlp (True) causes Splash Screen/Hang. App Launch (False) works but has prompt.
-                 BYPASS_YOUTUBE_APP = False
+                 # True: Direct URL casting (no app launch, but may have extraction issues)
+                 # False: YouTube App launch (stable but shows login prompts)
+                 BYPASS_YOUTUBE_APP = True
                  
                  # [Strategy 1: Direct Stream Extraction (Bypass App/Login)]
                  if BYPASS_YOUTUBE_APP:
