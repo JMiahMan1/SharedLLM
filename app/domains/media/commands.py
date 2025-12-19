@@ -312,7 +312,7 @@ async def handle_media_command(
         # STRICTER: Only swap to Music Assistant if explicitly requested or high confidence it's music
         if is_music_request and integration != "music_assistant" and not is_video_request:
             try:
-                from app.settings import GlobalResources
+                # GlobalResources is already imported at module level
                 
                 # Get current device's group_id and entity_id
                 current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
@@ -372,7 +372,7 @@ async def handle_media_command(
         if is_video_request and integration in ["cast", "music_assistant"]:
             try:
                 # Get the current device's group_id from ChromaDB
-                from app.settings import GlobalResources
+                # GlobalResources is already imported at module level
                 current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
                 if current_docs and current_docs.get("metadatas"):
                     current_group_id = current_docs["metadatas"][0].get("group_id")
