@@ -108,17 +108,6 @@ async def handle_media_command(
             if isinstance(resolved, list):
                 if resolved:
                     log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
-                    # Force context update for the first resolved entity (primary target)
-                    if len(resolved) > 0:
-                        first_entity = resolved[0][0]
-                        user = user_creds.get("user")
-                        if user and first_entity:
-                            log.info(f"[CONTEXT FORCE] Pre-batch update for user={user} -> {first_entity}")
-                            _set_last_entity(redis_client, user, first_entity)
-                            if first_entity.startswith("media_player."):
-                                 from app.domains.media.devices import _set_last_media_entity
-                                 _set_last_media_entity(redis_client, user, first_entity)
-
                     return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
                 else:
                      log.info(f"[Device Fallback] No devices found for {device_name}")
@@ -156,17 +145,6 @@ async def handle_media_command(
                 if isinstance(resolved, list):
                     if resolved:
                         log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
-                        # Force context update for the first resolved entity (primary target)
-                        if len(resolved) > 0:
-                            first_entity = resolved[0][0]
-                            user = user_creds.get("user")
-                            if user and first_entity:
-                                log.info(f"[CONTEXT FORCE] Pre-batch update for user={user} -> {first_entity}")
-                                _set_last_entity(redis_client, user, first_entity)
-                                if first_entity.startswith("media_player."):
-                                     from app.domains.media.devices import _set_last_media_entity
-                                     _set_last_media_entity(redis_client, user, first_entity)
-                        
                         return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
                     else:
                          log.info(f"[Device Fallback] No devices found for {cleaned_for_res}")
@@ -265,7 +243,8 @@ async def handle_media_command(
     # [**UNIVERSAL** MASS INTELLIGENCE SWAP] - Run for ALL music requests
     # If we have a music request but resolved to a non-MA device, try to swap to MA player
     if intent in ["play_media", "open_app", "watch_video", "view_content"]:
-        if (is_music_request or (intent == "play_media" and not is_video_request)) and integration != "music_assistant":
+        # STRICTER: Only swap to Music Assistant if explicitly requested or high confidence it's music
+        if is_music_request and integration != "music_assistant" and not is_video_request:
             try:
                 from app.settings import GlobalResources
                 
@@ -291,41 +270,28 @@ async def handle_media_command(
                                     log.info(f"[MASS Swap] Found MA player in same group: {found_ma_player}")
                                     break
                     
-                    # Strategy 2: If no MA in group, try entity ID similarity
+                    # Strategy 2: Reverse Metadata Lookup (Trust attributes, not names)
                     if not found_ma_player:
-                        log.info(f"[MASS Swap] No MA in group. Checking entity ID similarity for base: {current_entity_base}")
-                        # Get ALL music_assistant devices and check for entity ID match
+                        log.info(f"[MASS Swap] No MA in group. Attempting strict metadata lookup via active_queue...")
                         ma_docs = GlobalResources.ha_collection._collection.get(
                             where={"integration": "music_assistant"},
                             include=["metadatas"]
                         )
                         if ma_docs and ma_docs.get("metadatas"):
+                            import json
                             for metadata in ma_docs["metadatas"]:
-                                candidate_id = metadata.get("entity_id")
-                                if candidate_id:
-                                    candidate_base = re.sub(r'_?\d+$', '', candidate_id)
+                                try:
+                                    # Parse attributes JSON to find the link
+                                    # We are looking for a MASS player whose 'active_queue' points to specific entity_id
+                                    attrs = json.loads(metadata.get("attributes", "{}"))
+                                    target_queue = attrs.get("active_queue")
                                     
-                                    # Fuzzy match: check if IDs are "super close"
-                                    # Match if exact, or if one contains the other, or 80%+ similar
-                                    is_match = False
-                                    if current_entity_base == candidate_base:
-                                        is_match = True
-                                    elif current_entity_base in candidate_base or candidate_base in current_entity_base:
-                                        is_match = True
-                                    else:
-                                        # Calculate similarity (rough Levenshtein-like)
-                                        longer = max(len(current_entity_base), len(candidate_base))
-                                        if longer > 0:
-                                            # Count matching characters in order
-                                            common = sum(a == b for a, b in zip(current_entity_base, candidate_base))
-                                            similarity = common / longer
-                                            if similarity >= 0.8:
-                                                is_match = True
-                                    
-                                    if is_match:
-                                        found_ma_player = candidate_id
-                                        log.info(f"[MASS Swap] Found MA player via fuzzy entity ID match: {found_ma_player} (base: {candidate_base} ~ {current_entity_base})")
+                                    if target_queue == entity_id:
+                                        found_ma_player = metadata.get("entity_id")
+                                        log.info(f"[MASS Swap] Found MA player via active_queue metadata: {found_ma_player}")
                                         break
+                                except Exception as e:
+                                    continue
                     
                     if found_ma_player:
                         log.info(f"[MASS Swap] Swapping {entity_id} ({integration}) -> MA {found_ma_player}")
