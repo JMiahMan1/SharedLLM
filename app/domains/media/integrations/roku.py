@@ -95,39 +95,44 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      log.error("[Roku] Could not determine Roku IP address")
                      return {"status": "FAILURE", "message": "Roku IP address not found"}
                  
-                 # Use Roku ECP API to launch Roku Media Player (channel 15985)
-                 # Official documented method for direct HTTP video streaming
-                 import requests
-                 
-                 ecp_url = f"http://{roku_ip}:8060/launch/15985"
-                 params = {"contentID": local_url}
-                 
-                 try:
-                     log.info(f"[Roku ECP] Launching Roku Media Player (15985): {ecp_url}")
-                     log.info(f"[Roku ECP] Video URL: {local_url}")
-                     response = requests.post(ecp_url, params=params, timeout=10)
-                     if response.status_code == 200:
-                         log.info("[Roku ECP] Successfully launched Roku Media Player")
-                         return {
-                             "status": "SUCCESS",
-                             "message": f"Playing video on {entity_id}",
-                             "entity_id": entity_id,
-                             "service": "roku_ecp_launch"
-                         }
-                     else:
-                         log.error(f"[Roku ECP] Failed with status {response.status_code}: {response.text}")
-                         return {
-                             "status": "FAILURE",
-                             "message": f"Roku ECP returned {response.status_code}",
-                             "entity_id": entity_id
-                         }
-                 except Exception as e:
-                     log.error(f"[Roku ECP] Exception: {e}")
-                     return {
-                         "status": "FAILURE",
-                         "message": f"Roku ECP error: {str(e)}",
-                         "entity_id": entity_id
-                     }
+                 # Use Roku ECP /input endpoint (showed purple screen = was attempting to play)
+                # This endpoint accepts video URLs directly
+                import requests
+                
+                ecp_url = f"http://{roku_ip}:8060/input/15985"
+                params = {
+                    "t": "v",  # type: video
+                    "u": local_url,  # video URL
+                    "videoName": "Video Stream",
+                    "videoFormat": "mp4"
+                }
+                
+                try:
+                    log.info(f"[Roku ECP] Using /input endpoint: {ecp_url}")
+                    log.info(f"[Roku ECP] Video URL: {local_url}")
+                    response = requests.post(ecp_url, params=params, timeout=10)
+                    if response.status_code == 200:
+                        log.info("[Roku ECP] Successfully sent video to Roku")
+                        return {
+                            "status": "SUCCESS",
+                            "message": f"Playing video on {entity_id}",
+                            "entity_id": entity_id,
+                            "service": "roku_ecp_input"
+                        }
+                    else:
+                        log.error(f"[Roku ECP] Failed with status {response.status_code}: {response.text}")
+                        return {
+                            "status": "FAILURE",
+                            "message": f"Roku ECP returned {response.status_code}",
+                            "entity_id": entity_id
+                        }
+                except Exception as e:
+                    log.error(f"[Roku ECP] Exception: {e}")
+                    return {
+                        "status": "FAILURE",
+                        "message": f"Roku ECP error: {str(e)}",
+                        "entity_id": entity_id
+                    }
             else:
                 log.error("[Roku] Failed to generate local stream URL.")
 
