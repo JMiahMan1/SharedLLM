@@ -65,11 +65,9 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      video_id = await self._resolve_playlist_to_video(query)
 
                 if video_id:
-                     # STRATEGY: Deep Link to YouTube App
-                     # Format: <AppID>?contentId=<VideoID>&mediaType=live
-                     # App ID 837 is standard YouTube.
-                     deep_link_id = f"837?contentId={video_id}&mediaType=live"
-                     log.info(f"[Roku] Launching YouTube Deep Link: {deep_link_id}")
+                     # STRATEGY: Deep Link to YouTube App using 'extra' params
+                     # Format: media_content_id="837", extra={"contentId": "...", "mediaType": "live"}
+                     log.info(f"[Roku] Launching YouTube Deep Link (ID: {video_id}) via 'extra' params")
 
                      return await execute_ha_service(
                           "media_player",
@@ -77,8 +75,12 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                           entity_id,
                           user_creds,
                           {
-                              "media_content_id": deep_link_id,
-                              "media_content_type": "app"
+                              "media_content_id": "837", # YouTube Channel ID
+                              "media_content_type": "app",
+                              "extra": {
+                                  "contentId": video_id,
+                                  "mediaType": "live"
+                              }
                           },
                           kwargs.get("redis_client")
                      )
