@@ -1,0 +1,23 @@
+TESTING: Gracies TV (media_player.28_tcl_roku_tv)
+============================================================
+
+1️⃣ Checking Initial State...
+   State: Unknown
+
+2️⃣ Testing Music Playback (Brandon Lake)...
+
+📱 USER: Play Brandon Lake on Gracies TV
+🤖 ASSISTANT: I'll attempt to play Brandon Lake on the Roku device. Let me check the connection... Error: Unable to control the Roku device (mediaplayer.roku2n0062385487). Please ensure the device is online and try again. If this is not the correct TV, please specify the proper name.
+   State: Unknown | Media: N/A
+
+3️⃣ Testing Video Playback (Big Buck Bunny)...
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+🤖 ASSISTANT: I'm unable to play the video on Gracies TV at this moment. There seems to be an issue with the device integration. Would you like me to try again, or should I check the device name/settings for adjustments?
+   State: Unknown | Media: N/A
+
+4️⃣ Testing Stop...
+
+📱 USER: Stop Gracies TV
+❌ COMM ERROR: None
+   State: Unknown

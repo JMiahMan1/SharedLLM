@@ -1,0 +1,14 @@
+======================================================================
+SIMPLE ROKU TEST - App Should Handle Power
+======================================================================
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+🤖 ASSISTANT: I'm unable to play the video at this time. The command to playmedia on Gracies TV failed due to an integration error. Would you like me to check the device's connectivity or try a different video source?
+
+⏳ Waiting 15s for playback to start...
+
+======================================================================
+🔍 PLEASE VERIFY:
+   1. Is the TV display ON?
+   2. Is video playing or attempting to play?
+======================================================================

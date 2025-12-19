@@ -1,0 +1,18 @@
+total 64
+-rw-r--r--. 1 jeremiah jeremiah  81 Dec 19 12:12 check_gitignore.txt
+-rw-r--r--. 1 jeremiah jeremiah  82 Dec 19 12:18 check_power_test.txt
+-rw-r--r--. 1 jeremiah jeremiah  79 Dec 19 12:17 check_remotes.txt
+-rw-r--r--. 1 jeremiah jeremiah  90 Dec 19 12:10 check_verification_retry.txt
+-rw-r--r--. 1 jeremiah jeremiah  90 Dec 19 12:10 check_verification.txt
+-rw-r--r--. 1 jeremiah jeremiah  73 Dec 19 12:12 final_commit.txt
+-rw-r--r--. 1 jeremiah jeremiah 478 Dec 19 12:11 final_git_status_2.txt
+-rw-r--r--. 1 jeremiah jeremiah 478 Dec 19 12:11 final_git_status_3.txt
+-rw-r--r--. 1 jeremiah jeremiah 478 Dec 19 12:11 final_git_status.txt
+-rw-r--r--. 1 jeremiah jeremiah  73 Dec 19 12:10 git_revert.txt
+-rw-r--r--. 1 jeremiah jeremiah 783 Dec 19 12:12 ls_final_check.txt
+-rw-r--r--. 1 jeremiah jeremiah 302 Dec 19 12:10 ls_long_wait.txt
+-rw-r--r--. 1 jeremiah jeremiah   0 Dec 19 12:18 ls_power_check.txt
+-rw-r--r--. 1 jeremiah jeremiah 168 Dec 19 12:17 remotes_list.txt
+-rw-r--r--. 1 jeremiah jeremiah 931 Dec 19 12:10 roku_final_verification.txt
+-rw-r--r--. 1 jeremiah jeremiah 593 Dec 19 12:18 roku_power_test.txt
+-rw-r--r--. 1 jeremiah jeremiah 478 Dec 19 12:12 status_check.txt

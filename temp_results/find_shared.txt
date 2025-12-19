@@ -1,0 +1,5 @@
+./.venv/lib/python3.11/site-packages/docx/shared.py
+./.venv/lib/python3.11/site-packages/docx/opc/shared.py
+./.venv/lib/python3.11/site-packages/docx/oxml/shared.py
+./.venv/lib/python3.11/site-packages/pandas/core/_numba/kernels/shared.py
+./.venv/lib/python3.11/site-packages/fastapi/_compat/shared.py

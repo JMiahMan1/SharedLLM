@@ -1,0 +1,25 @@
+2025-12-19 14:27:33,021 [INFO] [VideoHelper] Video ready at: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
+2025-12-19 14:27:33,021 [INFO] [Roku] Streaming: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
+2025-12-19 14:27:33,022 [INFO] [Roku] Using configured IP: 192.168.2.166
+2025-12-19 14:27:33,022 [INFO] [Roku ECP] Launching video: http://192.168.2.166:8060/input/15985 with URL: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
+2025-12-19 14:27:33,367 [INFO] [Roku ECP] Successfully launched video
+2025-12-19 14:27:33,368 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
+2025-12-19 14:27:33,370 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]]
+2025-12-19 14:27:33,370 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}], type: <class 'list'>
+2025-12-19 14:27:33,370 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
+2025-12-19 14:27:33,370 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
+[download]   0.0% of   27.20MiB at  693.16KiB/s ETA 00:42[download]   0.0% of   27.20MiB at    1.11MiB/s ETA 00:24[download]   0.0% of   27.20MiB at    2.24MiB/s ETA 00:12[download]   0.1% of   27.20MiB at    4.29MiB/s ETA 00:06[download]   0.1% of   27.20MiB at    7.55MiB/s ETA 00:03[download]   0.2% of   27.20MiB at    1.82MiB/s ETA 00:14[download]   0.5% of   27.20MiB at    1.85MiB/s ETA 00:14[download]   0.9% of   27.20MiB at    2.21MiB/s ETA 00:12[download]   1.8% of   27.20MiB at    2.72MiB/s ETA 00:09[download]   3.7% of   27.20MiB at    3.58MiB/s ETA 00:07[download]   7.3% of   27.20MiB at    4.15MiB/s ETA 00:06[DEBUG] try_handle_compound_command returning: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
+2025-12-19 14:27:33,371 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
+2025-12-19 14:27:33,371 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'roku_ecp_input' sent to N/A. Verified New State: N/A
+
+2025-12-19 14:27:33,372 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-19 14:27:33,372 [INFO] DEBUG: Entering Silent Mode for intent 'play_media'
+2025-12-19 14:27:33,373 [DEBUG] [RESPONSE] Returning to client: Done.
+INFO:     192.168.2.1:35134 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-19 14:27:38,528 [DEBUG] [d3ec6b31a2715d2d] Connection close sent (code 0x0, reason )
+2025-12-19 14:27:38,529 [DEBUG] [d3ec6b31a2715d2d] CONNECTED -> CLOSING
+2025-12-19 14:27:48,464 [INFO] [INTENT] get_intent called with query: 'Turn off Gracies TV'
+2025-12-19 14:27:48,464 [INFO] [REGEX START] apply_regex_override called with: 'Turn off Gracies TV'
+2025-12-19 14:27:48,464 [INFO] [REGEX CHECK] Checking query: 'turn off gracies tv'

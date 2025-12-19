@@ -1,0 +1,20 @@
+TESTING ROKU POWER: media_player.28_tcl_roku_tv
+============================================================
+
+1️⃣ Checking Initial State...
+   Media Player State: on
+   Remote State:       on
+
+   ⚠️ Roku is ALREADY ON. Turning it OFF for test...
+🔄 Calling media_player.turn_off with {'entity_id': 'media_player.28_tcl_roku_tv'}...
+   ✅ Service called successfully.
+   New State: off
+
+2️⃣ Test A: Standard media_player.turn_on
+🔄 Calling media_player.turn_on with {'entity_id': 'media_player.28_tcl_roku_tv'}...
+   ✅ Service called successfully.
+   ⏳ Waiting 10s for wake up...
+   State after turn_on: on
+   🎉 SUCCESS! Standard turn_on works.
+
+DONE.

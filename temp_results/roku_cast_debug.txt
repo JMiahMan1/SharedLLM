@@ -1,0 +1,44 @@
+--- Check Safe Wake ---
+Testing Payload A (type=video)...
+
+Sending [media_player/play_media] Payload:
+{
+  "entity_id": "media_player.28_tcl_roku_tv",
+  "media_content_id": "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+  "media_content_type": "video",
+  "extra": {
+    "title": "Debug Cast A",
+    "format": "mp4"
+  }
+}
+Response: 200
+
+Testing Payload B (type=url - EXPECT FAILURE)...
+
+Sending [media_player/play_media] Payload:
+{
+  "entity_id": "media_player.28_tcl_roku_tv",
+  "media_content_id": "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+  "media_content_type": "url",
+  "extra": {
+    "title": "Debug Cast B",
+    "format": "mp4"
+  }
+}
+Response: 500
+Error: 500 Internal Server Error
+
+Server got itself in trouble
+
+Testing Payload C (Minimal)...
+
+Sending [media_player/play_media] Payload:
+{
+  "entity_id": "media_player.28_tcl_roku_tv",
+  "media_content_id": "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+  "media_content_type": "video"
+}
+Response: 500
+Error: 500 Internal Server Error
+
+Server got itself in trouble

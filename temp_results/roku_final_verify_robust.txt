@@ -1,0 +1,26 @@
+TESTING: Gracies TV (media_player.28_tcl_roku_tv)
+============================================================
+
+1️⃣ Checking & Ensuring Power State...
+   Waiting for device to turn ON (Timeout: 30s)...
+   [Polling] MP: idle | Remote: on
+   ✅ Device is ON (Remote: on, MP: idle)
+   Current State: idle
+
+2️⃣ Testing Music Playback (Brandon Lake)...
+
+📱 USER: Play Brandon Lake on Gracies TV
+🤖 ASSISTANT: I'm unable to play Brandon Lake on Gracies TV at this moment. The system detected an issue connecting to the device. Would you like me to check the TV's status or attempt the command again?
+   State: idle | Media: N/A
+
+3️⃣ Testing Video Playback (Big Buck Bunny)...
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+❌ COMM ERROR: None
+   State: idle | Media: N/A
+
+4️⃣ Testing Stop...
+
+📱 USER: Stop Gracies TV
+❌ COMM ERROR: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f4f9a6ee5d0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+   State: idle

@@ -145,16 +145,11 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         )
     
     async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
-        """
-        Get Roku IP address using SSDP network discovery
-        Falls back to ROKU_IP env var if discovery fails
-        """
+        """Get Roku IP address using SSDP network discovery"""
         import requests
         from app.settings import HA_URL
-        import os
-        from app.utils.roku_discovery import find_roku_ip_by_entity
+        from app.utils.network_discovery import discover_roku_ip
         
-        # Step 1: Try SSDP network discovery
         try:
             headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
             resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
@@ -163,21 +158,14 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                 attributes = entity_data.get("attributes", {})
                 
                 # Attempt SSDP discovery
-                ip = find_roku_ip_by_entity(entity_id, attributes)
+                ip = discover_roku_ip(attributes)
                 if ip:
                     log.info(f"[Roku] Discovered IP via SSDP: {ip}")
                     return ip
                 else:
-                    log.warning(f"[Roku] SSDP discovery failed for {entity_id}")
+                    log.error(f"[Roku] SSDP discovery found no Roku devices for {entity_id}")
+                    return None
         except Exception as e:
-            log.warning(f"[Roku] SSDP discovery error: {e}")
-        
-        # Step 2: Fallback to configured IP
-        configured_ip = os.getenv("ROKU_IP")
-        if configured_ip:
-            log.info(f"[Roku] Using configured ROKU_IP: {configured_ip}")
-            return configured_ip
-        
-        log.error(f"[Roku] Could not determine IP for {entity_id}. Set ROKU_IP env var or ensure Roku is discoverable on network.")
-        return None
+            log.error(f"[Roku] Discovery error: {e}")
+            return None
 

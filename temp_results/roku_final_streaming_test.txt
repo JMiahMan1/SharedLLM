@@ -1,0 +1,13 @@
+======================================================================
+SIMPLE ROKU TEST - App Should Handle Power
+======================================================================
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+❌ EXCEPTION: None
+
+⏳ Waiting 15s for playback to start...
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/tools/test_roku_simple.py", line 37, in <module>
+    time.sleep(15)
+    ~~~~~~~~~~^^^^
+KeyboardInterrupt
