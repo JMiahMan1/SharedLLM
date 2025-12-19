@@ -73,11 +73,14 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         if media_type == "video":
             # 1. Resolve Query
             if not query.startswith(("http", "www", "spotify", "app")):
-                from app.logic.web_search import search_web
-                search_results = await search_web(f"{query} youtube", num_results=1)
-                if search_results and len(search_results) > 0:
-                    query = search_results[0]['link']
-                    log.info(f"[Roku] Resolved '{query}' to {query}")
+                from app.logic.web_search import tool_web_search
+                search_results_text = await tool_web_search(f"{query} youtube")
+                # Parse first URL from results
+                import re
+                urls = re.findall(r'URL: (https?://[^\s]+)', search_results_text)
+                if urls:
+                    query = urls[0]
+                    log.info(f"[Roku] Resolved to {query}")
 
             # 2. Download & Cast (Direct Stream)
             # This is mandated by user ("HAVE to do the cast feature").
