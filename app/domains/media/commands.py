@@ -29,14 +29,14 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     intent = intent.strip()
     log.info(f"[_execute_transport_command] Intent='{intent}' (repr={repr(intent)}) Entity='{entity_id}'")
 
-    # Unwrap MASS wrappers for transport commands
-    # Use generic unwrap function - MASS declares unwrap_for_request_types: ["video", "transport"]
-    from app.domains.media.integrations.base import unwrap_entity_if_needed
-    entity_id = await unwrap_entity_if_needed(entity_id, "transport", user_creds)
-
+    # DON'T unwrap - send to original entity (MASS wrapper or Cast)
+    # MASS wrappers should handle transport commands directly
+    # If they fail on Cast, we fallback to remote commands below
+    
     # Special handling for stop_media - check state first
     if intent == "stop_media":
         log.info(f"[Transport] Match stop_media for {entity_id}")
+        from app.domains.media.devices import get_entity_state
         state = await get_entity_state(entity_id, user_creds)
         if state in ["off", "unavailable", "idle", "standby"]:
             return {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
@@ -52,8 +52,22 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     }
     service_name = intent_to_service.get(intent, intent)
     
-    # Fallback to generic service call
-    return await execute_ha_service("media_player", service_name, entity_id, user_creds, {}, redis_client)
+    # Send command to original entity
+    result = await execute_ha_service("media_player", service_name, entity_id, user_creds, {}, redis_client)
+    
+    # If failed and NOT Music Assistant, try remote fallback
+    is_mass = "music_assistant" in integration or "_2" in entity_id  # heuristic for MASS wrappers
+    if result.get("status") == "FAILURE" and not is_mass and intent in ["media_next", "media_previous"]:
+        remote_id = entity_id.replace("media_player", "remote")
+        # Check if remote exists
+        from app.domains.media.devices import get_entity_state
+        remote_state = await get_entity_state(remote_id, user_creds)
+        if remote_state and remote_state != "unknown":
+            log.info(f"[Transport] {service_name} failed on {entity_id}. Falling back to remote: {remote_id}")
+            remote_command = "MEDIA_NEXT" if intent == "media_next" else "MEDIA_PREVIOUS"
+            result = await execute_ha_service("remote", "send_command", remote_id, user_creds, {"command": remote_command}, redis_client)
+    
+    return result
 
 
 async def handle_media_command(
