@@ -454,6 +454,24 @@ async def handle_media_command(
                 pass
 
         # Standard power/remote commands
+        # [SmartPowerSync] For turn_on/turn_off, route to actual TV device instead of Cast/MASS wrapper
+        if intent in ["turn_on", "turn_off"] and domain == "media_player":
+            from app.domains.media.power_sync import find_tv_sibling
+            tv_entity = await find_tv_sibling(entity_id, user_creds)
+            if tv_entity != entity_id:
+                log.info(f"[SmartPowerSync] Routing {intent} from {entity_id} to actual TV: {tv_entity}")
+                entity_id = tv_entity
+                # Update domain based on new entity
+                if tv_entity.startswith("remote."):
+                    domain = "remote"
+                    # For remotes, use send_command instead
+                    if intent == "turn_off":
+                        service = "send_command"
+                        service_data = {"command": "POWER"}
+                    elif intent == "turn_on":
+                        service = "send_command"
+                        service_data = {"command": "POWER"}
+        
         if domain not in ["light", "switch", "remote", "media_player"]:
             domain = "homeassistant"
         return [await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)]
