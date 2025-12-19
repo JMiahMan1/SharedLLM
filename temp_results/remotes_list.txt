@@ -1,0 +1,6 @@
+Searching for remote entities...
+ID: remote.28_tcl_roku_tv
+  Friendly Name: Gracies TV
+  State: off
+----------------------------------------
+Found 1 potential remotes.

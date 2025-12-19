@@ -1,0 +1,108 @@
+Deploying to jeremiah@192.168.2.211:/home/jeremiah/SharedLLM
+Syncing local .env to remote...
+Branch: timer
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+Activate the web console with: systemctl enable --now cockpit.socket
+
+Fetching latest code...
+From github.com:JMiahMan1/SharedLLM
+   202a1ef..e1bd42f  timer      -> origin/timer
+Already on 'timer'
+Your branch is behind 'origin/timer' by 1 commit, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+HEAD is now at e1bd42f Prioritize native TV integrations over Music Assistant for video
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+Already up to date.
+Recreating Docker container to apply config...
+time="2025-12-19T13:27:11-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+#1 [internal] load local bake definitions
+#1 reading from stdin 509B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile:
+#2 transferring dockerfile: 1.19kB done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+#3 DONE 0.8s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 456B done
+#4 DONE 0.1s
+
+#5 [1/8] FROM docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime@sha256:f0ca81b440e252399d9954a45b616ee2540959466aacf3dfc3f856691eee66e8
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 111.26kB 0.0s done
+#6 DONE 0.1s
+
+#7 [5/8] RUN pip install --no-cache-dir -r requirements.txt
+#7 CACHED
+
+#8 [2/8] WORKDIR /app
+#8 CACHED
+
+#9 [3/8] COPY requirements.txt .
+#9 CACHED
+
+#10 [4/8] RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y     curl     iputils-ping     tesseract-ocr     poppler-utils     ffmpeg     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libdrm2     libxkbcommon0     libxcomposite1     libxdamage1     libxfixes3     libxrandr2     libgbm1     libasound2     libpango-1.0-0     libcairo2     tzdata     && rm -rf /var/lib/apt/lists/*
+#10 CACHED
+
+#11 [6/8] RUN playwright install chromium
+#11 CACHED
+
+#12 [7/8] COPY app/ /app/
+#12 DONE 0.3s
+
+#13 [8/8] COPY data/ /data/
+#13 DONE 0.6s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 0.3s done
+#14 writing image sha256:bd327407fa7672592e23a5bd4bf18bfda5cf61d98bae4d66e178d66f7e307621
+#14 writing image sha256:bd327407fa7672592e23a5bd4bf18bfda5cf61d98bae4d66e178d66f7e307621 0.4s done
+#14 naming to docker.io/library/sharedllm-rag-api
+#14 naming to docker.io/library/sharedllm-rag-api 0.0s done
+#14 DONE 0.7s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ sharedllm-rag-api  Built
+ Container unified_rag_redis  Recreate
+ Container unified_rag_redis  Recreated
+ Container unified_rag_api  Recreate
+time="2025-12-19T13:27:15-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+ Container unified_rag_api  Recreated
+ Container unified_rag_redis  Starting
+ Container unified_rag_redis  Started
+ Container unified_rag_api  Starting
+ Container unified_rag_api  Started
+Waiting for application startup...
+..............................
+[FAIL] Timeout waiting for application startup.
+Last 20 lines of logs:
+[DEBUG] try_handle_compound_command returning: [{'status': 'FAILURE', 'message': "Integration error: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)", 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'play_media'}]
+    from app.logic.web_search import search_web
+ImportError: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)
+2025-12-19 13:28:02,102 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': "Integration error: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)", 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'play_media'}]
+2025-12-19 13:28:02,102 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': "Integration error: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)", 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'play_media'}]]
+2025-12-19 13:28:02,102 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': "Integration error: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)", 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'play_media'}], type: <class 'list'>
+2025-12-19 13:28:02,103 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': "Integration error: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)", 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'play_media'}]
+2025-12-19 13:28:02,103 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': "Integration error: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)", 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'play_media'}]
+2025-12-19 13:28:02,103 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': "Integration error: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)", 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'play_media'}]
+2025-12-19 13:28:02,103 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'play_media' on 'media_player.28_tcl_roku_tv' failed. Reason: Integration error: cannot import name 'search_web' from 'app.logic.web_search' (/workspace/app/logic/web_search.py)
+
+2025-12-19 13:28:02,103 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-19 13:28:02,104 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2711
+2025-12-19 13:28:02,106 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2025-12-19 13:28:02,383 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2025-12-19 13:28:11,330 [DEBUG] [RESPONSE] Final response to user (203 chars): I'm unable to play the video at this time. The command to playmedia on Gracies TV failed due to an integration error. Would you like me to check the device's connectivity or try a different video source?
+INFO:     192.168.2.1:34916 - "POST /api/chat HTTP/1.1" 200 OK
+2025-12-19 13:28:11,331 [DEBUG] [RESPONSE] Returning to client: I'm unable to play the video at this time. The command to playmedia on Gracies TV failed due to an integration error. Would you like me to check the device's connectivity or try a different video sour
+[FAIL] Deployment Failed.

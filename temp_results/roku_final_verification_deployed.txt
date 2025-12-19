@@ -1,0 +1,58 @@
+TESTING: Gracies TV (media_player.28_tcl_roku_tv)
+============================================================
+
+1️⃣ Checking Initial State...
+   State: Unknown
+
+2️⃣ Testing Music Playback (Brandon Lake)...
+
+📱 USER: Play Brandon Lake on Gracies TV
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/tools/test_media_gracies_tv.py", line 65, in <module>
+    send_chat(f"Play Brandon Lake on {DEVICE_NAME}")
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/tools/test_media_gracies_tv.py", line 43, in send_chat
+    response = requests.post(API_URL, json={"query": message}, timeout=60)
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 115, in post
+    return request("post", url, data=data, json=json, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/usr/lib/python3.14/site-packages/requests/adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1733, in urlopen
+    response = self._make_request(  # type: ignore[call-overload,misc]
+        conn,
+    ...<15 lines>...
+        extension=extension,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connectionpool.py", line 1360, in _make_request
+    response = conn.getresponse(
+        police_officer=self.pool, early_response_callback=on_early_response
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/connection.py", line 634, in getresponse
+    low_response = super().getresponse(
+        promise=promise,
+        early_response_callback=early_response_handler,
+    )
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/backend/hface.py", line 1532, in getresponse
+    head_event: HeadersReceived | EarlyHeadersReceived = self.__exchange_until(  # type: ignore[assignment]
+                                                         ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (
+        ^
+    ...<9 lines>...
+        stream_id=stream_id,
+        ^^^^^^^^^^^^^^^^^^^^
+    ).pop()
+    ^
+  File "/home/jeremiah/.local/lib/python3.14/site-packages/urllib3/backend/hface.py", line 908, in __exchange_until
+    data_in = self.sock.recv(self.blocksize)
+KeyboardInterrupt

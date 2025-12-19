@@ -1,0 +1,19 @@
+======================================================================
+SIMPLE ROKU TEST - App Should Handle Power
+======================================================================
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+🤖 ASSISTANT: The command to play Big Buck Bunny on Gracies TV failed. It seems the Roku device isn't currently detectable on the network. Would you like me to attempt the command again, or would you prefer guidance on locating the Roku's IP address manually? (Note: The video is 12 minutes long, would you like a timer reminder before it starts?)
+
+⏳ Waiting 15s for playback to start...
+
+======================================================================
+🔍 PLEASE VERIFY:
+   1. Is the TV display ON?
+   2. Is video playing or attempting to play?
+======================================================================
+
+🔴 Turning off TV...
+
+📱 USER: Turn off Gracies TV
+🤖 ASSISTANT: Turning off Gracies TV.

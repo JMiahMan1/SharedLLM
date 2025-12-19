@@ -1,0 +1,1 @@
+-rw-r--r--. 1 jeremiah jeremiah 468 Dec 19 12:10 temp_results/roku_final_verification.txt

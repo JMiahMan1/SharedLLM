@@ -1,0 +1,23 @@
+TESTING: Gracies TV (media_player.28_tcl_roku_tv)
+============================================================
+
+1️⃣ Checking Initial State...
+   State: Unknown
+
+2️⃣ Testing Music Playback (Brandon Lake)...
+
+📱 USER: Play Brandon Lake on Gracies TV
+❌ COMM ERROR: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7fc254746cf0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+   State: Unknown | Media: N/A
+
+3️⃣ Testing Video Playback (Big Buck Bunny)...
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+🤖 ASSISTANT: The command to play the Big Buck Bunny video on Gracies TV failed. There appears to be an issue with the Roku integration, specifically, a syntax error in the code (unexpected indent on line 54 of roku.py). Let me know if you'd like me to attempt the command again or verify the device name.
+   State: Unknown | Media: N/A
+
+4️⃣ Testing Stop...
+
+📱 USER: Stop Gracies TV
+🤖 ASSISTANT: The command to stop Gracies TV (28 Tcl Roku Tv) failed. Would you like me to attempt to stop it again?
+   State: Unknown

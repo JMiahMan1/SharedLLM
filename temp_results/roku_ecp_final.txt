@@ -1,0 +1,19 @@
+======================================================================
+SIMPLE ROKU TEST - App Should Handle Power
+======================================================================
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+🤖 ASSISTANT: I'm unable to play the video on Gracies TV at this time. The system encountered an error trying to access the Roku device. Would you like me to attempt the command again, or would you prefer to check if Gracies TV is properly configured in the Home Assistant settings?
+
+⏳ Waiting 15s for playback to start...
+
+======================================================================
+🔍 PLEASE VERIFY:
+   1. Is the TV display ON?
+   2. Is video playing or attempting to play?
+======================================================================
+
+🔴 Turning off TV...
+
+📱 USER: Turn off Gracies TV
+🤖 ASSISTANT: Turning off Gracies TV.

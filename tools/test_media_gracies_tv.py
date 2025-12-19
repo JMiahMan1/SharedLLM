@@ -19,6 +19,18 @@ headers = {
     "Content-Type": "application/json",
 }
 
+REMOTE_ENTITY = "remote.28_tcl_roku_tv"
+
+def get_entity_state(entity_id):
+    try:
+        url = f"{HA_URL}/api/states/{entity_id}"
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            return resp.json().get("state", "unknown")
+    except:
+        pass
+    return "unknown"
+
 def get_tv_state():
     try:
         url = f"{HA_URL}/api/states/{TARGET_ENTITY}"
@@ -65,18 +77,23 @@ def wait_for_power_on(timeout=30):
     start_time = time.time()
     print(f"   Waiting for device to turn ON (Timeout: {timeout}s)...")
     while time.time() - start_time < timeout:
-        state_data = get_tv_state()
-        curr_state = state_data.get("state", "unknown")
+        # Check both Media Player and Remote
+        mp_state_data = get_tv_state() # Returns dict
+        mp_state = mp_state_data.get("state", "unknown")
         
-        # Roku 'home' or 'idle' usually means ON. 'standby' or 'off' means OFF.
-        if curr_state in ["on", "idle", "playing", "paused", "home"]:
-            print(f"   ✅ Device is ON (State: {curr_state})")
+        rem_state = get_entity_state(REMOTE_ENTITY)
+        
+        print(f"   [Polling] MP: {mp_state} | Remote: {rem_state}", end="\r")
+        
+        # Criteria: Remote is 'on' OR Media Player is active
+        if rem_state == "on" or mp_state in ["on", "idle", "playing", "paused", "home"]:
+            print(f"\n   ✅ Device is ON (Remote: {rem_state}, MP: {mp_state})")
             return True
         
-        # If off, try sending turn_on command
-        if curr_state in ["off", "standby", "unavailable", "unknown"]:
-             print(f"   Device is '{curr_state}'. Sending turn_on...", end="\r")
+        # If off, send turn_on to BOTH to be sure
+        if time.time() - start_time > 5: # Give it a few seconds before spamming
              requests.post(f"{HA_URL}/api/services/media_player/turn_on", headers=headers, json={"entity_id": TARGET_ENTITY})
+             # Also try remote command if needed, but MP turn_on worked in test_roku_power
         
         time.sleep(2)
         

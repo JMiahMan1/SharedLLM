@@ -1,0 +1,14 @@
+On branch timer
+Your branch is up to date with 'origin/timer'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   tools/inspect_ha_players.py
+	modified:   tools/test_media_gracies_tv.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	temp_results/
+
+no changes added to commit (use "git add" and/or "git commit -a")

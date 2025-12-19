@@ -1,0 +1,15 @@
+TESTING: Gracies TV (media_player.28_tcl_roku_tv)
+============================================================
+
+1️⃣ Checking Initial State...
+   State: Unknown
+
+2️⃣ Testing Music Playback (Brandon Lake)...
+
+📱 USER: Play Brandon Lake on Gracies TV
+❌ COMM ERROR: HTTPConnectionPool(host='192.168.2.211', port=11435): Max retries exceeded with url: /api/chat (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f8f99f62cf0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+Traceback (most recent call last):
+  File "/home/jeremiah/Summers Drive/Code/SharedLLM/tools/test_media_gracies_tv.py", line 66, in <module>
+    time.sleep(10)
+    ~~~~~~~~~~^^^^
+KeyboardInterrupt
