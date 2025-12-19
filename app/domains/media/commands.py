@@ -64,8 +64,19 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
         if state in ["off", "unavailable", "idle", "standby"]:
             return {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
 
-    # Fallback to generic service call if intent matches a service name
-    return await execute_ha_service("media_player", intent, entity_id, user_creds, {}, redis_client)
+    # Map internal intent names to HA service names
+    intent_to_service = {
+        "media_next": "media_next_track",
+        "media_previous": "media_previous_track",
+        "stop_media": "media_stop",
+        "media_pause": "media_pause",
+        "media_play": "media_play",
+        "resume": "media_play",
+    }
+    service_name = intent_to_service.get(intent, intent)
+    
+    # Fallback to generic service call
+    return await execute_ha_service("media_player", service_name, entity_id, user_creds, {}, redis_client)
 
 
 async def handle_media_command(
