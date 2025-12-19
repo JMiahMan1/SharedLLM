@@ -11,6 +11,16 @@ class MusicAssistantIntegration(MediaIntegration):
     Music Assistant Integration.
     Handles delegation to music_assistant_ops and specific cleaners.
     """
+    
+    # Service Registry Metadata
+    service_type = "music"
+    creates_wrapper = True
+    wrapper_detection = {
+        "attribute": "mass_player_type",
+        "underlying_device_attribute": "active_queue"
+    }
+    unwrap_for_request_types = ["video", "transport"]  # Keep wrapper for music requests
+    
     @property
     def integration_type(self) -> str:
         return "music_assistant"

@@ -29,26 +29,10 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     intent = intent.strip()
     log.info(f"[_execute_transport_command] Intent='{intent}' (repr={repr(intent)}) Entity='{entity_id}'")
 
-    # [MASS Unwrap for Transport Commands]
-    # Music Assistant wrappers don't support skip/pause/resume/stop.
-    # Unwrap to the underlying Cast device for these commands.
-    try:
-        import requests
-        from app.settings import HA_URL
-        headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}", "Content-Type": "application/json"}
-        response = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
-        if response.status_code == 200:
-            entity_data = response.json()
-            if entity_data.get("attributes", {}).get("mass_player_type"):
-                # This is a Music Assistant wrapper
-                active_queue = entity_data["attributes"].get("active_queue")
-                if active_queue:
-                    log.info(f"[Transport MASS Unwrap] Detected Music Assistant wrapper '{entity_id}'. Using underlying device: {active_queue}")
-                    entity_id = active_queue  # Replace with real device
-                else:
-                    log.warning(f"[Transport MASS Unwrap] Entity {entity_id} is a MASS wrapper but has no active_queue.")
-    except Exception as e:
-        log.warning(f"[Transport MASS Unwrap] Failed to check for MA wrapper: {e}")
+    # [Generic Wrapper Unwrap - Service Registry Pattern]
+    # Use generic unwrap function for transport commands
+    from app.domains.media.integrations.base import unwrap_entity_if_needed
+    entity_id = await unwrap_entity_if_needed(entity_id, "transport", user_creds)
 
     result = None
 
