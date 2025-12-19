@@ -27,17 +27,26 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         """
         log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - CAST MODE")
         
-        # [SmartPowerSync] - Ensure TV is ON and Ready
-        await self.turn_on(entity_id, user_creds)
+        # [SmartPowerSync] - Ensure TV is ON via Remote (Robust)
+        # Infer remote entity from media_player entity (e.g. media_player.foo -> remote.foo)
+        remote_entity_id = entity_id.replace("media_player.", "remote.")
         
-        # Poll for state change (timeout 20s) instead of blind sleep
+        # Poll for state change (timeout 20s)
         for i in range(10):
+            # Check state
             state = await self.get_state(entity_id, user_creds)
             if state and state.state in ["on", "idle", "home", "playing", "paused"]:
                 log.info(f"[Roku] Device is verified ON (State: {state.state})")
                 break
-            if i % 2 == 0: # Retry turn_on every 4s if still off
+            
+            # Action: Wake Device
+            if i % 2 == 0: 
+                 log.info(f"[Roku] Device is {state.state if state else 'unknown'}. Sending PowerOn to {remote_entity_id}...")
+                 # Try Remote PowerOn (Most reliable)
+                 await execute_ha_service("remote", "send_command", remote_entity_id, user_creds, {"command": "poweron"}, None)
+                 # Backup: Media Player Turn On
                  await self.turn_on(entity_id, user_creds)
+            
             await asyncio.sleep(2)
         else:
             log.warning("[Roku] Device did not report ON state after wait. Proceeding but command may fail.")
