@@ -32,10 +32,16 @@ class IntegrationFactory:
             
         integration = integration.lower()
         
-        # Normalize integration names if needed (e.g. google_cast -> cast)
-        if "cast" in integration: target = "cast"
-        elif "music" in integration: target = "music_assistant"
-        else: target = "standard"
+        # Normalize integration names
+        if "cast" in integration: 
+            target = "cast"
+        elif "music" in integration: 
+            target = "music_assistant"
+        elif integration in ["roku", "tv"]:
+            # Both roku integration and generic tv should use RokuIntegration if available
+            target = integration if integration in cls._handlers else "roku"
+        else: 
+            target = integration if integration in cls._handlers else "standard"
         
         # Check cache
         if target in cls._instances:
