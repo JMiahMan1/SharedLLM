@@ -374,8 +374,10 @@ async def _handle_single_command(
         log.info(f"[PIPELINE DEBUG] Orchestration Plan: {orchestration_plan}")
         
         # [INTENT LOCK ENFORCEMENT] If intent was locked, restore it if LLM changed it
+        log.info(f"[INTENT LOCK DEBUG] intent_locked={intent_locked}, action={orchestration_plan.get('action')}, original_intent={intent}")
         if intent_locked and orchestration_plan.get("action") == "tool_call":
             plan_intent = orchestration_plan.get("parameters", {}).get("intent")
+            log.info(f"[INTENT LOCK DEBUG] plan_intent={plan_intent}, checking if != {intent}")
             if plan_intent and plan_intent != intent:
                 log.warning(f"[INTENT LOCK] LLM tried to change locked intent '{intent}' to '{plan_intent}'. Overriding back.")
                 orchestration_plan["parameters"]["intent"] = intent
