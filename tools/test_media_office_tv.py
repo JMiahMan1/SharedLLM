@@ -48,8 +48,17 @@ def send_chat(message):
         )
         if response.status_code == 200:
             data = response.json()
-            print(f"🤖 ASSISTANT: {data.get('response', 'No response')}")
-            return True
+            # Handle standard format: {"message": {"content": ...}}
+            if "message" in data and "content" in data["message"]:
+                 print(f"🤖 ASSISTANT: {data['message']['content']}")
+                 return True
+            # Handle cleanup format: {"response": ...}
+            elif "response" in data:
+                 print(f"🤖 ASSISTANT: {data['response']}")
+                 return True
+            else:
+                 print(f"🤖 ASSISTANT: (Raw Data) {data}")
+                 return True
         else:
             print(f"❌ ERROR: {response.status_code} - {response.text}")
             return False

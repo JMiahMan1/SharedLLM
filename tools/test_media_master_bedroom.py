@@ -40,7 +40,13 @@ def send_chat(message):
     try:
         response = requests.post(API_URL, json={"query": message}, timeout=60)
         if response.status_code == 200:
-            print(f"🤖 ASSISTANT: {response.json().get('response', 'No response')}")
+            data = response.json()
+            if "message" in data and "content" in data["message"]:
+                 print(f"🤖 ASSISTANT: {data['message']['content']}")
+            elif "response" in data:
+                 print(f"🤖 ASSISTANT: {data['response']}")
+            else:
+                 print(f"🤖 ASSISTANT: (Raw Data) {data}")
         else:
             print(f"❌ ERROR: {response.status_code}")
     except Exception as e:

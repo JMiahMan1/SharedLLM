@@ -9,9 +9,43 @@ import requests
 import asyncio
 from typing import List, Dict, Optional, Tuple
 from app.settings import run_blocking, HA_URL, GlobalResources
-# from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern (Moved inside methods)
 
 log = logging.getLogger(__name__)
+
+def _filter_by_area(candidates: List[dict], query: str) -> List[dict]:
+    """
+    Filters candidates if the query explicitly mentions an area name found in their metadata.
+    Example: "Turn off Living Room" -> Keeps only devices with area_name="Living Room".
+    """
+    if not candidates:
+        return candidates
+
+    query_lower = query.lower()
+    
+    # Check if any candidate has an area that matches the query
+    # We do a 'best effort' match. If multiple areas mentioned? (Simple contains check for now)
+    
+    # 1. Collect all unique areas present in candidates
+    candidate_areas = set(c.get("metadata", {}).get("area_name", "").lower() for c in candidates)
+    candidate_areas.discard("") # Remove empty
+    
+    matched_area = None
+    for area in candidate_areas:
+        if area in query_lower:
+             matched_area = area
+             break
+    
+    if matched_area:
+        log.info(f"[AREA MATCH] Query mentions area '{matched_area}'. Filtering candidates.")
+        filtered = [
+             c for c in candidates 
+             if c.get("metadata", {}).get("area_name", "").lower() == matched_area
+        ]
+        if filtered:
+             return filtered
+        log.warning(f"[AREA MATCH] Filter returned empty list. Fallback to original.")
+        
+    return candidates
 
 
 def safe_similarity_search(collection, query: str, k: int = 5):
@@ -602,6 +636,13 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
     if not raw_candidates:
         return [] if allow_multiple else (None, None)
+
+    # 3.5 AREA FILTERING (New Modular Step)
+    raw_candidates = _filter_by_area(raw_candidates, query_name)
+    
+    if not raw_candidates:
+         log.info("Area filtering removed all candidates. Returning None.")
+         return [] if allow_multiple else (None, None)
 
     # 4. Pattern Logic Application
     if patterns:

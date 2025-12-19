@@ -47,7 +47,7 @@ async def refresh_db():
         # Template to extract: entity_id|device_id|manufacturer|model
         template = """
         {% for state in states %}
-        {{ state.entity_id }}|{{ device_attr(state.entity_id, 'id') }}|{{ device_attr(state.entity_id, 'manufacturer') }}|{{ device_attr(state.entity_id, 'model') }}
+        {{ state.entity_id }}|{{ device_attr(state.entity_id, 'id') }}|{{ device_attr(state.entity_id, 'manufacturer') }}|{{ device_attr(state.entity_id, 'model') }}|{{ area_name(state.entity_id) }}|{{ area_name(device_attr(state.entity_id, 'id')) }}
         {% endfor %}
         """
         
@@ -62,21 +62,35 @@ async def refresh_db():
             lines = tmpl_resp.text.strip().split('\n')
             for line in lines:
                 parts = line.split('|')
-                if len(parts) >= 4:
+                if len(parts) >= 6:
                     eid = parts[0].strip()
                     did = parts[1].strip()
                     man = parts[2].strip()
                     mod = parts[3].strip()
+                    e_area = parts[4].strip()
+                    d_area = parts[5].strip()
                     
-                    if did == "None": did = None
-                    if man == "None": man = None
-                    if mod == "None": mod = None
-                    
-                    device_map[eid] = {
-                        "device_id": did,
-                        "manufacturer": man,
-                        "model": mod
-                    }
+                    # Prefer Entity Area, fallback to Device Area
+                    area = e_area if e_area and e_area != "None" else (d_area if d_area and d_area != "None" else None)
+                elif len(parts) >= 4:
+                     eid = parts[0].strip()
+                     did = parts[1].strip()
+                     man = parts[2].strip()
+                     mod = parts[3].strip()
+                     area = None
+                else:
+                     continue
+                
+                if did == "None": did = None
+                if man == "None": man = None
+                if mod == "None": mod = None
+                
+                device_map[eid] = {
+                    "device_id": did,
+                    "manufacturer": man,
+                    "model": mod,
+                    "area_name": area
+                }
             log.info(f"Built Device Map for {len(device_map)} entities.")
         else:
             log.warning(f"Failed to fetch Device Registry: {tmpl_resp.status_code}")
@@ -129,6 +143,7 @@ async def refresh_db():
                 "attributes": json.dumps(attrs), # Store attributes for smart capability parsing
                 "manufacturer": reg_data.get("manufacturer") or "",
                 "model": reg_data.get("model") or "",
+                "area_name": reg_data.get("area_name") or "",
                 "last_updated": str(asyncio.get_event_loop().time()),
                 "source": "home_assistant"
             }
