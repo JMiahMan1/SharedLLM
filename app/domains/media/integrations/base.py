@@ -1,22 +1,19 @@
+# app/domains/media/integrations/base.py
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-import logging
-
-log = logging.getLogger(__name__)
+from app.settings import log
 
 class MediaIntegration(ABC):
     """
-    Abstract Base Class for Home Assistant Media Integrations.
-    State Pattern / Strategy Pattern for handling different device types.
+    Base class for all media integrations.
     
-    Service Registry Pattern:
-    - Integrations declare wrapper metadata
-    - Generic unwrap logic uses this metadata instead of hardcoded checks
+    Service Registry Pattern Metadata:
+    - service_type: Type of media service (e.g., "music", "video", "audiobook")
+    - creates_wrapper: Whether integration creates wrapper entities  
+    - wrapper_detection: Dict with detection attributes
+    - unwrap_for_request_types: List of request types requiring unwrap
     """
-    
-    # ===== Service Registry Metadata =====
-    # Override these in subclasses to declare wrapper behavior
-    service_type: str = "unknown"  # "music", "video", "audiobook", etc.
+    service_type: str = "unknown"
     creates_wrapper: bool = False  # Does this integration create wrapper entities?
     wrapper_detection: Optional[Dict[str, str]] = None  # {"attribute": "mass_player_type", "underlying_device_attribute": "active_queue"}
     unwrap_for_request_types: list = []  # ["video", "transport", "music", etc.]
@@ -51,8 +48,6 @@ class MediaIntegration(ABC):
         return await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, None)
 
 
-# ===== Generic Unwrap Function (Service Registry Pattern) =====
-
 async def unwrap_entity_if_needed(
     entity_id: str,
     request_type: str,  # "music", "video", "transport"
@@ -60,8 +55,7 @@ async def unwrap_entity_if_needed(
 ) -> str:
     """
     Generic wrapper unwrap logic based on integration metadata.
-    Returns the underlying device entity_id if unwrap is needed, else returns original.
-    
+    Returns the underlying device entity_id if unwrap is needed, else returns original.   
     Uses Service Registry pattern: reads integration metadata instead of hardcoded checks.
     """
     try:
@@ -100,6 +94,15 @@ async def unwrap_entity_if_needed(
                 
                 # Should we unwrap for this request type?
                 if request_type in integration_class.unwrap_for_request_types:
+                    # Special case for transport commands: check if wrapper is actively playing
+                    if request_type == "transport":
+                        entity_state = entity_data.get("state", "unknown")
+                        if entity_state in ["playing", "paused", "buffering"]:
+                            # Wrapper is actively playing - keep it
+                            log.info(f"[Generic Unwrap] {integration_class.__name__} wrapper {entity_id} is {entity_state}. Keeping for active transport control.")
+                            return entity_id
+                        # Wrapper is idle - unwrap to underlying device
+                    
                     underlying_attr = integration_class.wrapper_detection.get("underlying_device_attribute")
                     underlying_device = attributes.get(underlying_attr)
                     
