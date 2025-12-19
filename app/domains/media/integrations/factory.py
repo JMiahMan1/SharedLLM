@@ -3,6 +3,7 @@ import logging
 from app.domains.media.integrations.base import MediaIntegration
 from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
 from app.domains.media.integrations.cast import CastIntegration
+from app.domains.media.integrations.roku import RokuIntegration
 from app.domains.media.integrations.standard import StandardIntegration
 
 log = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ class IntegrationFactory:
         "standard": StandardIntegration,
         # Map other integrations to standard for now, or implement specific ones
         "androidtv": StandardIntegration, 
-        "roku": StandardIntegration, 
+        "roku": RokuIntegration, 
         "webostv": StandardIntegration,
         "unknown": StandardIntegration
     }

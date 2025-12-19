@@ -98,6 +98,7 @@ requirements.txt
 - Navigation control (up, down, left, right, back, home, select)
 - Device grouping and batch operations
 - Smart device resolution with capability routing
+- **Area-based targeting** ("Turn off lights in the Office")
 
 ### ✅ Music Assistant Integration
 - Music search (artist, album, track)
