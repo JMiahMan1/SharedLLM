@@ -96,49 +96,49 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      return {"status": "FAILURE", "message": "Roku IP address not found"}
                  
                  # Dynamically discover the best video playback channel
-                from app.utils.roku_channels import find_video_playback_channel
-                import requests
-                
-                channel_id = find_video_playback_channel(roku_ip)
-                if not channel_id:
-                    log.error("[Roku] No suitable video playback channel found on device")
-                    return {"status": "FAILURE", "message": "No video playback channel available"}
-                
-                # Use Roku ECP /input endpoint (accepts video URLs directly)
-                ecp_url = f"http://{roku_ip}:8060/input/{channel_id}"
-                params = {
-                    "t": "v",  # type: video
-                    "u": local_url,  # video URL
-                    "videoName": "Video Stream",
-                    "videoFormat": "mp4"
-                }
-                
-                try:
-                    log.info(f"[Roku ECP] Using /input/{channel_id}: {ecp_url}")
-                    log.info(f"[Roku ECP] Video URL: {local_url}")
-                    response = requests.post(ecp_url, params=params, timeout=10)
-                    if response.status_code == 200:
-                        log.info("[Roku ECP] Successfully sent video to Roku")
-                        return {
-                            "status": "SUCCESS",
-                            "message": f"Playing video on {entity_id}",
-                            "entity_id": entity_id,
-                            "service": "roku_ecp_input"
-                        }
-                    else:
-                        log.error(f"[Roku ECP] Failed with status {response.status_code}: {response.text}")
-                        return {
-                            "status": "FAILURE",
-                            "message": f"Roku ECP returned {response.status_code}",
-                            "entity_id": entity_id
-                        }
-                except Exception as e:
-                    log.error(f"[Roku ECP] Exception: {e}")
-                    return {
-                        "status": "FAILURE",
-                        "message": f"Roku ECP error: {str(e)}",
-                        "entity_id": entity_id
-                    }
+                 from app.utils.roku_channels import find_video_playback_channel
+                 import requests
+                 
+                 channel_id = find_video_playback_channel(roku_ip)
+                 if not channel_id:
+                     log.error("[Roku] No suitable video playback channel found on device")
+                     return {"status": "FAILURE", "message": "No video playback channel available"}
+                 
+                 # Use Roku ECP /input endpoint (accepts video URLs directly)
+                 ecp_url = f"http://{roku_ip}:8060/input/{channel_id}"
+                 params = {
+                     "t": "v",  # type: video
+                     "u": local_url,  # video URL
+                     "videoName": "Video Stream",
+                     "videoFormat": "mp4"
+                 }
+                 
+                 try:
+                     log.info(f"[Roku ECP] Using /input/{channel_id}: {ecp_url}")
+                     log.info(f"[Roku ECP] Video URL: {local_url}")
+                     response = requests.post(ecp_url, params=params, timeout=10)
+                     if response.status_code == 200:
+                         log.info("[Roku ECP] Successfully sent video to Roku")
+                         return {
+                             "status": "SUCCESS",
+                             "message": f"Playing video on {entity_id}",
+                             "entity_id": entity_id,
+                             "service": "roku_ecp_input"
+                         }
+                     else:
+                         log.error(f"[Roku ECP] Failed with status {response.status_code}: {response.text}")
+                         return {
+                             "status": "FAILURE",
+                             "message": f"Roku ECP returned {response.status_code}",
+                             "entity_id": entity_id
+                         }
+                 except Exception as e:
+                     log.error(f"[Roku ECP] Exception: {e}")
+                     return {
+                         "status": "FAILURE",
+                         "message": f"Roku ECP error: {str(e)}",
+                         "entity_id": entity_id
+                     }
             else:
                 log.error("[Roku] Failed to generate local stream URL.")
 
