@@ -77,15 +77,62 @@ async def handle_media_command(
     if integration is None:
         integration = "unknown"
 
-    # 1. EARLY MUSIC/CONTENT DETECTION
+    # ===== LAYERED INTENT-TO-TYPE ROUTING =====
+    # Priority Cascade:
+    # 1. Intent sets default type (watch_media → video, play_media → music)
+    # 2. Strong keyword overrides (YouTube, song, album, etc.)
+    # 3. Existing heuristics refine
+    
+    # Layer 1: Intent → Default Type
+    if intent == "watch_media":
+        media_type_default = "video"
+    elif intent == "play_media":
+        media_type_default = "music"
+    else:
+        media_type_default = None  # Other intents (transport commands, etc.)
+    
+    # Layer 2: Strong Override Keywords
+    strong_video_keywords = ["youtube.com", "youtu.be", "watch?v=", "video"]
+    strong_music_keywords = ["song", "album", "artist", "track", "spotify:", "playlist"]
+    
+    media_type_override = None
+    if any(kw in q_low for kw in strong_video_keywords):
+        media_type_override = "video"
+    elif any(kw in q_low for kw in strong_music_keywords):
+        media_type_override = "music"
+    
+    # Layer 3: Existing Heuristics (Refinement)
     music_keywords = ["music", "song", "artist", "album", "track", "playlist", "radio"]
     audiobook_keywords = ["read", "book", "chapter", "audiobook"]
-    # ONLY watch/view/video should trigger video mode - not generic music keywords
     video_keywords = ["watch", "view", "video"]
 
     is_music_request = any(x in q_low for x in music_keywords)
     is_audiobook_request = any(x in q_low for x in audiobook_keywords)
     is_video_request = any(x in q_low for x in video_keywords)
+    
+    # Final Decision: Override > Default > Heuristic fallback
+    if media_type_override:
+        final_media_type = media_type_override
+        log.info(f"[Media Type] Override by keyword: {final_media_type}")
+    elif media_type_default:
+        final_media_type = media_type_default
+        log.info(f"[Media Type] Set by intent '{intent}': {final_media_type}")
+    else:
+        # Fallback to heuristics for non-play/watch intents
+        if is_video_request:
+            final_media_type = "video"
+        elif is_music_request or is_audiobook_request:
+            final_media_type = "music"
+        else:
+            final_media_type = None
+    
+    # Set legacy flags for backward compatibility with existing code
+    if final_media_type == "video":
+        is_video_request = True
+        is_music_request = False
+    elif final_media_type == "music":
+        is_music_request = True
+        is_video_request = False
 
     strict_resolution = (is_music_request or is_audiobook_request) or (
         (intent == "play_media" or intent == "play") and not is_video_request

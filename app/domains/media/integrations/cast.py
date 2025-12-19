@@ -22,30 +22,37 @@ class CastIntegration(StandardIntegration):
         Play media on Cast device, ensuring TV sibling is powered on.
         """
         # [Music Assistant Wrapper Detection]
-        # If targeting a Music Assistant wrapper (e.g., media_player.office_tv_chrome_2),
-        # swap to the underlying Cast device (e.g., media_player.office_tv_chrome)
-        from app.domains.media.devices import get_entity_state
+        # CONDITIONAL UNWRAP: Only strip the Music Assistant wrapper for VIDEO requests.
+        # For MUSIC requests, we WANT to keep the MASS wrapper (media_player.office_tv_chrome_2)
+        # so that Music Assistant handles the playback routing.
         
-        entity_state_data = await get_entity_state(entity_id, user_creds)
-        # get_entity_state returns state string, we need full entity data
-        # Let's get it from HA API directly
-        try:
-            import requests
-            from app.settings import HA_URL
-            headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}", "Content-Type": "application/json"}
-            response = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
-            if response.status_code == 200:
-                entity_data = response.json()
-                if entity_data.get("attributes", {}).get("mass_player_type"):
-                    # This is a Music Assistant wrapper
-                    active_queue = entity_data["attributes"].get("active_queue")
-                    if active_queue:
-                        log.info(f"[MASS Unwrap] Detected Music Assistant wrapper '{entity_id}'. Using underlying Cast device: {active_queue}")
-                        entity_id = active_queue  # Replace with real Cast device
-                    else:
-                        log.warning(f"[MASS Unwrap] Entity {entity_id} is a MASS wrapper but has no active_queue. Proceeding anyway.")
-        except Exception as e:
-            log.warning(f"[MASS Unwrap] Failed to check for MA wrapper: {e}")
+        if media_type == "video":
+            # For video: unwrap to bare Cast device (media_player.office_tv_chrome)
+            from app.domains.media.devices import get_entity_state
+            
+            entity_state_data = await get_entity_state(entity_id, user_creds)
+            # get_entity_state returns state string, we need full entity data
+            # Let's get it from HA API directly
+            try:
+                import requests
+                from app.settings import HA_URL
+                headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}", "Content-Type": "application/json"}
+                response = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
+                if response.status_code == 200:
+                    entity_data = response.json()
+                    if entity_data.get("attributes", {}).get("mass_player_type"):
+                        # This is a Music Assistant wrapper
+                        active_queue = entity_data["attributes"].get("active_queue")
+                        if active_queue:
+                            log.info(f"[MASS Unwrap] Video request: Detected Music Assistant wrapper '{entity_id}'. Using underlying Cast device: {active_queue}")
+                            entity_id = active_queue  # Replace with real Cast device
+                        else:
+                            log.warning(f"[MASS Unwrap] Entity {entity_id} is a MASS wrapper but has no active_queue. Proceeding anyway.")
+            except Exception as e:
+                log.warning(f"[MASS Unwrap] Failed to check for MA wrapper: {e}")
+        else:
+            # For music: keep the MASS wrapper (don't unwrap)
+            log.info(f"[MASS Unwrap] Music request: Keeping Music Assistant wrapper '{entity_id}' for proper routing")
         
         # [SmartPowerSync]
         await self._ensure_tv_on(entity_id, user_creds)

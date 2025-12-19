@@ -39,7 +39,8 @@ MEDIA_INTENTS = [
 # Regex intent mapping used by pipeline.py
 REGEX_INTENT_MAP = {
     r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)": "open_app",
-    r"\b(play|watch|view)\b": "play_media",
+    r"\b(watch|view)\b": "watch_media",  # Video intent (default: cast device)
+    r"\b(play)\b": "play_media",          # Music intent (default: music assistant)
     r"\b(stop|pause)\b": "stop_media",
     r"\b(resume|unpause)\b": "media_play",
     r"\b(skip|next)\b": "media_next",
