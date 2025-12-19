@@ -92,17 +92,8 @@ async def unwrap_entity_if_needed(
             if wrapper_attr and attributes.get(wrapper_attr):
                 # This is a wrapper from this integration
                 
-                # Should we unwrap for this request type?
+                #Should we unwrap for this request type?
                 if request_type in integration_class.unwrap_for_request_types:
-                    # Special case for transport commands: check if wrapper is actively playing
-                    if request_type == "transport":
-                        entity_state = entity_data.get("state", "unknown")
-                        if entity_state in ["playing", "paused", "buffering"]:
-                            # Wrapper is actively playing - keep it
-                            log.info(f"[Generic Unwrap] {integration_class.__name__} wrapper {entity_id} is {entity_state}. Keeping for active transport control.")
-                            return entity_id
-                        # Wrapper is idle - unwrap to underlying device
-                    
                     underlying_attr = integration_class.wrapper_detection.get("underlying_device_attribute")
                     underlying_device = attributes.get(underlying_attr)
                     
