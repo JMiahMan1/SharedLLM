@@ -9,8 +9,10 @@ import os
 API_URL = "http://192.168.2.211:11435/api/chat"
 HA_URL = os.getenv("HA_URL", "https://ha.sumemail.com")
 HA_TOKEN = os.getenv("HA_TOKEN")
+# Device Configuration
+# TARGET_ENTITY = "media_player.roku_2n0062385487" # OLD (MASS)
+TARGET_ENTITY = "media_player.28_tcl_roku_tv" # NEW (Native Roku)
 DEVICE_NAME = "Gracies TV"
-ENTITY_ID = "media_player.roku_2n0062385487"
 
 headers = {
     "Authorization": f"Bearer {HA_TOKEN}",
@@ -52,7 +54,7 @@ def send_chat(message):
     except Exception as e:
         print(f"❌ COMM ERROR: {e}")
 
-print(f"TESTING: {DEVICE_NAME} ({ENTITY_ID})")
+print(f"TESTING: {DEVICE_NAME} ({TARGET_ENTITY})")
 print("="*60)
 
 print("\n1️⃣ Checking Initial State...")
