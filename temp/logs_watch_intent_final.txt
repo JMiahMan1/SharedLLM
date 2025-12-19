@@ -1,0 +1,50 @@
+2025-12-18 21:11:49,516 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/tokenizer.json HTTP/2.0" 200 None
+2025-12-18 21:11:49,622 [DEBUG] Attempting to release lock 140393790136016 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-18 21:11:49,623 [DEBUG] Lock 140393790136016 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-18 21:11:49,752 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/added_tokens.json HTTP/2.0" 404 0
+2025-12-18 21:11:49,861 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/special_tokens_map.json HTTP/2.0" 307 0
+2025-12-18 21:11:49,893 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/special_tokens_map.json HTTP/2.0" 200 0
+2025-12-18 21:11:49,895 [DEBUG] Attempting to acquire lock 140393761047504 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-18 21:11:49,895 [DEBUG] Lock 140393761047504 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-18 21:11:49,926 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/special_tokens_map.json HTTP/2.0" 200 112
+2025-12-18 21:11:49,929 [DEBUG] Attempting to release lock 140393761047504 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-18 21:11:49,930 [DEBUG] Lock 140393761047504 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-18 21:11:50,042 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/chat_template.jinja HTTP/2.0" 404 0
+2025-12-18 21:11:50,180 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/1_Pooling/config.json HTTP/2.0" 307 0
+2025-12-18 21:11:50,213 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 0
+2025-12-18 21:11:50,215 [DEBUG] Attempting to acquire lock 140393790206928 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-18 21:11:50,215 [DEBUG] Lock 140393790206928 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-18 21:11:50,240 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 190
+2025-12-18 21:11:50,243 [DEBUG] Attempting to release lock 140393790206928 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-18 21:11:50,243 [DEBUG] Lock 140393790206928 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-18 21:11:50,359 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2 HTTP/2.0" 200 6781
+2025-12-18 21:11:50,366 [INFO] Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+2025-12-18 21:11:50,614 [INFO] Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2025-12-18 21:11:50,667 [DEBUG] Starting component System
+2025-12-18 21:11:50,668 [DEBUG] Starting component Posthog
+2025-12-18 21:11:50,788 [INFO] ChromaDB Loaded from /data/chroma_db
+2025-12-18 21:11:50,788 [INFO] --- Initializing Semantic Intent Engine ---
+2025-12-18 21:11:50,788 [INFO] Loaded phrasebook from /app/data/phrasebook.json
+2025-12-18 21:11:50,788 [INFO] Vectorizing 187 phrases for Intent Engine...
+2025-12-18 21:11:51,038 [INFO] Intent Engine Ready. Indexed 187 phrases.
+2025-12-18 21:11:51,038 [INFO] Starting Timer/Alarm Scheduler...
+2025-12-18 21:11:51,040 [INFO] Starting Device DB Refresh...
+2025-12-18 21:11:51,041 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-18 21:11:51,084 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 50031
+2025-12-18 21:11:51,101 [INFO] Fetched 707 entities from HA.
+2025-12-18 21:11:51,103 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-18 21:11:51,163 [DEBUG] https://ha.sumemail.com:443 "POST /api/template HTTP/1.1" 200 73664
+2025-12-18 21:11:51,187 [INFO] Built Device Map for 707 entities.
+2025-12-18 21:11:51,196 [INFO] Formed 142 Device Groups.
+2025-12-18 21:11:51,201 [INFO] Upserting 163 documents to ChromaDB...
+2025-12-18 21:11:51,201 [INFO] Preparing Doc: binary_sensor.music_assistant_server_running | Group: music assistant:home assistant add-on:music running | Integ: unknown
+2025-12-18 21:11:51,201 [INFO] Preparing Doc: light.kauf_plug_d67371_kauf_plug | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-18 21:11:51,201 [INFO] Preparing Doc: switch.string_lights_front | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-18 21:11:51,201 [INFO] Preparing Doc: light.downstairs_bathroom_1_light | Group: signify:wiz a19 filament:downstairs bathroom 1 light | Integ: unknown
+2025-12-18 21:11:51,201 [INFO] Preparing Doc: light.downstairs_bathroom_2_light | Group: signify:wiz a19 filament:downstairs bathroom 2 light | Integ: unknown
+2025-12-18 21:11:51,277 [INFO] Timer Scheduler Started.
+2025-12-18 21:11:51,277 [DEBUG] Starting new HTTPS connection (1): us.i.posthog.com:443
+INFO:     Application startup complete.
+2025-12-18 21:11:51,681 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-18 21:11:53,455 [INFO] Upsert OK.
+2025-12-18 21:11:53,455 [INFO] Device DB Refresh Complete.

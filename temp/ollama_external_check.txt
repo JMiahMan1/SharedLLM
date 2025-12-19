@@ -1,0 +1,19 @@
+*   Trying 192.168.1.161:11434...
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0* Connected to 192.168.1.161 (192.168.1.161) port 11434 (#0)
+> GET /api/tags HTTP/1.1
+> Host: 192.168.1.161:11434
+> User-Agent: curl/7.81.0
+> Accept: */*
+> 
+* Mark bundle as not supporting multiuse
+< HTTP/1.1 200 OK
+< Content-Type: application/json; charset=utf-8
+< Date: Fri, 19 Dec 2025 03:44:44 GMT
+< Content-Length: 1731
+< 
+{ [1323 bytes data]
+100  1731  100  1731    0     0  70225      0 --:--:-- --:--:-- --:--:-- 72125
+* Connection #0 to host 192.168.1.161 left intact
+{"models":[{"name":"lukaspetrik/gemma3-tools:4b","model":"lukaspetrik/gemma3-tools:4b","modified_at":"2025-11-01T10:30:54.253336377-07:00","size":3338803895,"digest":"b39e89a483a671e88c22b84c284b3c4c164b6862470ca6329a67c5c004d7eda4","details":{"parent_model":"","format":"gguf","family":"gemma3","families":["gemma3"],"parameter_size":"4.3B","quantization_level":"Q4_K_M"}},{"name":"qwen3:latest","model":"qwen3:latest","modified_at":"2025-10-30T19:06:09.347792475-07:00","size":5225388164,"digest":"500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41","details":{"parent_model":"","format":"gguf","family":"qwen3","families":["qwen3"],"parameter_size":"8.2B","quantization_level":"Q4_K_M"}},{"name":"oscar_while/gemma-3-4b-tools:Q4_K_M","model":"oscar_while/gemma-3-4b-tools:Q4_K_M","modified_at":"2025-10-30T18:59:58.128919999-07:00","size":3338815372,"digest":"893a475682b7eba20ece254e4dc9f7dea10aa60200ad594c3f3e62a5fd25f848","details":{"parent_model":"","format":"gguf","family":"gemma3","families":["gemma3"],"parameter_size":"4.3B","quantization_level":"Q4_K_M"}},{"name":"qwen3:4b","model":"qwen3:4b","modified_at":"2025-10-30T18:59:58.128919999-07:00","size":2497293931,"digest":"359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7","details":{"parent_model":"","format":"gguf","family":"qwen3","families":["qwen3"],"parameter_size":"4.0B","quantization_level":"Q4_K_M"}},{"name":"qwen3:8b","model":"qwen3:8b","modified_at":"2025-10-30T18:59:58.128919999-07:00","size":5225388164,"digest":"500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41","details":{"parent_model":"","format":"gguf","family":"qwen3","families":["qwen3"],"parameter_size":"8.2B","quantization_level":"Q4_K_M"}}]}

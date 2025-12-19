@@ -1,0 +1,43 @@
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+   aa0208f..b002019  timer      -> origin/timer
+Updating aa0208f..b002019
+Fast-forward
+ app/logic/web_search.py | 17 ++++++++++++++++-
+ 1 file changed, 16 insertions(+), 1 deletion(-)
+--- STARTING PLAYWRIGHT FALLBACK TEST (Structured v2) ---
+
+[TEST 1] Testing Connection Failure (Bad URL)
+2025-12-18 15:50:38,078 [DEBUG] Using selector: EpollSelector
+2025-12-18 15:50:38,079 [INFO] Launching Playwright for URL: http://localhost:9999/search?q=test_connection_failure
+2025-12-18 15:50:38,573 [WARNING] Playwright Primary URL Failed: Page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:9999/search?q=test_connection_failure
+Call log:
+  - navigating to "http://localhost:9999/search?q=test_connection_failure", waiting until "networkidle"
+. Proceeding to Fallback.
+2025-12-18 15:50:38,574 [WARNING] Playwright: Whoogle selectors failed or URL down. Trying DuckDuckGo HTML fallback...
+2025-12-18 15:50:38,968 [WARNING] Playwright DDG Fallback Failed: Page.goto: Navigation to "https://html.duckduckgo.com/html/?q=test_connection_failure" is interrupted by another navigation to "about:blank"
+Call log:
+  - navigating to "https://html.duckduckgo.com/html/?q=test_connection_failure", waiting until "networkidle"
+
+2025-12-18 15:50:38,968 [WARNING] Playwright: DDG failed. Trying Bing HTML fallback...
+2025-12-18 15:50:53,982 [WARNING] Playwright Bing Fallback Failed: Page.goto: Timeout 15000ms exceeded.
+Call log:
+  - navigating to "https://www.bing.com/search?q=test_connection_failure", waiting until "networkidle"
+
+2025-12-18 15:50:53,983 [INFO] Playwright: All selectors failed, grabbing generalized body text.
+Results Count: 0
+>> FAIL: No results returned. Fallback Log logic might be broken.
+
+[TEST 2] Testing Content Fallback (Example.com)
+2025-12-18 15:50:54,038 [INFO] Launching Playwright for URL: https://example.com/search?q=spacex
+2025-12-18 15:50:55,050 [INFO] Playwright fetched page content length: 528
+2025-12-18 15:50:55,054 [WARNING] Playwright: Whoogle selectors failed or URL down. Trying DuckDuckGo HTML fallback...
+2025-12-18 15:50:55,909 [WARNING] Playwright: DDG failed. Trying Bing HTML fallback...
+2025-12-18 15:51:10,932 [WARNING] Playwright Bing Fallback Failed: Page.goto: Timeout 15000ms exceeded.
+Call log:
+  - navigating to "https://www.bing.com/search?q=spacex", waiting until "networkidle"
+
+2025-12-18 15:51:10,933 [INFO] Playwright: All selectors failed, grabbing generalized body text.
+Results Count: 1
+ - Playwright Text Dump: Page Text Dump
+>> SUCCESS: Fallback logic engaged.

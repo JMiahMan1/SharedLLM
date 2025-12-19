@@ -58,14 +58,37 @@ class StandardIntegration(MediaIntegration):
              from app.logic.web_search import tool_web_search
              search_results = await tool_web_search(f"{search_query} youtube")
              
-             # Extract URLs using regex
+             # Extract URLs using regex from Markdown output
              url_pattern = r'URL:\s*(https?://[^\s\n]+)'
              urls = re.findall(url_pattern, search_results)
              
+             best_match = None
+             
              for url in urls:
-                 if "youtube.com" in url or "youtu.be" in url:
-                     log.info(f"[StandardIntegration] Resolved to {url}")
+                 # Filter OUT Channel/User pages - they are not playable
+                 if any(x in url for x in ["/channel/", "/user/", "/@"]):
+                     log.info(f"[StandardIntegration] Skipping Channel URL: {url}")
+                     continue
+
+                 # Prioritize Valid Video URLs
+                 if "youtube.com/watch?v=" in url or "youtu.be/" in url:
+                     log.info(f"[StandardIntegration] Found precise video match: {url}")
                      return url
+                     
+                 # Allow playlists
+                 if "youtube.com/playlist?list=" in url:
+                     log.info(f"[StandardIntegration] Found playlist match: {url}")
+                     best_match = url # Keep looking for single video, but use as backup
+                     continue
+
+                 # Store other YouTube links as fallback (e.g., /embed/)
+                 if "youtube.com" in url or "youtu.be" in url:
+                     if not best_match: best_match = url
+
+             if best_match:
+                 log.info(f"[StandardIntegration] Resolved to (fallback): {best_match}")
+                 return best_match
+                 
         except Exception as e:
             log.warning(f"[StandardIntegration] Search error: {e}")
         return None

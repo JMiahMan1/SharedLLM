@@ -1,0 +1,68 @@
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+   517b45f..b2e9567  timer      -> origin/timer
+Updating 517b45f..b2e9567
+Fast-forward
+ temp/api_test_fireplace.txt      |   4 -
+ temp/cast_url_logs.txt           | 197 -------------------
+ temp/current_tv_state.txt        |   1 -
+ temp/dump_office_devices.py      |  22 ---
+ temp/final_casting_test.txt      |  98 ----------
+ temp/git_doc_update.txt          |   2 -
+ temp/git_pull_doc.txt            |   7 -
+ temp/git_pull_smartpowersync.txt |   7 -
+ temp/git_pull_syntax_fix.txt     |   7 -
+ temp/git_pull_youtube_app.txt    |   3 -
+ temp/git_push_smartpowersync.txt |   2 -
+ temp/git_status_debug.txt        |  42 ----
+ temp/git_syntax_fix.txt          |   2 -
+ temp/last_commit.txt             |  46 -----
+ temp/latest_logs.txt             |  50 -----
+ temp/logs_3.txt                  | 100 ----------
+ temp/office_devices_output.txt   | 206 --------------------
+ temp/office_group_devices.txt    |   0
+ temp/office_ha_devices.txt       |  10 -
+ temp/power_sync_logs.txt         | 148 ---------------
+ temp/recent_cast_logs.txt        | 200 --------------------
+ temp/remote_server_logs.txt      | 400 ---------------------------------------
+ temp/server_logs.txt             | 100 ----------
+ temp/tv_state.txt                |   1 -
+ temp/verification_logs.txt       |   7 -
+ temp/verification_logs_2.txt     |   1 -
+ temp/verify_cleanup.txt          |  63 ------
+ temp/verify_cleanup_2.txt        |  63 ------
+ tools/app_test_log.txt           |   5 -
+ tools/office_tv_state.json       |   1 -
+ tools/tv_state.json              |  28 ---
+ 31 files changed, 1823 deletions(-)
+ delete mode 100644 temp/api_test_fireplace.txt
+ delete mode 100644 temp/cast_url_logs.txt
+ delete mode 100644 temp/current_tv_state.txt
+ delete mode 100644 temp/dump_office_devices.py
+ delete mode 100644 temp/final_casting_test.txt
+ delete mode 100644 temp/git_doc_update.txt
+ delete mode 100644 temp/git_pull_doc.txt
+ delete mode 100644 temp/git_pull_smartpowersync.txt
+ delete mode 100644 temp/git_pull_syntax_fix.txt
+ delete mode 100644 temp/git_pull_youtube_app.txt
+ delete mode 100644 temp/git_push_smartpowersync.txt
+ delete mode 100644 temp/git_status_debug.txt
+ delete mode 100644 temp/git_syntax_fix.txt
+ delete mode 100644 temp/last_commit.txt
+ delete mode 100644 temp/latest_logs.txt
+ delete mode 100644 temp/logs_3.txt
+ delete mode 100644 temp/office_devices_output.txt
+ delete mode 100644 temp/office_group_devices.txt
+ delete mode 100644 temp/office_ha_devices.txt
+ delete mode 100644 temp/power_sync_logs.txt
+ delete mode 100644 temp/recent_cast_logs.txt
+ delete mode 100644 temp/remote_server_logs.txt
+ delete mode 100644 temp/server_logs.txt
+ delete mode 100644 temp/tv_state.txt
+ delete mode 100644 temp/verification_logs.txt
+ delete mode 100644 temp/verification_logs_2.txt
+ delete mode 100644 temp/verify_cleanup.txt
+ delete mode 100644 temp/verify_cleanup_2.txt
+ delete mode 100644 tools/app_test_log.txt
+ delete mode 100644 tools/office_tv_state.json
+ delete mode 100644 tools/tv_state.json
