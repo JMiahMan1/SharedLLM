@@ -1,5 +1,0 @@
-total 12
--rw-r--r--. 1 jeremiah jeremiah  90 Dec 19 12:10 check_verification_retry.txt
--rw-r--r--. 1 jeremiah jeremiah  90 Dec 19 12:10 check_verification.txt
--rw-r--r--. 1 jeremiah jeremiah   0 Dec 19 12:10 ls_long_wait.txt
--rw-r--r--. 1 jeremiah jeremiah 603 Dec 19 12:10 roku_final_verification.txt

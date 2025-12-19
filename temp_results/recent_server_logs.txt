@@ -1,100 +1,0 @@
-2025-12-19 14:27:31,395 [DEBUG] [d3ec6b31a2715d2d] Stream 3 created by peer
-2025-12-19 14:27:31,425 [DEBUG] [d3ec6b31a2715d2d] Discarding epoch 2
-2025-12-19 14:27:31,552 [DEBUG] [d3ec6b31a2715d2d] Stream 11 created by peer
-2025-12-19 14:27:31,566 [DEBUG] [d3ec6b31a2715d2d] Stream 0 discarded
-2025-12-19 14:27:31,605 [DEBUG] [d3ec6b31a2715d2d] Stream 7 created by peer
-2025-12-19 14:27:31,768 [DEBUG] [d3ec6b31a2715d2d] Stream 4 discarded
-2025-12-19 14:27:33,020 [INFO] [VideoCache] File created and streaming ready: 1047552 bytes
-2025-12-19 14:27:33,021 [INFO] [VideoHelper] Video ready at: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
-2025-12-19 14:27:33,021 [INFO] [Roku] Streaming: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
-2025-12-19 14:27:33,022 [INFO] [Roku] Using configured IP: 192.168.2.166
-2025-12-19 14:27:33,022 [INFO] [Roku ECP] Launching video: http://192.168.2.166:8060/input/15985 with URL: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
-2025-12-19 14:27:33,367 [INFO] [Roku ECP] Successfully launched video
-2025-12-19 14:27:33,368 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
-2025-12-19 14:27:33,370 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]]
-2025-12-19 14:27:33,370 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}], type: <class 'list'>
-2025-12-19 14:27:33,370 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
-2025-12-19 14:27:33,370 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
-[download]   0.0% of   27.20MiB at  693.16KiB/s ETA 00:42[download]   0.0% of   27.20MiB at    1.11MiB/s ETA 00:24[download]   0.0% of   27.20MiB at    2.24MiB/s ETA 00:12[download]   0.1% of   27.20MiB at    4.29MiB/s ETA 00:06[download]   0.1% of   27.20MiB at    7.55MiB/s ETA 00:03[download]   0.2% of   27.20MiB at    1.82MiB/s ETA 00:14[download]   0.5% of   27.20MiB at    1.85MiB/s ETA 00:14[download]   0.9% of   27.20MiB at    2.21MiB/s ETA 00:12[download]   1.8% of   27.20MiB at    2.72MiB/s ETA 00:09[download]   3.7% of   27.20MiB at    3.58MiB/s ETA 00:07[download]   7.3% of   27.20MiB at    4.15MiB/s ETA 00:06[DEBUG] try_handle_compound_command returning: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
-2025-12-19 14:27:33,371 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Playing video on media_player.28_tcl_roku_tv', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'roku_ecp_input'}]
-2025-12-19 14:27:33,371 [DEBUG] [ACTION CONTEXT] Sending to LLM:
-### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
-- SUCCESS: Command 'roku_ecp_input' sent to N/A. Verified New State: N/A
-
-2025-12-19 14:27:33,372 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
-2025-12-19 14:27:33,372 [INFO] DEBUG: Entering Silent Mode for intent 'play_media'
-2025-12-19 14:27:33,373 [DEBUG] [RESPONSE] Returning to client: Done.
-INFO:     192.168.2.1:35134 - "POST /api/chat HTTP/1.1" 200 OK
-2025-12-19 14:27:38,528 [DEBUG] [d3ec6b31a2715d2d] Connection close sent (code 0x0, reason )
-2025-12-19 14:27:38,529 [DEBUG] [d3ec6b31a2715d2d] CONNECTED -> CLOSING
-2025-12-19 14:27:48,464 [INFO] [INTENT] get_intent called with query: 'Turn off Gracies TV'
-2025-12-19 14:27:48,464 [INFO] [REGEX START] apply_regex_override called with: 'Turn off Gracies TV'
-2025-12-19 14:27:48,464 [INFO] [REGEX CHECK] Checking query: 'turn off gracies tv'
-2025-12-19 14:27:48,464 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 19 patterns
-2025-12-19 14:27:48,465 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
-2025-12-19 14:27:48,465 [INFO] [REGEX CHECK] Testing pattern: \b(watch|view)\b -> watch_media
-2025-12-19 14:27:48,466 [INFO] [REGEX CHECK] Testing pattern: \b(play)\b -> play_media
-2025-12-19 14:27:48,466 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
-2025-12-19 14:27:48,467 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
-2025-12-19 14:27:48,467 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
-2025-12-19 14:27:48,467 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
-2025-12-19 14:27:48,467 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
-2025-12-19 14:27:48,467 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
-2025-12-19 14:27:48,467 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
-2025-12-19 14:27:48,467 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
-2025-12-19 14:27:48,467 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
-2025-12-19 14:27:48,468 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
-2025-12-19 14:27:48,468 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
-2025-12-19 14:27:48,468 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
-2025-12-19 14:27:48,468 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
-2025-12-19 14:27:48,468 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
-2025-12-19 14:27:48,468 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
-2025-12-19 14:27:48,468 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] No regex matches for: 'turn off gracies tv'
-2025-12-19 14:27:48,469 [INFO] [INTENT] Falling back to vector engine for: 'Turn off Gracies TV'
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Intent engine checking query: 'Turn off Gracies TV'
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 19 patterns
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(watch|view)\b -> watch_media
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(play)\b -> play_media
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(resume|unpause)\b -> media_play
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(skip|next)\b -> media_next
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(previous|back|prev)\b -> media_previous
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+up\b -> nav_up
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+down\b -> nav_down
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+left\b -> nav_left
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(scroll|move|go)\s+right\b -> nav_right
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \bgo back\b|\bback\b -> nav_back
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \bgo home\b|\bhome\b -> nav_home
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \bselect\b|\benter\b|\bok\b -> nav_enter
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool) -> set_color
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(dim|darken|lower)\b -> dim
-2025-12-19 14:27:48,469 [INFO] [REGEX CHECK] Testing pattern: \b(brighten|brighter|increase)\b -> brighten
-2025-12-19 14:27:48,470 [INFO] [REGEX CHECK] Testing pattern: \b(brightness|bright)\b -> set_brightness
-2025-12-19 14:27:48,470 [INFO] [REGEX CHECK] No regex matches for: 'turn off gracies tv'
-2025-12-19 14:27:48,567 [DEBUG] Intent Low Confidence: 'Turn off Gracies TV' -> Best: 'turn_off' (0.44)
-2025-12-19 14:27:48,567 [INFO] [INTENT] Vector result: (None, 0.4370848212231496, False)
-2025-12-19 14:27:48,570 [INFO] DEBUG: Entering smart_resolve_entity. Q='gracies tv' Intent='turn_off' Multiple=False
-2025-12-19 14:27:48,589 [INFO] [EXACT MATCH] 'gracies tv' → media_player.roku_2n0062385487
-2025-12-19 14:27:48,589 [INFO] [EXACT MATCH] 'gracies tv' → media_player.28_tcl_roku_tv
-2025-12-19 14:27:48,589 [INFO] [EXACT MATCH] 'gracies tv' → remote.28_tcl_roku_tv
-2025-12-19 14:27:48,589 [INFO] [EXACT MATCH] 'gracies tv' → media_player.media_player_28_tcl_roku_tv
-2025-12-19 14:27:48,589 [INFO] Using prioritized exact name match for 'gracies tv': ('media_player.28_tcl_roku_tv', 'roku') (Candidates: [('media_player.28_tcl_roku_tv', 'roku'), ('media_player.media_player_28_tcl_roku_tv', 'cast'), ('media_player.roku_2n0062385487', 'speaker'), ('remote.28_tcl_roku_tv', 'remote')])
-2025-12-19 14:27:48,589 [INFO] Fast HA Path: Resolved 'gracies tv' -> media_player.28_tcl_roku_tv (roku) via smart_resolve_entity
-2025-12-19 14:27:48,607 [INFO] EXEC HA: homeassistant.turn_off on media_player.28_tcl_roku_tv | Data: {}
-2025-12-19 14:27:49,720 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Sent command to turn off the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'homeassistant.turn_off', 'new_state': 'off'}]]
-2025-12-19 14:27:49,720 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Sent command to turn off the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'homeassistant.turn_off', 'new_state': 'off'}], type: <class 'list'>
-2025-12-19 14:27:49,720 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Sent command to turn off the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'homeassistant.turn_off', 'new_state': 'off'}]
-2025-12-19 14:27:49,721 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Sent command to turn off the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'homeassistant.turn_off', 'new_state': 'off'}]
-[download]  14.7% of   27.20MiB at    4.58MiB/s ETA 00:05[download]  29.4% of   27.20MiB at    4.85MiB/s ETA 00:03[download]  36.5% of   27.20MiB at    5.00MiB/s ETA 00:03[download]  36.5% of   27.20MiB at  Unknown B/s ETA Unknown[download]  36.5% of   27.20MiB at    1.74MiB/s ETA 00:10  [download]  36.6% of   27.20MiB at    2.33MiB/s ETA 00:07[download]  36.6% of   27.20MiB at    4.11MiB/s ETA 00:04[download]  36.6% of   27.20MiB at    4.41MiB/s ETA 00:03[download]  36.8% of   27.20MiB at    1.14MiB/s ETA 00:15[download]  37.0% of   27.20MiB at    1.89MiB/s ETA 00:09[download]  37.4% of   27.20MiB at    2.03MiB/s ETA 00:08[download]  38.4% of   27.20MiB at    2.78MiB/s ETA 00:06[download]  40.2% of   27.20MiB at    3.44MiB/s ETA 00:04[download]  43.9% of   27.20MiB at    4.22MiB/s ETA 00:03[download]  51.2% of   27.20MiB at    4.22MiB/s ETA 00:03[download]  65.9% of   27.20MiB at    4.68MiB/s ETA 00:01[download]  72.8% of   27.20MiB at    4.73MiB/s ETA 00:01[download]  72.8% of   27.20MiB at  Unknown B/s ETA Unknown[download]  72.8% of   27.20MiB at    1.79MiB/s ETA 00:04  [download]  72.9% of   27.20MiB at    2.70MiB/s ETA 00:02[download]  72.9% of   27.20MiB at    4.24MiB/s ETA 00:01[download]  72.9% of   27.20MiB at    5.70MiB/s ETA 00:01[download]  73.1% of   27.20MiB at    1.25MiB/s ETA 00:05[download]  73.3% of   27.20MiB at    1.55MiB/s ETA 00:04[download]  73.7% of   27.20MiB at    2.10MiB/s ETA 00:03[download]  74.7% of   27.20MiB at    2.44MiB/s ETA 00:02[download]  76.5% of   27.20MiB at    2.95MiB/s ETA 00:02[download]  80.2% of   27.20MiB at    3.73MiB/s ETA 00:01[download]  87.5% of   27.20MiB at    4.36MiB/s ETA 00:00[download] 100.0% of   27.20MiB at    4.89MiB/s ETA 00:00[download] 100% of   27.20MiB in 00:00:06 at 4.41MiB/s                                                         [DEBUG] try_handle_compound_command returning: [{'status': 'SUCCESS', 'message': 'Sent command to turn off the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'homeassistant.turn_off', 'new_state': 'off'}]
-2025-12-19 14:27:49,721 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Sent command to turn off the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'homeassistant.turn_off', 'new_state': 'off'}]
-2025-12-19 14:27:49,721 [DEBUG] [ACTION CONTEXT] Sending to LLM:
-### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
-- SUCCESS: Command 'homeassistant.turn_off' sent to Gracies TV. Verified New State: off
-
-2025-12-19 14:27:49,722 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2582
-2025-12-19 14:27:55,410 [DEBUG] [RESPONSE] Final response to user (29 chars): Gracies TV is now turned off.
-2025-12-19 14:27:55,410 [DEBUG] [RESPONSE] Returning to client: Gracies TV is now turned off.
-INFO:     192.168.2.1:57640 - "POST /api/chat HTTP/1.1" 200 OK
