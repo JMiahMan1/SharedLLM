@@ -455,7 +455,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     try:
         from app.settings import GlobalResources, run_blocking
         from langchain_chroma import Chroma
-        from app.logic.pattern_matching import detect_number_pattern
+        from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
     except ImportError:
         log.error("Could not import dependencies for resolution.")
         return [] if allow_multiple else (None, None)
