@@ -540,9 +540,20 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 elif friendly_name.startswith(query_lower) or query_lower in friendly_name:
                     prefix_matches.append((entity_id, integration, friendly_name))
 
-            # Return exact match immediately
+            # Return exact match immediately, but prioritize native integrations if multiple
             if exact_matches:
-                log.info(f"Using exact name match for '{query_name}': {exact_matches[0]}")
+                # Sort: Prefer non-MASS, non-DLNA
+                # Priority: Roku/AndroidTV/WebOS > Cast > Others > MASS/DLNA
+                def _integ_priority(item):
+                    eid, integ = item
+                    if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 10
+                    if "cast" in integ or "google_cast" in integ: return 8
+                    if "music_assistant" in integ or "dlna" in integ: return 0
+                    return 5
+                
+                exact_matches.sort(key=_integ_priority, reverse=True)
+                
+                log.info(f"Using prioritized exact name match for '{query_name}': {exact_matches[0]} (Candidates: {exact_matches})")
                 return [exact_matches[0]] if allow_multiple else exact_matches[0]
 
             # Return best prefix match if query is specific enough (>= 6 chars)
