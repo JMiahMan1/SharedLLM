@@ -88,6 +88,8 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             
             if local_url:
                  log.info(f"[Roku] Streaming: {local_url}")
+                 # Roku requires launching Roku Media Player channel with video URL
+                 # Channel ID for Roku Media Player is typically accessed via deep link
                  return await execute_ha_service(
                      "media_player",
                      "play_media",
@@ -95,11 +97,7 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      user_creds,
                      {
                          "media_content_id": local_url,
-                         "media_content_type": "video", # REQUIRED: 'video', not 'url'
-                         "extra": {
-                             "title": "SharedLLM Stream",
-                             "format": "mp4" # REQUIRED
-                         }
+                         "media_content_type": "url",  # Use 'url' for direct video streams on Roku
                      },
                      kwargs.get("redis_client")
                  )
