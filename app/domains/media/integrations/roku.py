@@ -148,4 +148,42 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             }, 
             kwargs.get("redis_client")
         )
+    
+    async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
+        """Extract Roku IP address from Home Assistant or use configured fallback"""
+        import requests
+        from app.settings import HA_URL
+        import os
+        
+        # Check for configured Roku IP
+        configured_ip = os.getenv("ROKU_IP")
+        if configured_ip:
+            log.info(f"[Roku] Using configured IP: {configured_ip}")
+            return configured_ip
+        
+        try:
+            headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
+            
+            # Get entity info
+            resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
+            if resp.status_code != 200:
+                log.error(f"[Roku] Could not fetch entity state for {entity_id}, ROKU_IP env var required")
+                return None
+            
+            entity_data = resp.json()
+            attributes = entity_data.get("attributes", {})
+            
+            # Try to extract IP from attributes
+            for key in ["ip_address", "host", "hostname"]:
+                if key in attributes and attributes[key]:
+                    log.info(f"[Roku] Found IP in attributes.{key}: {attributes[key]}")
+                    return attributes[key]
+            
+            # No IP found
+            log.error(f"[Roku] No IP found in attributes, ROKU_IP environment variable required")
+            return None
+            
+        except Exception as e:
+            log.error(f"[Roku] Error getting IP: {e}, ROKU_IP env var required")
+            return None
 
