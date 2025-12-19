@@ -1,100 +1,0 @@
-2025-12-19 12:41:13,900 [DEBUG] [4f28b3d7112280c1] Stream 4 discarded
-2025-12-19 12:41:14,482 [DEBUG] [4f28b3d7112280c1] Connection close sent (code 0x0, reason )
-2025-12-19 12:41:14,483 [DEBUG] [4f28b3d7112280c1] CONNECTED -> CLOSING
-2025-12-19 12:41:15,478 [DEBUG] [229d6bdaf5f433f6] TLS: Advertising to peer post-quantum algorithm using X25519ML768 (0x11EC)
-2025-12-19 12:41:15,479 [DEBUG] [229d6bdaf5f433f6] TLS CLIENT_HANDSHAKE_START -> CLIENT_EXPECT_SERVER_HELLO
-2025-12-19 12:41:15,505 [DEBUG] [229d6bdaf5f433f6] FIRSTFLIGHT -> CONNECTED
-2025-12-19 12:41:15,507 [DEBUG] [229d6bdaf5f433f6] TLS: Post-quantum safety achieved using X25519ML768 (key-exchange)
-2025-12-19 12:41:15,508 [DEBUG] [229d6bdaf5f433f6] Negotiated protocol version 0x00000001 (VERSION_1)
-2025-12-19 12:41:15,508 [DEBUG] [229d6bdaf5f433f6] TLS CLIENT_EXPECT_SERVER_HELLO -> CLIENT_EXPECT_ENCRYPTED_EXTENSIONS
-2025-12-19 12:41:15,516 [DEBUG] [229d6bdaf5f433f6] TLS CLIENT_EXPECT_ENCRYPTED_EXTENSIONS -> CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE
-2025-12-19 12:41:15,516 [DEBUG] [229d6bdaf5f433f6] Discarding epoch 0
-2025-12-19 12:41:15,535 [DEBUG] [229d6bdaf5f433f6] TLS CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE -> CLIENT_EXPECT_CERTIFICATE_VERIFY
-2025-12-19 12:41:15,537 [DEBUG] [229d6bdaf5f433f6] TLS CLIENT_EXPECT_CERTIFICATE_VERIFY -> CLIENT_EXPECT_FINISHED
-2025-12-19 12:41:15,538 [DEBUG] [229d6bdaf5f433f6] TLS CLIENT_EXPECT_FINISHED -> CLIENT_POST_HANDSHAKE
-2025-12-19 12:41:15,538 [DEBUG] [229d6bdaf5f433f6] ALPN negotiated protocol h3
-2025-12-19 12:41:15,538 [DEBUG] [229d6bdaf5f433f6] Stream 3 created by peer
-2025-12-19 12:41:15,568 [DEBUG] [229d6bdaf5f433f6] Discarding epoch 2
-2025-12-19 12:41:15,691 [DEBUG] [229d6bdaf5f433f6] Stream 11 created by peer
-2025-12-19 12:41:15,704 [DEBUG] [229d6bdaf5f433f6] Stream 0 discarded
-2025-12-19 12:41:15,741 [DEBUG] [229d6bdaf5f433f6] Stream 7 created by peer
-2025-12-19 12:41:15,864 [DEBUG] [229d6bdaf5f433f6] Stream 4 discarded
-2025-12-19 12:41:16,985 [INFO] [VideoCache] File created and streaming ready: 261120 bytes
-2025-12-19 12:41:16,986 [INFO] [VideoHelper] Video ready at: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
-2025-12-19 12:41:16,986 [INFO] [CastIntegration] Video ready for streaming at: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
-2025-12-19 12:41:17,060 [INFO] EXEC HA: media_player.play_media on media_player.28_tcl_roku_tv | Data: {'media_content_id': 'http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4', 'media_content_type': 'video'}
-2025-12-19 12:41:25,631 [DEBUG] [229d6bdaf5f433f6] Connection close sent (code 0x0, reason )
-2025-12-19 12:41:25,632 [DEBUG] [229d6bdaf5f433f6] CONNECTED -> CLOSING
-2025-12-19 12:41:27,452 [WARNING] HA 500 Error: 500 Internal Server Error
-
-Server got itself in trouble
-2025-12-19 12:41:27,453 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
-
-Server got itself in trouble
-2025-12-19 12:41:27,453 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': '28 Tcl Roku Tv', 'service': 'media_player.play_media'}]
-2025-12-19 12:41:27,453 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': '28 Tcl Roku Tv', 'service': 'media_player.play_media'}]]
-2025-12-19 12:41:27,453 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': '28 Tcl Roku Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
-2025-12-19 12:41:27,454 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': '28 Tcl Roku Tv', 'service': 'media_player.play_media'}]
-2025-12-19 12:41:27,454 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': '28 Tcl Roku Tv', 'service': 'media_player.play_media'}]
-2025-12-19 12:41:27,454 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': '28 Tcl Roku Tv', 'service': 'media_player.play_media'}]
-[download]   0.0% of   27.20MiB at  926.71KiB/s ETA 00:30[download]   0.0% of   27.20MiB at    1.39MiB/s ETA 00:19[download]   0.0% of   27.20MiB at    2.69MiB/s ETA 00:10[download]   0.1% of   27.20MiB at    5.06MiB/s ETA 00:05[download]   0.1% of   27.20MiB at    8.74MiB/s ETA 00:03[download]   0.2% of   27.20MiB at    2.10MiB/s ETA 00:12[download]   0.5% of   27.20MiB at    1.32MiB/s ETA 00:20[download]   0.9% of   27.20MiB at    1.69MiB/s ETA 00:15[download]   1.8% of   27.20MiB at    2.10MiB/s ETA 00:12[download]   3.7% of   27.20MiB at    2.61MiB/s ETA 00:10[download]   7.3% of   27.20MiB at    3.04MiB/s ETA 00:08[download]  14.7% of   27.20MiB at    3.11MiB/s ETA 00:07[download]  26.4% of   27.20MiB at    3.39MiB/s ETA 00:05[download]  36.6% of   27.20MiB at    3.39MiB/s ETA 00:05[download]  36.6% of   27.20MiB at  366.83KiB/s ETA 00:48[download]  36.6% of   27.20MiB at  789.19KiB/s ETA 00:22[download]  36.6% of   27.20MiB at    1.49MiB/s ETA 00:11[download]  36.6% of   27.20MiB at    2.75MiB/s ETA 00:06[download]  36.7% of   27.20MiB at    2.38MiB/s ETA 00:07[download]  36.8% of   27.20MiB at    1.16MiB/s ETA 00:14[download]  37.0% of   27.20MiB at    1.47MiB/s ETA 00:11[download]  37.5% of   27.20MiB at  663.13KiB/s ETA 00:26[download]  38.4% of   27.20MiB at    1.07MiB/s ETA 00:15[download]  40.3% of   27.20MiB at    1.65MiB/s ETA 00:09[download]  43.9% of   27.20MiB at    2.32MiB/s ETA 00:06[download]  51.3% of   27.20MiB at    2.89MiB/s ETA 00:04[download]  65.3% of   27.20MiB at    2.67MiB/s ETA 00:03[download]  72.9% of   27.20MiB at    2.96MiB/s ETA 00:02[download]  72.9% of   27.20MiB at  Unknown B/s ETA Unknown[download]  72.9% of   27.20MiB at    1.43MiB/s ETA 00:05  [download]  72.9% of   27.20MiB at    2.19MiB/s ETA 00:03[download]  72.9% of   27.20MiB at    3.28MiB/s ETA 00:02[download]  73.0% of   27.20MiB at    3.78MiB/s ETA 00:01[download]  73.1% of   27.20MiB at    1.54MiB/s ETA 00:04[download]  73.3% of   27.20MiB at    1.63MiB/s ETA 00:04[download]  73.8% of   27.20MiB at    1.94MiB/s ETA 00:03[download]  74.7% of   27.20MiB at    2.12MiB/s ETA 00:03[download]  76.5% of   27.20MiB at    2.49MiB/s ETA 00:02[download]  80.2% of   27.20MiB at    2.86MiB/s ETA 00:01[download]  87.6% of   27.20MiB at    3.18MiB/s ETA 00:01[download] 100.0% of   27.20MiB at    3.20MiB/s ETA 00:00[download] 100% of   27.20MiB in 00:00:09 at 2.94MiB/s                                                         [DEBUG] try_handle_compound_command returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': '28 Tcl Roku Tv', 'service': 'media_player.play_media'}]
-INFO:     192.168.2.1:56860 - "POST /api/chat HTTP/1.1" 200 OK
-2025-12-19 12:41:27,454 [DEBUG] [ACTION CONTEXT] Sending to LLM:
-### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
-- FAILURE: Command 'media_player.play_media' on 'media_player.28_tcl_roku_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
-
-Server got itself in trouble
-
-2025-12-19 12:41:27,454 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
-2025-12-19 12:41:27,455 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2682
-2025-12-19 12:41:33,862 [DEBUG] [RESPONSE] Final response to user (285 chars): I'm unable to play the video at this moment. The Roku TV is experiencing a technical issue preventing playback. Let me know if you'd like me to check the device's connection or attempt the playback again later. twelve forty-one P M, Friday, December nineteen, two thousand twenty-five.
-2025-12-19 12:41:33,863 [DEBUG] [RESPONSE] Returning to client: I'm unable to play the video at this moment. The Roku TV is experiencing a technical issue preventing playback. Let me know if you'd like me to check the device's connection or attempt the playback ag
-2025-12-19 12:41:48,967 [INFO] [INTENT] get_intent called with query: 'Stop Gracies TV'
-2025-12-19 12:41:48,967 [INFO] [REGEX START] apply_regex_override called with: 'Stop Gracies TV'
-2025-12-19 12:41:48,967 [INFO] [REGEX CHECK] Checking query: 'stop gracies tv'
-2025-12-19 12:41:48,967 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 19 patterns
-2025-12-19 12:41:48,968 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
-2025-12-19 12:41:48,968 [INFO] [REGEX CHECK] Testing pattern: \b(watch|view)\b -> watch_media
-[DEBUG] FAST PATH ORCHESTRATION Starting for intent=stop_media, is_high_confidence=True
-[DEBUG] FAST PATH Condition met, processing stop_media
-2025-12-19 12:41:48,969 [INFO] [REGEX CHECK] Testing pattern: \b(play)\b -> play_media
-2025-12-19 12:41:48,969 [INFO] [REGEX CHECK] Testing pattern: \b(stop|pause)\b -> stop_media
-2025-12-19 12:41:48,969 [INFO] [REGEX OVERRIDE] Matched 'stop_media' via pattern: \b(stop|pause)\b...
-2025-12-19 12:41:48,969 [INFO] [INTENT] Regex override: 'Stop Gracies TV' -> stop_media [LOCKED]
-2025-12-19 12:41:49,013 [INFO] [PIPELINE DEBUG] Using provided intent: stop_media (Score: 1.0)
-2025-12-19 12:41:49,013 [INFO] [FAST PATH ORCHESTRATION] Starting for intent=stop_media, is_high_confidence=True
-2025-12-19 12:41:49,014 [INFO] [FAST PATH] Condition met, processing stop_media
-2025-12-19 12:41:49,014 [INFO] [FAST PATH] Matched transport intent: stop_media
-2025-12-19 12:41:49,014 [INFO] [FAST PATH] device_in_query: False, query: Stop Gracies TV
-2025-12-19 12:41:49,015 [INFO] [FAST PATH] action_plan set: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'stop_media', 'device_name': None}}
-2025-12-19 12:41:49,015 [INFO] [FAST ORCHESTRA] Bypassing LLM for stop_media
-2025-12-19 12:41:49,015 [INFO] [ACTION DISPATCH] Calling handler for media_command
-2025-12-19 12:41:49,015 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=stop_media, entity_id=None, device_name=None, integration=unknown
-2025-12-19 12:41:49,015 [INFO] DEBUG: Entering smart_resolve_entity. Q='gracies tv' Intent='stop_media' Multiple=True
-2025-12-19 12:41:49,039 [INFO] [EXACT MATCH] 'gracies tv' → media_player.roku_2n0062385487
-2025-12-19 12:41:49,039 [INFO] [EXACT MATCH] 'gracies tv' → media_player.28_tcl_roku_tv
-2025-12-19 12:41:49,039 [INFO] [EXACT MATCH] 'gracies tv' → remote.28_tcl_roku_tv
-2025-12-19 12:41:49,039 [INFO] [EXACT MATCH] 'gracies tv' → media_player.media_player_28_tcl_roku_tv
-2025-12-19 12:41:49,040 [INFO] Using prioritized exact name match for 'gracies tv': ('media_player.28_tcl_roku_tv', 'cast') (Candidates: [('media_player.28_tcl_roku_tv', 'cast'), ('media_player.media_player_28_tcl_roku_tv', 'cast'), ('media_player.roku_2n0062385487', 'speaker'), ('remote.28_tcl_roku_tv', 'remote')])
-2025-12-19 12:41:49,040 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
-2025-12-19 12:41:49,040 [INFO] [BATCH] Executing 'stop_media' on 1 entities
-2025-12-19 12:41:49,040 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=stop_media, entity_id=media_player.28_tcl_roku_tv, device_name=None, integration=cast
-2025-12-19 12:41:49,040 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='stop_media' is_transport=True entity=media_player.28_tcl_roku_tv
-2025-12-19 12:41:49,040 [INFO] [DEBUG_TRANSPORT] Entered Transport Redirection Block for stop_media
-2025-12-19 12:41:49,040 [INFO] [_execute_transport_command] Intent='stop_media' (repr='stop_media') Entity='media_player.28_tcl_roku_tv'
-2025-12-19 12:41:49,040 [INFO] [Transport] Match stop_media for media_player.28_tcl_roku_tv
-2025-12-19 12:41:49,065 [INFO] [ACTION DISPATCH] Handler returned: {'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.28_tcl_roku_tv', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.28_tcl_roku_tv is already stopped.', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}
-2025-12-19 12:41:49,066 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.28_tcl_roku_tv', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.28_tcl_roku_tv is already stopped.', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]]
-2025-12-19 12:41:49,066 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.28_tcl_roku_tv', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.28_tcl_roku_tv is already stopped.', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}], type: <class 'list'>
-2025-12-19 12:41:49,066 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.28_tcl_roku_tv', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.28_tcl_roku_tv is already stopped.', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
-[DEBUG] try_handle_compound_command returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.28_tcl_roku_tv', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.28_tcl_roku_tv is already stopped.', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
-2025-12-19 12:41:49,066 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.28_tcl_roku_tv', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.28_tcl_roku_tv is already stopped.', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
-2025-12-19 12:41:49,066 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: media_player.28_tcl_roku_tv', 'service': 'stop_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'media_player.28_tcl_roku_tv is already stopped.', 'entity_id': 'media_player.28_tcl_roku_tv', 'service': 'media_stop', 'new_state': 'idle'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
-2025-12-19 12:41:49,066 [DEBUG] [ACTION CONTEXT] Sending to LLM:
-### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
-- SUCCESS: Command 'stop_media' sent to 1 devices. Verified New State: N/A
-INFO:     192.168.2.1:48936 - "POST /api/chat HTTP/1.1" 200 OK
-
-2025-12-19 12:41:49,067 [INFO] DEBUG: Checking Simple Intent 'stop_media' for silent mode. Results: 1
-2025-12-19 12:41:49,067 [INFO] DEBUG: Entering Silent Mode for intent 'stop_media'
-2025-12-19 12:41:49,067 [DEBUG] [RESPONSE] Returning to client: Done.

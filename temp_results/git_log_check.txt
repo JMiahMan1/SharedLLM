@@ -1,5 +1,0 @@
-commit c6ec064bfdfc995d87dda15b66ece5b332507239
-Author: Agent <agent@example.com>
-Date:   Fri Dec 19 12:23:01 2025 -0700
-
-    Fix Roku resolution priority in devices.py

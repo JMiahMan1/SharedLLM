@@ -1,1 +1,0 @@
--rw-r--r--. 1 jeremiah jeremiah 3150 Dec 19 12:38 temp_results/deploy_syntax_fix.txt

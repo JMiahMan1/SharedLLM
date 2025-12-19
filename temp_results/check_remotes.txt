@@ -1,1 +1,0 @@
--rw-r--r--. 1 jeremiah jeremiah 168 Dec 19 12:17 temp_results/remotes_list.txt

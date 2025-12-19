@@ -1,1 +1,0 @@
--rw-r--r--. 1 jeremiah jeremiah 487 Dec 19 12:19 temp_results/roku_retry_after_power.txt

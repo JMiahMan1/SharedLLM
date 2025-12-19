@@ -1,2 +1,0 @@
-To github.com:JMiahMan1/SharedLLM.git
-   47de991..3beecfe  HEAD -> timer
