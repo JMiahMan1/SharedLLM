@@ -136,8 +136,6 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             else:
                 log.error("[Roku] Failed to generate local stream URL.")
 
-        # Fallback: Generic
-        return await execute_ha_service(
         # Fallback: Generic playback
         return await execute_ha_service(
             "media_player", 
