@@ -1,0 +1,253 @@
+"""
+Shared Network Device Discovery System
+Supports SSDP-based discovery for smart home devices (Roku, Android TV, WebOS, etc.)
+"""
+import socket
+import logging
+import requests
+import xml.etree.ElementTree as ET
+from typing import Dict, List, Optional, Callable
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+
+log = logging.getLogger(__name__)
+
+# SSDP constants
+SSDP_ADDR = "239.255.255.250"
+SSDP_PORT = 1900
+SSDP_TIMEOUT = 3
+
+
+@dataclass
+class DiscoveredDevice:
+    """Represents a discovered network device"""
+    ip: str
+    device_type: str  # 'roku', 'androidtv', 'webos', etc.
+    serial_number: Optional[str] = None
+    model: Optional[str] = None
+    manufacturer: Optional[str] = None
+    friendly_name: Optional[str] = None
+    raw_info: Dict = None
+
+
+class DeviceDiscoveryProtocol(ABC):
+    """Base class for device-specific discovery protocols"""
+    
+    @property
+    @abstractmethod
+    def ssdp_search_target(self) -> str:
+        """SSDP ST (Search Target) for this device type"""
+        pass
+    
+    @property
+    @abstractmethod
+    def device_type(self) -> str:
+        """Device type identifier"""
+        pass
+    
+    @abstractmethod
+    def get_device_info(self, ip: str) -> Optional[DiscoveredDevice]:
+        """Fetch detailed device info from IP address"""
+        pass
+
+
+class RokuDiscoveryProtocol(DeviceDiscoveryProtocol):
+    """Roku device discovery via SSDP"""
+    
+    @property
+    def ssdp_search_target(self) -> str:
+        return "roku:ecp"
+    
+    @property
+    def device_type(self) -> str:
+        return "roku"
+    
+    def get_device_info(self, ip: str) -> Optional[DiscoveredDevice]:
+        """Get Roku device info from ECP endpoint"""
+        try:
+            resp = requests.get(f"http://{ip}:8060/query/device-info", timeout=2)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.text)
+                
+                serial = root.find('.//serial-number')
+                model = root.find('.//model-name')
+                manufacturer = root.find('.//vendor-name')
+                name = root.find('.//user-device-name')
+                
+                return DiscoveredDevice(
+                    ip=ip,
+                    device_type=self.device_type,
+                    serial_number=serial.text if serial is not None else None,
+                    model=model.text if model is not None else None,
+                    manufacturer=manufacturer.text if manufacturer is not None else None,
+                    friendly_name=name.text if name is not None else None,
+                    raw_info={'xml': resp.text}
+                )
+        except Exception as e:
+            log.debug(f"[Discovery] Failed to get Roku info from {ip}: {e}")
+        return None
+
+
+class AndroidTVDiscoveryProtocol(DeviceDiscoveryProtocol):
+    """Android TV discovery via SSDP"""
+    
+    @property
+    def ssdp_search_target(self) -> str:
+        return "urn:dial-multiscreen-org:service:dial:1"
+    
+    @property
+    def device_type(self) -> str:
+        return "androidtv"
+    
+    def get_device_info(self, ip: str) -> Optional[DiscoveredDevice]:
+        """Get Android TV device info"""
+        # Android TV uses DIAL protocol - implementation can be added here
+        return DiscoveredDevice(
+            ip=ip,
+            device_type=self.device_type,
+            serial_number=None,  # Would need ADB or specific protocol
+            model=None,
+            manufacturer=None
+        )
+
+
+class NetworkDeviceDiscovery:
+    """Main network device discovery system"""
+    
+    def __init__(self):
+        self.protocols: List[DeviceDiscoveryProtocol] = [
+            RokuDiscoveryProtocol(),
+            # AndroidTVDiscoveryProtocol(),  # Can be enabled when needed
+        ]
+    
+    def discover_devices(self, device_types: List[str] = None, timeout: int = SSDP_TIMEOUT) -> List[DiscoveredDevice]:
+        """
+        Discover devices on the network
+        
+        Args:
+            device_types: List of device types to discover (e.g., ['roku', 'androidtv'])
+                         If None, discovers all supported types
+            timeout: SSDP discovery timeout in seconds
+        
+        Returns:
+            List of discovered devices
+        """
+        protocols_to_use = self.protocols
+        if device_types:
+            protocols_to_use = [p for p in self.protocols if p.device_type in device_types]
+        
+        discovered = []
+        for protocol in protocols_to_use:
+            devices = self._ssdp_discover(protocol, timeout)
+            discovered.extend(devices)
+        
+        return discovered
+    
+    def _ssdp_discover(self, protocol: DeviceDiscoveryProtocol, timeout: int) -> List[DiscoveredDevice]:
+        """Perform SSDP discovery for a specific protocol"""
+        discovered = []
+        seen_ips = set()
+        
+        ssdp_request = (
+            f'M-SEARCH * HTTP/1.1\r\n'
+            f'HOST: {SSDP_ADDR}:{SSDP_PORT}\r\n'
+            f'MAN: "ssdp:discover"\r\n'
+            f'MX: 1\r\n'
+            f'ST: {protocol.ssdp_search_target}\r\n'
+            f'\r\n'
+        )
+        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        
+        try:
+            sock.sendto(ssdp_request.encode('utf-8'), (SSDP_ADDR, SSDP_PORT))
+            
+            while True:
+                try:
+                    data, addr = sock.recvfrom(4096)
+                    response = data.decode('utf-8', errors='ignore')
+                    
+                    # Extract location URL
+                    for line in response.split('\r\n'):
+                        if line.lower().startswith('location:'):
+                            location = line.split(':', 1)[1].strip()
+                            if '//' in location:
+                                ip = location.split('//')[1].split(':')[0]
+                                
+                                # Avoid duplicates
+                                if ip in seen_ips:
+                                    continue
+                                seen_ips.add(ip)
+                                
+                                # Get detailed device info
+                                device = protocol.get_device_info(ip)
+                                if device:
+                                    discovered.append(device)
+                                    log.info(f"[Discovery] Found {protocol.device_type}: {ip} (serial: {device.serial_number})")
+                            break
+                            
+                except socket.timeout:
+                    break
+                    
+        except Exception as e:
+            log.error(f"[Discovery] SSDP error for {protocol.device_type}: {e}")
+        finally:
+            sock.close()
+        
+        return discovered
+    
+    def find_device_by_attributes(self, entity_attributes: Dict, device_types: List[str] = None) -> Optional[DiscoveredDevice]:
+        """
+        Find a device by matching HA entity attributes to discovered devices
+        
+        Args:
+            entity_attributes: HA entity attributes dict
+            device_types: Device types to search for
+        
+        Returns:
+            Matched device or None
+        """
+        # Discover devices
+        devices = self.discover_devices(device_types=device_types)
+        
+        if not devices:
+            log.warning("[Discovery] No devices discovered")
+            return None
+        
+        # Try to match by serial number
+        serial_keys = ['serial_number', 'serial', 'unique_id']
+        for key in serial_keys:
+            if key in entity_attributes and entity_attributes[key]:
+                entity_serial = str(entity_attributes[key]).strip()
+                for device in devices:
+                    if device.serial_number and device.serial_number.strip() == entity_serial:
+                        log.info(f"[Discovery] Matched device by serial: {device.ip}")
+                        return device
+        
+        # If only one device of requested type(s), return it
+        if len(devices) == 1:
+            log.warning(f"[Discovery] Only one device found, assuming it's the target: {devices[0].ip}")
+            return devices[0]
+        
+        log.error(f"[Discovery] Could not match entity to any of {len(devices)} discovered devices")
+        return None
+
+
+# Global discovery instance
+_discovery = NetworkDeviceDiscovery()
+
+
+def discover_roku_ip(entity_attributes: Dict) -> Optional[str]:
+    """
+    Convenience function to discover Roku IP address
+    
+    Args:
+        entity_attributes: HA entity attributes
+    
+    Returns:
+        IP address or None
+    """
+    device = _discovery.find_device_by_attributes(entity_attributes, device_types=['roku'])
+    return device.ip if device else None

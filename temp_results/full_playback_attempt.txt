@@ -1,0 +1,60 @@
+2025-12-19 13:44:06,280 [INFO] [Roku] Playing Media: Play Big Buck Bunny video on Gracies TV (Entity: media_player.28_tcl_roku_tv) - CAST MODE
+2025-12-19 13:44:06,300 [INFO] [Roku] Current state: off
+2025-12-19 13:44:06,303 [INFO] [Roku] Device is off, calling turn_on...
+2025-12-19 13:44:06,321 [INFO] EXEC HA: media_player.turn_on on media_player.28_tcl_roku_tv | Data: {}
+2025-12-19 13:44:06,778 [INFO] Upsert OK.
+2025-12-19 13:44:06,778 [INFO] Device DB Refresh Complete.
+2025-12-19 13:44:10,426 [INFO] [Roku] Sending Home button to wake display...
+2025-12-19 13:44:10,454 [INFO] EXEC HA: remote.send_command on remote.28_tcl_roku_tv | Data: {'command': 'Home'}
+2025-12-19 13:44:18,739 [INFO] [Roku] After wake: state=idle, app=Roku
+2025-12-19 13:44:18,739 [INFO] Executing Web Search for: Play Big Buck Bunny video on Gracies TV youtube
+2025-12-19 13:44:23,489 [INFO] [Roku] Resolved to https://www.youtube.com/watch?v=aqz-KE-bpKQ
+2025-12-19 13:44:23,489 [INFO] [VideoHelper] Starting progressive download for video 1c504eb5640b
+2025-12-19 13:44:23,494 [INFO] [VideoCache] Cleared stale cache for 1c504eb5640b
+2025-12-19 13:44:24,614 [DEBUG] [96168a7b7eb6b953] TLS: Advertising to peer post-quantum algorithm using X25519ML768 (0x11EC)
+2025-12-19 13:44:24,615 [DEBUG] [96168a7b7eb6b953] TLS CLIENT_HANDSHAKE_START -> CLIENT_EXPECT_SERVER_HELLO
+2025-12-19 13:44:24,645 [DEBUG] [96168a7b7eb6b953] FIRSTFLIGHT -> CONNECTED
+2025-12-19 13:44:24,647 [DEBUG] [96168a7b7eb6b953] TLS: Post-quantum safety achieved using X25519ML768 (key-exchange)
+2025-12-19 13:44:24,647 [DEBUG] [96168a7b7eb6b953] Negotiated protocol version 0x00000001 (VERSION_1)
+2025-12-19 13:44:24,648 [DEBUG] [96168a7b7eb6b953] TLS CLIENT_EXPECT_SERVER_HELLO -> CLIENT_EXPECT_ENCRYPTED_EXTENSIONS
+2025-12-19 13:44:24,651 [DEBUG] [96168a7b7eb6b953] TLS CLIENT_EXPECT_ENCRYPTED_EXTENSIONS -> CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE
+2025-12-19 13:44:24,652 [DEBUG] [96168a7b7eb6b953] Discarding epoch 0
+2025-12-19 13:44:24,679 [DEBUG] [96168a7b7eb6b953] TLS CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE -> CLIENT_EXPECT_CERTIFICATE_VERIFY
+2025-12-19 13:44:24,682 [DEBUG] [96168a7b7eb6b953] TLS CLIENT_EXPECT_CERTIFICATE_VERIFY -> CLIENT_EXPECT_FINISHED
+2025-12-19 13:44:24,682 [DEBUG] [96168a7b7eb6b953] TLS CLIENT_EXPECT_FINISHED -> CLIENT_POST_HANDSHAKE
+2025-12-19 13:44:24,683 [DEBUG] [96168a7b7eb6b953] ALPN negotiated protocol h3
+2025-12-19 13:44:24,683 [DEBUG] [96168a7b7eb6b953] Stream 3 created by peer
+2025-12-19 13:44:24,712 [DEBUG] [96168a7b7eb6b953] Discarding epoch 2
+2025-12-19 13:44:24,839 [DEBUG] [96168a7b7eb6b953] Stream 11 created by peer
+2025-12-19 13:44:24,853 [DEBUG] [96168a7b7eb6b953] Stream 0 discarded
+2025-12-19 13:44:24,891 [DEBUG] [96168a7b7eb6b953] Stream 7 created by peer
+2025-12-19 13:44:25,026 [DEBUG] [96168a7b7eb6b953] Stream 4 discarded
+2025-12-19 13:44:25,515 [DEBUG] [96168a7b7eb6b953] Connection close sent (code 0x0, reason )
+2025-12-19 13:44:25,515 [DEBUG] [96168a7b7eb6b953] CONNECTED -> CLOSING
+2025-12-19 13:44:26,732 [DEBUG] [5b48a7638aedb732] TLS: Advertising to peer post-quantum algorithm using X25519ML768 (0x11EC)
+2025-12-19 13:44:26,733 [DEBUG] [5b48a7638aedb732] TLS CLIENT_HANDSHAKE_START -> CLIENT_EXPECT_SERVER_HELLO
+2025-12-19 13:44:26,759 [DEBUG] [5b48a7638aedb732] FIRSTFLIGHT -> CONNECTED
+2025-12-19 13:44:26,762 [DEBUG] [5b48a7638aedb732] TLS: Post-quantum safety achieved using X25519ML768 (key-exchange)
+2025-12-19 13:44:26,762 [DEBUG] [5b48a7638aedb732] Negotiated protocol version 0x00000001 (VERSION_1)
+2025-12-19 13:44:26,762 [DEBUG] [5b48a7638aedb732] TLS CLIENT_EXPECT_SERVER_HELLO -> CLIENT_EXPECT_ENCRYPTED_EXTENSIONS
+2025-12-19 13:44:26,767 [DEBUG] [5b48a7638aedb732] TLS CLIENT_EXPECT_ENCRYPTED_EXTENSIONS -> CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE
+2025-12-19 13:44:26,768 [DEBUG] [5b48a7638aedb732] Discarding epoch 0
+2025-12-19 13:44:26,787 [DEBUG] [5b48a7638aedb732] TLS CLIENT_EXPECT_CERTIFICATE_REQUEST_OR_CERTIFICATE -> CLIENT_EXPECT_CERTIFICATE_VERIFY
+2025-12-19 13:44:26,791 [DEBUG] [5b48a7638aedb732] TLS CLIENT_EXPECT_CERTIFICATE_VERIFY -> CLIENT_EXPECT_FINISHED
+2025-12-19 13:44:26,791 [DEBUG] [5b48a7638aedb732] TLS CLIENT_EXPECT_FINISHED -> CLIENT_POST_HANDSHAKE
+2025-12-19 13:44:26,791 [DEBUG] [5b48a7638aedb732] ALPN negotiated protocol h3
+2025-12-19 13:44:26,791 [DEBUG] [5b48a7638aedb732] Stream 3 created by peer
+2025-12-19 13:44:26,817 [DEBUG] [5b48a7638aedb732] Discarding epoch 2
+2025-12-19 13:44:26,939 [DEBUG] [5b48a7638aedb732] Stream 11 created by peer
+2025-12-19 13:44:26,955 [DEBUG] [5b48a7638aedb732] Stream 0 discarded
+2025-12-19 13:44:26,990 [DEBUG] [5b48a7638aedb732] Stream 7 created by peer
+2025-12-19 13:44:27,118 [DEBUG] [5b48a7638aedb732] Stream 4 discarded
+2025-12-19 13:44:28,030 [INFO] [VideoCache] File created and streaming ready: 1047552 bytes
+2025-12-19 13:44:28,030 [INFO] [VideoHelper] Video ready at: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
+2025-12-19 13:44:28,031 [INFO] [Roku] Streaming: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
+2025-12-19 13:44:28,202 [INFO] EXEC HA: media_player.play_media on media_player.28_tcl_roku_tv | Data: {'media_content_id': 'http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4', 'media_content_type': 'video', 'extra': {'title': 'SharedLLM Stream', 'format': 'mp4'}}
+2025-12-19 13:44:33,762 [DEBUG] [5b48a7638aedb732] Connection close sent (code 0x0, reason )
+2025-12-19 13:44:33,762 [DEBUG] [5b48a7638aedb732] CONNECTED -> CLOSING
+2025-12-19 13:44:35,788 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Sent command to play media the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'media_player.play_media', 'new_state': 'idle'}]
+2025-12-19 13:44:35,788 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Sent command to play media the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'media_player.play_media', 'new_state': 'idle'}]]
+2025-12-19 13:44:35,789 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Sent command to play media the Gracies TV.', 'entity_id': 'media_player.28_tcl_roku_tv', 'friendly_name': 'Gracies TV', 'service': 'media_player.play_media', 'new_state': 'idle'}], type: <class 'list'>

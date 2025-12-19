@@ -1,0 +1,106 @@
+Deploying to jeremiah@192.168.2.211:/home/jeremiah/SharedLLM
+Syncing local .env to remote...
+Branch: timer
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+Activate the web console with: systemctl enable --now cockpit.socket
+
+Fetching latest code...
+From github.com:JMiahMan1/SharedLLM
+   9b806ae..4af4b87  timer      -> origin/timer
+Already on 'timer'
+Your branch is behind 'origin/timer' by 1 commit, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+HEAD is now at 4af4b87 Switch Roku ECP from /input to /launch/2213 endpoint
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+Already up to date.
+Recreating Docker container to apply config...
+time="2025-12-19T14:29:55-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+#1 [internal] load local bake definitions
+#1 reading from stdin 509B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile:
+#2 transferring dockerfile: 1.19kB done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+#3 DONE 0.9s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 456B done
+#4 DONE 0.1s
+
+#5 [1/8] FROM docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime@sha256:f0ca81b440e252399d9954a45b616ee2540959466aacf3dfc3f856691eee66e8
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 40.31kB 0.0s done
+#6 DONE 0.1s
+
+#7 [5/8] RUN pip install --no-cache-dir -r requirements.txt
+#7 CACHED
+
+#8 [2/8] WORKDIR /app
+#8 CACHED
+
+#9 [3/8] COPY requirements.txt .
+#9 CACHED
+
+#10 [4/8] RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y     curl     iputils-ping     tesseract-ocr     poppler-utils     ffmpeg     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libdrm2     libxkbcommon0     libxcomposite1     libxdamage1     libxfixes3     libxrandr2     libgbm1     libasound2     libpango-1.0-0     libcairo2     tzdata     && rm -rf /var/lib/apt/lists/*
+#10 CACHED
+
+#11 [6/8] RUN playwright install chromium
+#11 CACHED
+
+#12 [7/8] COPY app/ /app/
+#12 DONE 0.3s
+
+#13 [8/8] COPY data/ /data/
+#13 DONE 0.6s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 0.3s done
+#14 writing image sha256:4fa92e67d248c2689302750e74bffbd322738013901cc1c64365561ffe7fbc0b 0.0s done
+#14 naming to docker.io/library/sharedllm-rag-api 0.0s done
+#14 DONE 0.3s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ sharedllm-rag-api  Built
+ Container unified_rag_redis  Recreate
+ Container unified_rag_redis  Recreated
+ Container unified_rag_api  Recreate
+time="2025-12-19T14:29:59-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+ Container unified_rag_api  Recreated
+ Container unified_rag_redis  Starting
+ Container unified_rag_redis  Started
+ Container unified_rag_api  Starting
+ Container unified_rag_api  Started
+Waiting for application startup...
+..............................
+[FAIL] Timeout waiting for application startup.
+Last 20 lines of logs:
+2025-12-19 14:30:55,982 [ERROR] [Roku] Could not fetch device registry
+2025-12-19 14:30:55,983 [ERROR] [Roku] Could not determine Roku IP address
+2025-12-19 14:30:55,983 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Roku IP address not found'}]
+2025-12-19 14:30:55,983 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Roku IP address not found'}]]
+2025-12-19 14:30:55,983 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Roku IP address not found'}], type: <class 'list'>
+2025-12-19 14:30:55,984 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Roku IP address not found'}]
+2025-12-19 14:30:55,984 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Roku IP address not found'}]
+[download]   0.0% of   27.20MiB at  Unknown B/s ETA Unknown[download]   0.0% of   27.20MiB at    1.35MiB/s ETA 00:20  [download]   0.0% of   27.20MiB at    2.19MiB/s ETA 00:12[download]   0.1% of   27.20MiB at    4.19MiB/s ETA 00:06[download]   0.1% of   27.20MiB at    4.05MiB/s ETA 00:06[download]   0.2% of   27.20MiB at    1.87MiB/s ETA 00:14[download]   0.5% of   27.20MiB at    1.78MiB/s ETA 00:15[download]   0.9% of   27.20MiB at    2.49MiB/s ETA 00:10[download]   1.8% of   27.20MiB at    1.92MiB/s ETA 00:13[download]   3.7% of   27.20MiB at    2.92MiB/s ETA 00:08[download]   7.3% of   27.20MiB at    3.85MiB/s ETA 00:06[DEBUG] try_handle_compound_command returning: [{'status': 'FAILURE', 'message': 'Roku IP address not found'}]
+2025-12-19 14:30:55,984 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Roku IP address not found'}]
+2025-12-19 14:30:55,984 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'N/A' on 'N/A' failed. Reason: Roku IP address not found
+
+2025-12-19 14:30:55,984 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2025-12-19 14:30:55,984 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=2590
+2025-12-19 14:31:01,214 [DEBUG] [9d2b4cd738662676] Connection close sent (code 0x0, reason )
+2025-12-19 14:31:01,215 [DEBUG] [9d2b4cd738662676] CONNECTED -> CLOSING
+2025-12-19 14:31:03,584 [DEBUG] [RESPONSE] Final response to user (271 chars): I'm unable to locate the Roku device for Gracies TV. Would you like me to attempt the command again, or would you prefer guidance on finding the Roku's IP address? If the TV isn't detected, double-check its network connection and device name in your Home Assistant setup.
+2025-12-19 14:31:03,585 [DEBUG] [RESPONSE] Returning to client: I'm unable to locate the Roku device for Gracies TV. Would you like me to attempt the command again, or would you prefer guidance on finding the Roku's IP address? If the TV isn't detected, double-che
+[download]  14.7% of   27.20MiB at    4.80MiB/s ETA 00:04[download]  29.4% of   27.20MiB at    5.37MiB/s ETA 00:03[download]  36.7% of   27.20MiB at    5.56MiB/s ETA 00:03[download]  36.7% of   27.20MiB at  Unknown B/s ETA Unknown[download]  36.7% of   27.20MiB at    1.95MiB/s ETA 00:08  [download]  36.7% of   27.20MiB at    2.79MiB/s ETA 00:06[download]  36.7% of   27.20MiB at    4.47MiB/s ETA 00:03[download]  36.8% of   27.20MiB at    5.27MiB/s ETA 00:03[download]  36.9% of   27.20MiB at    1.84MiB/s ETA 00:09[download]  37.1% of   27.20MiB at    1.93MiB/s ETA 00:08[download]  37.6% of   27.20MiB at    2.59MiB/s ETA 00:06[download]  38.5% of   27.20MiB at    3.22MiB/s ETA 00:05[download]  40.4% of   27.20MiB at    3.70MiB/s ETA 00:04[download]  44.0% of   27.20MiB at    4.40MiB/s ETA 00:03[download]  51.4% of   27.20MiB at    4.91MiB/s ETA 00:02[download]  66.1% of   27.20MiB at    4.88MiB/s ETA 00:01[download]  71.9% of   27.20MiB at    4.90MiB/s ETA 00:01[download]  71.9% of   27.20MiB at  Unknown B/s ETA Unknown[download]  71.9% of   27.20MiB at    1.91MiB/s ETA 00:04  [download]  71.9% of   27.20MiB at    2.37MiB/s ETA 00:03[download]  71.9% of   27.20MiB at    2.92MiB/s ETA 00:02[download]  72.0% of   27.20MiB at    3.21MiB/s ETA 00:02[download]  72.1% of   27.20MiB at    1.46MiB/s ETA 00:05[download]  72.3% of   27.20MiB at    1.60MiB/s ETA 00:04[download]  72.8% of   27.20MiB at    2.35MiB/s ETA 00:03[download]  73.7% of   27.20MiB at    2.60MiB/s ETA 00:02[download]  75.5% of   27.20MiB at    3.45MiB/s ETA 00:01[download]  79.2% of   27.20MiB at    3.82MiB/s ETA 00:01[download]  86.6% of   27.20MiB at    3.96MiB/s ETA 00:00[download] 100.0% of   27.20MiB at    4.14MiB/s ETA 00:00[download] 100% of   27.20MiB in 00:00:05 at 4.60MiB/s                                                         INFO:     192.168.2.1:46598 - "POST /api/chat HTTP/1.1" 200 OK
+[FAIL] Deployment Failed.

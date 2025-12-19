@@ -1,0 +1,1 @@
+-rw-r--r--. 1 jeremiah jeremiah 600 Dec 19 12:18 temp_results/roku_power_test_2.txt

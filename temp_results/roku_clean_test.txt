@@ -1,0 +1,19 @@
+======================================================================
+SIMPLE ROKU TEST - App Should Handle Power
+======================================================================
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+🤖 ASSISTANT: Done.
+
+⏳ Waiting 15s for playback to start...
+
+======================================================================
+🔍 PLEASE VERIFY:
+   1. Is the TV display ON?
+   2. Is video playing or attempting to play?
+======================================================================
+
+🔴 Turning off TV...
+
+📱 USER: Turn off Gracies TV
+🤖 ASSISTANT: Turning off Gracies TV. Current state: off.

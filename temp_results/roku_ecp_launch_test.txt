@@ -1,0 +1,19 @@
+======================================================================
+SIMPLE ROKU TEST - App Should Handle Power
+======================================================================
+
+📱 USER: Play Big Buck Bunny video on Gracies TV
+🤖 ASSISTANT: I cannot locate the Roku device to play the video. The system failed to find the Gracies TV Roku IP address. Would you like me to check the device name or network settings?
+
+⏳ Waiting 15s for playback to start...
+
+======================================================================
+🔍 PLEASE VERIFY:
+   1. Is the TV display ON?
+   2. Is video playing or attempting to play?
+======================================================================
+
+🔴 Turning off TV...
+
+📱 USER: Turn off Gracies TV
+🤖 ASSISTANT: Gracies TV is now turned off.

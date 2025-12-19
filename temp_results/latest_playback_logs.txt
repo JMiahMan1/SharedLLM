@@ -1,0 +1,50 @@
+2025-12-19 13:36:50,238 [INFO] Preparing Doc: light.downstairs_bathroom_2_light | Group: signify:wiz a19 filament:downstairs bathroom 2 light | Integ: unknown
+2025-12-19 13:36:50,262 [DEBUG] Starting new HTTPS connection (1): us.i.posthog.com:443
+2025-12-19 13:36:50,435 [INFO] Timer Scheduler Started.
+INFO:     Application startup complete.
+INFO:     192.168.2.1:41924 - "GET /health HTTP/1.1" 200 OK
+2025-12-19 13:36:50,727 [INFO] [INTENT] get_intent called with query: 'Play Big Buck Bunny video on Gracies TV'
+2025-12-19 13:36:50,727 [INFO] [REGEX START] apply_regex_override called with: 'Play Big Buck Bunny video on Gracies TV'
+2025-12-19 13:36:50,727 [INFO] [REGEX CHECK] Checking query: 'play big buck bunny video on gracies tv'
+2025-12-19 13:36:50,730 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 19 patterns
+2025-12-19 13:36:50,730 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-19 13:36:50,731 [INFO] [REGEX CHECK] Testing pattern: \b(watch|view)\b -> watch_media
+2025-12-19 13:36:50,731 [INFO] [REGEX CHECK] Testing pattern: \b(play)\b -> play_media
+2025-12-19 13:36:50,731 [INFO] [REGEX OVERRIDE] Matched 'play_media' via pattern: \b(play)\b...
+2025-12-19 13:36:50,731 [INFO] [INTENT] Regex override: 'Play Big Buck Bunny video on Gracies TV' -> play_media [LOCKED]
+[DEBUG] FAST PATH ORCHESTRATION Starting for intent=play_media, is_high_confidence=True
+2025-12-19 13:36:50,733 [INFO] [PIPELINE DEBUG] Using provided intent: play_media (Score: 1.0)
+2025-12-19 13:36:50,733 [INFO] [FAST PATH ORCHESTRATION] Starting for intent=play_media, is_high_confidence=True
+2025-12-19 13:36:50,736 [INFO] [FAST PATH] Condition met, processing play_media
+2025-12-19 13:36:50,736 [INFO] [FAST PATH] Matched transport intent: play_media
+2025-12-19 13:36:50,737 [INFO] [FAST PATH] device_in_query: False, query: Play Big Buck Bunny video on Gracies TV
+2025-12-19 13:36:50,737 [INFO] [FAST PATH] action_plan set: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play_media', 'device_name': None}}
+2025-12-19 13:36:50,737 [INFO] [FAST ORCHESTRA] Bypassing LLM for play_media
+2025-12-19 13:36:50,737 [INFO] [ACTION DISPATCH] Calling handler for media_command
+2025-12-19 13:36:50,737 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=play_media, entity_id=None, device_name=None, integration=unknown
+[DEBUG] FAST PATH Condition met, processing play_media
+2025-12-19 13:36:50,737 [INFO] [Media Type] Override by keyword: video
+2025-12-19 13:36:50,737 [INFO] DEBUG: Entering smart_resolve_entity. Q='big buck bunny video gracies tv' Intent='play_media' Multiple=True
+2025-12-19 13:36:50,747 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
+2025-12-19 13:36:50,814 [INFO] DEBUG: Search returned 30 docs.
+2025-12-19 13:36:50,814 [INFO] DEBUG: First result type: <class 'tuple'> val: (Document(id='media_player.roku_2n0062385487', metadata={'last_updated': '1026666.405', 'model': 'TCL 28S3750', 'entity_id': 'media_player.roku_2n0062385487', 'group_id': 'tcl:tcl 28s3750:gracies', 'source': 'home_assistant', 'friendly_name': 'Gracies TV', 'capabilities': 'turn_off,turn_on,play_media,remote_control', 'state': 'off', 'domain': 'media_player', 'attributes': '{"mass_player_type": "player", "active_queue": "ROKU_2N0062385487", "device_class": "speaker", "icon": "mdi:speaker", "friendly_name": "Gracies TV", "supported_features": 7795643}', 'group_name': 'Gracies', 'integration': 'speaker', 'manufacturer': 'TCL', 'area_name': ''}, page_content="Gracies TV (media_player.roku_2n0062385487) is a speaker device in group 'Gracies'. Can turn off. Can play media. Is a remote."), 0.9073619246482849)
+2025-12-19 13:36:50,814 [INFO] Resolution: Skipping binary_sensor.28_tcl_roku_tv_supports_find_remote for intent 'play_media' because domain 'binary_sensor' is not a media player or remote.
+2025-12-19 13:36:50,814 [INFO] Resolution: Skipping binary_sensor.28_tcl_roku_tv_supports_airplay for intent 'play_media' because domain 'binary_sensor' is not a media player or remote.
+2025-12-19 13:36:50,814 [INFO] Resolution: Skipping binary_sensor.28_tcl_roku_tv_headphones_connected for intent 'play_media' because domain 'binary_sensor' is not a media player or remote.
+2025-12-19 13:36:50,814 [INFO] Resolution: Skipping binary_sensor.28_tcl_roku_tv_supports_ethernet for intent 'play_media' because domain 'binary_sensor' is not a media player or remote.
+2025-12-19 13:36:50,814 [INFO] match found in Group: tcl:tcl 28s3750:gracies (via Gracies TV (media_pl...)
+2025-12-19 13:36:50,819 [INFO] Group tcl:tcl 28s3750:gracies has 4 members.
+2025-12-19 13:36:50,819 [INFO] Capability Routing used media_player.28_tcl_roku_tv (cast) for intent play_media
+2025-12-19 13:36:50,819 [INFO] [Device Fallback] Resolved 'big buck bunny video gracies tv' to media_player.28_tcl_roku_tv
+2025-12-19 13:36:50,819 [INFO] [CONTEXT UPDATE] user=admin, entity_id=media_player.28_tcl_roku_tv, redis_client=True
+2025-12-19 13:36:50,820 [INFO] [LAST MEDIA ENTITY] Setting rag:last_media_entity:admin = media_player.28_tcl_roku_tv
+2025-12-19 13:36:50,821 [INFO] [DEBUG_TRANSPORT] Checking Redirection: intent='play_media' is_transport=False entity=media_player.28_tcl_roku_tv
+2025-12-19 13:36:50,823 [INFO] [TV Swap] Video request on cast device. group_id=tcl:tcl 28s3750:gracies, searching for TV...
+2025-12-19 13:36:50,837 [INFO] [Router] Delegating to Integration: cast for media_player.28_tcl_roku_tv
+2025-12-19 13:36:50,838 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-19 13:36:50,859 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.28_tcl_roku_tv HTTP/1.1" 200 1168
+2025-12-19 13:36:50,861 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-19 13:36:50,884 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.28_tcl_roku_tv HTTP/1.1" 200 1168
+2025-12-19 13:36:50,887 [INFO] [SmartPowerSync] Searching for TV in group tcl:tcl 28s3750:gracies
+2025-12-19 13:36:50,888 [WARNING] [SmartPowerSync] No TV sibling found for media_player.28_tcl_roku_tv
+2025-12-19 13:36:50,888 [INFO] [StandardIntegration] Searching Whoogle for 'big buck bunny video gracies youtube'...
