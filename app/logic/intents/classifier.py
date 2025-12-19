@@ -26,24 +26,26 @@ class IntentClassifier:
         return None
 
     @classmethod
-    async def get_intent(cls, query: str) -> Tuple[str, float, bool]:
+    async def get_intent(cls, query: str) -> Tuple[str, float, bool, bool]:
         """
-        Returns (intent, score, is_high_confidence)
+        Returns (intent, score, is_high_confidence, intent_locked)
+        intent_locked=True means the intent was detected by regex and should NOT be changed by LLM
         """
         log.info(f"[INTENT] get_intent called with query: '{query}'")
 
-        # 1. Regex
+        # 1. Regex (LOCKED - LLM cannot override)
         regex_intent = cls.apply_regex_override(query)
         if regex_intent:
-            log.info(f"[INTENT] Regex override: '{query}' -> {regex_intent}")
-            return regex_intent, 1.0, True
+            log.info(f"[INTENT] Regex override: '{query}' -> {regex_intent} [LOCKED]")
+            return regex_intent, 1.0, True, True  # intent_locked=True
 
-        # 2. Vector Engine
+        # 2. Vector Engine (NOT locked - LLM can refine)
         log.info(f"[INTENT] Falling back to vector engine for: '{query}'")
         result = await intent_engine.classify(
             query,
             threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD,
             high_confidence_threshold=0.85
         )
+        intent, score, is_high_conf = result
         log.info(f"[INTENT] Vector result: {result}")
-        return result
+        return intent, score, is_high_conf, False  # intent_locked=False
