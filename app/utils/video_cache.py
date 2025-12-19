@@ -66,9 +66,9 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
     # yt-dlp options for progressive download
     # Use best MP4 video+audio, but limit to 1080p to ensure cast compatibility and speed
     ydl_opts = {
-        # MUST use single file format (best[ext=mp4]) for progressive streaming.
-        # Limit to 1080p to assure it's not a 128GB 4K file.
-        'format': 'best[ext=mp4][height<=1080]/best[ext=mp4]/best',
+        # FORCE H.264 (avc1) video and AAC audio for Chromecast compatibility.
+        # VP9 (webm) or newer codecs often fail on older/standard Cast devices.
+        'format': 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': str(file_path),
         'quiet': True,
         'no_warnings': True,
