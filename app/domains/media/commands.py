@@ -29,28 +29,40 @@ async def _execute_transport_command(intent: str, entity_id: str, domain: str, u
     intent = intent.strip()
     log.info(f"[_execute_transport_command] Intent='{intent}' (repr={repr(intent)}) Entity='{entity_id}'")
 
-    # [Generic Wrapper Unwrap - Service Registry Pattern]
-    # Use generic unwrap function for transport commands
-    from app.domains.media.integrations.base import unwrap_entity_if_needed
-    entity_id = await unwrap_entity_if_needed(entity_id, "transport", user_creds)
+    # [MASS Queue Sync] Check if Music Assistant wrapper is actively playing
+    # If MASS is playing, transport commands must go to MASS, not underlying Cast device
+    # This is analogous to SmartPowerSync routing power to TV entity
+    from app.domains.media.devices import get_entity_state
+    import requests
+    from app.settings import HA_URL
+    
+    headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}", "Content-Type": "application/json"}
+    try:
+        response = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
+        if response.status_code == 200:
+            entity_data = response.json()
+            attributes = entity_data.get("attributes", {})
+            entity_state = entity_data.get("state", "unknown")
+            
+            # Check if this is a MASS wrapper that's actively playing
+            if attributes.get("mass_player_type") and entity_state in ["playing", "paused", "buffering"]:
+                log.info(f"[MASS Queue Sync] MASS wrapper {entity_id} is {entity_state}. Sending transport to MASS wrapper.")
+                # Don't unwrap - MASS controls the queue
+            else:
+                # Either not MASS or MASS is idle - unwrap to hardware device
+                from app.domains.media.integrations.base import unwrap_entity_if_needed
+                entity_id = await unwrap_entity_if_needed(entity_id, "transport", user_creds)
+    except Exception as e:
+        log.warning(f"[MASS Queue Sync] Error checking entity state: {e}, falling back to unwrap")
+        from app.domains.media.integrations.base import unwrap_entity_if_needed
+        entity_id = await unwrap_entity_if_needed(entity_id, "transport", user_creds)
 
-    result = None
-
+    # Special handling for stop_media - check state first
     if intent == "stop_media":
         log.info(f"[Transport] Match stop_media for {entity_id}")
-        # Check state first to avoid 500 error on off devices
-        from app.domains.media.devices import get_entity_state
         state = await get_entity_state(entity_id, user_creds)
         if state in ["off", "unavailable", "idle", "standby"]:
-             result = {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
-             log.info(f"[Transport] Returning result: {result}")
-             return result
-        result = await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
-        log.info(f"[Transport] Returning result: {result}")
-        return result
-
-    # [Transport Redirection Logic - simplified version]
-    # This is a simplified version - the full logic from media_ops.py would go here
+            return {"status": "SUCCESS", "message": f"{entity_id} is already stopped.", "entity_id": entity_id, "service": "media_stop", "new_state": state}
 
     # Fallback to generic service call if intent matches a service name
     return await execute_ha_service("media_player", intent, entity_id, user_creds, {}, redis_client)
