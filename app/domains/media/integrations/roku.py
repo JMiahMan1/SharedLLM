@@ -27,29 +27,31 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         """
         log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - CAST MODE")
         
-        # [SmartPowerSync] - Ensure TV is ON via Remote (Robust)
-        # Infer remote entity from media_player entity (e.g. media_player.foo -> remote.foo)
+        # [SmartPowerSync] - Ensure TV display is actually ON
         remote_entity_id = entity_id.replace("media_player.", "remote.")
         
-        # Poll for state change (timeout 20s)
-        for i in range(10):
-            # Check state
-            state = await self.get_state(entity_id, user_creds)
-            if state and state.state in ["on", "idle", "home", "playing", "paused"]:
-                log.info(f"[Roku] Device is verified ON (State: {state.state})")
-                break
-            
-            # Action: Wake Device
-            if i % 2 == 0: 
-                 log.info(f"[Roku] Device is {state.state if state else 'unknown'}. Sending PowerOn to {remote_entity_id}...")
-                 # Try Remote PowerOn (Most reliable)
-                 await execute_ha_service("remote", "send_command", remote_entity_id, user_creds, {"command": "poweron"}, None)
-                 # Backup: Media Player Turn On
-                 await self.turn_on(entity_id, user_creds)
-            
-            await asyncio.sleep(2)
-        else:
-            log.warning("[Roku] Device did not report ON state after wait. Proceeding but command may fail.")
+        # Step 1: Check current state
+        initial_state = await self.get_state(entity_id, user_creds)
+        current_state_value = initial_state.state if initial_state else "unknown"
+        
+        log.info(f"[Roku] Current state: {current_state_value}")
+        
+        # Step 2: If OFF, turn on first
+        if current_state_value in ["off", "unavailable", "unknown"]:
+            log.info(f"[Roku] Device is {current_state_value}, calling turn_on...")
+            await self.turn_on(entity_id, user_creds)
+            await asyncio.sleep(3)
+        
+        # Step 3: Send Home button to wake display (even if state is 'idle')
+        # Idle just means standby - Home button actually wakes the screen
+        log.info(f"[Roku] Sending Home button to wake display...")
+        await execute_ha_service("remote", "send_command", remote_entity_id, user_creds, {"command": "Home"}, None)
+        await asyncio.sleep(3)
+        
+        # Step 4: Verify display is showing something
+        final_state = await self.get_state(entity_id, user_creds)
+        if final_state:
+            log.info(f"[Roku] After wake: state={final_state.state}, app={final_state.attributes.get('app_name', 'N/A')}")
         
         if media_type == "video":
             # 1. Resolve Query
