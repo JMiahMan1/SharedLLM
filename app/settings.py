@@ -46,6 +46,7 @@ SEARCH_HEADERS = {
 }
 
 WHOOGLE_URL = os.getenv("WHOOGLE_URL", "https://search.sumemail.com")
+SERVER_URL = os.getenv("SERVER_URL", "http://192.168.2.211:11435")  # External URL for video streaming
 NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
 NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
