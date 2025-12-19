@@ -1,0 +1,74 @@
+35b2259a0747   ghcr.io/open-webui/open-webui:main   "bash start.sh"          2 weeks ago    Up 11 days (healthy)                                                    ollama-docker-openWebUI-1
+8c912204674f   ollama/ollama                        "/bin/ollama serve"      7 months ago   Exited (0) 7 months ago                                                 ollama
+---
+services:
+  # --- 1. Main Unified RAG API Service ---
+  rag-api:
+    # Renamed service to 'rag-api' for clear internal service linking
+    build: .
+    container_name: unified_rag_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # CRITICAL: Configure Redis to use Localhost since we are in Host Mode
+      - REDIS_URL=redis://127.0.0.1:6379/0
+      # CRITICAL: Preserve the OLLAMA_URL configuration passed from .env
+      - OLLAMA_URL=${OLLAMA_URL}
+      - DEFAULT_MODEL=${DEFAULT_MODEL}
+      - DOCKER_ENV=1
+      - DEBUG_RAG_CONTEXT=true
+      - DEBUG=1
+      # Pass through remaining variables
+      - HA_URL=${HA_URL}
+      - HA_TOKEN=${HA_TOKEN}
+      - NEXTCLOUD_URL=${NEXTCLOUD_URL}
+      - NEXTCLOUD_USER=${NEXTCLOUD_USER}
+      - NEXTCLOUD_PASS=${NEXTCLOUD_PASS}
+      - WHOOGLE_URL=${WHOOGLE_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - TZ=America/Phoenix
+
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - .:/workspace:z
+      - rag_chroma:/data/chroma_db:z
+      # Mounting the system prompt file separately for clarity
+      - ./app/data/system_prompt.txt:/workspace/app/data/system_prompt.txt
+      # Adding the necessary temp dir for Nextcloud ingestion
+      - ./data/nextcloud_temp:/data/nextcloud_temp:z
+
+    working_dir: /workspace
+    entrypoint: []
+    command: [ "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "11435", "--workers", "1", "--reload", "--log-level", "debug" ]
+    depends_on:
+      - redis # CRITICAL: Depend on Redis service
+    network_mode: "host" # Use Host Networking for Cast Discovery
+    # networks:
+    #   - ragnet
+
+  # --- 2. Redis Service (Shared Cache/Memory) ---
+  redis:
+    image: redis:7-alpine
+    container_name: unified_rag_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - rag_redis:/data # Volume for Redis persistence
+    ports:
+      - "6379:6379" # Expose to Host so successful Host Mode API can reach it
+    networks:
+      - ragnet
+
+# --- Volumes ---
+volumes:
+  rag_chroma:
+  rag_redis:
+    # ADDED: Volume for Redis persistence
+
+    # --- Networks ---
+networks:
+  ragnet:
+    driver: bridge

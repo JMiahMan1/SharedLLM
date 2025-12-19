@@ -1,0 +1,36 @@
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+   46c0783..f2b8758  timer      -> origin/timer
+Updating 46c0783..f2b8758
+Fast-forward
+ tools/test_search_integrations.py | 64 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 64 insertions(+)
+ create mode 100644 tools/test_search_integrations.py
+--- Testing Web Search Integrations (Regex Compatibility) ---
+
+Performing Search for: 'site:youtube.com OpenAI Sora'
+2025-12-18 20:35:39,721 [DEBUG] Using selector: EpollSelector
+2025-12-18 20:35:39,722 [INFO] Executing Web Search for: site:youtube.com OpenAI Sora
+2025-12-18 20:35:39,726 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2025-12-18 20:35:43,323 [DEBUG] https://search.sumemail.com:443 "GET /search?q=site%3Ayoutube.com+OpenAI+Sora&format=json HTTP/2.0" 200 5581
+
+--- Search Result Output Sample (First 500 chars) ---
+### Real-time Web Search Results (Web Search):
+Title: Introducing Sora 2 - YouTube
+URL: https://www.youtube.com/watch?v=gzneGhpXwjU
+Snippet: www.youtube.com › watch Sep 30, 2025 · Bill Peebles, Rohan Sahai, and Thomas Dimson introduce and demo Sora 2 and the new Sora app. https:// openai.com/index/sora-2/
+
+Title: OpenAI Sora: The Age Of AI Is Here! - YouTube
+URL: https://www.youtube.com/watch?v=nbPbK1xYSNY
+Snippet: www.youtube.com › watch Feb 16, 2024 · Check out Weights & Biases and sign up for...
+-----------------------------------------------------
+
+[TEST 1] standard.py Integration (Generic URL)
+Found URLs: ['https://www.youtube.com/watch?v=gzneGhpXwjU', 'https://www.youtube.com/watch?v=nbPbK1xYSNY', 'https://www.youtube.com/watch?v=tPx6bCDa5GE', 'https://www.youtube.com/@OpenAI', 'https://www.youtube.com/watch?v=G5nWLVITjTM']
+>> PASS: standard.py regex found URLs.
+
+[TEST 2] media_ops.py Integration (YouTube specific)
+>> PASS: media_ops.py regex found: https://www.youtube.com/watch?v=gzneGhpXwjU
+
+[TEST 3] android_tv_ops.py Integration (YouTube Strict)
+>> PASS: android_tv_ops.py regex found: https://www.youtube.com/watch?v=gzneGhpXwjU

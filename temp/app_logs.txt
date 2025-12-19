@@ -1,0 +1,100 @@
+2025-12-18 14:32:45,529 [INFO] [CastIntegration] Pre-resolved video query to: https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 14:32:45,533 [INFO] [CastIntegration] Starting progressive download for video ac9654451efa
+2025-12-18 14:33:15,608 [ERROR] [VideoCache] Download failed or too slow for https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 14:33:15,609 [ERROR] [CastIntegration] Progressive download failed for https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 14:33:15,609 [INFO] [CastIntegration] Launching YouTube App for Video ID: HF6LSbMKvrw
+2025-12-18 14:33:15,869 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome | Data: {'media_content_id': '{"app_name": "youtube", "media_id": "HF6LSbMKvrw"}', 'media_content_type': 'cast'}
+2025-12-18 14:33:22,801 [INFO] [ACTION DISPATCH] Handler returned: {'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}
+2025-12-18 14:33:22,801 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]]
+2025-12-18 14:33:22,802 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}], type: <class 'list'>
+2025-12-18 14:33:22,802 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-18 14:33:22,803 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'play_media' sent to 1 devices. Verified New State: N/A
+
+INFO:     192.168.2.1:40988 - "POST /api/chat HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2025-12-18 14:33:34,831 [INFO] --- SHUTDOWN: Cleaning up resources ---
+2025-12-18 14:33:34,832 [INFO] Timer Scheduler Stopped.
+2025-12-18 14:33:34,832 [INFO] Shutdown complete.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2150]
+INFO:     Stopping reloader process [1]
+[download]   0.5% of  128.26GiB at    1.38MiB/s ETA 26:20:09[download]   0.5% of  128.26GiB at    1.39MiB/s ETA 26:10:07[download]   0.5% of  128.26GiB at    1.35MiB/s ETA 26:52:23[download]   0.5% of  128.26GiB at    1.32MiB/s ETA 27:34:07[download]   0.5% of  128.26GiB at    1.28MiB/s ETA 28:25:30[download]   0.5% of  128.26GiB at    1.24MiB/s ETA 29:18:01[download]   0.5% of  128.26GiB at    1.28MiB/s ETA 28:25:24[download]   0.5% of  128.26GiB at    1.36MiB/s ETA 26:39:34[download]   0.5% of  128.26GiB at  Unknown B/s ETA Unknown [download]   0.5% of  128.26GiB at  364.41KiB/s ETA --:--:--[download]   0.5% of  128.26GiB at  534.44KiB/s ETA 69:40:00[download]   0.5% of  128.26GiB at  980.22KiB/s ETA 37:57:59[download]   0.5% of  128.26GiB at    1.76MiB/s ETA 20:41:07[download]   0.5% of  128.26GiB at    1.95MiB/s ETA 18:40:02[download]   0.5% of  128.26GiB at    1.64MiB/s ETA 22:05:22[download]   0.5% of  128.26GiB at    1.41MiB/s ETA 25:39:52[download]   0.5% of  128.26GiB at    1.20MiB/s ETA 30:13:53[download]   0.5% of  128.26GiB at    1.51MiB/s ETA 24:01:37[download]   0.5% of  128.26GiB at    2.30MiB/s ETA 15:45:41[download]   0.5% of  128.26GiB at    2.34MiB/s ETA 15:29:44[download]   0.5% of  128.26GiB at    2.42MiB/s ETA 15:01:45[download]   0.5% of  128.26GiB at    2.38MiB/s ETA 15:13:30[download]   0.5% of  128.26GiB at    2.49MiB/s ETA 14:34:20[download]   0.5% of  128.26GiB at   97.01KiB/s ETA --:--:--[download]   0.5% of  128.26GiB at  230.36KiB/s ETA --:--:--[download]   0.5% of  128.26GiB at  392.37KiB/s ETA 94:51:34[download]   0.5% of  128.26GiB at  463.96KiB/s ETA 80:15:30[download]   0.5% of  128.26GiB at  849.17KiB/s ETA 43:48:06[download]   0.5% of  128.26GiB at  818.17KiB/s ETA 45:27:10[download]   0.5% of  128.26GiB at    1.34MiB/s ETA 27:04:53[download]   0.5% of  128.26GiB at    1.54MiB/s ETA 23:35:54[download]   0.5% of  128.26GiB at    1.46MiB/s ETA 24:52:45[download]   0.5% of  128.26GiB at    1.82MiB/s ETA 19:59:53[download]   0.5% of  128.26GiB at    2.19MiB/s ETA 16:36:30INFO:     Will watch for changes in these directories: ['/workspace']
+INFO:     Uvicorn running on http://0.0.0.0:11435 (Press CTRL+C to quit)
+INFO:     Started reloader process [1] using WatchFiles
+INFO:     Started server process [8]
+INFO:     Waiting for application startup.
+2025-12-18 14:33:36,499 [INFO] Loading Global Resources...
+2025-12-18 14:33:36,501 [INFO] Redis Connected.
+2025-12-18 14:33:40,214 [INFO] Use pytorch device_name: cpu
+2025-12-18 14:33:40,214 [INFO] Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+2025-12-18 14:33:42,213 [INFO] Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+2025-12-18 14:33:42,457 [INFO] Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2025-12-18 14:33:42,642 [INFO] ChromaDB Loaded from /data/chroma_db
+2025-12-18 14:33:42,642 [INFO] --- Initializing Semantic Intent Engine ---
+2025-12-18 14:33:42,642 [INFO] Loaded phrasebook from /app/data/phrasebook.json
+2025-12-18 14:33:42,642 [INFO] Vectorizing 187 phrases for Intent Engine...
+2025-12-18 14:33:42,920 [INFO] Intent Engine Ready. Indexed 187 phrases.
+2025-12-18 14:33:42,920 [INFO] Starting Timer/Alarm Scheduler...
+2025-12-18 14:33:42,921 [INFO] Starting Device DB Refresh...
+2025-12-18 14:33:42,983 [INFO] Fetched 707 entities from HA.
+2025-12-18 14:33:43,085 [INFO] Built Device Map for 707 entities.
+2025-12-18 14:33:43,092 [INFO] Formed 142 Device Groups.
+2025-12-18 14:33:43,094 [INFO] Upserting 163 documents to ChromaDB...
+2025-12-18 14:33:43,094 [INFO] Preparing Doc: binary_sensor.music_assistant_server_running | Group: music assistant:home assistant add-on:music running | Integ: unknown
+2025-12-18 14:33:43,094 [INFO] Preparing Doc: light.kauf_plug_d67371_kauf_plug | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-18 14:33:43,094 [INFO] Preparing Doc: switch.string_lights_front | Group: kauf:plf12:string lights kauf plug | Integ: unknown
+2025-12-18 14:33:43,095 [INFO] Preparing Doc: light.downstairs_bathroom_1_light | Group: signify:wiz a19 filament:downstairs bathroom 1 light | Integ: unknown
+2025-12-18 14:33:43,095 [INFO] Preparing Doc: light.downstairs_bathroom_2_light | Group: signify:wiz a19 filament:downstairs bathroom 2 light | Integ: unknown
+2025-12-18 14:33:43,160 [INFO] Timer Scheduler Started.
+INFO:     Application startup complete.
+2025-12-18 14:33:45,305 [INFO] Upsert OK.
+2025-12-18 14:33:45,305 [INFO] Device DB Refresh Complete.
+2025-12-18 14:33:58,134 [INFO] [INTENT] get_intent called with query: 'Play a fireplace video on the Office TV'
+2025-12-18 14:33:58,134 [INFO] [REGEX START] apply_regex_override called with: 'Play a fireplace video on the Office TV'
+2025-12-18 14:33:58,134 [INFO] [REGEX CHECK] Checking query: 'play a fireplace video on the office tv'
+2025-12-18 14:33:58,135 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 18 patterns
+2025-12-18 14:33:58,135 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2025-12-18 14:33:58,135 [INFO] [REGEX CHECK] Testing pattern: \bplay\b -> play_media
+2025-12-18 14:33:58,135 [INFO] [REGEX OVERRIDE] Matched 'play_media' via pattern: \bplay\b...
+2025-12-18 14:33:58,135 [INFO] [INTENT] Regex override: 'Play a fireplace video on the Office TV' -> play_media
+2025-12-18 14:33:58,177 [INFO] [FAST PATH ORCHESTRATION] Starting for intent=play_media, is_high_confidence=True
+2025-12-18 14:33:58,177 [INFO] [FAST PATH] Condition met, processing play_media
+2025-12-18 14:33:58,177 [INFO] [FAST PATH] Matched transport intent: play_media
+2025-12-18 14:33:58,177 [INFO] [FAST PATH] device_in_query: True, query: Play a fireplace video on the Office TV
+2025-12-18 14:33:58,178 [INFO] [FAST PATH] action_plan set: {'action': 'tool_call', 'tool_name': 'media_command', 'parameters': {'intent': 'play_media', 'device_name': 'Office Tv'}}
+2025-12-18 14:33:58,178 [INFO] [FAST ORCHESTRA] Bypassing LLM for play_media
+2025-12-18 14:33:58,178 [INFO] [ACTION DISPATCH] Calling handler for media_command
+2025-12-18 14:33:58,178 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=play_media, entity_id=None, device_name=Office Tv, integration=unknown
+2025-12-18 14:33:58,178 [INFO] [Device Fallback] No entity_id provided. Attempting to resolve device_name: 'Office Tv' (Music Mode: False)
+2025-12-18 14:33:58,200 [INFO] [EXACT MATCH] 'Office Tv' → media_player.office_tv_chrome_2
+2025-12-18 14:33:58,201 [INFO] Using exact name match for 'Office Tv': ('media_player.office_tv_chrome_2', 'cast')
+2025-12-18 14:33:58,201 [INFO] [Device Fallback] Resolved 1 entities. Executing Batch.
+2025-12-18 14:33:58,201 [INFO] [BATCH] Executing 'play_media' on 1 entities
+2025-12-18 14:33:58,201 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=play_media, entity_id=media_player.office_tv_chrome_2, device_name=None, integration=cast
+2025-12-18 14:33:58,202 [INFO] [TV Swap] Video request on cast device. group_id=unknown manufacturer:sti6140d360:office, searching for TV...
+2025-12-18 14:33:58,204 [INFO] [Router] Delegating to Integration: cast for media_player.office_tv_chrome_2
+2025-12-18 14:33:58,264 [INFO] [MASS Unwrap] Detected Music Assistant wrapper 'media_player.office_tv_chrome_2'. Using underlying Cast device: media_player.office_tv_chrome
+2025-12-18 14:33:58,265 [INFO] [SmartPowerSync] Searching for TV in group unknown manufacturer:sti6140d360:office
+2025-12-18 14:33:58,266 [INFO] [SmartPowerSync] Found TV sibling via suffix stripping: media_player.office_tv
+2025-12-18 14:33:58,291 [INFO] [SmartPowerSync] TV media_player.office_tv is already on
+2025-12-18 14:33:58,292 [INFO] [StandardIntegration] Searching Whoogle for 'a fireplace video youtube'...
+2025-12-18 14:33:58,292 [INFO] Executing Web Search for: a fireplace video youtube
+2025-12-18 14:34:02,642 [INFO] [StandardIntegration] Resolved to https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 14:34:02,643 [INFO] [CastIntegration] Pre-resolved video query to: https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 14:34:02,645 [INFO] [CastIntegration] Starting progressive download for video ac9654451efa
+2025-12-18 14:34:32,716 [ERROR] [VideoCache] Download failed or too slow for https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 14:34:32,716 [ERROR] [CastIntegration] Progressive download failed for https://www.youtube.com/watch?v=HF6LSbMKvrw
+2025-12-18 14:34:32,716 [INFO] [CastIntegration] Launching YouTube App for Video ID: HF6LSbMKvrw
+2025-12-18 14:34:32,792 [INFO] EXEC HA: media_player.play_media on media_player.office_tv_chrome | Data: {'media_content_id': '{"app_name": "youtube", "media_id": "HF6LSbMKvrw"}', 'media_content_type': 'cast'}
+2025-12-18 14:34:39,877 [INFO] [ACTION DISPATCH] Handler returned: {'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}
+2025-12-18 14:34:39,878 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]]
+2025-12-18 14:34:39,878 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}], type: <class 'list'>
+2025-12-18 14:34:39,880 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+2025-12-18 14:34:39,880 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Successfully controlled 1 devices: Office TV Chrome', 'service': 'play_media', 'batch_results': [{'status': 'SUCCESS', 'message': 'Sent command to play media the Office TV Chrome.', 'entity_id': 'media_player.office_tv_chrome', 'friendly_name': 'Office TV Chrome', 'service': 'media_player.play_media', 'new_state': 'buffering'}], 'success_count': 1, 'failure_count': 0, 'friendly_name': '1 devices', 'entity_id': 'batch_command'}]
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'play_media' sent to 1 devices. Verified New State: N/A
+
+[download]   0.5% of  128.26GiB at    3.03MiB/s ETA 11:57:57INFO:     192.168.2.1:52946 - "POST /api/chat HTTP/1.1" 200 OK
