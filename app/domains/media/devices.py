@@ -871,7 +871,16 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
                 if integration == "music_assistant": score += 100
                 elif "play_media" in caps: score += 10
             elif is_video:
-                if "cast" in integration or "androidtv" in integration: score += 100
+                # Prioritize native TV integrations for video
+                HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "braviatv", "samsungtv", "apple_tv", "tv"]
+                if any(x in integration for x in HW_TV_INTEGRATIONS):
+                    score += 100
+                elif "cast" in integration:
+                    score += 90  # Cast is good for video but prefer native TV
+                elif integration == "music_assistant" or integration == "speaker":
+                    score -= 50  # Music Assistant wrapper shouldn't handle video
+                elif "play_media" in caps:
+                    score += 10
             else:
                 # Ambiguous
                 if integration == "music_assistant": score += 50
