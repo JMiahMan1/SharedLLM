@@ -95,21 +95,15 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      log.error("[Roku] Could not determine Roku IP address")
                      return {"status": "FAILURE", "message": "Roku IP address not found"}
                  
-                 # Use Roku ECP API to launch Roku Media Player with video URL
-                 # ECP /launch endpoint for Roku Media Player (channel ID 2213)
-                 # Documentation: https://developer.roku.com/docs/developer-program/dev-tools/external-control-api.md
+                 # Use Roku ECP API to launch Roku Media Player (channel 15985)
+                 # Official documented method for direct HTTP video streaming
                  import requests
-                 from urllib.parse import quote
                  
-                 ecp_url = f"http://{roku_ip}:8060/launch/2213"
-                 # Roku Media Player parameters: contentID must be URL-encoded
-                 params = {
-                     "contentID": local_url,
-                     "mediaType": "video"
-                 }
+                 ecp_url = f"http://{roku_ip}:8060/launch/15985"
+                 params = {"contentID": local_url}
                  
                  try:
-                     log.info(f"[Roku ECP] Launching Roku Media Player: {ecp_url}")
+                     log.info(f"[Roku ECP] Launching Roku Media Player (15985): {ecp_url}")
                      log.info(f"[Roku ECP] Video URL: {local_url}")
                      response = requests.post(ecp_url, params=params, timeout=10)
                      if response.status_code == 200:
