@@ -1,0 +1,75 @@
+Querying https://ha.sumemail.com...
+2025-12-18 21:14:40,934 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2025-12-18 21:14:41,006 [DEBUG] https://ha.sumemail.com:443 "GET /api/states HTTP/1.1" 200 49973
+Total Entities: 707
+============================================================
+ID: media_player.office_tv_chrome
+  Friendly Name: Office TV Chrome
+  State: idle
+----------------------------------------
+ID: media_player.ap0b0a38ef2a1e
+  Friendly Name: [LG] webOS TV UN6955ZUF
+  State: idle
+  [MASS] Type: player
+  [LINK] Active Queue Of: ap0b0a38ef2a1e
+----------------------------------------
+ID: media_player.lg_webos_tv_un6955zuf
+  Friendly Name: [LG] webOS TV UN6955ZUF
+  State: idle
+  [MASS] Type: player
+  [LINK] Active Queue Of: uuid:b864340e-7560-9341-84c6-657d39c09ae4
+----------------------------------------
+ID: media_player.roku_2n0062385487
+  Friendly Name: Gracies TV
+  State: off
+  [MASS] Type: player
+  [LINK] Active Queue Of: ROKU_2N0062385487
+----------------------------------------
+ID: media_player.tv_master_2
+  Friendly Name: [TV]Master
+  State: idle
+  [MASS] Type: player
+  [LINK] Active Queue Of: uuid:0b532b80-00be-1000-8ad6-f47b5e72fe9c
+----------------------------------------
+ID: media_player.loft_tv_2
+  Friendly Name: Loft TV
+  State: idle
+  [MASS] Type: player
+----------------------------------------
+ID: media_player.media_player_office_tv
+  Friendly Name: Office TV Remote
+  State: idle
+  [MASS] Type: player
+  [LINK] Active Queue Of: media_player.office_tv
+----------------------------------------
+ID: media_player.media_player_master_bedroom_tv_3
+  Friendly Name: Master Bedroom TV
+  State: off
+  [MASS] Type: player
+  [LINK] Active Queue Of: media_player.master_bedroom_tv_3
+----------------------------------------
+ID: media_player.office_tv_chrome_2
+  Friendly Name: Office TV
+  State: idle
+  [MASS] Type: player
+  [LINK] Active Queue Of: media_player.office_tv_chrome
+----------------------------------------
+ID: media_player.master_bedroom_tv_2
+  Friendly Name: Master Bedroom TV
+  State: off
+  [MASS] Type: player
+  [LINK] Active Queue Of: media_player.master_bedroom_tv
+----------------------------------------
+ID: media_player.office_speaker
+  Friendly Name: Office Speaker
+  State: idle
+  [MASS] Type: player
+  [LINK] Active Queue Of: media_player.office_jarvis
+----------------------------------------
+ID: media_player.media_player_28_tcl_roku_tv
+  Friendly Name: Gracies TV
+  State: off
+  [MASS] Type: player
+  [LINK] Active Queue Of: media_player.28_tcl_roku_tv
+----------------------------------------
+Found 12 relevant media players.

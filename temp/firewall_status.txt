@@ -1,0 +1,2 @@
+sudo: a terminal is required to read the password; either use ssh's -t option or configure an askpass helper
+sudo: a password is required
