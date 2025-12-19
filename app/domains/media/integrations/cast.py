@@ -30,6 +30,16 @@ class CastIntegration(StandardIntegration):
         from app.domains.media.integrations.base import unwrap_entity_if_needed
         entity_id = await unwrap_entity_if_needed(entity_id, media_type, user_creds)
         
+        # [Session Clearing for Video Playback]
+        # If device is playing (e.g., Music Assistant session), stop it first
+        # to prevent session conflicts when switching to video
+        if media_type == "video":
+            from app.domains.media.devices import get_entity_state
+            current_state = await get_entity_state(entity_id, user_creds)
+            if current_state in ["playing", "paused", "buffering"]:
+                log.info(f"[Session Clear] Device {entity_id} is {current_state}. Stopping before video playback.")
+                await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, None)
+                await asyncio.sleep(1)  # Brief wait for stop to complete
         
         # [SmartPowerSync]
         await self._ensure_tv_on(entity_id, user_creds)
