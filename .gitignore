@@ -8,4 +8,3 @@ __pycache__/
 *.swp
 *.swo
 app.log
-temp/
