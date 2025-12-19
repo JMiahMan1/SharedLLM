@@ -96,28 +96,29 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      return {"status": "FAILURE", "message": "Roku IP address not found"}
                  
                  # Use Roku ECP API to launch Roku Media Player with video URL
-                 # ECP /input endpoint: http://<roku_ip>:8060/input/15985?t=v&u=<url>&videoName=<name>&videoFormat=mp4
+                 # ECP /launch endpoint for Roku Media Player (channel ID 2213)
+                 # Documentation: https://developer.roku.com/docs/developer-program/dev-tools/external-control-api.md
                  import requests
                  from urllib.parse import quote
                  
-                 ecp_url = f"http://{roku_ip}:8060/input/15985"
+                 ecp_url = f"http://{roku_ip}:8060/launch/2213"
+                 # Roku Media Player parameters: contentID must be URL-encoded
                  params = {
-                     "t": "v",  # Type: video
-                     "u": local_url,  # Video URL
-                     "videoName": "SharedLLM Stream",
-                     "videoFormat": "mp4"
+                     "contentID": local_url,
+                     "mediaType": "video"
                  }
                  
                  try:
-                     log.info(f"[Roku ECP] Launching video: {ecp_url} with URL: {local_url}")
+                     log.info(f"[Roku ECP] Launching Roku Media Player: {ecp_url}")
+                     log.info(f"[Roku ECP] Video URL: {local_url}")
                      response = requests.post(ecp_url, params=params, timeout=10)
                      if response.status_code == 200:
-                         log.info("[Roku ECP] Successfully launched video")
+                         log.info("[Roku ECP] Successfully launched Roku Media Player")
                          return {
                              "status": "SUCCESS",
                              "message": f"Playing video on {entity_id}",
                              "entity_id": entity_id,
-                             "service": "roku_ecp_input"
+                             "service": "roku_ecp_launch"
                          }
                      else:
                          log.error(f"[Roku ECP] Failed with status {response.status_code}: {response.text}")
