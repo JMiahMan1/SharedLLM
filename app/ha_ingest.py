@@ -6,6 +6,7 @@ import logging
 import sys
 import shutil
 from typing import Dict, Any, Tuple, List
+from datetime import datetime, timedelta, timezone
 
 # LangChain and Chroma Imports
 try:
@@ -137,10 +138,15 @@ def ingest_ha_metadata():
         logger.error("No states received from HA. Aborting.")
         return
 
-    # 4. Process Entities
+    # Filter Logic Setup
     docs_to_add = []
     skipped_count = 0
+    stale_count = 0
     
+    # Cutoff for 'Active' Devices (30 Days)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(days=30)
+    logger.info(f"Filtering entites older than: {cutoff_time.isoformat()}")
+
     # Domains to index (controllable or useful info)
     ALLOWED_DOMAINS = [
         "light", "switch", "media_player", "climate", 
@@ -152,15 +158,29 @@ def ingest_ha_metadata():
         entity_id = state_obj["entity_id"]
         attributes = state_obj.get("attributes", {})
         current_state = state_obj.get("state", "unknown")
+        last_updated_str = state_obj.get("last_updated")
         
-        # Filter 1: Skip unwanted types
+        # Filter 1: Activity Check (30 Days)
+        if last_updated_str:
+            try:
+                # Handle Z or +00:00. Python 3.11 fromisoformat generally handles it.
+                last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
+                if last_updated < cutoff_time:
+                    stale_count += 1
+                    continue
+            except Exception:
+                # If we cannot parse the date, we default to INCLUDING it to be safe, 
+                # unless it's clearly garbage? Safe fail: include.
+                pass
+
+        # Filter 2: Skip unwanted types
         if entity_id.startswith(("group.", "zone.", "sun.")):
             skipped_count += 1
             continue
 
         domain = entity_id.split('.')[0]
         
-        # Filter 2: Domain & State
+        # Filter 3: Domain & State
         if domain not in ALLOWED_DOMAINS:
             continue
         if current_state in ["unavailable", "unknown", "none"]:
@@ -236,6 +256,7 @@ def ingest_ha_metadata():
             
             logger.info(f"✅ Successfully ingested {len(docs_to_add)} ACTIVE entities into '{COLLECTION_NAME}'.")
             logger.info(f"Skipped {skipped_count} inactive/filtered entities.")
+            logger.info(f"Skipped {stale_count} STALE entities (Older than 30 days).")
             
             # 6. Trigger API Reload
             # This ensures the running API picks up the new database state immediately
