@@ -23,63 +23,59 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
 
     async def play_media(self, entity_id: str, query: str, media_type: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
-        Play media on Roku.
-        Strategy: Deep Link Only (No Direct Stream due to HA 500 errors).
+        Play media on Roku via Direct Casting (User Requirement).
         """
-        log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - DEEP LINK MODE ACTIVE")
+        log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - CAST MODE")
         
         # [SmartPowerSync] - Ensure TV is ON
-        # Roku integration usually handles 'turn_on' if configured with Wake-on-LAN.
-        # We'll explicitly call turn_on first just in case.
-        # Check state not needed as turn_on is idempotent usually, but good practice.
         await self.turn_on(entity_id, user_creds)
-        await asyncio.sleep(4) # Allow boot time
+        await asyncio.sleep(4) 
         
         if media_type == "video":
-            # 1. Resolve Query to URL (if it's a search term)
+            # 1. Resolve Query
             if not query.startswith(("http", "www", "spotify", "app")):
-                # Search using generic StandardIntegration helper? 
-                # We need to import it or duplicate search logic.
-                # Let's import the StandardIntegration search logic or just re-implement simple search.
-                # Re-using StandardIntegration search is cleaner but inheritance gets messy.
-                # For now, let's use a simple YouTube search if needed.
-                from app.domains.media.integrations.standard import StandardIntegration
-                # Helper instantiation just for search? No, let's just use youtube search tool or assume simple kwarg.
-                # Actually, standard logic is just: search -> return link.
-                # Let's do a quick search if it's not a URL.
                 from app.logic.web_search import search_web
                 search_results = await search_web(f"{query} youtube", num_results=1)
                 if search_results and len(search_results) > 0:
                     query = search_results[0]['link']
                     log.info(f"[Roku] Resolved '{query}' to {query}")
 
-            # 2. Check for YouTube
-            if "youtube.com" in query or "youtu.be" in query:
-                video_id = self._extract_youtube_id(query)
-                
-                if not video_id and "list=" in query:
-                     video_id = await self._resolve_playlist_to_video(query)
+            # 2. Download & Cast (Direct Stream)
+            # This is mandated by user ("HAVE to do the cast feature").
+            local_url = await self._download_and_serve_video(query)
+            
+            if local_url:
+                 log.info(f"[Roku] Streaming: {local_url}")
+                 return await execute_ha_service(
+                     "media_player",
+                     "play_media",
+                     entity_id,
+                     user_creds,
+                     {
+                         "media_content_id": local_url,
+                         "media_content_type": "video", # REQUIRED: 'video', not 'url'
+                         "extra": {
+                             "title": "SharedLLM Stream",
+                             "format": "mp4" # REQUIRED
+                         }
+                     },
+                     kwargs.get("redis_client")
+                 )
+            else:
+                log.error("[Roku] Failed to generate local stream URL.")
 
-                if video_id:
-                     # STRATEGY: Deep Link to YouTube App using 'extra' params
-                     # Format: media_content_id="837", extra={"contentId": "...", "mediaType": "live"}
-                     log.info(f"[Roku] Launching YouTube Deep Link (ID: {video_id}) via 'extra' params")
-
-                     return await execute_ha_service(
-                          "media_player",
-                          "play_media",
-                          entity_id,
-                          user_creds,
-                          {
-                              "media_content_id": "837", # YouTube Channel ID
-                              "media_content_type": "app",
-                              "extra": {
-                                  "contentId": video_id,
-                                  "mediaType": "live"
-                              }
-                          },
-                          kwargs.get("redis_client")
-                     )
+        # Fallback: Generic
+        return await execute_ha_service(
+            "media_player", 
+            "play_media", 
+            entity_id, 
+            user_creds, 
+            {
+                "media_content_id": query,
+                "media_content_type": media_type 
+            }, 
+            kwargs.get("redis_client")
+        )
 
         # Fallback: Generic playback
         return await execute_ha_service(
