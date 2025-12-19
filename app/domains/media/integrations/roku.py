@@ -65,50 +65,19 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      video_id = await self._resolve_playlist_to_video(query)
 
                 if video_id:
-                     # STRATEGY A: Direct Stream (Download & Host)
-                     # This gives the best "Cast-like" experience without app ads/login issues.
-                     local_url = await self._download_and_serve_video(query)
-                     
-                     if local_url:
-                          log.info(f"[Roku] Playing Direct Stream: {local_url}")
-                          # Roku 'play_media' supports: content_id=url, content_type='video' (mapped to Format: mp4 in extra usually)
-                          return await execute_ha_service(
-                              "media_player",
-                              "play_media",
-                              entity_id,
-                              user_creds,
-                              {
-                                  "media_content_id": local_url,
-                                  "media_content_type": "url", # Roku integration specific
-                                  "extra": {
-                                      "title": "SharedLLM Stream",
-                                      "format": "mp4"
-                                  }
-                              },
-                              kwargs.get("redis_client")
-                          )
-                     
-                     # STRATEGY B: Fallback to YouTube App
-                     log.info(f"[Roku] Direct Stream failed. Fallback to YouTube App (ID: {video_id})")
-                     # Roku App Launch: media_content_type="app", media_content_id="837" (YouTube)
-                     # Deep linking? 
-                     # According to research: contentId=<id>&mediaType=live (or similar params).
-                     # The HA Roku integration might not support complex deep link params via standard play_media easily without 'extra'.
-                     # But most sources say simply launching the app with deep link support is complex via generic HA.
-                     # Let's try the standard method:
-                     # Official Roku Deep Link:  launch/837?contentId=<video_id>&mediaType=movie
-                     
-                     # HA Service: media_player.play_media(entity_id, media_content_id="837", media_content_type="app", extra={"content_id": video_id, "media_type": "movie"})
-                     # Note: Current HA Roku integration implementation details might vary.
-                     # Let's try a generic app launch if deep linking isn't standard.
-                     
+                     # STRATEGY: Deep Link to YouTube App
+                     # Format: <AppID>?contentId=<VideoID>&mediaType=live
+                     # App ID 837 is standard YouTube.
+                     deep_link_id = f"837?contentId={video_id}&mediaType=live"
+                     log.info(f"[Roku] Launching YouTube Deep Link: {deep_link_id}")
+
                      return await execute_ha_service(
                           "media_player",
                           "play_media",
                           entity_id,
                           user_creds,
                           {
-                              "media_content_id": "837", # YouTube Channel ID
+                              "media_content_id": deep_link_id,
                               "media_content_type": "app"
                           },
                           kwargs.get("redis_client")
