@@ -130,10 +130,10 @@ async def decompose_command_query(query: str, model: str) -> List[str]:
 async def contextualize_query(query, user, model):
     """
     Contextualizes query and returns both refined query and intent.
-    Returns: (refined_query, intent, score, is_high_confidence)
+    Returns: (refined_query, intent, score, is_high_confidence, intent_locked)
     """
     # Use Modular Classifier
-    intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
+    intent, score, is_high_confidence, intent_locked = await IntentClassifier.get_intent(query)
 
     stateless_intents = [
         "turn_on",
@@ -162,7 +162,7 @@ async def contextualize_query(query, user, model):
         "volume_mute",
     ]
     if is_high_confidence and intent in stateless_intents:
-        return query, intent, score, is_high_confidence
+        return query, intent, score, is_high_confidence, intent_locked
     verbs = [
         "turn",
         "play",
@@ -183,10 +183,10 @@ async def contextualize_query(query, user, model):
         "wake",
     ]
     if any(query.lower().lstrip().startswith(v) for v in verbs):
-        return query, intent, score, is_high_confidence
+        return query, intent, score, is_high_confidence, intent_locked
     hist = get_history_context(user)
     if not hist:
-        return query, intent, score, is_high_confidence
+        return query, intent, score, is_high_confidence, intent_locked
 
     # Explicit handling for confirmations
     if query.lower().strip().strip("!.") in ["yes", "sure", "please", "please do", "ok", "yep", "do it"]:
@@ -194,24 +194,29 @@ async def contextualize_query(query, user, model):
          r = await call_ollama_generate(special_prompt, model)
          refined = clean_llm_output(r.get("text", query), is_voice=False)
          log.info(f"[CONTEXT REWRITE] Confirmation '{query}' -> '{refined}'")
-         return refined, intent, score, is_high_confidence
+         return refined, intent, score, is_high_confidence, intent_locked
 
     if len(query) > 150:
-        return query, intent, score, is_high_confidence
+        return query, intent, score, is_high_confidence, intent_locked
     prompt = CONTEXT_REWRITE_PROMPT.format(history=hist, query=query)
     r = await call_ollama_generate(prompt, model)
     refined = clean_llm_output(r.get("text", query), is_voice=False)
     if len(refined) > len(query) * 3:
-        return query, intent, score, is_high_confidence
-    return refined, intent, score, is_high_confidence
+        return query, intent, score, is_high_confidence, intent_locked
+    return refined, intent, score, is_high_confidence, intent_locked
 
 
 async def _llm_orchestrator(
-    query: str, intent: str, score: float, model: str, conversation_history: str = ""
+    query: str, intent: str, score: float, model: str, conversation_history: str = "", intent_locked: bool = False
 ) -> Dict[str, Any]:
+    # If intent is locked (regex-detected), instruct LLM to preserve it
+    lock_instruction = ""
+    if intent_locked:
+        lock_instruction = f"\n\nCRITICAL: The intent '{intent}' is LOCKED and was explicitly detected from the user's verb choice. You MUST use this intent in your response. DO NOT change it to any other intent. Extract only the device_name and media_title parameters."
+    
     orchestrator_prompt = ORCHESTRATOR_PROMPT.format(
         query=query, intent_name=intent, intent_score=score, conversation_history=conversation_history
-    )
+    ) + lock_instruction
     last_error = ""
     for attempt in range(2):
         if attempt > 0:
@@ -279,14 +284,15 @@ async def _handle_single_command(
         return [action_result]
 
     # 2. Intent Classification (only if not provided)
+    intent_locked = False
     if intent is None:
         try:
-            intent, score, is_high_confidence = await IntentClassifier.get_intent(query)
+            intent, score, is_high_confidence, intent_locked = await IntentClassifier.get_intent(query)
             if intent:
-                log.info(f"[PIPELINE DEBUG] Intent detected: {intent} (Score: {score})")
+                log.info(f"[PIPELINE DEBUG] Intent detected: {intent} (Score: {score}, Locked: {intent_locked})")
         except Exception as e:
             log.exception(f"[PIPELINE ERROR] IntentClassifier failed: {e}")
-            intent, score, is_high_confidence = None, 0.0, False
+            intent, score, is_high_confidence, intent_locked = None, 0.0, False, False
     else:
         log.info(f"[PIPELINE DEBUG] Using provided intent: {intent} (Score: {score})")
 
@@ -363,9 +369,16 @@ async def _handle_single_command(
             history_text = f"\nConversation History:\n{conversation_history}"
 
         orchestration_plan = await _llm_orchestrator(
-            query, intent or "unknown", score, model, history_text
+            query, intent or "unknown", score, model, history_text, intent_locked
         )
         log.info(f"[PIPELINE DEBUG] Orchestration Plan: {orchestration_plan}")
+        
+        # [INTENT LOCK ENFORCEMENT] If intent was locked, restore it if LLM changed it
+        if intent_locked and orchestration_plan.get("action") == "tool_call":
+            plan_intent = orchestration_plan.get("parameters", {}).get("intent")
+            if plan_intent and plan_intent != intent:
+                log.warning(f"[INTENT LOCK] LLM tried to change locked intent '{intent}' to '{plan_intent}'. Overriding back.")
+                orchestration_plan["parameters"]["intent"] = intent
     except Exception as e:
         log.exception(f"[PIPELINE ERROR] Orchestrator failed: {e}")
         return None
@@ -461,7 +474,7 @@ async def generate_rag_stream(
         yield builder.done()
         return
 
-    refined, intent, score, is_high_confidence = await contextualize_query(query, user, model)
+    refined, intent, score, is_high_confidence, intent_locked = await contextualize_query(query, user, model)
     update_history(user, "user", query)
     creds = get_user_creds(user)
     # Intent already obtained from contextualize_query, no need to re-classify
