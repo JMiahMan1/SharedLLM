@@ -267,7 +267,7 @@ async def _execute_tool_action(
 
 async def _handle_single_command(
     query: Union[str, Dict], user_creds: Dict[str, str], model: str = None, 
-    intent: Optional[str] = None, score: float = 0.0, is_high_confidence: bool = False
+    intent: Optional[str] = None, score: float = 0.0, is_high_confidence: bool = False, intent_locked: bool = False
 ) -> Optional[List[Dict[str, Any]]]:
     if isinstance(query, dict):
         query = str(query.get("response", query.get("text", str(query))))
@@ -406,7 +406,7 @@ async def _handle_single_command(
 
 async def try_handle_compound_command(
     query, user_creds, model, intent: Optional[str] = None, 
-    score: float = 0.0, is_high_confidence: bool = False
+    score: float = 0.0, is_high_confidence: bool = False, intent_locked: bool = False
 ) -> Optional[List[Dict[str, Any]]]:
     if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
         return None
@@ -430,7 +430,7 @@ async def try_handle_compound_command(
                 tasks.append(_handle_single_command(c, user_creds, model))
     else:
         # For single command, pass the intent to avoid re-classification
-        tasks.append(_handle_single_command(query, user_creds, model, intent, score, is_high_confidence))
+        tasks.append(_handle_single_command(query, user_creds, model, intent, score, is_high_confidence, intent_locked))
     if not tasks:
         return None
     results = await asyncio.gather(*tasks)
@@ -479,7 +479,7 @@ async def generate_rag_stream(
     creds = get_user_creds(user)
     # Intent already obtained from contextualize_query, no need to re-classify
     t_action = time.time()
-    action_results = await try_handle_compound_command(refined, creds, model, intent, score, is_high_confidence)
+    action_results = await try_handle_compound_command(refined, creds, model, intent, score, is_high_confidence, intent_locked)
 
     # Handle failed no-search intents directly (don't call LLM)
     no_search_intents = [
