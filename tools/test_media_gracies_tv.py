@@ -21,21 +21,23 @@ headers = {
 
 def get_tv_state():
     try:
-        response = requests.get(
-            f"{HA_URL}/api/states/{ENTITY_ID}",
-            headers=headers,
-            timeout=10
-        )
+        url = f"{HA_URL}/api/states/{TARGET_ENTITY}"
+        response = requests.get(url, headers=headers, timeout=10)
+        
         if response.status_code == 200:
             data = response.json()
             attrs = data.get("attributes", {})
             return {
-                "state": data["state"],
+                "state": data.get("state", "Unknown"),
                 "app": attrs.get("app_name", "N/A"),
                 "media_title": attrs.get("media_title", "N/A")
             }
-    except: pass
-    return None
+        else:
+             print(f"   ⚠️ HA Error: {response.status_code} - {response.text}")
+             return {"state": f"Error {response.status_code}"}
+    except Exception as e:
+        print(f"   ⚠️ Connection Error: {e}")
+        return {"state": "Conn Error"}
 
 def send_chat(message):
     print(f"\n📱 USER: {message}")
@@ -57,9 +59,36 @@ def send_chat(message):
 print(f"TESTING: {DEVICE_NAME} ({TARGET_ENTITY})")
 print("="*60)
 
-print("\n1️⃣ Checking Initial State...")
+print("\n1️⃣ Checking & Ensuring Power State...")
+
+def wait_for_power_on(timeout=30):
+    start_time = time.time()
+    print(f"   Waiting for device to turn ON (Timeout: {timeout}s)...")
+    while time.time() - start_time < timeout:
+        state_data = get_tv_state()
+        curr_state = state_data.get("state", "unknown")
+        
+        # Roku 'home' or 'idle' usually means ON. 'standby' or 'off' means OFF.
+        if curr_state in ["on", "idle", "playing", "paused", "home"]:
+            print(f"   ✅ Device is ON (State: {curr_state})")
+            return True
+        
+        # If off, try sending turn_on command
+        if curr_state in ["off", "standby", "unavailable", "unknown"]:
+             print(f"   Device is '{curr_state}'. Sending turn_on...", end="\r")
+             requests.post(f"{HA_URL}/api/services/media_player/turn_on", headers=headers, json={"entity_id": TARGET_ENTITY})
+        
+        time.sleep(2)
+        
+    print(f"\n   ❌ Failed to turn on device after {timeout} seconds.")
+    return False
+
+if not wait_for_power_on():
+    print("⛔ CRITICAL: Device failed to turn on. Aborting test to prevent false positives.")
+    exit(1)
+
 state = get_tv_state()
-print(f"   State: {state['state'] if state else 'Unknown'}")
+print(f"   Current State: {state['state']}")
 
 print("\n2️⃣ Testing Music Playback (Brandon Lake)...")
 send_chat(f"Play Brandon Lake on {DEVICE_NAME}")
