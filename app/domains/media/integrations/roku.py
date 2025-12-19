@@ -95,11 +95,17 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      log.error("[Roku] Could not determine Roku IP address")
                      return {"status": "FAILURE", "message": "Roku IP address not found"}
                  
-                 # Use Roku ECP /input endpoint (showed purple screen = was attempting to play)
-                # This endpoint accepts video URLs directly
+                 # Dynamically discover the best video playback channel
+                from app.utils.roku_channels import find_video_playback_channel
                 import requests
                 
-                ecp_url = f"http://{roku_ip}:8060/input/15985"
+                channel_id = find_video_playback_channel(roku_ip)
+                if not channel_id:
+                    log.error("[Roku] No suitable video playback channel found on device")
+                    return {"status": "FAILURE", "message": "No video playback channel available"}
+                
+                # Use Roku ECP /input endpoint (accepts video URLs directly)
+                ecp_url = f"http://{roku_ip}:8060/input/{channel_id}"
                 params = {
                     "t": "v",  # type: video
                     "u": local_url,  # video URL
@@ -108,7 +114,7 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                 }
                 
                 try:
-                    log.info(f"[Roku ECP] Using /input endpoint: {ecp_url}")
+                    log.info(f"[Roku ECP] Using /input/{channel_id}: {ecp_url}")
                     log.info(f"[Roku ECP] Video URL: {local_url}")
                     response = requests.post(ecp_url, params=params, timeout=10)
                     if response.status_code == 200:
