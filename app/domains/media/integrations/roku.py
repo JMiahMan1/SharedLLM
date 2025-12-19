@@ -24,13 +24,9 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
     async def play_media(self, entity_id: str, query: str, media_type: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Play media on Roku.
-        Strategy:
-        1. If it's a video (YouTube) query:
-           - Try to download & stream locally (Direct URL).
-           - If that fails, extract ID and launch YouTube App.
-        2. If it's music (generic):
-           - Try generic play_media (Music Assistant might handle it via DLNA if supported, otherwise limited).
+        Strategy: Deep Link Only (No Direct Stream due to HA 500 errors).
         """
+        log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - DEEP LINK MODE ACTIVE")
         
         # [SmartPowerSync] - Ensure TV is ON
         # Roku integration usually handles 'turn_on' if configured with Wake-on-LAN.
