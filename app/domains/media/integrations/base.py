@@ -180,7 +180,8 @@ class VideoHelperMixin:
             
             # Return local streaming URL
             # Using server's external IP so devices can access it
-            local_url = f"http://192.168.2.211:11435/cast_video/{video_id}.mp4"
+            from app.settings import SERVER_URL
+            local_url = f"{SERVER_URL}/cast_video/{video_id}.mp4"
             log.info(f"[VideoHelper] Video ready at: {local_url}")
             
             return local_url
