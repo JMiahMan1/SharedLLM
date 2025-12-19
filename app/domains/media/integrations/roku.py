@@ -145,78 +145,39 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         )
     
     async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
-        """Extract Roku IP address from Home Assistant Device Registry"""
+        """
+        Get Roku IP address using SSDP network discovery
+        Falls back to ROKU_IP env var if discovery fails
+        """
         import requests
         from app.settings import HA_URL
         import os
-        from urllib.parse import urlparse
+        from app.utils.roku_discovery import find_roku_ip_by_entity
         
-        # Check for configured Roku IP
-        configured_ip = os.getenv("ROKU_IP")
-        if configured_ip:
-            log.info(f"[Roku] Using configured IP: {configured_ip}")
-            return configured_ip
-        
+        # Step 1: Try SSDP network discovery
         try:
             headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
-            
-            # Step 1: Get entity to find device_id
             resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
-            if resp.status_code != 200:
-                log.error(f"[Roku] Could not fetch entity {entity_id}")
-                return None
-            
-            entity_data = resp.json()
-            device_id = entity_data.get("attributes", {}).get("device_id")
-            
-            if not device_id:
-                log.warning(f"[Roku] No device_id found for {entity_id}, trying device registry search")
-            
-            # Step 2: Get device registry
-            resp = requests.get(f"{HA_URL}/api/config/device_registry/list", headers=headers, timeout=5)
-            if resp.status_code != 200:
-                log.error(f"[Roku] Could not fetch device registry")
-                return None
-            
-            devices = resp.json()
-            
-            # Step 3: Find device by device_id or by searching for Roku in connections/identifiers
-            target_device = None
-            if device_id:
-                target_device = next((d for d in devices if d.get("id") == device_id), None)
-            
-            # Fallback: search for TCL/Roku manufacturer
-            if not target_device:
-                for device in devices:
-                    manufacturer = device.get("manufacturer", "").lower()
-                    model = device.get("model", "").lower()
-                    if "roku" in manufacturer or "tcl" in manufacturer or "roku" in model:
-                        # Verify this device has our entity
-                        identifiers = device.get("identifiers", [])
-                        for identifier_set in identifiers:
-                            if len(identifier_set) >= 2 and entity_id in str(identifier_set):
-                                target_device = device
-                                break
-                        if target_device:
-                            break
-            
-            if not target_device:
-                log.error(f"[Roku] Could not find device in registry for {entity_id}")
-                return None
-            
-            # Step 4: Extract IP from configuration_url
-            config_url = target_device.get("configuration_url")
-            if config_url:
-                parsed = urlparse(config_url)
-                ip = parsed.hostname
+            if resp.status_code == 200:
+                entity_data = resp.json()
+                attributes = entity_data.get("attributes", {})
+                
+                # Attempt SSDP discovery
+                ip = find_roku_ip_by_entity(entity_id, attributes)
                 if ip:
-                    log.info(f"[Roku] Found IP from configuration_url: {ip}")
+                    log.info(f"[Roku] Discovered IP via SSDP: {ip}")
                     return ip
-            
-            log.error(f"[Roku] No configuration_url found in device registry, ROKU_IP env var required")
-            return None
-            
+                else:
+                    log.warning(f"[Roku] SSDP discovery failed for {entity_id}")
         except Exception as e:
-            log.error(f"[Roku] Error getting IP from device registry: {e}")
-            return None
+            log.warning(f"[Roku] SSDP discovery error: {e}")
+        
+        # Step 2: Fallback to configured IP
+        configured_ip = os.getenv("ROKU_IP")
+        if configured_ip:
+            log.info(f"[Roku] Using configured ROKU_IP: {configured_ip}")
+            return configured_ip
+        
+        log.error(f"[Roku] Could not determine IP for {entity_id}. Set ROKU_IP env var or ensure Roku is discoverable on network.")
+        return None
 
