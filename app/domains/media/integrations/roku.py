@@ -27,9 +27,20 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         """
         log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - CAST MODE")
         
-        # [SmartPowerSync] - Ensure TV is ON
+        # [SmartPowerSync] - Ensure TV is ON and Ready
         await self.turn_on(entity_id, user_creds)
-        await asyncio.sleep(4) 
+        
+        # Poll for state change (timeout 20s) instead of blind sleep
+        for i in range(10):
+            state = await self.get_state(entity_id, user_creds)
+            if state and state.state in ["on", "idle", "home", "playing", "paused"]:
+                log.info(f"[Roku] Device is verified ON (State: {state.state})")
+                break
+            if i % 2 == 0: # Retry turn_on every 4s if still off
+                 await self.turn_on(entity_id, user_creds)
+            await asyncio.sleep(2)
+        else:
+            log.warning("[Roku] Device did not report ON state after wait. Proceeding but command may fail.")
         
         if media_type == "video":
             # 1. Resolve Query
