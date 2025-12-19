@@ -52,7 +52,7 @@ class DeviceDiscoveryProtocol(ABC):
 
 
 class RokuDiscoveryProtocol(DeviceDiscoveryProtocol):
-    """Roku device discovery via SSDP"""
+    """Roku device discovery via port scan and SSDP"""
     
     @property
     def ssdp_search_target(self) -> str:
@@ -61,6 +61,49 @@ class RokuDiscoveryProtocol(DeviceDiscoveryProtocol):
     @property
     def device_type(self) -> str:
         return "roku"
+    
+    def scan_network_for_roku(self, subnet: str = "192.168.2.0/24", timeout: float = 0.5) -> List[str]:
+        """
+        Scan network for devices listening on Roku ECP port 8060
+        Returns list of IP addresses that respond on port 8060
+        """
+        import asyncio
+        import ipaddress
+        
+        async def check_port(ip: str, port: int = 8060, timeout: float = timeout) -> Optional[str]:
+            """Check if port is open on given IP"""
+            try:
+                conn = asyncio.open_connection(ip, port)
+                reader, writer = await asyncio.wait_for(conn, timeout=timeout)
+                writer.close()
+                await writer.wait_closed()
+                return ip
+            except:
+                return None
+        
+        async def scan_subnet(subnet: str) -> List[str]:
+            """Scan subnet concurrently"""
+            network = ipaddress.ip_network(subnet, strict=False)
+            tasks = [check_port(str(ip)) for ip in network.hosts()]
+            results = await asyncio.gather(*tasks)
+            return [ip for ip in results if ip is not None]
+        
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If already in async context, create new loop
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, scan_subnet(subnet))
+                    found_ips = future.result(timeout=30)
+            else:
+                found_ips = loop.run_until_complete(scan_subnet(subnet))
+            
+            log.info(f"[Discovery] Port scan found {len(found_ips)} devices on port 8060")
+            return found_ips
+        except Exception as e:
+            log.error(f"[Discovery] Port scan error: {e}")
+            return []
     
     def get_device_info(self, ip: str) -> Optional[DiscoveredDevice]:
         """Get Roku device info from ECP endpoint"""
@@ -123,6 +166,7 @@ class NetworkDeviceDiscovery:
     def discover_devices(self, device_types: List[str] = None, timeout: int = SSDP_TIMEOUT) -> List[DiscoveredDevice]:
         """
         Discover devices on the network
+        Tries port scanning first (works in Docker), falls back to SSDP
         
         Args:
             device_types: List of device types to discover (e.g., ['roku', 'androidtv'])
@@ -138,8 +182,21 @@ class NetworkDeviceDiscovery:
         
         discovered = []
         for protocol in protocols_to_use:
-            devices = self._ssdp_discover(protocol, timeout)
-            discovered.extend(devices)
+            # Try port scan first for Roku (works in Docker)
+            if protocol.device_type == 'roku' and hasattr(protocol, 'scan_network_for_roku'):
+                log.info(f"[Discovery] Scanning network for {protocol.device_type} devices...")
+                ips = protocol.scan_network_for_roku()
+                for ip in ips:
+                    device = protocol.get_device_info(ip)
+                    if device:
+                        discovered.append(device)
+                        log.info(f"[Discovery] Found {protocol.device_type} via port scan: {ip} (serial: {device.serial_number})")
+            
+            # If no devices found via port scan, try SSDP
+            if not discovered:
+                log.info(f"[Discovery] Port scan found nothing, trying SSDP for {protocol.device_type}...")
+                devices = self._ssdp_discover(protocol, timeout)
+                discovered.extend(devices)
         
         return discovered
     
