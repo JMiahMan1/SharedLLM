@@ -51,11 +51,11 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                 # Helper instantiation just for search? No, let's just use youtube search tool or assume simple kwarg.
                 # Actually, standard logic is just: search -> return link.
                 # Let's do a quick search if it's not a URL.
-                 from app.logic.web_search import search_web
-                 search_results = await search_web(f"{query} youtube", num_results=1)
-                 if search_results and len(search_results) > 0:
-                     query = search_results[0]['link']
-                     log.info(f"[Roku] Resolved '{query}' to {query}")
+                from app.logic.web_search import search_web
+                search_results = await search_web(f"{query} youtube", num_results=1)
+                if search_results and len(search_results) > 0:
+                    query = search_results[0]['link']
+                    log.info(f"[Roku] Resolved '{query}' to {query}")
 
             # 2. Check for YouTube
             if "youtube.com" in query or "youtu.be" in query:
