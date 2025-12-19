@@ -20,6 +20,23 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
     @property
     def integration_type(self) -> str:
         return "roku"
+    
+    async def get_state(self, entity_id: str, user_creds: Dict) -> Optional[Any]:
+        """Get current state of the entity"""
+        import requests
+        from app.settings import HA_URL
+        
+        try:
+            headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
+            resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
+            if resp.status_code == 200:
+                from types import SimpleNamespace
+                data = resp.json()
+                return SimpleNamespace(state=data.get("state"), attributes=data.get("attributes", {}))
+            return None
+        except Exception as e:
+            log.warning(f"[Roku] Failed to get state: {e}")
+            return None
 
     async def play_media(self, entity_id: str, query: str, media_type: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
