@@ -88,35 +88,56 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             
             if local_url:
                  log.info(f"[Roku] Streaming: {local_url}")
-                 # Roku requires launching Roku Media Player channel with video URL
-                 # Channel ID for Roku Media Player is typically accessed via deep link
-                 return await execute_ha_service(
-                     "media_player",
-                     "play_media",
-                     entity_id,
-                     user_creds,
-                     {
-                         "media_content_id": local_url,
-                         "media_content_type": "url",  # Use 'url' for direct video streams on Roku
-                     },
-                     kwargs.get("redis_client")
-                 )
+                 
+                 # Get Roku IP from Home Assistant device info
+                 roku_ip = await self._get_roku_ip(entity_id, user_creds)
+                 if not roku_ip:
+                     log.error("[Roku] Could not determine Roku IP address")
+                     return {"status": "FAILURE", "message": "Roku IP address not found"}
+                 
+                 # Use Roku ECP API to launch Roku Media Player with video URL
+                 # ECP /input endpoint: http://<roku_ip>:8060/input/15985?t=v&u=<url>&videoName=<name>&videoFormat=mp4
+                 import requests
+                 from urllib.parse import quote
+                 
+                 ecp_url = f"http://{roku_ip}:8060/input/15985"
+                 params = {
+                     "t": "v",  # Type: video
+                     "u": local_url,  # Video URL
+                     "videoName": "SharedLLM Stream",
+                     "videoFormat": "mp4"
+                 }
+                 
+                 try:
+                     log.info(f"[Roku ECP] Launching video: {ecp_url} with URL: {local_url}")
+                     response = requests.post(ecp_url, params=params, timeout=10)
+                     if response.status_code == 200:
+                         log.info("[Roku ECP] Successfully launched video")
+                         return {
+                             "status": "SUCCESS",
+                             "message": f"Playing video on {entity_id}",
+                             "entity_id": entity_id,
+                             "service": "roku_ecp_input"
+                         }
+                     else:
+                         log.error(f"[Roku ECP] Failed with status {response.status_code}: {response.text}")
+                         return {
+                             "status": "FAILURE",
+                             "message": f"Roku ECP returned {response.status_code}",
+                             "entity_id": entity_id
+                         }
+                 except Exception as e:
+                     log.error(f"[Roku ECP] Exception: {e}")
+                     return {
+                         "status": "FAILURE",
+                         "message": f"Roku ECP error: {str(e)}",
+                         "entity_id": entity_id
+                     }
             else:
                 log.error("[Roku] Failed to generate local stream URL.")
 
         # Fallback: Generic
         return await execute_ha_service(
-            "media_player", 
-            "play_media", 
-            entity_id, 
-            user_creds, 
-            {
-                "media_content_id": query,
-                "media_content_type": media_type 
-            }, 
-            kwargs.get("redis_client")
-        )
-
         # Fallback: Generic playback
         return await execute_ha_service(
             "media_player", 
