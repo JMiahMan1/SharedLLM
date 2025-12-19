@@ -9,8 +9,8 @@ import os
 API_URL = "http://192.168.2.211:11435/api/chat"
 HA_URL = os.getenv("HA_URL", "https://ha.sumemail.com")
 HA_TOKEN = os.getenv("HA_TOKEN")
-DEVICE_NAME = "Living Room TV" # Assumed Samsung
-ENTITY_ID = "media_player.living_room_tv_2" 
+DEVICE_NAME = "Loft TV" # Confirmed Samsung
+ENTITY_ID = "media_player.loft_tv_2" 
 
 headers = {
     "Authorization": f"Bearer {HA_TOKEN}",
@@ -40,7 +40,13 @@ def send_chat(message):
     try:
         response = requests.post(API_URL, json={"query": message}, timeout=60)
         if response.status_code == 200:
-            print(f"🤖 ASSISTANT: {response.json().get('response', 'No response')}")
+            data = response.json()
+            if "message" in data and "content" in data["message"]:
+                 print(f"🤖 ASSISTANT: {data['message']['content']}")
+            elif "response" in data:
+                 print(f"🤖 ASSISTANT: {data['response']}")
+            else:
+                 print(f"🤖 ASSISTANT: (Raw Data) {data}")
         else:
             print(f"❌ ERROR: {response.status_code}")
     except Exception as e:
