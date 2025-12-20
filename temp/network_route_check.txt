@@ -1,23 +1,0 @@
-    inet 192.168.2.211/24 brd 192.168.2.255 scope global dynamic noprefixroute wlo1
-    inet6 fe80::583f:462:e377:999f/64 scope link noprefixroute 
----
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 192.168.2.211:11435...
-* Connected to 192.168.2.211 (192.168.2.211) port 11435
-* using HTTP/1.x
-> GET /health HTTP/1.1
-> Host: 192.168.2.211:11435
-> User-Agent: curl/8.14.1
-> Accept: */*
-> 
-* Request completely sent off
-< HTTP/1.1 200 OK
-< date: Fri, 19 Dec 2025 04:03:38 GMT
-< server: uvicorn
-< content-length: 25
-< content-type: application/json
-< 
-{ [25 bytes data]
-100    25  100    25   {"status":"ok","db":true} 0     0  14450      0 --:--:-- --:--:-- --:--:-- 25000
-* Connection #0 to host 192.168.2.211 left intact
