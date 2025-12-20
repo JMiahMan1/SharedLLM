@@ -43,10 +43,17 @@ async def test_video():
          log.error("Factory returned wrong handler! Check settings.")
          return
 
+    # Mock _download_and_serve_video to bypass yt-dlp issues
+    async def mock_download(url):
+        log.info(f"Mock download called for {url}")
+        return "http://192.168.2.211:11435/videos/test.mp4"
+    
+    handler._download_and_serve_video = mock_download
+
     # Test Video
     result = await handler.play_media(
         entity_id=ROKU_ENTITY_ID,
-        query=BIG_BUCK_BUNNY_URL, # Direct URL to skip youtube search overhead for basic test
+        query=BIG_BUCK_BUNNY_URL, # URL doesn't matter now since mocked
         media_type="video",
         user_creds=USER_CREDS,
         media_title="Big Buck Bunny Test",
