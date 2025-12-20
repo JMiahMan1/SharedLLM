@@ -41,8 +41,34 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
     async def play_media(self, entity_id: str, query: str, media_type: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Play media on Roku via Direct Casting (User Requirement).
+        
+        For music requests: Delegates to Music Assistant if entity is MA wrapper.
+        For video requests: Uses direct casting via Media Assistant app.
         """
-        log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - CAST MODE")
+        log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - Type: {media_type}")
+        
+        # [Music Delegation] If this is a music request AND the entity is an MA wrapper,
+        # delegate to MusicAssistantIntegration instead of trying to play music directly
+        if media_type == "music":
+            # Check if this entity is a Music Assistant wrapper
+            from app.settings import GlobalResources
+            try:
+                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if docs and docs.get("metadatas"):
+                    import json
+                    attrs_str = docs["metadatas"][0].get("attributes", "{}")
+                    attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
+                    
+                    if attrs.get("mass_player_type"):
+                        log.info(f"[Roku] Music request on MA wrapper, delegating to MusicAssistantIntegration")
+                        from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
+                        ma_integration = MusicAssistantIntegration()
+                        return await ma_integration.play_media(entity_id, query, media_type, user_creds, **kwargs)
+            except Exception as e:
+                log.warning(f"[Roku] Failed to check MA wrapper status: {e}, continuing with direct play")
+        
+        # [Video Playback] - Direct casting for video content
+        log.info(f"[Roku] Using direct video playback mode")
         
         # [SmartPowerSync] - Ensure TV display is actually ON
         remote_entity_id = entity_id.replace("media_player.", "remote.")
