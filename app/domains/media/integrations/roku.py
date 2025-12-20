@@ -75,12 +75,34 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             if not query.startswith(("http", "www", "spotify", "app")):
                 from app.logic.web_search import tool_web_search
                 search_results_text = await tool_web_search(f"{query} youtube")
-                # Parse first URL from results
+                # Parse URLs from results and filter out channels/users
                 import re
                 urls = re.findall(r'URL: (https?://[^\s]+)', search_results_text)
-                if urls:
-                    query = urls[0]
+                
+                resolved_url = None
+                for url in urls:
+                    # Skip channel/user pages (not playable videos)
+                    if any(x in url for x in ["/channel/", "/user/", "/@"]):
+                        log.info(f"[Roku] Skipping Channel URL: {url}")
+                        continue
+                    
+                    # Prioritize actual video URLs
+                    if "youtube.com/watch?v=" in url or "youtu.be/" in url:
+                        log.info(f"[Roku] Found video: {url}")
+                        resolved_url = url
+                        break
+                    
+                    # Fallback to other YouTube URLs (embed, shorts, etc.)
+                    if not resolved_url and ("youtube.com" in url or "youtu.be" in url):
+                        resolved_url = url
+                
+                if resolved_url:
+                    query = resolved_url
                     log.info(f"[Roku] Resolved to {query}")
+                else:
+                    log.error("[Roku] No valid video URL found in search results")
+                    return {"status": "FAILURE", "message": "Could not find a playable video"}
+
 
             # 2. Download & Cast (Direct Stream)
             # This is mandated by user ("HAVE to do the cast feature").
@@ -95,7 +117,21 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      log.error("[Roku] Could not determine Roku IP address")
                      return {"status": "FAILURE", "message": "Roku IP address not found"}
                  
-                 # Use Roku Media Player (2213) - Verified working
+                 
+                 # Strategy 1: Direct Play via Media Assistant (App ID 782875) - Preferred
+                 # This is a custom receiver that supports direct URL playback without DLNA browsing.
+                 direct_result = await self._play_media_direct(roku_ip, local_url, "Casted Video", "mp4")
+                 if direct_result:
+                     return {
+                         "status": "SUCCESS",
+                         "message": "Launched via Media Assistant (Direct Play)",
+                         "entity_id": entity_id,
+                         "service": "roku_direct_launch"
+                     }
+                 
+                 log.warning("[Roku] Direct Play failed, falling back to DLNA (Roku Media Player)...")
+
+                 # Strategy 2: Roku Media Player (2213) with Smart Wait
                  # Parameters: contentId, u (duplicate of contentId), mediaType
                  import requests
                  
@@ -238,3 +274,40 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             log.error(f"[Roku] Discovery error: {e}")
             return None
 
+            log.error(f"[Roku] Discovery error: {e}")
+            return None
+
+    async def _play_media_direct(self, roku_ip: str, video_url: str, title: str, video_format: str) -> bool:
+        """
+        Attempt to play media directly using 'Media Assistant' (Channel 782875).
+        Returns True if launch command was accepted (200 OK), False otherwise.
+        """
+        import requests
+        
+        # Channel ID 782875 = Media Assistant (Store Version)
+        # Supports: t=v, u=URL, videoName=..., videoFormat=...
+        url = f"http://{roku_ip}:8060/launch/782875"
+        
+        params = {
+            "t": "v",
+            "u": video_url,
+            "videoName": title,
+            "videoFormat": video_format
+        }
+        
+        try:
+            log.info(f"[Roku Direct] Launching Media Assistant: {url}")
+            log.info(f"[Roku Direct] Params: {params}")
+            
+            resp = requests.post(url, params=params, timeout=10)
+            
+            if resp.status_code == 200:
+                log.info("[Roku Direct] Launch accepted (200 OK).")
+                return True
+            else:
+                log.warning(f"[Roku Direct] Launch failed: {resp.status_code} - {resp.text}")
+                return False
+                
+        except Exception as e:
+            log.error(f"[Roku Direct] Exception: {e}")
+            return False
