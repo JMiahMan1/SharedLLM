@@ -2,7 +2,9 @@ from typing import Dict, Any
 import logging
 import re
 from app.domains.media.integrations.base import MediaIntegration
-from app.logic import music_assistant_ops
+from app.settings import log
+# Lazy import to avoid circular dependency
+# from app.logic import music_assistant_ops
 
 log = logging.getLogger(__name__)
 
@@ -27,8 +29,12 @@ class MusicAssistantIntegration(MediaIntegration):
 
     async def play_media(self, entity_id: str, query: str, media_type: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
-        Delegate to Music Assistant.
+        Execute play_media logic for Music Assistant.
         """
+        from app.logic import music_assistant_ops 
+        
+        # 1. Clean Query
+        # If media_type is music, we want to strip punctuation and common words
         # Determine content type (Default to music for MA)
         ctype = "video" if media_type == "video" else "music"
         
