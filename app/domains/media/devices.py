@@ -870,10 +870,15 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
             if is_music:
                 # Check for MA integration or attributes in metadata
                 attrs = m.get("attributes", "")
-                is_ma = integration == "music_assistant" or "mass_player_type" in str(attrs)
+                has_ma_attr = "mass_player_type" in str(attrs)
                 
-                if is_ma: score += 100
-                elif "speaker" in integration: score += 90 # Speakers > TVs for music
+                is_pure_ma = integration == "music_assistant"
+                is_speaker = "speaker" in integration or "dlna" in integration
+                
+                if is_pure_ma: score += 200
+                elif is_speaker and has_ma_attr: score += 150 # Specialized Speaker > Wrapped TV
+                elif has_ma_attr: score += 100 # Wrapped TV (e.g. Roku with MA)
+                elif is_speaker: score += 90
                 elif "play_media" in caps: score += 10
 
             elif is_video:
