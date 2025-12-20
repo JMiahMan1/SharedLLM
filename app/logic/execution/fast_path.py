@@ -69,7 +69,18 @@ class FastPathExecutor:
             log.info(f"Fast HA Path Aborted: Batch entities detected ({len(result)}) - falling back to Orchestrator")
             return None
             
-        eid, integration = result
+        eid, integration = None, None
+        if isinstance(result, tuple):
+            if len(result) == 3: # (eid, integration, score)
+                eid, integration, _ = result
+            elif len(result) == 2: # (eid, integration)
+                eid, integration = result
+            else: # (eid,)
+                eid = result[0]
+                integration = "unknown"
+        elif result: # single eid string
+            eid = result
+            integration = "unknown"
         
         if not eid:
             # Fallback to LLM if no entity found
