@@ -61,7 +61,7 @@ async def _execute_transport_command(
                 # If it is, and we aren't explicitly asking for video, default to music.
                 if media_type == "video":
                     # Determine if entity is MA-enabled
-                    docs = ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
                     if docs and docs.get("metadatas"):
                         import json
                         meta = docs["metadatas"][0]
