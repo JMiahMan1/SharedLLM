@@ -103,8 +103,7 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                  ecp_url = f"http://{roku_ip}:8060/launch/15985"
                  params = {
                      "contentId": local_url,
-                     "mediaType": "movie",
-                     "u": local_url
+                     "mediaType": "movie"
                  }
                  
                  try:
