@@ -307,65 +307,9 @@ async def handle_media_command(
     service_data = {}
 
     # [**UNIVERSAL** MASS INTELLIGENCE SWAP] - Run for ALL music requests
-    # If we have a music request but resolved to a non-MA device, try to swap to MA player
-    if intent in ["play_media", "open_app", "watch_video", "view_content"]:
-        # STRICTER: Only swap to Music Assistant if explicitly requested or high confidence it's music
-        if is_music_request and integration != "music_assistant" and not is_video_request:
-            try:
-                # GlobalResources is already imported at module level
-                
-                # Get current device's group_id and entity_id
-                current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
-                if current_docs and current_docs.get("metadatas"):
-                    current_group_id = current_docs["metadatas"][0].get("group_id")
-                    current_entity_base = re.sub(r'_?\d+$', '', entity_id)  # Strip trailing numbers
-                    
-                    found_ma_player = None
-                    
-                    # Strategy 1: Try exact group_id match
-                    if current_group_id:
-                        log.info(f"[MASS Swap] Looking for MA player in group_id={current_group_id}")
-                        group_docs = GlobalResources.ha_collection._collection.get(
-                            where={"group_id": current_group_id},
-                            include=["metadatas"]
-                        )
-                        if group_docs and group_docs.get("metadatas"):
-                            for metadata in group_docs["metadatas"]:
-                                if metadata.get("integration") == "music_assistant":
-                                    found_ma_player = metadata.get("entity_id")
-                                    log.info(f"[MASS Swap] Found MA player in same group: {found_ma_player}")
-                                    break
-                    
-                    # Strategy 2: Reverse Metadata Lookup (Trust attributes, not names)
-                    if not found_ma_player:
-                        log.info(f"[MASS Swap] No MA in group. Attempting strict metadata lookup via active_queue...")
-                        ma_docs = GlobalResources.ha_collection._collection.get(
-                            where={"integration": "music_assistant"},
-                            include=["metadatas"]
-                        )
-                        if ma_docs and ma_docs.get("metadatas"):
-                            import json
-                            for metadata in ma_docs["metadatas"]:
-                                try:
-                                    # Parse attributes JSON to find the link
-                                    # We are looking for a MASS player whose 'active_queue' points to specific entity_id
-                                    attrs = json.loads(metadata.get("attributes", "{}"))
-                                    target_queue = attrs.get("active_queue")
-                                    
-                                    if target_queue == entity_id:
-                                        found_ma_player = metadata.get("entity_id")
-                                        log.info(f"[MASS Swap] Found MA player via active_queue metadata: {found_ma_player}")
-                                        break
-                                except Exception as e:
-                                    continue
-                    
-                    if found_ma_player:
-                        log.info(f"[MASS Swap] Swapping {entity_id} ({integration}) -> MA {found_ma_player}")
-                        entity_id = found_ma_player
-                        integration = "music_assistant"
-                        domain = entity_id.split('.')[0]
-            except Exception as e:
-                log.warning(f"[MASS Swap] Error: {e}")
+    # MASS swap logic removed - now handled per-integration in RokuIntegration and CastIntegration
+
+
 
         # [**TV INTELLIGENCE SWAP**] - For VIDEO requests, swap speaker/cast to actual TV
         # If we have a video request but resolved to a speaker/cast, find the TV in the same group
