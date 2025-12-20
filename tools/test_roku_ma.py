@@ -10,7 +10,8 @@ log = logging.getLogger("test_roku_ma")
 
 # Test Data
 ROKU_ENTITY_ID = "media_player.28_tcl_roku_tv" # Ensure this is correct
-BIG_BUCK_BUNNY_URL = "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4"
+# BIG_BUCK_BUNNY_URL = "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4"
+BIG_BUCK_BUNNY_URL = "https://www.youtube.com/watch?v=ye82jsAdplU" # Big Buck Bunny Trailer
 MUSIC_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
 
 USER_CREDS = {
