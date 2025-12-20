@@ -35,7 +35,7 @@ async def _execute_transport_command(
     """
     try:
         # Get the correct integration handler
-        handler = IntegrationFactory.get_integration(integration)
+        handler = IntegrationFactory.get_handler(integration)
         
         # Add credentials to handler context if needed (e.g. for Spotify/User-specific actions)
         if hasattr(handler, "user_creds"):
