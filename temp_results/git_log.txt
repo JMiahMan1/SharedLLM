@@ -1,0 +1,5 @@
+3d15221 Add music delegation to MA in RokuIntegration
+a3e41bb Add stop_media method to Roku integration
+34dbd54 Fix: Use StandardIntegration search logic in Roku (same as Cast)
+21d7c12 more clean up
+22c781c Merge branch 'timer' of github.com:JMiahMan1/SharedLLM into timer

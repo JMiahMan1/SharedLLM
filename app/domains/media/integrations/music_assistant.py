@@ -32,9 +32,14 @@ class MusicAssistantIntegration(MediaIntegration):
         # Determine content type (Default to music for MA)
         ctype = "video" if media_type == "video" else "music"
         
+        # Extract device name to help cleaning
+        device_name = kwargs.get("device_name") or ""
+        if not device_name and "metadata" in kwargs:
+             device_name = kwargs["metadata"].get("friendly_name") or ""
+        
         # Clean Query (Reuse the logic or specialized MA cleaning)
-        cleaned_query = self._clean_query(query)
-        log.info(f"[MusicAssistantIntegration] Play on {entity_id} | Query: '{cleaned_query}' | Type: {ctype}")
+        cleaned_query = self._clean_query(query, device_name)
+        log.info(f"[MusicAssistantIntegration] Play on {entity_id} | Query: '{cleaned_query}' | Type: {ctype} | Device Removed: '{device_name}'")
 
         # Attempt MA Delegation
         try:
@@ -56,17 +61,29 @@ class MusicAssistantIntegration(MediaIntegration):
             log.error(f"[MusicAssistantIntegration] Error: {e}")
             return {"status": "FAILURE", "message": str(e)}
 
-    def _clean_query(self, query: str) -> str:
+    def _clean_query(self, query: str, device_name: str = "") -> str:
         """MA specific cleaner."""
         clean = query.lower()
+        
+        # Remove device name if known
+        if device_name:
+            # Simple case-insensitive removal
+            d_clean = device_name.lower().strip()
+            # Try to remove "on [device_name]" first
+            clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?" + re.escape(d_clean) + r"\b", " ", clean)
+            # Remove just the device name
+            clean = clean.replace(d_clean, " ")
+        
         # Remove common MA keywords
         clean = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean)
         # Remove actions
         clean = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean)
-        # Remove device names (simple approach)
-        # Remove "on X" pattern at end, handling "the"
+        
+        # Remove "on X" pattern at end if it looks like a device (catch-all)
         # Matches: "on office tv", "on the office tv", "in the bedroom"
-        clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?.*$", "", clean)
+        # Be careful not to cut off song titles like "Walk on Water"
+        # Strategy: matching common room names or "tv"/"speaker"
+        clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?(office|living|bedroom|kitchen|garage|patio|tv|speaker|soundbar).*$", "", clean)
         
         # Remove "the" if standalone
         clean = re.sub(r"\bthe\b", "", clean)

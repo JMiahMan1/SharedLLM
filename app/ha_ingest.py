@@ -5,6 +5,7 @@ import json
 import logging
 import sys
 import shutil
+import argparse
 from typing import Dict, Any, Tuple, List
 from datetime import datetime, timedelta, timezone
 
@@ -43,20 +44,24 @@ logger = logging.getLogger("HA_Ingest")
 # Core HA Data Fetching
 # ----------------------
 
-def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any], Dict[str, str]]:
+def fetch_ha_data(ha_url: str = None, ha_token: str = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any], Dict[str, str]]:
     """Fetches all states, device registry, entity registry, and area registry info from Home Assistant.
     
     Returns:
         Tuple of (states, device_registry, entity_registry, area_registry)
     """
-    if not HA_TOKEN:
+    # Use args if provided, else fall back to globals
+    _url = ha_url or HA_URL
+    _token = ha_token or HA_TOKEN
+    
+    if not _token:
         logger.error("HA_TOKEN not configured.")
         return [], {}, {}, {}
     
-    headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {_token}", "Content-Type": "application/json"}
     
     def fetch_endpoint(endpoint):
-        url = f"{HA_URL.rstrip('/')}/api/{endpoint}"
+        url = f"{_url.rstrip('/')}/api/{endpoint}"
         try:
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
@@ -98,7 +103,7 @@ def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any
         # Note: We construct a flattened view and extract areas from it to simplify the template logic.
         
         try:
-            tmpl_url = f"{HA_URL.rstrip('/')}/api/template"
+            tmpl_url = f"{_url.rstrip('/')}/api/template"
             resp = requests.post(tmpl_url, headers=headers, json={"template": template_str}, timeout=20)
             if resp.status_code == 200:
                 data = resp.json()
@@ -164,7 +169,7 @@ def get_device_info(entity_id: str, device_registry: Dict[str, Any], entity_regi
 # Ingestion Main
 # ----------------------
 
-def ingest_ha_metadata():
+def ingest_ha_metadata(ha_url: str = None, ha_token: str = None):
     logger.info(f"--- Starting Home Assistant Ingestion to '{COLLECTION_NAME}' ---")
 
     # 1. Initialize Embeddings
@@ -184,7 +189,7 @@ def ingest_ha_metadata():
         pass
 
     # 3. Fetch HA Data
-    states, device_registry, entity_registry, area_registry = fetch_ha_data()
+    states, device_registry, entity_registry, area_registry = fetch_ha_data(ha_url, ha_token)
     if not states:
         logger.error("No states received from HA. Aborting.")
         return
@@ -196,7 +201,7 @@ def ingest_ha_metadata():
     
     # Cutoff for 'Active' Devices (30 Days)
     cutoff_time = datetime.now(timezone.utc) - timedelta(days=30)
-    logger.info(f"Filtering entites older than: {cutoff_time.isoformat()}")
+    logger.info(f"Checking for entites older than: {cutoff_time.isoformat()}")
 
     # Domains to index (controllable or useful info)
     ALLOWED_DOMAINS = [
@@ -211,17 +216,15 @@ def ingest_ha_metadata():
         current_state = state_obj.get("state", "unknown")
         last_updated_str = state_obj.get("last_updated")
         
-        # Filter 1: Activity Check (30 Days)
+        # Filter 1: Activity Check (30 Days) - RELAXED: Log only
         if last_updated_str:
             try:
                 # Handle Z or +00:00. Python 3.11 fromisoformat generally handles it.
                 last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
                 if last_updated < cutoff_time:
                     stale_count += 1
-                    continue
+                    # continue  <-- DISABLED Stale filtering to ensure we get ALL devices
             except Exception:
-                # If we cannot parse the date, we default to INCLUDING it to be safe, 
-                # unless it's clearly garbage? Safe fail: include.
                 pass
 
         # Filter 2: Skip unwanted types
@@ -233,10 +236,13 @@ def ingest_ha_metadata():
         
         # Filter 3: Domain & State
         if domain not in ALLOWED_DOMAINS:
+            # Check for specific mass entities if domain differs, but usually they are media_player
             continue
-        if current_state in ["unavailable", "unknown", "none"]:
-            skipped_count += 1
-            continue
+            
+        # RELAXED: Don't skip unavailable/unknown. We want static catalog.
+        # if current_state in ["unavailable", "unknown", "none"]:
+        #     skipped_count += 1
+        #     continue
             
         # Get enriched metadata
         device_name, integration, area_name = get_device_info(entity_id, device_registry, entity_registry, area_registry)
@@ -343,4 +349,10 @@ def ingest_ha_metadata():
         logger.warning("No valid entities found to ingest.")
 
 if __name__ == "__main__":
-    ingest_ha_metadata()
+    parser = argparse.ArgumentParser(description="Ingest Home Assistant metadata into ChromaDB.")
+    parser.add_argument("--url", type=str, help="Home Assistant URL (overrides HA_URL env var)")
+    parser.add_argument("--token", type=str, help="Home Assistant Long-Lived Access Token (overrides HA_TOKEN env var)")
+    
+    args = parser.parse_args()
+    
+    ingest_ha_metadata(ha_url=args.url, ha_token=args.token)

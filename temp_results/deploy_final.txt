@@ -1,0 +1,104 @@
+Deploying to jeremiah@192.168.2.211:/home/jeremiah/SharedLLM
+Syncing local .env to remote...
+Branch: timer
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+Activate the web console with: systemctl enable --now cockpit.socket
+
+Fetching latest code...
+Your branch is up to date with 'origin/timer'.
+Already on 'timer'
+HEAD is now at 3d15221 Add music delegation to MA in RokuIntegration
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+Already up to date.
+Recreating Docker container to apply config...
+time="2025-12-19T21:26:27-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+#1 [internal] load local bake definitions
+#1 reading from stdin 509B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile:
+#2 transferring dockerfile: 1.19kB done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+#3 DONE 0.9s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 456B done
+#4 DONE 0.1s
+
+#5 [1/8] FROM docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime@sha256:f0ca81b440e252399d9954a45b616ee2540959466aacf3dfc3f856691eee66e8
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 19.62kB 0.0s done
+#6 DONE 0.1s
+
+#7 [2/8] WORKDIR /app
+#7 CACHED
+
+#8 [4/8] RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y     curl     iputils-ping     tesseract-ocr     poppler-utils     ffmpeg     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libdrm2     libxkbcommon0     libxcomposite1     libxdamage1     libxfixes3     libxrandr2     libgbm1     libasound2     libpango-1.0-0     libcairo2     tzdata     && rm -rf /var/lib/apt/lists/*
+#8 CACHED
+
+#9 [6/8] RUN playwright install chromium
+#9 CACHED
+
+#10 [7/8] COPY app/ /app/
+#10 CACHED
+
+#11 [3/8] COPY requirements.txt .
+#11 CACHED
+
+#12 [5/8] RUN pip install --no-cache-dir -r requirements.txt
+#12 CACHED
+
+#13 [8/8] COPY data/ /data/
+#13 CACHED
+
+#14 exporting to image
+#14 exporting layers done
+#14 writing image sha256:b57e365eb12f087bc246f192e774e04e2d213288cef0fcd2cce6fcf51c022e52
+#14 writing image sha256:b57e365eb12f087bc246f192e774e04e2d213288cef0fcd2cce6fcf51c022e52 0.2s done
+#14 naming to docker.io/library/sharedllm-rag-api
+#14 naming to docker.io/library/sharedllm-rag-api done
+#14 DONE 0.2s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ sharedllm-rag-api  Built
+ Container unified_rag_redis  Recreate
+ Container unified_rag_redis  Recreated
+ Container unified_rag_api  Recreate
+time="2025-12-19T21:26:30-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+ Container unified_rag_api  Recreated
+ Container unified_rag_redis  Starting
+ Container unified_rag_redis  Started
+ Container unified_rag_api  Starting
+Waiting for application startup...
+ Container unified_rag_api  Started
+..............................
+[FAIL] Timeout waiting for application startup.
+Last 20 lines of logs:
+INFO:     192.168.2.156:44294 - "GET /dlna/description.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44292 - "GET /dlna/description.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44292 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44296 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44294 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44296 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44292 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44292 - "SUBSCRIBE /dlna/connection_manager/event HTTP/1.1" 404 Not Found
+INFO:     192.168.2.156:44296 - "SUBSCRIBE /dlna/content_directory/event HTTP/1.1" 404 Not Found
+INFO:     192.168.2.156:44294 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44294 - "SUBSCRIBE /dlna/content_directory/event HTTP/1.1" 404 Not Found
+INFO:     192.168.2.156:44298 - "SUBSCRIBE /dlna/connection_manager/event HTTP/1.1" 404 Not Found
+INFO:     192.168.2.156:44300 - "POST /dlna/content_directory/control HTTP/1.1" 200 OK
+INFO:     192.168.2.156:44300 - "POST /dlna/content_directory/control HTTP/1.1" 200 OK
+2025-12-19 21:27:27,638 [INFO] [DLNA] Detected Browse Action at 1766204847.6382246
+2025-12-19 21:27:27,638 [INFO] [DLNA] Browse Action: ID=0, Flag=BrowseDirectChildren
+2025-12-19 21:27:28,823 [INFO] [DLNA] Detected Browse Action at 1766204848.8230057
+2025-12-19 21:27:28,823 [INFO] [DLNA] Browse Action: ID=1, Flag=BrowseDirectChildren
+2025-12-19 21:27:28,823 [INFO] Upsert OK.
+2025-12-19 21:27:28,823 [INFO] Device DB Refresh Complete.
+[FAIL] Deployment Failed.
