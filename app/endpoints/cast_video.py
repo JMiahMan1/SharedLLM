@@ -13,7 +13,7 @@ router = APIRouter()
 CACHE_DIR = Path("/workspace/temp/cast_videos")
 
 
-@router.get("/cast_video/{filename}")
+@router.api_route("/cast_video/{filename}", methods=["GET", "HEAD"])
 async def stream_video(filename: str, request: Request):
     """
     Serve video file with HTTP Range support for progressive streaming.
@@ -42,6 +42,9 @@ async def stream_video(filename: str, request: Request):
         filename=filename,
         headers={
             "Accept-Ranges": "bytes",
-            "Cache-Control": "no-cache"
+            "Cache-Control": "no-cache",
+            "contentFeatures.dlna.org": "DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000",
+            "transferMode.dlna.org": "Streaming",
+            "realTimeInfo.dlna.org": "DLNA.ORG_TLAG=*"
         }
     )

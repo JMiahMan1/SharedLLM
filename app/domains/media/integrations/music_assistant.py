@@ -64,8 +64,14 @@ class MusicAssistantIntegration(MediaIntegration):
         # Remove actions
         clean = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean)
         # Remove device names (simple approach)
-        clean = re.sub(r"\b(on|in|at|to)?\s+(office|bedroom|living room|kitchen|tv|speaker)\b.*", "", clean) 
-        # Better: remove "on X" pattern at end
-        clean = re.sub(r"\s+on\s+.*$", "", clean)
+        # Remove "on X" pattern at end, handling "the"
+        # Matches: "on office tv", "on the office tv", "in the bedroom"
+        clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?.*$", "", clean)
+        
+        # Remove "the" if standalone
+        clean = re.sub(r"\bthe\b", "", clean)
+        
+        # Remove punctuation
+        clean = re.sub(r"[^\w\s]", "", clean)
         
         return re.sub(r'\s+', ' ', clean).strip()

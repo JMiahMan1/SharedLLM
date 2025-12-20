@@ -47,7 +47,15 @@ def infer_integration(entity_id: str, attributes: dict, manufacturer: str = None
         device_class = attributes.get("device_class")
         fname = attributes.get("friendly_name", "").lower()
         
-        # Robust Cast/Android Detection
+        # Priority 1: Check for Roku BEFORE Cast (Roku devices have app_id but are native integrations)
+        if manufacturer and "roku" in str(manufacturer).lower():
+            return "roku"
+        if model and "roku" in str(model).lower():
+            return "roku"
+        if device_class == "tv" and ("roku" in eid or "roku" in fname):
+            return "roku"
+        
+        # Priority 2: Robust Cast/Android Detection
         # Android TV often uses 'com.google.android.youtube.tv' or similar package names
         if app_id and ("android" in str(app_id).lower() or "." in str(app_id)):
             return "androidtv"
