@@ -53,7 +53,13 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             # Check if this entity is a Music Assistant wrapper
             from app.settings import GlobalResources
             try:
-                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                # [Robust Lookup] Try strict ID first, then fallback to domain-prefixed (ingestion bug workaround)
+                search_ids = [entity_id]
+                if entity_id.startswith("media_player."):
+                    search_ids.append(f"media_player.{entity_id}")
+                
+                docs = GlobalResources.ha_collection.get(ids=search_ids, include=["metadatas"])
+                
                 if docs and docs.get("metadatas"):
                     import json
                     attrs_str = docs["metadatas"][0].get("attributes", "{}")
