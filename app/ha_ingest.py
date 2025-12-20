@@ -84,25 +84,18 @@ def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any
             {% set dev_ids = states | map(attribute='entity_id') | map('device_id') | unique | select('string') | list %}
             {% for did in dev_ids %}
             {
-              "id": "{{ did }}",
-              "manufacturer": "{{ device_attr(did, 'manufacturer') | default('unknown') }}",
-              "model": "{{ device_attr(did, 'model') | default('unknown') }}",
-              "name": "{{ device_attr(did, 'name') | default('unknown') }}",
-              "area_id": "{{ area_id(did) | default('') }}"
+              "id": {{ did | to_json }},
+              "manufacturer": {{ (device_attr(did, 'manufacturer') or 'unknown') | to_json }},
+              "model": {{ (device_attr(did, 'model') or 'unknown') | to_json }},
+              "name": {{ (device_attr(did, 'name') or 'unknown') | to_json }},
+              "area_id": {{ (area_id(did) or '') | to_json }},
+              "area_name": {{ (area_name(did) or '') | to_json }}
             }{{ "," if not loop.last else "" }}
             {% endfor %}
-          ],
-          "areas": {
-             {% for did in dev_ids %}
-               {% set aid = area_id(did) %}
-               {% if aid %}
-                 "{{ aid }}": "{{ area_name(did) }}"{{ "," if not loop.last else "" }}
-               {% endif %}
-             {% endfor %}
-          }
+          ]
         }
         """
-        # Note: We construct a simplified view. Ideally we'd iterate areas directly but templates are limited to states/devices usually.
+        # Note: We construct a flattened view and extract areas from it to simplify the template logic.
         
         try:
             tmpl_url = f"{HA_URL.rstrip('/')}/api/template"
@@ -110,15 +103,24 @@ def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any
             if resp.status_code == 200:
                 data = resp.json()
                 device_registry_list = data.get("devices", [])
-                # Areas map -> Registry list format
-                area_map = data.get("areas", {})
-                area_registry_list = [{"area_id": k, "name": v} for k, v in area_map.items()]
+                
+                # Reconstruct Area Registry from the flat device list
+                area_registry_list = []
+                _seen_areas = set()
+                for d in device_registry_list:
+                    aid = d.get("area_id")
+                    aname = d.get("area_name")
+                    if aid and aname and aid not in _seen_areas:
+                        area_registry_list.append({"area_id": aid, "name": aname})
+                        _seen_areas.add(aid)
                 
                 logger.info(f"Fallback successful: Retrieved {len(device_registry_list)} devices and {len(area_registry_list)} areas via template.")
             else:
                 logger.warning(f"Template API fallback failed: {resp.status_code} - {resp.text}")
         except Exception as e:
             logger.error(f"Template API error: {e}")
+            if 'resp' in locals():
+                 logger.error(f"Response text start: {resp.text[:200]}")
 
     # Index registries for fast lookup
     device_registry = {dev["id"]: dev for dev in device_registry_list if "id" in dev}
@@ -325,6 +327,7 @@ def ingest_ha_metadata():
             logger.info(f"✅ Successfully ingested {len(docs_to_add)} ACTIVE entities into '{COLLECTION_NAME}'.")
             logger.info(f"Skipped {skipped_count} inactive/filtered entities.")
             logger.info(f"Skipped {stale_count} STALE entities (Older than 30 days).")
+            logger.info(f"Post-ingest DB Count: {vectordb._collection.count()}")
             
             # 6. Trigger API Reload
             # This ensures the running API picks up the new database state immediately

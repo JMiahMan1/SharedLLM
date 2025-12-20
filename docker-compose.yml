@@ -27,18 +27,20 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
       - TZ=America/Phoenix
+      # Update System Prompt path for mapped structure
+      - SYSTEM_PROMPT_FILE=/app/data/system_prompt.txt
 
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - .:/workspace:z
+      - ./app:/app:z
+      - ./data:/data:z
+      - ./tools:/tools:z
       - rag_chroma:/data/chroma_db:z
       - huggingface_cache:/root/.cache/huggingface:z
-      # Mounting the system prompt file separately for clarity
-      - ./app/data/system_prompt.txt:/workspace/app/data/system_prompt.txt
       # Adding the necessary temp dir for Nextcloud ingestion
       - ./data/nextcloud_temp:/data/nextcloud_temp:z
 
-    working_dir: /workspace
+    working_dir: /
     entrypoint: []
     command: [ "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "11435", "--workers", "1", "--reload", "--log-level", "debug" ]
     depends_on:
@@ -47,7 +49,7 @@ services:
     # networks:
     #   - ragnet
 
-  # --- 2. Redis Service (Shared Cache/Memory) ---
+    # --- 2. Redis Service (Shared Cache/Memory) ---
   redis:
     image: redis:7-alpine
     container_name: unified_rag_redis
