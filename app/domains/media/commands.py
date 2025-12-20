@@ -56,22 +56,47 @@ async def _execute_transport_command(
             # Check if this is a Music Assistant entity (even if integration says Roku)
             # If it is, and we aren't explicitly asking for video, default to music.
             try:
-                # [Legacy Fix] Roku Specific Music Inference
-                # Restoring Android to 'Video' default (Safe Mode)
-                # Only Roku will infer 'music' from MA attributes to fix the "Nothing Played" issue
-                if integration == "roku" and media_type == "video":
-                    # Determine if entity is MA-enabled
-                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
-                    if docs and docs.get("metadatas"):
-                        for meta in docs["metadatas"]:
-                             if meta:
-                                 attrs_str = meta.get("attributes", "{}")
-                                 # Simple string check
-                                 if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
-                                     # Only switch if user didn't explicitly say "watch" or "video"
-                                     if not ("watch" in query.lower() or "video" in query.lower() or "movie" in query.lower()):
-                                         log.info(f"[Media Type] Inferred 'music' for Roku due to lack of explicit video intent (Query: {query})")
-                                         media_type = "music"
+                if media_type == "video":
+                    # [Heuristic 1] Speakers/Soundbars should default to Music
+                    is_speaker = integration in ["speaker", "sonos", "dlna_dmr", "heos", "bose"]
+                    
+                    # [Heuristic 2] Check MA Attributes (Robust ID Lookup)
+                    # Handle suffix mismatches (e.g. office_tv vs office_tv_chrome_2)
+                    has_ma_attrs = False
+                    candidates = [entity_id, f"{entity_id}_2", f"{entity_id}_3", entity_id.replace("_chrome", ""), entity_id.replace("_cast", "")]
+                    
+                    # Add original if different
+                    if entity_id not in candidates: candidates.insert(0, entity_id)
+
+                    try:
+                        docs = GlobalResources.ha_collection.get(ids=candidates, include=["metadatas"])
+                        if docs and docs.get("metadatas"):
+                            for meta in docs["metadatas"]:
+                                if meta:
+                                    attrs_str = meta.get("attributes", "{}")
+                                    # Check for MA attributes
+                                    if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
+                                        has_ma_attrs = True
+                                    # Check for Speaker device class
+                                    if "speaker" in meta.get("device_class", ""):
+                                        is_speaker = True
+                    except Exception as e:
+                        log.warning(f"Error checking attributes for music inference: {e}")
+
+                    # Logic: If it's a speaker OR has MA attributes -> Default to Music
+                    if (is_speaker or has_ma_attrs):
+                         # Guard against explicit "Watch" intent
+                         if not ("watch" in query.lower() or "video" in query.lower() or "movie" in query.lower()):
+                             log.info(f"[Media Type] Inferred 'music' (Speaker/MA Detected). Entity: {entity_id}")
+                             media_type = "music"
+                             
+                             # [CRITICAL] Switch Integration to Music Assistant
+                             # Standard/Cast integrations cannot handle semantic music queries (only URLs).
+                             # We must use proper MA handler.
+                             if integration != "music_assistant":
+                                 log.info(f"[Integration Switch] Switching from '{integration}' to 'music_assistant'")
+                                 integration = "music_assistant"
+                                 handler = IntegrationFactory.get_handler("music_assistant")
             except Exception as e:
                 log.warning(f"Error checking MA attributes: {e}")
 
