@@ -31,7 +31,26 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         from app.domains.media.integrations.base import unwrap_entity_if_needed
         entity_id = await unwrap_entity_if_needed(entity_id, media_type, user_creds)
         
+        # [Music Delegation] If music request AND entity is MA wrapper, delegate to MusicAssistantIntegration
+        if media_type == "music":
+            from app.settings import GlobalResources
+            try:
+                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if docs and docs.get("metadatas"):
+                    import json
+                    attrs_str = docs["metadatas"][0].get("attributes", "{}")
+                    attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
+                    
+                    if attrs.get("mass_player_type"):
+                        log.info(f"[Cast] Music request on MA wrapper, delegating to MusicAssistantIntegration")
+                        from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
+                        ma_integration = MusicAssistantIntegration()
+                        return await ma_integration.play_media(entity_id, query, media_type, user_creds, **kwargs)
+            except Exception as e:
+                log.warning(f"[Cast] Failed to check MA wrapper status: {e}, continuing with standard play")
+        
         # [Session Clearing for Video Playback]
+
         # If device is playing (e.g., Music Assistant session), stop it first
         # to prevent session conflicts when switching to video
         if media_type == "video":
