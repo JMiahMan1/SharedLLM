@@ -229,6 +229,38 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             kwargs.get("redis_client")
         )
     
+    async def stop_media(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Stop media playback on Roku by sending Home key.
+        This exits the current app and returns to Roku home screen.
+        """
+        log.info(f"[Roku] Stopping playback on {entity_id}")
+        
+        # Get remote entity
+        remote_entity_id = entity_id.replace("media_player.", "remote.")
+        
+        # Send Home key to stop playback
+        from app.domains.shared import execute_ha_service
+        result = await execute_ha_service(
+            "remote",
+            "send_command",
+            remote_entity_id,
+            user_creds,
+            {"command": "Home"},
+            kwargs.get("redis_client")
+        )
+        
+        if result.get("status") == "SUCCESS":
+            return {
+                "status": "SUCCESS",
+                "message": "Stopped playback and returned to home screen",
+                "entity_id": entity_id,
+                "service": "remote.send_command"
+            }
+        
+        return result
+    
+
     async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
         """Get Roku IP address using SSDP network discovery"""
         import requests
