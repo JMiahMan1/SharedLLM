@@ -20,6 +20,44 @@ class StandardIntegration(MediaIntegration):
         """
         Standard playback with Whoogle Search fallback for videos.
         """
+        # [Music Delegation] If music request AND entity is MA wrapper, delegate to MusicAssistantIntegration
+        if media_type == "music":
+            # [Source of Truth] Check passed metadata first (Reliable)
+            metadata = kwargs.get("metadata", {})
+            
+            # Helper to check attributes
+            def check_ma_attrs(attrs_dict):
+                 return bool(attrs_dict.get("mass_player_type") or attrs_dict.get("music_assistant"))
+
+            is_ma = False
+            
+            # 1. Check passed metadata
+            if metadata:
+                 attrs = metadata.get("attributes", {})
+                 if isinstance(attrs, str):
+                      is_ma = "mass_player_type" in attrs or "music_assistant" in attrs
+                 elif isinstance(attrs, dict):
+                      is_ma = check_ma_attrs(attrs)
+            
+            # 2. Fallback to Chroma Lookup (Legacy)
+            if not is_ma and not metadata:
+                try:
+                    from app.settings import GlobalResources
+                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    if docs and docs.get("metadatas"):
+                        import json
+                        attrs_str = docs["metadatas"][0].get("attributes", "{}")
+                        attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
+                        is_ma = check_ma_attrs(attrs)
+                except Exception:
+                    pass
+
+            if is_ma:
+                log.info(f"[Standard] Music request on MA wrapper (Source of Truth), delegating to MusicAssistantIntegration")
+                from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
+                ma_integration = MusicAssistantIntegration()
+                return await ma_integration.play_media(entity_id, query, media_type, user_creds, **kwargs)
+
         redis_client = kwargs.get("redis_client")
         
         # CLEAN QUERY

@@ -33,21 +33,43 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         
         # [Music Delegation] If music request AND entity is MA wrapper, delegate to MusicAssistantIntegration
         if media_type == "music":
-            from app.settings import GlobalResources
-            try:
-                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
-                if docs and docs.get("metadatas"):
-                    import json
-                    attrs_str = docs["metadatas"][0].get("attributes", "{}")
-                    attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
-                    
-                    if attrs.get("mass_player_type"):
-                        log.info(f"[Cast] Music request on MA wrapper, delegating to MusicAssistantIntegration")
-                        from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
-                        ma_integration = MusicAssistantIntegration()
-                        return await ma_integration.play_media(entity_id, query, media_type, user_creds, **kwargs)
-            except Exception as e:
-                log.warning(f"[Cast] Failed to check MA wrapper status: {e}, continuing with standard play")
+            # [Source of Truth] Check passed metadata first (Reliable)
+            metadata = kwargs.get("metadata", {})
+            
+            # Helper to check attributes
+            def check_ma_attrs(attrs_dict):
+                 return bool(attrs_dict.get("mass_player_type") or attrs_dict.get("music_assistant"))
+
+            is_ma = False
+            
+            # 1. Check passed metadata
+            if metadata:
+                 attrs = metadata.get("attributes", {})
+                 # If flattened string
+                 if isinstance(attrs, str):
+                      is_ma = "mass_player_type" in attrs or "music_assistant" in attrs
+                 elif isinstance(attrs, dict):
+                      is_ma = check_ma_attrs(attrs)
+            
+            # 2. Fallback to Chroma Lookup (Only if metadata missing) - [Legacy/Backup]
+            if not is_ma and not metadata:
+                from app.settings import GlobalResources
+                try:
+                    # Logic here might fail on suffixes, but it's a backup.
+                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    if docs and docs.get("metadatas"):
+                        import json
+                        attrs_str = docs["metadatas"][0].get("attributes", "{}")
+                        attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
+                        is_ma = check_ma_attrs(attrs)
+                except Exception as e:
+                    log.warning(f"[Cast] Failed to check MA wrapper status: {e}")
+
+            if is_ma:
+                log.info(f"[Cast] Music request on MA wrapper (Source of Truth), delegating to MusicAssistantIntegration")
+                from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
+                ma_integration = MusicAssistantIntegration()
+                return await ma_integration.play_media(entity_id, query, media_type, user_creds, **kwargs)
         
         # [Session Clearing for Video Playback]
 
