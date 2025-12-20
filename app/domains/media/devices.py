@@ -765,23 +765,24 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
             if integ in HW_INTEGRATIONS_POWER: score += 20
             if feats.get("turn_off"): score += 10
+            
             # Intent Analysis / Media Type Inference
-    # Global Policy: "Play" -> Music, "Watch" -> Video
-    q_lower = query_name.lower()
-    
-    # Check for explicit Video keywords
-    is_video = "watch" in q_lower or "view" in q_lower or "video" in q_lower or "movie" in q_lower or "show" in q_lower or "netflix" in q_lower or "youtube" in q_lower
-    
-    # Check for explicit Music keywords
-    is_music = "listen" in q_lower or "music" in q_lower or "song" in q_lower or "radio" in q_lower or "spotify" in q_lower
-    
-    # [Global Policy Logic]
-    # If intent is "play_media" and NOT explicit video -> Default to Music
-    if intent == "play_media" and not is_video:
-        is_music = True
-    
-    # Special: "Play X on Y" without "watch" should be music.
-    # The commands.py logic does this too, but we need it HERE for Group Routing to pick the MA entity.
+            # Global Policy: "Play" -> Music, "Watch" -> Video
+            q_lower = query_name.lower()
+            
+            # Check for explicit Video keywords
+            is_video = "watch" in q_lower or "view" in q_lower or "video" in q_lower or "movie" in q_lower or "show" in q_lower or "netflix" in q_lower or "youtube" in q_lower
+            
+            # Check for explicit Music keywords
+            is_music = "listen" in q_lower or "music" in q_lower or "song" in q_lower or "radio" in q_lower or "spotify" in q_lower
+            
+            # [Global Policy Logic]
+            # If intent is "play_media" and NOT explicit video -> Default to Music
+            if intent == "play_media" and not is_video:
+                is_music = True
+            
+            # Special: "Play X on Y" without "watch" should be music.
+            # The commands.py logic does this too, but we need it HERE for Group Routing to pick the MA entity.
             if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]): score += 5
 
             is_chrome = "chrome" in integ.lower() or "cast" in integ.lower() or "google_cast" in integ.lower()
