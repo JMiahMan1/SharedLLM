@@ -13,7 +13,7 @@ router = APIRouter()
 CACHE_DIR = Path("/workspace/temp/cast_videos")
 
 
-@router.get("/cast_video/{filename}")
+@router.api_route("/cast_video/{filename}", methods=["GET", "HEAD"])
 async def stream_video(filename: str, request: Request):
     """
     Serve video file with HTTP Range support for progressive streaming.
