@@ -1,0 +1,25 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 192.168.2.211:11435...
+* Connected to 192.168.2.211 (192.168.2.211) port 11435
+* using HTTP/1.x
+> GET /cast_video/1c504eb5640b.mp4 HTTP/1.1
+> Host: 192.168.2.211:11435
+> User-Agent: curl/8.15.0
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/1.1 200 OK
+< date: Fri, 19 Dec 2025 23:59:08 GMT
+< server: uvicorn
+< accept-ranges: bytes
+< cache-control: no-cache
+< content-type: video/mp4
+< content-disposition: attachment; filename="1c504eb5640b.mp4"
+< content-length: 28523658
+< last-modified: Fri, 19 Dec 2025 23:21:18 GMT
+< etag: "7be4eb3df13f51d1f5d8f4ac048dde72"
+< 
+{ [1448 bytes data]
+  5 27.2M    5 1448k    0     0  2499k      0  0:00:11 --:--:--  0:00:11 2496k 21 27.2M   21 6122k    0     0  3878k      0  0:00:07  0:00:01  0:00:06 3877k 43 27.2M   43 11.7M    0     0  4683k      0  0:00:05  0:00:02  0:00:03 4682k 64 27.2M   64 17.5M    0     0  5025k      0  0:00:05  0:00:03  0:00:02 5025k 84 27.2M   84 23.0M    0     0  5159k      0  0:00:05  0:00:04  0:00:01 5158k 96 27.2M   96 26.3M    0     0  4839k      0  0:00:05  0:00:05 --:--:-- 5110k100 27.2M  100 27.2M    0     0  4772k      0  0:00:05  0:00:05 --:--:-- 5105k
+* Connection #0 to host 192.168.2.211 left intact
