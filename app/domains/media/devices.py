@@ -381,13 +381,13 @@ async def resolve_multiple_entities_with_pattern(
         # No pattern - use single entity resolution
         result = await smart_resolve_entity(query, intent, ha_collection)
 
-        # Check if smart_resolve_entity returned a list (batch)
         if isinstance(result, list):
              return result
 
-        entity_id, integration = result
-        if entity_id:
-            return [(entity_id, integration)]
+        if result and len(result) == 3:
+            entity_id, integration, metadata = result
+            if entity_id:
+                return [(entity_id, integration, metadata)]
         return []
 
     # Prioritize Music Assistant entities if multiple are active
@@ -478,10 +478,10 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     """
     Resolves the best entity (or entities) based on query and intent.
     When is_music=True, it prioritizes Music Assistant devices.
-
+    
     Returns:
-       - If allow_multiple=False: (entity_id, integration) tuple (legacy)
-       - If allow_multiple=True: List of (entity_id, integration) tuples
+       - If allow_multiple=False: (entity_id, integration, metadata) tuple
+       - If allow_multiple=True: List of (entity_id, integration, metadata) tuples
     """
     log.info(f"DEBUG: Entering smart_resolve_entity. Q='{query_name}' Intent='{intent}' Multiple={allow_multiple}")
 
@@ -534,11 +534,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
                 # Exact match (highest priority)
                 if friendly_name == query_lower:
-                    exact_matches.append((entity_id, integration))
+                    exact_matches.append((entity_id, integration, meta))
                     log.info(f"[EXACT MATCH] '{query_name}' → {entity_id}")
                 # Prefix match (e.g. "Office TV" starts with "Office")
                 elif friendly_name.startswith(query_lower) or query_lower in friendly_name:
-                    prefix_matches.append((entity_id, integration, friendly_name))
+                    prefix_matches.append((entity_id, integration, friendly_name, meta))
 
             # Return exact match immediately, but prioritize native integrations if multiple
             if exact_matches:
@@ -554,13 +554,17 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 exact_matches.sort(key=_integ_priority, reverse=True)
                 
                 log.info(f"Using prioritized exact name match for '{query_name}': {exact_matches[0]} (Candidates: {exact_matches})")
-                return [exact_matches[0]] if allow_multiple else exact_matches[0]
+                
+                # [Fix] Return 3-item tuple to preserve metadata (Source of Truth)
+                best = exact_matches[0] # (eid, integ, meta) is already in this format as appended above
+                return [best] if allow_multiple else best
 
-            # Return best prefix match if query is specific enough (>= 6 chars)
+            # Return best prefix match
             if prefix_matches and len(query_lower) >= 6:
-                # Sort by name length (shorter = more specific)
                 prefix_matches.sort(key=lambda x: len(x[2]))
-                best_match = (prefix_matches[0][0], prefix_matches[0][1])
+                # [Fix] Return 3-item tuple for prefix match as well
+                eid, integ, friendly, meta = prefix_matches[0]
+                best_match = (eid, integ, meta)
                 log.info(f"Using prefix match for '{query_name}': {best_match[0]} ({prefix_matches[0][2]})")
                 return [best_match] if allow_multiple else best_match
 
@@ -681,7 +685,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
     # 5. Standard Priority Logic
     # Reconstruct simple candidates list for legacy logic
-    candidates = [(c["eid"], c["integration"]) for c in raw_candidates]
+    candidates = [(c["eid"], c["integration"], c["metadata"]) for c in raw_candidates]
 
     # Priority Logic for Music/Power/Etc
 
@@ -706,9 +710,9 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
         # Second pass: If no MA match, look for "speaker" type devices that aren't strict TVs
         if not ma_candidate:
-             for eid, integration in candidates:
+             for eid, integration, meta in candidates:
                   if "speaker" in eid or "audio" in integration:
-                       ma_candidate = (eid, integration)
+                       ma_candidate = (eid, integration, meta)
                        break
 
         if ma_candidate:
@@ -717,10 +721,10 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         # Fallback: If no MA device found, we return the best TV candidate (if exists),
         # but we log a warning because we expected music.
         tv_candidate = None
-        for eid, integration in candidates:
+        for eid, integration, meta in candidates:
             if eid.startswith("media_player.") and any(x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
                 if tv_candidate is None:
-                    tv_candidate = (eid, integration)
+                    tv_candidate = (eid, integration, meta)
 
         if tv_candidate:
              return [tv_candidate] if allow_multiple else tv_candidate
@@ -761,16 +765,33 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
             if integ in HW_INTEGRATIONS_POWER: score += 20
             if feats.get("turn_off"): score += 10
+            # Intent Analysis / Media Type Inference
+    # Global Policy: "Play" -> Music, "Watch" -> Video
+    q_lower = query_name.lower()
+    
+    # Check for explicit Video keywords
+    is_video = "watch" in q_lower or "view" in q_lower or "video" in q_lower or "movie" in q_lower or "show" in q_lower or "netflix" in q_lower or "youtube" in q_lower
+    
+    # Check for explicit Music keywords
+    is_music = "listen" in q_lower or "music" in q_lower or "song" in q_lower or "radio" in q_lower or "spotify" in q_lower
+    
+    # [Global Policy Logic]
+    # If intent is "play_media" and NOT explicit video -> Default to Music
+    if intent == "play_media" and not is_video:
+        is_music = True
+    
+    # Special: "Play X on Y" without "watch" should be music.
+    # The commands.py logic does this too, but we need it HERE for Group Routing to pick the MA entity.
             if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]): score += 5
 
             is_chrome = "chrome" in integ.lower() or "cast" in integ.lower() or "google_cast" in integ.lower()
             if is_chrome: score -= 5 # Reduced penalty (was -20) to allow Cast TVs to win if no other TV exists
 
-            matches.append((score, eid, integ))
+            matches.append((score, eid, integ, c.get("supported_features", {}), c.get("friendly_name")))
 
         if matches:
             matches.sort(key=lambda x: x[0], reverse=True)
-            res = (matches[0][1], matches[0][2])
+            res = (matches[0][1], matches[0][2], {"supported_features": matches[0][3], "friendly_name": matches[0][4]})
             return [res] if allow_multiple else res
 
     # --- FALLBACK / GENERIC ---
@@ -826,7 +847,8 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                           selected = _route_by_intent(intent, members, is_music, is_video)
                           if selected:
                                log.info(f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}")
-                               return (selected["entity_id"], selected.get("integration", "unknown"))
+                               # Return 3-item tuple to preserve metadata (Source of Truth)
+                               return (selected["entity_id"], selected.get("integration", "unknown"), selected)
 
             except Exception as e:
                 log.error(f"Group Routing Failed: {e}")
@@ -868,18 +890,17 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
         # MEDIA PLAY
         elif intent == "play_media":
             if is_music:
-                # [Fix] Roku Specific: Prioritize the specialized MA 'speaker' entity over the Roku TV entity
-                # This ensures we use the MA integration (which works) instead of the Roku integration (which fails for music)
-                # We scope this strictly to 'roku' entity IDs to avoid affecting Android/Cast/Sonos
+                # [Fix] Global MA Routing: Prioritize specialized MA 'speaker' entities over generic TV entities
+                # This ensures we use the MA integration (which works) instead of generic Cast/TV integration (video-focused)
+                # We prioritize ANY entity with 'mass_player_type' for music.
                 attrs = m.get("attributes", "")
-                has_ma_attr = "mass_player_type" in str(attrs)
+                has_ma_attr = "mass_player_type" in str(attrs) or "music_assistant" in str(attrs)
                 
-                # Check for Roku in Entity ID (standard naming for MA/Roku links)
-                is_roku = "roku" in m.get("entity_id", "").lower()
                 is_speaker = "speaker" in integration or "dlna" in integration
                 
                 if integration == "music_assistant": score += 200 # Native MA Provider (Best)
-                elif is_speaker and is_roku and has_ma_attr: score += 150 # Roku MA Speaker (Critical Fix)
+                elif has_ma_attr: score += 150 # Wrapper with MA capability (Critical for Cast/Roku)
+                elif is_speaker: score += 50
                 elif "play_media" in caps: score += 10
 
             elif is_video:

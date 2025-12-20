@@ -28,7 +28,8 @@ async def _execute_transport_command(
     user_creds: Dict[str, Any],
     integration: str = "unknown", 
     redis_client = None,
-    query: str = ""
+    query: str = "",
+    metadata: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Executes a single media command on a specific entity using the appropriate MediaIntegration.
@@ -48,64 +49,44 @@ async def _execute_transport_command(
             # Determine media type (music vs video) based on query/context
             # Simple heuristic: "watch" -> video, "listen" -> music.
             # Default to "video" for now if ambiguous, or "music" if integration is music-focused.
-            media_type = "video"
-            if integration == "music_assistant" or "music" in query.lower() or "listen" in query.lower():
-                media_type = "music"
+            # [Media Type Inference]
+            # Use Metadata (Source of Truth) to default "Play" -> Music for Speakers/MA devices.
+            # We do NOT switch the integration here (User Request), only the Intent (media_type).
+            if media_type == "video" and metadata:
+                 try:
+                     attrs = metadata.get("attributes", {})
+                     # 1. Check for MA
+                     is_ma = False
+                     if isinstance(attrs, str):
+                          is_ma = "mass_player_type" in attrs or "music_assistant" in attrs
+                     elif isinstance(attrs, dict):
+                          is_ma = bool(attrs.get("mass_player_type") or attrs.get("music_assistant"))
+                     
+                     # 2. Check for Speaker
+                     # 'integration' arg is unreliable if it came from generic resolve, but metadata['integration'] is better
+                     meta_integ = metadata.get("integration", integration)
+                     is_speaker = meta_integ in ["speaker", "sonos", "dlna_dmr", "heos", "bose"]
+                     if isinstance(attrs, dict) and "speaker" in attrs.get("device_class", ""):
+                         is_speaker = True
+                     
+                     if (is_ma or is_speaker):
+                         # Guard against explicit "Watch"
+                         if not ("watch" in query.lower() or "video" in query.lower() or "movie" in query.lower()):
+                             log.info(f"[Media Type] Inferred 'music' (Speaker/MA Detected via Metadata). Entity: {entity_id}")
+                             media_type = "music"
+                 except Exception as e:
+                     log.warning(f"Error checking metadata for inference: {e}")
             
             # [Fix] Roku + Music Assistant Routing
-            # Check if this is a Music Assistant entity (even if integration says Roku)
-            # If it is, and we aren't explicitly asking for video, default to music.
-            try:
-                if media_type == "video":
-                    # [Heuristic 1] Speakers/Soundbars should default to Music
-                    is_speaker = integration in ["speaker", "sonos", "dlna_dmr", "heos", "bose"]
-                    
-                    # [Heuristic 2] Check MA Attributes (Robust ID Lookup)
-                    # Handle suffix mismatches (e.g. office_tv vs office_tv_chrome_2)
-                    has_ma_attrs = False
-                    candidates = [entity_id, f"{entity_id}_2", f"{entity_id}_3", entity_id.replace("_chrome", ""), entity_id.replace("_cast", "")]
-                    
-                    # Add original if different
-                    if entity_id not in candidates: candidates.insert(0, entity_id)
-
-                    try:
-                        docs = GlobalResources.ha_collection.get(ids=candidates, include=["metadatas"])
-                        if docs and docs.get("metadatas"):
-                            for meta in docs["metadatas"]:
-                                if meta:
-                                    attrs_str = meta.get("attributes", "{}")
-                                    # Check for MA attributes
-                                    if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
-                                        has_ma_attrs = True
-                                    # Check for Speaker device class
-                                    if "speaker" in meta.get("device_class", ""):
-                                        is_speaker = True
-                    except Exception as e:
-                        log.warning(f"Error checking attributes for music inference: {e}")
-
-                    # Logic: If it's a speaker OR has MA attributes -> Default to Music
-                    if (is_speaker or has_ma_attrs):
-                         # Guard against explicit "Watch" intent
-                         if not ("watch" in query.lower() or "video" in query.lower() or "movie" in query.lower()):
-                             log.info(f"[Media Type] Inferred 'music' (Speaker/MA Detected). Entity: {entity_id}")
-                             media_type = "music"
-                             
-                             # [CRITICAL] Switch Integration to Music Assistant
-                             # Standard/Cast integrations cannot handle semantic music queries (only URLs).
-                             # We must use proper MA handler.
-                             if integration != "music_assistant":
-                                 log.info(f"[Integration Switch] Switching from '{integration}' to 'music_assistant'")
-                                 integration = "music_assistant"
-                                 handler = IntegrationFactory.get_handler("music_assistant")
-            except Exception as e:
-                log.warning(f"Error checking MA attributes: {e}")
-
             # If we are on Roku but intent is music (explicit or inferred), trigger delegation
+            # Note: RokuIntegration must handle this delegation now.
             if integration == "roku" and ("music" in query.lower() or "prob_music" in query):
                  media_type = "music"
 
             log.info(f"[Media Type] Set by intent '{intent}': {media_type}")
-            return await handler.play_media(entity_id, query, media_type, user_creds=user_creds)
+            
+            # Pass metadata to handler so it can decide on delegation (Source of Truth)
+            return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata)
             
         elif intent == "media_pause":
             return await handler.pause_media(entity_id, user_creds=user_creds)
@@ -172,8 +153,17 @@ async def execute_batch_command(
     
     for entity in entities:
         # Resolve entity details
+        metadata = {}
         if isinstance(entity, tuple):
-             entity_id, integration = entity
+             if len(entity) == 3:
+                 entity_id, integration, metadata = entity
+             else:
+                 entity_id, integration = entity
+                 
+             # [Source of Truth] Use metadata to refine integration
+             # WE PASS METADATA DOWN, BUT DO NOT FORCE SWITCH HERE (User Request)
+             pass
+
         else:
              # If it's a Document object (fallback)
              entity_id = entity.metadata.get("entity_id")
@@ -189,7 +179,8 @@ async def execute_batch_command(
             user_creds, 
             integration, 
             redis_client, 
-            query
+            query,
+            metadata=metadata
         ))
 
     # Run all tasks concurrently
@@ -295,7 +286,17 @@ async def handle_media_command(
                 else:
                      log.info(f"[Device Fallback] No devices found for {cleaned_for_res}")
             elif isinstance(resolved, tuple):
-                 entity_id, integration = resolved
+                 # Handle new (id, integ, meta) format
+                 if len(resolved) == 3:
+                     entity_id, integration, metadata = resolved
+                     
+                     # [Source of Truth] Metadata Logic
+                     # We preserve metadata for passing down, but DO NOT switch integration here.
+                     pass
+                             
+                 else:
+                     entity_id, integration = resolved
+                     
                  log.info(f"[Device Fallback] Resolved '{cleaned_for_res}' to {entity_id}")
             elif resolved:
                  entity_id = resolved
@@ -329,13 +330,7 @@ async def handle_media_command(
         
         # If we didn't get integration from resolver, try to fetch it
         if integration == "home_assistant" or integration == "unknown":
-            try:
-                # Quick lookup in Chroma to get integration
-                docs = ha_collection.get(ids=[entity_id], include=["metadatas"])
-                if docs and docs.get("metadatas") and len(docs["metadatas"]) > 0:
-                    integration = docs["metadatas"][0].get("integration", "home_assistant")
-            except Exception:
-                pass
+            pass # Skipping redundant lookup - reliance on smart_resolve_entity is preferred.
 
         # If it's a script/scene/automation, execute immediately via standard handler
         # (This bypasses the complex media logic below)
@@ -405,4 +400,8 @@ async def handle_media_command(
     log.info(f"[HANDLE_MEDIA_COMMAND] Final Target: {entity_id} ({integration}) Intent: {intent}")
 
     # Execution
-    return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query)]
+    # Ensure metadata is available for passing
+    if 'metadata' not in locals():
+        metadata = {}
+        
+    return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query, metadata=metadata)]
