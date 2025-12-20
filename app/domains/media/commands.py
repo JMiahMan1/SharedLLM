@@ -56,10 +56,10 @@ async def _execute_transport_command(
             # Check if this is a Music Assistant entity (even if integration says Roku)
             # If it is, and we aren't explicitly asking for video, default to music.
             try:
-                # [Global Fix] Semantic Music Inference
-                # Check if this is a Music Assistant entity (Roku, Cast, Android, etc.)
-                # If it is, and we aren't explicitly asking for video, default to music.
-                if media_type == "video":
+                # [Legacy Fix] Roku Specific Music Inference
+                # Restoring Android to 'Video' default (Safe Mode)
+                # Only Roku will infer 'music' from MA attributes to fix the "Nothing Played" issue
+                if integration == "roku" and media_type == "video":
                     # Determine if entity is MA-enabled
                     docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
                     if docs and docs.get("metadatas"):
