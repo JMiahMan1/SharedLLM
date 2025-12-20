@@ -59,7 +59,7 @@ async def _execute_transport_command(
                  media_type = "music"
 
             log.info(f"[Media Type] Set by intent '{intent}': {media_type}")
-            return await handler.play_media(entity_id, query, media_type)
+            return await handler.play_media(entity_id, query, media_type, user_creds=user_creds)
             
         elif intent == "media_pause":
             return await handler.pause_media(entity_id)
