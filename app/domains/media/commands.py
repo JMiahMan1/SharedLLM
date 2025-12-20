@@ -195,20 +195,17 @@ async def execute_batch_command(
 
 async def handle_media_command(
     intent: str,
-    parameters: dict,
-    redis_client,
-    ha_collection,
-    user_creds: dict,
     query: str,
+    entity_id: str,
+    user_creds: dict,
+    ha_collection,
+    redis_client,
     device_name: str = None,
     brightness: int = None
 ) -> List[Dict[str, Any]]:
     """
     Orchestrates the resolution and execution of a media command.
     """
-    entity_id = parameters.get("entity_id")
-    device_name = parameters.get("device_name")
-    
     # Pre-cleaning for resolution
     cleaned_for_res = query
     if device_name:
