@@ -161,10 +161,10 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                 entity_data = resp.json()
                 attributes = entity_data.get("attributes", {})
                 
-                # Attempt SSDP discovery
-                ip = discover_roku_ip(attributes)
+                # Attempt SSDP/Scan discovery
+                ip = await discover_roku_ip(attributes)
                 if ip:
-                    log.info(f"[Roku] Discovered IP via SSDP: {ip}")
+                    log.info(f"[Roku] Discovered IP: {ip}")
                     return ip
                 else:
                     log.error(f"[Roku] SSDP discovery found no Roku devices for {entity_id}")
