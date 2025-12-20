@@ -868,11 +868,18 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
         # MEDIA PLAY
         elif intent == "play_media":
             if is_music:
-                # [Fix] Roku Specific: If Roku integration has MA attributes, boost it to beat the native Roku integration
-                # This fixes the Roku/MA tie-break without affecting Android/Cast
-                if "roku" in integration and "mass_player_type" in str(m.get("attributes", "")):
-                     score += 150
-                elif integration == "music_assistant": score += 100
+                # [Fix] Roku Specific: Prioritize the specialized MA 'speaker' entity over the Roku TV entity
+                # This ensures we use the MA integration (which works) instead of the Roku integration (which fails for music)
+                # We scope this strictly to 'roku' entity IDs to avoid affecting Android/Cast/Sonos
+                attrs = m.get("attributes", "")
+                has_ma_attr = "mass_player_type" in str(attrs)
+                
+                # Check for Roku in Entity ID (standard naming for MA/Roku links)
+                is_roku = "roku" in m.get("entity_id", "").lower()
+                is_speaker = "speaker" in integration or "dlna" in integration
+                
+                if integration == "music_assistant": score += 200 # Native MA Provider (Best)
+                elif is_speaker and is_roku and has_ma_attr: score += 150 # Roku MA Speaker (Critical Fix)
                 elif "play_media" in caps: score += 10
 
             elif is_video:
