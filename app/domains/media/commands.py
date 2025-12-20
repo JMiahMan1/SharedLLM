@@ -199,7 +199,9 @@ async def handle_media_command(
     redis_client,
     ha_collection,
     user_creds: dict,
-    query: str
+    query: str,
+    device_name: str = None,
+    brightness: int = None
 ) -> List[Dict[str, Any]]:
     """
     Orchestrates the resolution and execution of a media command.
