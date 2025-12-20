@@ -95,27 +95,21 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      log.error("[Roku] Could not determine Roku IP address")
                      return {"status": "FAILURE", "message": "Roku IP address not found"}
                  
-                 # Dynamically discover the best video playback channel
-                 from app.utils.roku_channels import find_video_playback_channel
+                 # Use Roku ECP /launch/15985 endpoint (Play On Roku)
+                 # This is the documented method for external video URLs
+                 # Parameters referenced from user snippet: contentId, mediaType, u
                  import requests
                  
-                 channel_id = find_video_playback_channel(roku_ip)
-                 if not channel_id:
-                     log.error("[Roku] No suitable video playback channel found on device")
-                     return {"status": "FAILURE", "message": "No video playback channel available"}
-                 
-                 # Use Roku ECP /input endpoint (accepts video URLs directly)
-                 ecp_url = f"http://{roku_ip}:8060/input/{channel_id}"
+                 ecp_url = f"http://{roku_ip}:8060/launch/15985"
                  params = {
-                     "t": "v",  # type: video
-                     "u": local_url,  # video URL
-                     "videoName": "Video Stream",
-                     "videoFormat": "mp4"
+                     "contentId": local_url,
+                     "mediaType": "movie",
+                     "u": local_url
                  }
                  
                  try:
-                     log.info(f"[Roku ECP] Using /input/{channel_id}: {ecp_url}")
-                     log.info(f"[Roku ECP] Video URL: {local_url}")
+                     log.info(f"[Roku ECP] Using /launch/15985: {ecp_url}")
+                     log.info(f"[Roku ECP] Params: {params}")
                      response = requests.post(ecp_url, params=params, timeout=10)
                      if response.status_code == 200:
                          log.info("[Roku ECP] Successfully sent video to Roku")
@@ -123,7 +117,7 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                              "status": "SUCCESS",
                              "message": f"Playing video on {entity_id}",
                              "entity_id": entity_id,
-                             "service": "roku_ecp_input"
+                             "service": "roku_ecp_launch"
                          }
                      else:
                          log.error(f"[Roku ECP] Failed with status {response.status_code}: {response.text}")
