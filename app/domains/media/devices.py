@@ -533,12 +533,20 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                     continue
 
                 # Exact match (highest priority)
-                if friendly_name == query_lower:
+                if friendly_name == query_lower or friendly_name.replace(".", "").replace(",", "") == query_lower.replace(".", "").replace(",", ""):
                     exact_matches.append((entity_id, integration, meta))
                     log.info(f"[EXACT MATCH] '{query_name}' → {entity_id}")
-                # Prefix match (e.g. "Office TV" starts with "Office")
-                elif friendly_name.startswith(query_lower) or query_lower in friendly_name:
-                    prefix_matches.append((entity_id, integration, friendly_name, meta))
+                
+                # Prefix matches
+                elif len(query_lower) > 3:
+                    # Normalize both for check
+                    fn_norm = friendly_name.replace(".", "").replace(",", "")
+                    q_norm = query_lower.replace(".", "").replace(",", "")
+                    
+                    if friendly_name.startswith(query_lower) or query_lower in friendly_name:
+                        prefix_matches.append((entity_id, integration, friendly_name, meta))
+                    elif fn_norm.startswith(q_norm) or q_norm in fn_norm:
+                         prefix_matches.append((entity_id, integration, friendly_name, meta))
 
             # Return exact match immediately, but prioritize native integrations if multiple
             if exact_matches:
@@ -905,6 +913,9 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
                 elif has_ma_attr: score += 150 # Wrapper with MA capability (Critical for Cast/Roku)
                 elif is_speaker: score += 50
                 elif "play_media" in caps: score += 10
+                
+                # Penalize Cast/Chrome if we want Music and have other options
+                if "cast" in integration or "chrome" in eid: score -= 50
 
             elif is_video:
                 # Prioritize native TV integrations for video
