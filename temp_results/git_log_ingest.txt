@@ -1,0 +1,240 @@
+commit f68b70280d1da047974b5f66c218f5654aa1dd1e
+Author: Agent <agent@example.com>
+Date:   Sat Dec 20 01:12:03 2025 -0700
+
+    Ha Ingest work
+
+diff --git a/app/ha_ingest.py b/app/ha_ingest.py
+index 6351103..777f9cf 100644
+--- a/app/ha_ingest.py
++++ b/app/ha_ingest.py
+@@ -84,25 +84,18 @@ def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any
+             {% set dev_ids = states | map(attribute='entity_id') | map('device_id') | unique | select('string') | list %}
+             {% for did in dev_ids %}
+             {
+-              "id": "{{ did }}",
+-              "manufacturer": "{{ device_attr(did, 'manufacturer') | default('unknown') }}",
+-              "model": "{{ device_attr(did, 'model') | default('unknown') }}",
+-              "name": "{{ device_attr(did, 'name') | default('unknown') }}",
+-              "area_id": "{{ area_id(did) | default('') }}"
++              "id": {{ did | to_json }},
++              "manufacturer": {{ (device_attr(did, 'manufacturer') or 'unknown') | to_json }},
++              "model": {{ (device_attr(did, 'model') or 'unknown') | to_json }},
++              "name": {{ (device_attr(did, 'name') or 'unknown') | to_json }},
++              "area_id": {{ (area_id(did) or '') | to_json }},
++              "area_name": {{ (area_name(did) or '') | to_json }}
+             }{{ "," if not loop.last else "" }}
+             {% endfor %}
+-          ],
+-          "areas": {
+-             {% for did in dev_ids %}
+-               {% set aid = area_id(did) %}
+-               {% if aid %}
+-                 "{{ aid }}": "{{ area_name(did) }}"{{ "," if not loop.last else "" }}
+-               {% endif %}
+-             {% endfor %}
+-          }
++          ]
+         }
+         """
+-        # Note: We construct a simplified view. Ideally we'd iterate areas directly but templates are limited to states/devices usually.
++        # Note: We construct a flattened view and extract areas from it to simplify the template logic.
+         
+         try:
+             tmpl_url = f"{HA_URL.rstrip('/')}/api/template"
+@@ -110,15 +103,24 @@ def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any
+             if resp.status_code == 200:
+                 data = resp.json()
+                 device_registry_list = data.get("devices", [])
+-                # Areas map -> Registry list format
+-                area_map = data.get("areas", {})
+-                area_registry_list = [{"area_id": k, "name": v} for k, v in area_map.items()]
++                
++                # Reconstruct Area Registry from the flat device list
++                area_registry_list = []
++                _seen_areas = set()
++                for d in device_registry_list:
++                    aid = d.get("area_id")
++                    aname = d.get("area_name")
++                    if aid and aname and aid not in _seen_areas:
++                        area_registry_list.append({"area_id": aid, "name": aname})
++                        _seen_areas.add(aid)
+                 
+                 logger.info(f"Fallback successful: Retrieved {len(device_registry_list)} devices and {len(area_registry_list)} areas via template.")
+             else:
+                 logger.warning(f"Template API fallback failed: {resp.status_code} - {resp.text}")
+         except Exception as e:
+             logger.error(f"Template API error: {e}")
++            if 'resp' in locals():
++                 logger.error(f"Response text start: {resp.text[:200]}")
+ 
+     # Index registries for fast lookup
+     device_registry = {dev["id"]: dev for dev in device_registry_list if "id" in dev}
+@@ -325,6 +327,7 @@ def ingest_ha_metadata():
+             logger.info(f"✅ Successfully ingested {len(docs_to_add)} ACTIVE entities into '{COLLECTION_NAME}'.")
+             logger.info(f"Skipped {skipped_count} inactive/filtered entities.")
+             logger.info(f"Skipped {stale_count} STALE entities (Older than 30 days).")
++            logger.info(f"Post-ingest DB Count: {vectordb._collection.count()}")
+             
+             # 6. Trigger API Reload
+             # This ensures the running API picks up the new database state immediately
+
+commit a84c1417df9e1d3820b64c2964d04b74c0179c5c
+Author: Agent <agent@example.com>
+Date:   Sat Dec 20 00:56:19 2025 -0700
+
+    Fix HA Ingest
+
+diff --git a/app/ha_ingest.py b/app/ha_ingest.py
+index 2010871..6351103 100644
+--- a/app/ha_ingest.py
++++ b/app/ha_ingest.py
+@@ -68,12 +68,61 @@ def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any
+ 
+     logger.info(f"Connecting to Home Assistant at {HA_URL}...")
+     states = fetch_endpoint("states") or []
++
++    # Try standard endpoints first
+     device_registry_list = fetch_endpoint("config/device_registry/list") or []
+     entity_registry_list = fetch_endpoint("config/entity_registry/list") or []
+     area_registry_list = fetch_endpoint("config/area_registry/list") or []
+ 
++    # Fallback: Use Template API if registries are empty (Common with non-admin tokens)
++    if not device_registry_list:
++        logger.info("Registry endpoints failed (404/403). Attempting fallback via Template API...")
++        
++        template_str = """
++        {
++          "devices": [
++            {% set dev_ids = states | map(attribute='entity_id') | map('device_id') | unique | select('string') | list %}
++            {% for did in dev_ids %}
++            {
++              "id": "{{ did }}",
++              "manufacturer": "{{ device_attr(did, 'manufacturer') | default('unknown') }}",
++              "model": "{{ device_attr(did, 'model') | default('unknown') }}",
++              "name": "{{ device_attr(did, 'name') | default('unknown') }}",
++              "area_id": "{{ area_id(did) | default('') }}"
++            }{{ "," if not loop.last else "" }}
++            {% endfor %}
++          ],
++          "areas": {
++             {% for did in dev_ids %}
++               {% set aid = area_id(did) %}
++               {% if aid %}
++                 "{{ aid }}": "{{ area_name(did) }}"{{ "," if not loop.last else "" }}
++               {% endif %}
++             {% endfor %}
++          }
++        }
++        """
++        # Note: We construct a simplified view. Ideally we'd iterate areas directly but templates are limited to states/devices usually.
++        
++        try:
++            tmpl_url = f"{HA_URL.rstrip('/')}/api/template"
++            resp = requests.post(tmpl_url, headers=headers, json={"template": template_str}, timeout=20)
++            if resp.status_code == 200:
++                data = resp.json()
++                device_registry_list = data.get("devices", [])
++                # Areas map -> Registry list format
++                area_map = data.get("areas", {})
++                area_registry_list = [{"area_id": k, "name": v} for k, v in area_map.items()]
++                
++                logger.info(f"Fallback successful: Retrieved {len(device_registry_list)} devices and {len(area_registry_list)} areas via template.")
++            else:
++                logger.warning(f"Template API fallback failed: {resp.status_code} - {resp.text}")
++        except Exception as e:
++            logger.error(f"Template API error: {e}")
++
+     # Index registries for fast lookup
+     device_registry = {dev["id"]: dev for dev in device_registry_list if "id" in dev}
++    # Entity registry might still be empty if we couldn't fetch it, but that's less critical than devices/manufacturers
+     entity_registry = {ent["entity_id"]: ent for ent in entity_registry_list if "entity_id" in ent}
+     area_registry = {area["area_id"]: area["name"] for area in area_registry_list if "area_id" in area}
+ 
+
+commit a2078fc84968eee7e0b5f55d6511d87f447ac505
+Author: Agent <agent@example.com>
+Date:   Fri Dec 19 22:05:05 2025 -0700
+
+    Fix scope issue in Roku detection
+
+diff --git a/app/ha_ingest.py b/app/ha_ingest.py
+index 3aa0f0f..2010871 100644
+--- a/app/ha_ingest.py
++++ b/app/ha_ingest.py
+@@ -190,6 +190,11 @@ def ingest_ha_metadata():
+         # Get enriched metadata
+         device_name, integration, area_name = get_device_info(entity_id, device_registry, entity_registry, area_registry)
+         
++        # Get platform and device_id for self-correction logic
++        registry_entry = entity_registry.get(entity_id, {})
++        platform = registry_entry.get("platform", "unknown")
++        device_id = registry_entry.get("device_id")
++        
+         # --- MUSIC ASSISTANT SELF-CORRECTION ---
+         # If integration is unknown but it has MA attributes, force it.
+         if "music_assistant" not in integration.lower() and (
+
+commit 539bf78270380c976eb9d58902b6078258c0ac33
+Author: Agent <agent@example.com>
+Date:   Fri Dec 19 21:41:53 2025 -0700
+
+    Refine Roku detection - avoid TCL Android TV false positives
+
+diff --git a/app/ha_ingest.py b/app/ha_ingest.py
+index f386c11..3aa0f0f 100644
+--- a/app/ha_ingest.py
++++ b/app/ha_ingest.py
+@@ -198,14 +198,17 @@ def ingest_ha_metadata():
+             integration = "music_assistant"
+         
+         # --- ROKU SELF-CORRECTION ---
+-        # Detect Roku devices by model/manufacturer and set correct integration
++        # Detect Roku devices via HA's platform or Roku-specific attributes
++        # Don't use manufacturer alone (TCL makes both Roku and Android TVs)
+         if "music_assistant" not in integration.lower():
+-            model = device_registry.get(device_id, {}).get("model", "") if device_id else ""
+-            manufacturer = device_registry.get(device_id, {}).get("manufacturer", "") if device_id else ""
+-            # Roku devices often have "Roku", "TCL" manufacturer, or specific Roku model patterns
+-            if "roku" in integration.lower() or "roku" in model.lower() or "roku" in manufacturer.lower() or \
+-               ("tcl" in manufacturer.lower() and ("roku" in str(attributes).lower() or "app_id" in attributes)):
++            # Check if HA already detected it as Roku
++            if platform and "roku" in platform.lower():
+                 integration = "roku"
++            else:
++                # Check for Roku-specific attributes (app_id, app_name are Roku ECP attributes)
++                model = device_registry.get(device_id, {}).get("model", "") if device_id else ""
++                if "roku" in model.lower() or ("app_id" in attributes and "app_name" in attributes):
++                    integration = "roku"
+ 
+ 
+         # Build Friendly Name
+
+commit c8d6413ec0052dc2732adf30ab14d046b4a4be22
+Author: Agent <agent@example.com>
+Date:   Fri Dec 19 21:40:12 2025 -0700
+
+    Add Roku detection to ha_ingest
+
+diff --git a/app/ha_ingest.py b/app/ha_ingest.py
+index a07f0bc..f386c11 100644
+--- a/app/ha_ingest.py
++++ b/app/ha_ingest.py
+@@ -196,6 +196,17 @@ def ingest_ha_metadata():
+             "mass_player_type" in attributes or "active_queue" in attributes
+         ):
+             integration = "music_assistant"
++        
++        # --- ROKU SELF-CORRECTION ---
++        # Detect Roku devices by model/manufacturer and set correct integration
++        if "music_assistant" not in integration.lower():
++            model = device_registry.get(device_id, {}).get("model", "") if device_id else ""
++            manufacturer = device_registry.get(device_id, {}).get("manufacturer", "") if device_id else ""
++            # Roku devices often have "Roku", "TCL" manufacturer, or specific Roku model patterns
++            if "roku" in integration.lower() or "roku" in model.lower() or "roku" in manufacturer.lower() or \
++               ("tcl" in manufacturer.lower() and ("roku" in str(attributes).lower() or "app_id" in attributes)):
++                integration = "roku"
++
+ 
+         # Build Friendly Name
+         friendly_name = attributes.get("friendly_name", device_name or entity_id.split('.')[1])

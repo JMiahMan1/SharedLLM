@@ -1,0 +1,20 @@
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1204, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1176, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1147, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 690, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/workspace/app/main.py", line 28, in <module>
+    from app.logic import (
+  File "/workspace/app/logic/__init__.py", line 3, in <module>
+    from .pipeline import generate_rag_stream, try_handle_compound_command, contextualize_query
+  File "/workspace/app/logic/pipeline.py", line 40, in <module>
+    from .execution.fast_path import FastPathExecutor
+  File "/workspace/app/logic/execution/fast_path.py", line 3, in <module>
+    from app.domains.media import smart_resolve_entity, APP_PACKAGES
+  File "/workspace/app/domains/media/__init__.py", line 6, in <module>
+    from .commands import handle_media_command
+  File "/workspace/app/domains/media/commands.py", line 8, in <module>
+    from app.domains.media.entities import MediaEntity
+ModuleNotFoundError: No module named 'app.domains.media.entities'
