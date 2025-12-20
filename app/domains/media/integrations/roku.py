@@ -71,38 +71,14 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             log.info(f"[Roku] After wake: state={final_state.state}, app={final_state.attributes.get('app_name', 'N/A')}")
         
         if media_type == "video":
-            # 1. Resolve Query
+            # 1. Resolve Query (use shared search logic from VideoHelperMixin)
             if not query.startswith(("http", "www", "spotify", "app")):
-                from app.logic.web_search import tool_web_search
-                search_results_text = await tool_web_search(f"{query} youtube")
-                # Parse URLs from results and filter out channels/users
-                import re
-                urls = re.findall(r'URL: (https?://[^\s]+)', search_results_text)
-                
-                resolved_url = None
-                for url in urls:
-                    # Skip channel/user pages (not playable videos)
-                    if any(x in url for x in ["/channel/", "/user/", "/@"]):
-                        log.info(f"[Roku] Skipping Channel URL: {url}")
-                        continue
-                    
-                    # Prioritize actual video URLs
-                    if "youtube.com/watch?v=" in url or "youtu.be/" in url:
-                        log.info(f"[Roku] Found video: {url}")
-                        resolved_url = url
-                        break
-                    
-                    # Fallback to other YouTube URLs (embed, shorts, etc.)
-                    if not resolved_url and ("youtube.com" in url or "youtu.be" in url):
-                        resolved_url = url
-                
+                resolved_url = await self._search_and_filter_video_url(query)
                 if resolved_url:
                     query = resolved_url
-                    log.info(f"[Roku] Resolved to {query}")
                 else:
                     log.error("[Roku] No valid video URL found in search results")
                     return {"status": "FAILURE", "message": "Could not find a playable video"}
-
 
             # 2. Download & Cast (Direct Stream)
             # This is mandated by user ("HAVE to do the cast feature").
