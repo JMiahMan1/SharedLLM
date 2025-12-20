@@ -868,17 +868,11 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
         # MEDIA PLAY
         elif intent == "play_media":
             if is_music:
-                # Check for MA integration or attributes in metadata
-                attrs = m.get("attributes", "")
-                has_ma_attr = "mass_player_type" in str(attrs)
-                
-                is_pure_ma = integration == "music_assistant"
-                is_speaker = "speaker" in integration or "dlna" in integration
-                
-                if is_pure_ma: score += 200
-                elif is_speaker and has_ma_attr: score += 150 # Specialized Speaker > Wrapped TV
-                elif has_ma_attr: score += 100 # Wrapped TV (e.g. Roku with MA)
-                elif is_speaker: score += 90
+                # [Fix] Roku Specific: If Roku integration has MA attributes, boost it to beat the native Roku integration
+                # This fixes the Roku/MA tie-break without affecting Android/Cast
+                if "roku" in integration and "mass_player_type" in str(m.get("attributes", "")):
+                     score += 150
+                elif integration == "music_assistant": score += 100
                 elif "play_media" in caps: score += 10
 
             elif is_video:
