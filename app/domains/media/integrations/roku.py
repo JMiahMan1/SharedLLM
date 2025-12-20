@@ -132,6 +132,26 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                          log.info("[Roku ECP] Sending Play...")
                          requests.post(f"http://{roku_ip}:8060/keypress/Play", timeout=20)
                          
+                         # Verification: Poll for playback state
+                         log.info("[Roku ECP] Verifying playback state...")
+                         import xml.etree.ElementTree as ET
+                         for _ in range(5):
+                             try:
+                                 q_resp = requests.get(f"http://{roku_ip}:8060/query/media-player", timeout=5)
+                                 if q_resp.status_code == 200:
+                                     root = ET.fromstring(q_resp.content)
+                                     state = root.get("state")
+                                     log.info(f"[Roku ECP] Player State: {state}")
+                                     if state in ["play", "buffering", "startup"]:
+                                         return {
+                                             "status": "SUCCESS", 
+                                             "message": f"Roku launched and playback verified (State: {state})"
+                                         }
+                             except Exception as e:
+                                 log.warning(f"[Roku ECP] State check failed: {e}")
+                             time.sleep(2)
+
+                         log.warning("[Roku ECP] Navigation complete but playback state not confirmed.")
                          return {
                              "status": "SUCCESS",
                              "message": f"Playing video on {entity_id}",
