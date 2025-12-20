@@ -13,21 +13,26 @@ def test_office_music():
     payload = {
         "query": "Play Brandon Lake on the Office TV",
         "user": "test_script",
-        "model": "gpt-4o-mini" # or whatever default is, doesn't matter much for routing if semantic
+        "model": "gpt-4o-mini"
     }
     
-    # Wait for API to be responsive (just in case)
-    for i in range(10):
+    # Wait for API to be responsive (Robust Health Check)
+    # 30 retries * 2s = 60s timeout
+    print("Running Health Check...")
+    for i in range(30):
         try:
             resp = requests.get("http://localhost:8000/health", timeout=2)
             if resp.status_code == 200:
-                print("API is UP.")
+                print("API is UP and Healthy.")
                 break
         except Exception:
-            print(f"Waiting for API... ({i+1}/10)")
-            time.sleep(2)
+            pass # ignore conn errors
+        
+        if i % 5 == 0:
+            print(f"Waiting for API... ({i+1}/30)")
+        time.sleep(2)
     else:
-        print("API failed to come up.")
+        print("❌ CRITICAL: API failed to come up after 60 seconds.")
         sys.exit(1)
 
     # Send Request
@@ -50,13 +55,13 @@ def test_office_music():
             response_text = data.get("response", "") or data.get("message", {}).get("content", "")
             
             if "fail" in response_text.lower() or "error" in response_text.lower():
-                print("❌ TEST FAILED: Response indicates failure.")
+                print("❌ TEST FAILED: Response indicates failure/error.")
                 sys.exit(1)
             else:
                 print("✅ TEST PASSED: Response indicates success.")
         else:
             print(f"❌ TEST FAILED: HTTP {resp.status_code}")
-            print(resp.text)
+            print(f"Response Body: {resp.text}")
             sys.exit(1)
             
     except Exception as e:
