@@ -1,7 +1,0 @@
-Testing DIAL Launch for Play On Roku...
-Target: 192.168.2.166
-Sending ECP launch with videoFormat... {'contentId': 'http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4', 'mediaType': 'movie', 'videoFormat': 'mp4'}
-Response: 200
-
-Attempting RMP with streamFormat...
-Response: 503
