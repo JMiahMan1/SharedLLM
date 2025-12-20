@@ -112,7 +112,13 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      log.info(f"[Roku ECP] Params: {params}")
                      response = requests.post(ecp_url, params=params, timeout=10)
                      if response.status_code == 200:
-                         log.info("[Roku ECP] Successfully sent video to Roku")
+                         log.info("[Roku ECP] Successfully sent launch command. Sending Play input...")
+                         # Wait for app to load then send Play command
+                         import time
+                         time.sleep(4) 
+                         requests.post(f"http://{roku_ip}:8060/keypress/Play", timeout=5)
+                         log.info("[Roku ECP] Sent Play keypress")
+                         
                          return {
                              "status": "SUCCESS",
                              "message": f"Playing video on {entity_id}",
