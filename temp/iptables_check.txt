@@ -1,4 +1,0 @@
-[sudo] password for jeremiah: Sorry, try again.
-[sudo] password for jeremiah: 
-sudo: no password was provided
-sudo: 1 incorrect password attempt

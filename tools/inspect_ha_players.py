@@ -3,8 +3,15 @@ import sys
 import requests
 import json
 
+import argparse
+
 # Add project root to path
 sys.path.append(os.getcwd())
+
+parser = argparse.ArgumentParser(description='Inspect HA Media Players')
+parser.add_argument('--filter', type=str, help='Filter entities by ID or name')
+parser.add_argument('--attributes', action='store_true', help='Show full attributes')
+args = parser.parse_args()
 
 try:
     from app import settings
@@ -47,19 +54,35 @@ for entity in states:
         continue
         
     attrs = entity.get('attributes', {})
-    mass_type = attrs.get('mass_player_type')
-    active_queue = attrs.get('active_queue') # This is the linking attribute
+    friendly_name = attrs.get('friendly_name', '')
     
-    # Filter for interesting devices (Cast, MASS, or ones with active_queue)
-    if mass_type or active_queue or "_chrome" in eid:
-        count += 1
-        print(f"ID: {eid}")
-        print(f"  Friendly Name: {attrs.get('friendly_name')}")
-        print(f"  State: {entity['state']}")
+    # Filter logic
+    if args.filter:
+        if args.filter.lower() not in eid.lower() and args.filter.lower() not in friendly_name.lower():
+            continue
+    else:
+        # Default legacy filter
+        mass_type = attrs.get('mass_player_type')
+        active_queue = attrs.get('active_queue')
+        if not (mass_type or active_queue or "_chrome" in eid):
+            continue
+
+    count += 1
+    print(f"ID: {eid}")
+    print(f"  Friendly Name: {friendly_name}")
+    print(f"  State: {entity['state']}")
+    
+    if args.attributes:
+        print("  Attributes:")
+        print(json.dumps(attrs, indent=4))
+    else:
+        mass_type = attrs.get('mass_player_type')
         if mass_type:
             print(f"  [MASS] Type: {mass_type}")
+        active_queue = attrs.get('active_queue')
         if active_queue:
             print(f"  [LINK] Active Queue Of: {active_queue}")
-        print("-" * 40)
+            
+    print("-" * 40)
 
 print(f"Found {count} relevant media players.")

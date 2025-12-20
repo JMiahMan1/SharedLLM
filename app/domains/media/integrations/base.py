@@ -113,3 +113,146 @@ async def unwrap_entity_if_needed(
         log.warning(f"[Generic Unwrap] Error: {e}")
         return entity_id
 
+
+class VideoHelperMixin:
+    """
+    Mixin for video downloading and streaming logic (yt-dlp).
+    """
+
+    async def _resolve_playlist_to_video(self, url: str) -> Optional[str]:
+        """Resolves a playlist URL to the first video ID."""
+        try:
+            import yt_dlp
+            import asyncio
+            
+            def extract_playlist_first_video():
+                ydl_opts = {
+                    'extract_flat': 'in_playlist', # Just get metadata, don't download
+                    'playlistend': 1, # Only get first item
+                    'quiet': True,
+                    'no_warnings': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    if 'entries' in info and len(info['entries']) > 0:
+                        return info['entries'][0]['id']
+                    return None
+
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, extract_playlist_first_video)
+        except Exception as e:
+            log.warning(f"[VideoHelper] Failed to resolve playlist: {e}")
+            return None
+
+    async def _search_and_filter_video_url(self, query: str) -> Optional[str]:
+        """
+        Search for a video URL and filter out non-playable pages (channels, users).
+        Returns the first valid video URL or None.
+        """
+        try:
+            from app.logic.web_search import tool_web_search
+            import re
+            
+            log.info(f"[VideoHelper] Searching for: {query} youtube")
+            search_results = await tool_web_search(f"{query} youtube")
+            urls = re.findall(r'URL: (https?://[^\s]+)', search_results)
+            
+            for url in urls:
+                # Skip channel/user pages (not playable)
+                if any(x in url for x in ["/channel/", "/user/", "/@"]):
+                    log.info(f"[VideoHelper] Skipping Channel URL: {url}")
+                    continue
+                
+                # Prioritize actual video URLs
+                if "youtube.com/watch?v=" in url or "youtu.be/" in url:
+                    log.info(f"[VideoHelper] Found video: {url}")
+                    return url
+                
+                # Fallback to other YouTube URLs (shorts, embed, etc.)
+                if "youtube.com" in url or "youtu.be" in url:
+                    log.info(f"[VideoHelper] Found fallback URL: {url}")
+                    return url
+            
+            log.warning(f"[VideoHelper] No valid video URL found for: {query}")
+            return None
+            
+        except Exception as e:
+            log.error(f"[VideoHelper] Search error: {e}")
+            return None
+
+    def _extract_youtube_id(self, url: str) -> str:
+        """Extracts video ID from various YouTube URL formats."""
+        import re
+        patterns = [
+            r'(?:v=|\/)([\w-]{11})(?:\?|&|\/|$)', # v=ID or /ID
+            r'youtu\.be\/([\w-]{11})',             # youtu.be/ID
+            r'embed\/([\w-]{11})'                  # embed/ID
+        ]
+        
+        for p in patterns:
+            match = re.search(p, url)
+            if match:
+                return match.group(1)
+        return None
+
+    async def _download_and_serve_video(self, url: str) -> Optional[str]:
+        """
+        Download video locally and return HTTP URL for streaming.
+        Uses progressive download - returns as soon as initial buffer is ready.
+        """
+        try:
+            from app.utils.video_cache import download_video_progressive, get_video_id
+            
+            # Get unique video ID
+            video_id = get_video_id(url)
+            log.info(f"[VideoHelper] Starting progressive download for video {video_id}")
+            
+            # Download with initial buffer
+            file_path, ready = await download_video_progressive(url, video_id)
+            
+            if not ready or not file_path:
+                log.error(f"[VideoHelper] Progressive download failed for {url}")
+                return None
+            
+            # Return local streaming URL
+            # Using server's external IP so devices can access it
+            from app.settings import SERVER_URL
+            local_url = f"{SERVER_URL}/cast_video/{video_id}.mp4"
+            log.info(f"[VideoHelper] Video ready at: {local_url}")
+            
+            return local_url
+            
+        except Exception as e:
+            log.error(f"[VideoHelper] Download and serve error: {e}")
+            return None
+
+    async def _extract_direct_stream_url(self, url: str) -> str:
+        """Attempts to extract a direct mp4 stream using yt-dlp."""
+        try:
+            import yt_dlp
+            import asyncio
+            
+            log.info("[VideoHelper] Attempting yt-dlp extraction...")
+            
+            # Run in executor to avoid blocking loop
+            loop = asyncio.get_running_loop()
+            
+            def run_extraction():
+                ydl_opts = {
+                    'format': 'best[ext=mp4]/best',
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    return info.get('url')
+
+            return await loop.run_in_executor(None, run_extraction)
+            
+        except ImportError:
+            log.warning("[VideoHelper] yt-dlp not installed. Skipping direct stream extraction.")
+        except Exception as e:
+            log.warning(f"[VideoHelper] yt-dlp extraction failed: {e}")
+        
+        return None

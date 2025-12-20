@@ -32,6 +32,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - .:/workspace:z
       - rag_chroma:/data/chroma_db:z
+      - huggingface_cache:/root/.cache/huggingface:z
       # Mounting the system prompt file separately for clarity
       - ./app/data/system_prompt.txt:/workspace/app/data/system_prompt.txt
       # Adding the necessary temp dir for Nextcloud ingestion
@@ -63,6 +64,7 @@ services:
 volumes:
   rag_chroma:
   rag_redis:
+  huggingface_cache:
     # ADDED: Volume for Redis persistence
 
     # --- Networks ---

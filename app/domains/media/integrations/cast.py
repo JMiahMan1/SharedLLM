@@ -3,11 +3,12 @@ import logging
 import asyncio
 import re
 from app.domains.media.integrations.standard import StandardIntegration
+from app.domains.media.integrations.base import VideoHelperMixin
 from app.domains.shared import execute_ha_service
 
 log = logging.getLogger(__name__)
 
-class CastIntegration(StandardIntegration):
+class CastIntegration(StandardIntegration, VideoHelperMixin):
     """
     Google Cast Integration.
     Adds SmartPowerSync to ensure the physical TV is ON before playing on the Cast device.
@@ -30,7 +31,48 @@ class CastIntegration(StandardIntegration):
         from app.domains.media.integrations.base import unwrap_entity_if_needed
         entity_id = await unwrap_entity_if_needed(entity_id, media_type, user_creds)
         
+        # [Music Delegation] If music request AND entity is MA wrapper, delegate to MusicAssistantIntegration
+        if media_type == "music":
+            # [Source of Truth] Check passed metadata first (Reliable)
+            metadata = kwargs.get("metadata", {})
+            
+            # Helper to check attributes
+            def check_ma_attrs(attrs_dict):
+                 return bool(attrs_dict.get("mass_player_type") or attrs_dict.get("music_assistant"))
+
+            is_ma = False
+            
+            # 1. Check passed metadata
+            if metadata:
+                 attrs = metadata.get("attributes", {})
+                 # If flattened string
+                 if isinstance(attrs, str):
+                      is_ma = "mass_player_type" in attrs or "music_assistant" in attrs
+                 elif isinstance(attrs, dict):
+                      is_ma = check_ma_attrs(attrs)
+            
+            # 2. Fallback to Chroma Lookup (Only if metadata missing) - [Legacy/Backup]
+            if not is_ma and not metadata:
+                from app.settings import GlobalResources
+                try:
+                    # Logic here might fail on suffixes, but it's a backup.
+                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    if docs and docs.get("metadatas"):
+                        import json
+                        attrs_str = docs["metadatas"][0].get("attributes", "{}")
+                        attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
+                        is_ma = check_ma_attrs(attrs)
+                except Exception as e:
+                    log.warning(f"[Cast] Failed to check MA wrapper status: {e}")
+
+            if is_ma:
+                log.info(f"[Cast] Music request on MA wrapper (Source of Truth), delegating to MusicAssistantIntegration")
+                from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
+                ma_integration = MusicAssistantIntegration()
+                return await ma_integration.play_media(entity_id, query, media_type, user_creds, **kwargs)
+        
         # [Session Clearing for Video Playback]
+
         # If device is playing (e.g., Music Assistant session), stop it first
         # to prevent session conflicts when switching to video
         if media_type == "video":
@@ -122,110 +164,7 @@ class CastIntegration(StandardIntegration):
         # If we updated 'query' to a URL, super() will skip search and just play it.
         return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
 
-    async def _resolve_playlist_to_video(self, url: str) -> Optional[str]:
-        """Resolves a playlist URL to the first video ID."""
-        try:
-            import yt_dlp
-            
-            def extract_playlist_first_video():
-                ydl_opts = {
-                    'extract_flat': 'in_playlist', # Just get metadata, don't download
-                    'playlistend': 1, # Only get first item
-                    'quiet': True,
-                    'no_warnings': True,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    if 'entries' in info and len(info['entries']) > 0:
-                        return info['entries'][0]['id']
-                    return None
-
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, extract_playlist_first_video)
-        except Exception as e:
-            log.warning(f"[CastIntegration] Failed to resolve playlist: {e}")
-            return None
-
-    def _extract_youtube_id(self, url: str) -> str:
-        """Extracts video ID from various YouTube URL formats."""
-        # Setup regex for standard and short URLs
-        import re
-        patterns = [
-            r'(?:v=|\/)([\w-]{11})(?:\?|&|\/|$)', # v=ID or /ID
-            r'youtu\.be\/([\w-]{11})',             # youtu.be/ID
-            r'embed\/([\w-]{11})'                  # embed/ID
-        ]
-        
-        for p in patterns:
-            match = re.search(p, url)
-            if match:
-                return match.group(1)
-        return None
-
-        return None
-
-    async def _download_and_serve_video(self, url: str) -> Optional[str]:
-        """
-        Download video locally and return HTTP URL for streaming.
-        
-        Uses progressive download - returns as soon as initial buffer is ready.
-        """
-        try:
-            from app.utils.video_cache import download_video_progressive, get_video_id
-            from app.settings import HA_URL
-            
-            # Get unique video ID
-            video_id = get_video_id(url)
-            log.info(f"[CastIntegration] Starting progressive download for video {video_id}")
-            
-            # Download with initial buffer
-            file_path, ready = await download_video_progressive(url, video_id)
-            
-            if not ready or not file_path:
-                log.error(f"[CastIntegration] Progressive download failed for {url}")
-                return None
-            
-            # Return local streaming URL
-            # Using server's external IP so Cast device can access it
-            local_url = f"http://192.168.2.211:11435/cast_video/{video_id}.mp4"
-            log.info(f"[CastIntegration] Video ready at: {local_url}")
-            
-            return local_url
-            
-        except Exception as e:
-            log.error(f"[CastIntegration] Download and serve error: {e}")
-            return None
-
-    async def _extract_direct_stream_url(self, url: str) -> str:
-        """Attempts to extract a direct mp4 stream using yt-dlp."""
-        try:
-            # Check if yt_dlp is installed
-            import yt_dlp
-            
-            log.info("[CastIntegration] Attempting yt-dlp extraction...")
-            
-            # Run in executor to avoid blocking loop
-            loop = asyncio.get_running_loop()
-            
-            def run_extraction():
-                ydl_opts = {
-                    'format': 'best[ext=mp4]/best',
-                    'quiet': True,
-                    'no_warnings': True,
-                    'noplaylist': True,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    return info.get('url')
-
-            return await loop.run_in_executor(None, run_extraction)
-            
-        except ImportError:
-            log.warning("[CastIntegration] yt-dlp not installed. Skipping direct stream extraction.")
-        except Exception as e:
-            log.warning(f"[CastIntegration] yt-dlp extraction failed: {e}")
-        
-        return None
+        return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
 
     async def _ensure_tv_on(self, entity_id: str, user_creds: Dict):
         """
