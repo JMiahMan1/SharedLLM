@@ -110,14 +110,27 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                  try:
                      log.info(f"[Roku ECP] Using /launch/2213: {ecp_url}")
                      log.info(f"[Roku ECP] Params: {params}")
-                     response = requests.post(ecp_url, params=params, timeout=10)
+                     response = requests.post(ecp_url, params=params, timeout=20)
                      if response.status_code == 200:
-                         log.info("[Roku ECP] Successfully sent launch command. Sending Play input...")
-                         # Wait for app to load then send Play command
+                         log.info("[Roku ECP] Successfully sent launch command. Executing navigation macro...")
+                         
+                         # Execute verified macro: Wait 15s (Load) -> Select -> Wait 5s -> Select -> Wait 5s -> Play
+                         # This navigates the DLNA menu structure to the video file
                          import time
-                         time.sleep(4) 
-                         requests.post(f"http://{roku_ip}:8060/keypress/Play", timeout=5)
-                         log.info("[Roku ECP] Sent Play keypress")
+                         
+                         log.info("[Roku ECP] Waiting 15s for DLNA load...")
+                         time.sleep(15) 
+                         
+                         log.info("[Roku ECP] Sending Select (1/2)...")
+                         requests.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20)
+                         time.sleep(5)
+                         
+                         log.info("[Roku ECP] Sending Select (2/2)...")
+                         requests.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20)
+                         time.sleep(5)
+                         
+                         log.info("[Roku ECP] Sending Play...")
+                         requests.post(f"http://{roku_ip}:8060/keypress/Play", timeout=20)
                          
                          return {
                              "status": "SUCCESS",
