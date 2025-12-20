@@ -868,8 +868,14 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
         # MEDIA PLAY
         elif intent == "play_media":
             if is_music:
-                if integration == "music_assistant": score += 100
+                # Check for MA integration or attributes in metadata
+                attrs = m.get("attributes", "")
+                is_ma = integration == "music_assistant" or "mass_player_type" in str(attrs)
+                
+                if is_ma: score += 100
+                elif "speaker" in integration: score += 90 # Speakers > TVs for music
                 elif "play_media" in caps: score += 10
+
             elif is_video:
                 # Prioritize native TV integrations for video
                 HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "braviatv", "samsungtv", "apple_tv", "tv"]
