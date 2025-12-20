@@ -107,6 +107,10 @@ ALARM_KEYWORDS_PATH = os.getenv(
 ALARM_SOUNDS_DIR = os.getenv("ALARM_SOUNDS_DIR", "/local/alarm_sounds")
 
 
+# --- Roku Configuration ---
+ROKU_USE_MEDIA_ASSISTANT = os.getenv("ROKU_USE_MEDIA_ASSISTANT", "True") in ("1", "true", "True")
+
+
 # --- Prompts (Externalized) ---
 DEFAULT_CONTEXT_PROMPT = """Rewrite the following query to be self-contained, resolving pronouns and confirmations (Yes/No) using history.
  Examples:
