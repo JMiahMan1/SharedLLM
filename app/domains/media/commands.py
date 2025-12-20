@@ -62,26 +62,26 @@ async def _execute_transport_command(
             return await handler.play_media(entity_id, query, media_type, user_creds=user_creds)
             
         elif intent == "media_pause":
-            return await handler.pause_media(entity_id)
+            return await handler.pause_media(entity_id, user_creds=user_creds)
             
         elif intent == "media_play":
-            return await handler.play(entity_id)
+            return await handler.play(entity_id, user_creds=user_creds)
             
         elif intent == "media_stop":
-            return await handler.stop_media(entity_id)
+            return await handler.stop_media(entity_id, user_creds=user_creds)
             
         elif intent == "media_next_track":
-            return await handler.next_track(entity_id)
+            return await handler.next_track(entity_id, user_creds=user_creds)
             
         elif intent == "media_previous_track":
-            return await handler.previous_track(entity_id)
+            return await handler.previous_track(entity_id, user_creds=user_creds)
             
         elif intent == "volume_up":
             # Default step is 0.1 (10%)
-            return await handler.volume_up(entity_id, step=0.1)
+            return await handler.volume_up(entity_id, step=0.1, user_creds=user_creds)
             
         elif intent == "volume_down":
-            return await handler.volume_down(entity_id, step=0.1)
+            return await handler.volume_down(entity_id, step=0.1, user_creds=user_creds)
             
         elif intent == "volume_set":
             # Extract volume level from query via simple regex (e.g. "volume 50")
@@ -94,13 +94,13 @@ async def _execute_transport_command(
                 if val > 1: volume_level = val / 100.0
                 else: volume_level = float(val)
             
-            return await handler.set_volume(entity_id, volume_level)
+            return await handler.set_volume(entity_id, volume_level, user_creds=user_creds)
             
         elif intent == "turn_on":
-            return await handler.turn_on(entity_id)
+            return await handler.turn_on(entity_id, user_creds=user_creds)
             
         elif intent == "turn_off":
-            return await handler.turn_off(entity_id)
+            return await handler.turn_off(entity_id, user_creds=user_creds)
             
         else:
             log.warning(f"Unknown intent '{intent}' for media domain.")
