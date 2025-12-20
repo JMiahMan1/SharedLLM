@@ -53,8 +53,26 @@ async def _execute_transport_command(
                 media_type = "music"
             
             # [Fix] Roku + Music Assistant Routing
-            # If we are on Roku but intent is music, we treat it as music type to trigger
-            # RokuIntegration's internal delegation logic.
+            # Check if this is a Music Assistant entity (even if integration says Roku)
+            # If it is, and we aren't explicitly asking for video, default to music.
+            try:
+                if integration == "roku" and media_type == "video":
+                    # Determine if entity is MA-enabled
+                    docs = ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    if docs and docs.get("metadatas"):
+                        import json
+                        meta = docs["metadatas"][0]
+                        attrs_str = meta.get("attributes", "{}")
+                        # Simple string check to avoid JSON parse overhead if possible, or parse if needed
+                        if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
+                             # Only switch if user didn't explicitly say "watch" or "video"
+                             if not ("watch" in query.lower() or "video" in query.lower() or "movie" in query.lower()):
+                                 log.info(f"[Media Type] Inferred 'music' for Roku due to MA attributes (Query: {query})")
+                                 media_type = "music"
+            except Exception as e:
+                log.warning(f"Error checking MA attributes: {e}")
+
+            # If we are on Roku but intent is music (explicit or inferred), trigger delegation
             if integration == "roku" and ("music" in query.lower() or "prob_music" in query):
                  media_type = "music"
 
