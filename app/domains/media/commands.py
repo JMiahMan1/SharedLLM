@@ -56,34 +56,22 @@ async def _execute_transport_command(
             # Check if this is a Music Assistant entity (even if integration says Roku)
             # If it is, and we aren't explicitly asking for video, default to music.
             try:
-                if media_type == "video":
-                    # [Heuristic 1] Speakers should always default to Music (unless 'watch' specified)
-                    # This fixes Echo Dots and other audio-only devices being sent video URLs
-                    is_speaker = integration in ["speaker", "sonos", "dlna_dmr", "heos"]
-                    
-                    # [Heuristic 2] Check MA Attributes (Robust Lookup)
-                    # We check entity_id, entity_id_2, etc. to handle ChromaDB suffix duplicates
-                    candidates = [entity_id, f"{entity_id}_2", f"{entity_id}_3"]
-                    docs = GlobalResources.ha_collection.get(ids=candidates, include=["metadatas"])
-                    
-                    has_ma_attrs = False
-                    is_speaker_device_class = False
-                    
+                # [Legacy Fix] Roku Specific Music Inference
+                # Restoring Android to 'Video' default (Safe Mode)
+                # Only Roku will infer 'music' from MA attributes to fix the "Nothing Played" issue
+                if integration == "roku" and media_type == "video":
+                    # Determine if entity is MA-enabled
+                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
                     if docs and docs.get("metadatas"):
                         for meta in docs["metadatas"]:
                              if meta:
                                  attrs_str = meta.get("attributes", "{}")
+                                 # Simple string check
                                  if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
-                                     has_ma_attrs = True
-                                 if "speaker" in meta.get("device_class", ""):
-                                     is_speaker_device_class = True
-                    
-                    # Logic: If it's a speaker (integration/class) OR looks like an MA player -> Music
-                    if (is_speaker or is_speaker_device_class or has_ma_attrs):
-                         # Final guard for explicit "Watch" intent (already handled by outer logic check, but safe to keep)
-                         if not ("watch" in query.lower() or "video" in query.lower() or "movie" in query.lower()):
-                             log.info(f"[Media Type] Inferred 'music' (Speaker/MA). Entity: {entity_id}")
-                             media_type = "music"
+                                     # Only switch if user didn't explicitly say "watch" or "video"
+                                     if not ("watch" in query.lower() or "video" in query.lower() or "movie" in query.lower()):
+                                         log.info(f"[Media Type] Inferred 'music' for Roku due to lack of explicit video intent (Query: {query})")
+                                         media_type = "music"
             except Exception as e:
                 log.warning(f"Error checking MA attributes: {e}")
 
