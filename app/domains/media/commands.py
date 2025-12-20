@@ -49,6 +49,8 @@ async def _execute_transport_command(
             # Determine media type (music vs video) based on query/context
             # Simple heuristic: "watch" -> video, "listen" -> music.
             # Default to "video" for now if ambiguous, or "music" if integration is music-focused.
+            media_type = "video"
+            
             # [Media Type Inference]
             # Use Metadata (Source of Truth) to default "Play" -> Music for Speakers/MA devices.
             # We do NOT switch the integration here (User Request), only the Intent (media_type).
