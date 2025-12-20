@@ -545,9 +545,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 # Sort: Prefer non-MASS, non-DLNA
                 # Priority: Roku/AndroidTV/WebOS > Cast > Others > MASS/DLNA
                 def _integ_priority(item):
-                    eid, integ = item
+                    # Handle 2-item or 3-item tuples
+                    eid = item[0]
+                    integ = item[1]
                     if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 10
-                    if "cast" in integ or "google_cast" in integ: return 8
+                    if "cast" in integ or "google_cast" in integ or "sonos" in integ: return 8
                     if "music_assistant" in integ or "dlna" in integ: return 0
                     return 5
                 
