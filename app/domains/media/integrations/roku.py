@@ -123,11 +123,11 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                          
                          log.info("[Roku ECP] Sending Select (1/2)...")
                          requests.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20)
-                         time.sleep(5)
+                         time.sleep(2)
                          
                          log.info("[Roku ECP] Sending Select (2/2)...")
                          requests.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20)
-                         time.sleep(5)
+                         time.sleep(2)
                          
                          log.info("[Roku ECP] Sending Play...")
                          requests.post(f"http://{roku_ip}:8060/keypress/Play", timeout=20)
