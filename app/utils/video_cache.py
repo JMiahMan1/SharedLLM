@@ -14,12 +14,13 @@ import logging
 log = logging.getLogger(__name__)
 
 # Cache directory
-CACHE_DIR = Path("/workspace/temp/cast_videos")
+CACHE_DIR = Path(os.getenv("CAST_CACHE_DIR", "/workspace/temp/cast_videos"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configuration
-INITIAL_BUFFER_MB = 1  # Wait for 1MB before returning URL
+INITIAL_BUFFER_MB = 5  # Wait for 5MB before returning URL (user requirement)
 MAX_FILE_AGE_HOURS = 1  # Delete files older than 1 hour
+
 
 
 def get_video_id(url: str) -> str:
@@ -109,11 +110,16 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
     while time.time() - start_time < max_wait_seconds:
         if file_path.exists():
             size = file_path.stat().st_size
-            if size > 1024: # Just wait for 1KB header
-                log.info(f"[VideoCache] File created and streaming ready: {size} bytes")
+            # Wait for 5MB buffer before streaming (user requirement)
+            if size > 5 * 1024 * 1024:  # 5MB
+                log.info(f"[VideoCache] Buffer ready ({size / 1024 / 1024:.1f}MB), starting stream")
                 return file_path, True
+            elif size > 0 and time.time() - start_time > 10:
+                # Fallback: If we have ANY data after 10s, log progress
+                log.info(f"[VideoCache] Buffering... ({size / 1024 / 1024:.2f}MB / 5MB target)")
         
         await asyncio.sleep(0.5)
+
     
     log.error(f"[VideoCache] Download failed to start within {max_wait_seconds}s for {url}")
     return None, False
