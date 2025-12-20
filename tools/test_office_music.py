@@ -4,7 +4,7 @@ import time
 import sys
 import json
 
-API_URL = "http://localhost:8000/api/chat"
+API_URL = "http://localhost:11435/api/chat"
 
 def test_office_music():
     print("--- Testing Office TV Music Playback ---")
@@ -21,7 +21,7 @@ def test_office_music():
     print("Running Health Check...")
     for i in range(30):
         try:
-            resp = requests.get("http://localhost:8000/health", timeout=2)
+            resp = requests.get("http://localhost:11435/health", timeout=2)
             if resp.status_code == 200:
                 print("API is UP and Healthy.")
                 break
