@@ -68,12 +68,61 @@ def fetch_ha_data() -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any
 
     logger.info(f"Connecting to Home Assistant at {HA_URL}...")
     states = fetch_endpoint("states") or []
+
+    # Try standard endpoints first
     device_registry_list = fetch_endpoint("config/device_registry/list") or []
     entity_registry_list = fetch_endpoint("config/entity_registry/list") or []
     area_registry_list = fetch_endpoint("config/area_registry/list") or []
 
+    # Fallback: Use Template API if registries are empty (Common with non-admin tokens)
+    if not device_registry_list:
+        logger.info("Registry endpoints failed (404/403). Attempting fallback via Template API...")
+        
+        template_str = """
+        {
+          "devices": [
+            {% set dev_ids = states | map(attribute='entity_id') | map('device_id') | unique | select('string') | list %}
+            {% for did in dev_ids %}
+            {
+              "id": "{{ did }}",
+              "manufacturer": "{{ device_attr(did, 'manufacturer') | default('unknown') }}",
+              "model": "{{ device_attr(did, 'model') | default('unknown') }}",
+              "name": "{{ device_attr(did, 'name') | default('unknown') }}",
+              "area_id": "{{ area_id(did) | default('') }}"
+            }{{ "," if not loop.last else "" }}
+            {% endfor %}
+          ],
+          "areas": {
+             {% for did in dev_ids %}
+               {% set aid = area_id(did) %}
+               {% if aid %}
+                 "{{ aid }}": "{{ area_name(did) }}"{{ "," if not loop.last else "" }}
+               {% endif %}
+             {% endfor %}
+          }
+        }
+        """
+        # Note: We construct a simplified view. Ideally we'd iterate areas directly but templates are limited to states/devices usually.
+        
+        try:
+            tmpl_url = f"{HA_URL.rstrip('/')}/api/template"
+            resp = requests.post(tmpl_url, headers=headers, json={"template": template_str}, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                device_registry_list = data.get("devices", [])
+                # Areas map -> Registry list format
+                area_map = data.get("areas", {})
+                area_registry_list = [{"area_id": k, "name": v} for k, v in area_map.items()]
+                
+                logger.info(f"Fallback successful: Retrieved {len(device_registry_list)} devices and {len(area_registry_list)} areas via template.")
+            else:
+                logger.warning(f"Template API fallback failed: {resp.status_code} - {resp.text}")
+        except Exception as e:
+            logger.error(f"Template API error: {e}")
+
     # Index registries for fast lookup
     device_registry = {dev["id"]: dev for dev in device_registry_list if "id" in dev}
+    # Entity registry might still be empty if we couldn't fetch it, but that's less critical than devices/manufacturers
     entity_registry = {ent["entity_id"]: ent for ent in entity_registry_list if "entity_id" in ent}
     area_registry = {area["area_id"]: area["name"] for area in area_registry_list if "area_id" in area}
 
