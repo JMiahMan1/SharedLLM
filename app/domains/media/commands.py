@@ -56,7 +56,10 @@ async def _execute_transport_command(
             # Check if this is a Music Assistant entity (even if integration says Roku)
             # If it is, and we aren't explicitly asking for video, default to music.
             try:
-                if integration == "roku" and media_type == "video":
+                # [Global Fix] Semantic Music Inference
+                # Check if this is a Music Assistant entity (Roku, Cast, Android, etc.)
+                # If it is, and we aren't explicitly asking for video, default to music.
+                if media_type == "video":
                     # Determine if entity is MA-enabled
                     docs = ha_collection.get(ids=[entity_id], include=["metadatas"])
                     if docs and docs.get("metadatas"):
@@ -67,7 +70,7 @@ async def _execute_transport_command(
                         if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
                              # Only switch if user didn't explicitly say "watch" or "video"
                              if not ("watch" in query.lower() or "video" in query.lower() or "movie" in query.lower()):
-                                 log.info(f"[Media Type] Inferred 'music' for Roku due to MA attributes (Query: {query})")
+                                 log.info(f"[Media Type] Inferred 'music' for MA-enabled device due to lack of explicit video intent (Query: {query})")
                                  media_type = "music"
             except Exception as e:
                 log.warning(f"Error checking MA attributes: {e}")
