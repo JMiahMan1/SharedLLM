@@ -1,0 +1,17 @@
+========================================
+DIAL Protocol Test for Play On Roku
+========================================
+Target: 192.168.2.166
+
+1. POST to http://192.168.2.166:8060/dial/apps/PlayOnRoku
+   Params (Body): {'streamFormat': 'mp4', 'url': 'http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4'}
+   Response: 404
+   Headers: {'Server': 'Roku/15.0.4 UPnP/1.0 Roku/15.0.4', 'Content-Length': '0'}
+   Body: 
+
+❌ 404 Not Found - trying 'Play On Roku' (with spaces)...
+   Response 2: 404
+❌ 404 again. Trying via ECP launch with input params...
+
+2. Checking Active App (Wait 5s)...
+   Active App: <?xml version="1.0" encoding="UTF-8" ?> <active-app> 	<app>Roku</app> </active-app>...

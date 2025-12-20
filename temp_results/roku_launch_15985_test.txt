@@ -1,0 +1,32 @@
+========================================
+Roku ECP Video Playback Test
+========================================
+
+0. Powering on TV...
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+   Sending Home button to wake display...
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+
+1. Querying Roku for installed apps...
+	<app id="2213" type="appl" version="5.5.13">Roku Media Player</app>
+
+2. Using channel 15985 (Play On Roku) for external video...
+
+3. Testing if video URL is accessible...
+HTTP Status: 200
+
+4. Sending play command to Roku via /launch/15985...
+   URL: http://192.168.2.166:8060/launch/15985
+   Parameter: contentID=http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
+   HTTP Response: 404
+
+5. Checking active app on Roku...
+<?xml version="1.0" encoding="UTF-8" ?>
+<active-app>
+	<app id="562859" type="home" version="14.10.5" ui-location="home">Roku Dynamic Menu</app>
+</active-app>
+
+========================================
+Test complete!
+Did video play on TV? (yes/no)
+========================================

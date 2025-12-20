@@ -1,0 +1,10 @@
+-rw-r--r--. 1 jeremiah jeremiah   328 Dec 19 16:17 temp_results/git_status_after_restore.txt
+-rw-r--r--. 1 jeremiah jeremiah    14 Dec 19 16:17 temp_results/turn_off_for_test.txt
+-rw-r--r--. 1 jeremiah jeremiah   478 Dec 19 16:17 temp_results/status_check.txt
+-rw-r--r--. 1 jeremiah jeremiah   996 Dec 19 16:17 temp_results/state_diagnostic.txt
+-rw-r--r--. 1 jeremiah jeremiah    22 Dec 19 16:17 temp_results/set_roku_ip.txt
+-rw-r--r--. 1 jeremiah jeremiah 13781 Dec 19 16:17 temp_results/server_logs_test.txt
+-rw-r--r--. 1 jeremiah jeremiah 16276 Dec 19 16:17 temp_results/server_crash_logs.txt
+-rw-r--r--. 1 jeremiah jeremiah   471 Dec 19 16:17 temp_results/server_check.txt
+-rw-r--r--. 1 jeremiah jeremiah   860 Dec 19 16:17 temp_results/roku_with_env_ip.txt
+-rw-r--r--. 1 jeremiah jeremiah     0 Dec 19 16:17 temp_results/rsync_check_1.txt

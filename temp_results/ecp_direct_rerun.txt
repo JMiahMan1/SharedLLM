@@ -1,0 +1,19 @@
+Testing Roku ECP direct launch...
+Roku IP: 192.168.2.166
+Video URL: http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4
+
+Sending POST to: http://192.168.2.166:8060/launch/15985
+Parameters: {'contentID': 'http://192.168.2.211:11435/cast_video/1c504eb5640b.mp4'}
+
+Response Status: 200
+Response Headers: {'Server': 'Roku/15.0.4 UPnP/1.0 Roku/15.0.4', 'Content-Length': '0'}
+Response Body: 
+
+======================================================================
+Checking Roku active app...
+Active App Response:
+<?xml version="1.0" encoding="UTF-8" ?>
+<active-app>
+	<app id="15985" type="appl" version="3.4.7" ui-location="15985">Play On Roku</app>
+</active-app>
+
