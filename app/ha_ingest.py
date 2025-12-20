@@ -190,6 +190,11 @@ def ingest_ha_metadata():
         # Get enriched metadata
         device_name, integration, area_name = get_device_info(entity_id, device_registry, entity_registry, area_registry)
         
+        # Get platform and device_id for self-correction logic
+        registry_entry = entity_registry.get(entity_id, {})
+        platform = registry_entry.get("platform", "unknown")
+        device_id = registry_entry.get("device_id")
+        
         # --- MUSIC ASSISTANT SELF-CORRECTION ---
         # If integration is unknown but it has MA attributes, force it.
         if "music_assistant" not in integration.lower() and (
