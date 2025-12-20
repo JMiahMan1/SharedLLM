@@ -4,7 +4,7 @@ import json
 import re
 from typing import List, Dict, Any, Optional
 
-from app.logic.resources import GlobalResources
+from app.settings import GlobalResources
 from app.domains.media.entities import MediaEntity
 from app.domains.media.integrations.factory import IntegrationFactory
 from app.domains.media.devices import (
