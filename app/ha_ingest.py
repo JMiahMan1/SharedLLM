@@ -198,14 +198,17 @@ def ingest_ha_metadata():
             integration = "music_assistant"
         
         # --- ROKU SELF-CORRECTION ---
-        # Detect Roku devices by model/manufacturer and set correct integration
+        # Detect Roku devices via HA's platform or Roku-specific attributes
+        # Don't use manufacturer alone (TCL makes both Roku and Android TVs)
         if "music_assistant" not in integration.lower():
-            model = device_registry.get(device_id, {}).get("model", "") if device_id else ""
-            manufacturer = device_registry.get(device_id, {}).get("manufacturer", "") if device_id else ""
-            # Roku devices often have "Roku", "TCL" manufacturer, or specific Roku model patterns
-            if "roku" in integration.lower() or "roku" in model.lower() or "roku" in manufacturer.lower() or \
-               ("tcl" in manufacturer.lower() and ("roku" in str(attributes).lower() or "app_id" in attributes)):
+            # Check if HA already detected it as Roku
+            if platform and "roku" in platform.lower():
                 integration = "roku"
+            else:
+                # Check for Roku-specific attributes (app_id, app_name are Roku ECP attributes)
+                model = device_registry.get(device_id, {}).get("model", "") if device_id else ""
+                if "roku" in model.lower() or ("app_id" in attributes and "app_name" in attributes):
+                    integration = "roku"
 
 
         # Build Friendly Name
