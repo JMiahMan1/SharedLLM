@@ -1,0 +1,107 @@
+Deploying to jeremiah@192.168.2.211:/home/jeremiah/SharedLLM
+Syncing local .env to remote...
+Branch: timer
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+Activate the web console with: systemctl enable --now cockpit.socket
+
+Fetching latest code...
+Your branch is behind 'origin/timer' by 2 commits, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+HEAD is now at 539bf78 Refine Roku detection - avoid TCL Android TV false positives
+From github.com:JMiahMan1/SharedLLM
+   85ae8fd..539bf78  timer      -> origin/timer
+Already on 'timer'
+From github.com:JMiahMan1/SharedLLM
+ * branch            timer      -> FETCH_HEAD
+Already up to date.
+Recreating Docker container to apply config...
+time="2025-12-19T21:43:21-07:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+#1 [internal] load local bake definitions
+#1 reading from stdin 509B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.19kB done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+#3 DONE 1.0s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 456B done
+#4 DONE 0.1s
+
+#5 [1/8] FROM docker.io/pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime@sha256:f0ca81b440e252399d9954a45b616ee2540959466aacf3dfc3f856691eee66e8
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 42.38kB 0.0s done
+#6 DONE 0.1s
+
+#7 [2/8] WORKDIR /app
+#7 CACHED
+
+#8 [3/8] COPY requirements.txt .
+#8 CACHED
+
+#9 [4/8] RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y     curl     iputils-ping     tesseract-ocr     poppler-utils     ffmpeg     libnss3     libnspr4     libatk1.0-0     libatk-bridge2.0-0     libcups2     libdrm2     libxkbcommon0     libxcomposite1     libxdamage1     libxfixes3     libxrandr2     libgbm1     libasound2     libpango-1.0-0     libcairo2     tzdata     && rm -rf /var/lib/apt/lists/*
+#9 CACHED
+
+#10 [5/8] RUN pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [6/8] RUN playwright install chromium
+#11 CACHED
+
+#12 [7/8] COPY app/ /app/
+#12 DONE 0.7s
+
+#13 [8/8] COPY data/ /data/
+#13 DONE 0.3s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 0.3s done
+#14 writing image sha256:3f33037d5a8256930810064d1c49d459a6236777d3229fbf6148e166d2a0d356
+#14 writing image sha256:3f33037d5a8256930810064d1c49d459a6236777d3229fbf6148e166d2a0d356 0.4s done
+#14 naming to docker.io/library/sharedllm-rag-api
+#14 naming to docker.io/library/sharedllm-rag-api 0.0s done
+#14 DONE 0.7s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ sharedllm-rag-api  Built
+ Container unified_rag_redis  Recreate
+ Container unified_rag_redis  Recreated
+ Container unified_rag_api  Recreate
+time="2025-12-19T21:43:25-07:00" level=warning msg="mount of type `volume` should not define `bind` option"
+ Container unified_rag_api  Recreated
+ Container unified_rag_redis  Starting
+ Container unified_rag_redis  Started
+ Container unified_rag_api  Starting
+ Container unified_rag_api  Started
+Waiting for application startup...
+..............................
+[FAIL] Timeout waiting for application startup.
+Last 20 lines of logs:
+2025-12-19 21:44:33,831 [DEBUG] Attempting to release lock 140355817891536 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-19 21:44:33,831 [DEBUG] Lock 140355817891536 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/cb202bfe2e3c98645018a6d12f182a434c9d3e02.lock
+2025-12-19 21:44:33,947 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/added_tokens.json HTTP/2.0" 404 0
+2025-12-19 21:44:34,048 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/special_tokens_map.json HTTP/2.0" 307 0
+2025-12-19 21:44:34,080 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/special_tokens_map.json HTTP/2.0" 200 0
+2025-12-19 21:44:34,080 [DEBUG] Attempting to acquire lock 140355818464336 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-19 21:44:34,081 [DEBUG] Lock 140355818464336 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-19 21:44:34,117 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/special_tokens_map.json HTTP/2.0" 200 112
+2025-12-19 21:44:34,118 [DEBUG] Attempting to release lock 140355818464336 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-19 21:44:34,118 [DEBUG] Lock 140355818464336 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/e7b0375001f109a6b8873d756ad4f7bbb15fbaa5.lock
+2025-12-19 21:44:34,225 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/chat_template.jinja HTTP/2.0" 404 0
+2025-12-19 21:44:34,360 [DEBUG] https://huggingface.co:443 "HEAD /sentence-transformers/all-MiniLM-L6-v2/resolve/main/1_Pooling/config.json HTTP/2.0" 307 0
+2025-12-19 21:44:34,387 [DEBUG] https://huggingface.co:443 "HEAD /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 0
+2025-12-19 21:44:34,388 [DEBUG] Attempting to acquire lock 140355828267216 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-19 21:44:34,388 [DEBUG] Lock 140355828267216 acquired on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-19 21:44:34,413 [DEBUG] https://huggingface.co:443 "GET /api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/c9745ed1d9f207416be6d2e6f8de32d1f16199bf/1_Pooling%2Fconfig.json HTTP/2.0" 200 190
+2025-12-19 21:44:34,414 [DEBUG] Attempting to release lock 140355828267216 on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-19 21:44:34,414 [DEBUG] Lock 140355828267216 released on /root/.cache/huggingface/hub/.locks/models--sentence-transformers--all-MiniLM-L6-v2/d1514c3162bbe87b343f565fadc62e6c06f04f03.lock
+2025-12-19 21:44:34,534 [DEBUG] https://huggingface.co:443 "GET /api/models/sentence-transformers/all-MiniLM-L6-v2 HTTP/2.0" 200 6809
+2025-12-19 21:44:34,538 [INFO] Embedding Model Loaded: sentence-transformers/all-MiniLM-L6-v2
+[FAIL] Deployment Failed.

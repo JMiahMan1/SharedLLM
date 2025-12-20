@@ -1,0 +1,20 @@
+INFO:     192.168.2.114:54437 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.114:54436 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.152:53957 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.152:53958 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.152:53959 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.152:53960 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47142 - "GET /dlna/description.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47144 - "GET /dlna/description.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47146 - "GET /dlna/description.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47146 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47142 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47144 - "GET /dlna/content_directory/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47142 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47144 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47146 - "GET /dlna/connection_manager/scpd.xml HTTP/1.1" 200 OK
+INFO:     192.168.2.156:47146 - "SUBSCRIBE /dlna/content_directory/event HTTP/1.1" 404 Not Found
+INFO:     192.168.2.156:47144 - "SUBSCRIBE /dlna/connection_manager/event HTTP/1.1" 404 Not Found
+INFO:     192.168.2.156:47142 - "SUBSCRIBE /dlna/content_directory/event HTTP/1.1" 404 Not Found
+INFO:     192.168.2.156:47148 - "SUBSCRIBE /dlna/connection_manager/event HTTP/1.1" 404 Not Found
+2025-12-19 22:49:52,074 [DEBUG] https://us.i.posthog.com:443 "POST /batch/ HTTP/2.0" 200 15
