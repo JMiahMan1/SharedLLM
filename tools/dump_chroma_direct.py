@@ -7,18 +7,18 @@ import sys
 # CHROMA_PERSIST_DIR in .env might be different if running locally vs docker
 # I will try the local path first, assuming .env is loaded or I hardcode what I see.
 
-CHROMA_DB_PATH = "/home/jeremiah/Summers Drive/Code/SharedLLM/chroma_db" # Guessing based on workspace
-# Actually, the user's workspace is /home/jeremiah/Summers Drive/Code/SharedLLM
-# The container maps /data/chroma_db.
-# I need to find where the DB is ON DISK.
+# Prioritize the Environment Variable if set
+CHROMA_ENV_PATH = os.getenv("CHROMA_PERSIST_DIR")
 
-# Let's check common locations first
 POSSIBLE_PATHS = [
+    CHROMA_ENV_PATH,  # Check env var first
+    "/data/chroma_db", # Check absolute Docker path next
+    "data/chroma_db",  # Check local repo path last
     "./chroma_db",
     "chroma_db",
-    "data/chroma_db",
-    "/data/chroma_db"
 ]
+# Filter out None
+POSSIBLE_PATHS = [p for p in POSSIBLE_PATHS if p]
 
 def main():
     print("--- Direct Chroma Dump ---")
