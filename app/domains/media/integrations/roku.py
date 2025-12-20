@@ -71,14 +71,18 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             log.info(f"[Roku] After wake: state={final_state.state}, app={final_state.attributes.get('app_name', 'N/A')}")
         
         if media_type == "video":
-            # 1. Resolve Query (use shared search logic from VideoHelperMixin)
+            # 1. Resolve Query using StandardIntegration's search (same as Cast)
             if not query.startswith(("http", "www", "spotify", "app")):
-                resolved_url = await self._search_and_filter_video_url(query)
+                from app.domains.media.integrations.standard import StandardIntegration
+                std_integration = StandardIntegration()
+                cleaned_query = std_integration._clean_query(query, media_type, entity_id, kwargs.get("device_name"))
+                resolved_url = await std_integration._search_video_url(cleaned_query)
                 if resolved_url:
                     query = resolved_url
                 else:
                     log.error("[Roku] No valid video URL found in search results")
                     return {"status": "FAILURE", "message": "Could not find a playable video"}
+
 
             # 2. Download & Cast (Direct Stream)
             # This is mandated by user ("HAVE to do the cast feature").
