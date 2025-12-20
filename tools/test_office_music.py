@@ -12,8 +12,7 @@ def test_office_music():
     # Payload mimicking user request
     payload = {
         "query": "Play Brandon Lake on the Office TV",
-        "user": "test_script",
-        "model": "gpt-4o-mini"
+        "user": "test_script"
     }
     
     # Wait for API to be responsive (Robust Health Check)
