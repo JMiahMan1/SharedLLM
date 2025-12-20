@@ -18,8 +18,9 @@ CACHE_DIR = Path(os.getenv("CAST_CACHE_DIR", "/workspace/temp/cast_videos"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configuration
-INITIAL_BUFFER_MB = 5  # Wait for 5MB before returning URL (user requirement)
+MIN_BUFFER_KB = 512  # Minimum buffer before streaming starts (progressive download)
 MAX_FILE_AGE_HOURS = 1  # Delete files older than 1 hour
+
 
 
 
@@ -101,24 +102,25 @@ async def download_video_progressive(url: str, video_id: str) -> tuple[Path, boo
     # Start download task in background
     download_task = asyncio.create_task(run_download())
     
-    # Wait for initial buffer - ANY data is enough to start streaming
-    # The client (Cast device) will buffer on its own.
-    # We just need the file to exist and have > 0 bytes.
-    max_wait_seconds = 45 # Increased wait time for slow starts
+    # Wait for initial buffer - just enough for headers and first chunk
+    # The Rok will stream progressively while download continues in background
+    MIN_BUFFER_BYTES = 512 * 1024  # 512KB minimum buffer
+    max_wait_seconds = 30
     start_time = time.time()
     
     while time.time() - start_time < max_wait_seconds:
         if file_path.exists():
             size = file_path.stat().st_size
-            # Wait for 5MB buffer before streaming (user requirement)
-            if size > 5 * 1024 * 1024:  # 5MB
-                log.info(f"[VideoCache] Buffer ready ({size / 1024 / 1024:.1f}MB), starting stream")
+            # Return as soon as we have minimum buffer
+            if size >= MIN_BUFFER_BYTES:
+                log.info(f"[VideoCache] Initial buffer ready ({size / 1024:.0f}KB), file streaming while download continues")
                 return file_path, True
-            elif size > 0 and time.time() - start_time > 10:
-                # Fallback: If we have ANY data after 10s, log progress
-                log.info(f"[VideoCache] Buffering... ({size / 1024 / 1024:.2f}MB / 5MB target)")
+            elif size > 0:
+                # Log progress every 2 seconds
+                if int(time.time() - start_time) % 2 == 0:
+                    log.info(f"[VideoCache] Buffering... {size / 1024:.0f}KB / {MIN_BUFFER_BYTES / 1024:.0f}KB")
         
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.2)  # Check more frequently
 
     
     log.error(f"[VideoCache] Download failed to start within {max_wait_seconds}s for {url}")
