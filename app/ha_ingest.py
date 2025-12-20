@@ -196,6 +196,17 @@ def ingest_ha_metadata():
             "mass_player_type" in attributes or "active_queue" in attributes
         ):
             integration = "music_assistant"
+        
+        # --- ROKU SELF-CORRECTION ---
+        # Detect Roku devices by model/manufacturer and set correct integration
+        if "music_assistant" not in integration.lower():
+            model = device_registry.get(device_id, {}).get("model", "") if device_id else ""
+            manufacturer = device_registry.get(device_id, {}).get("manufacturer", "") if device_id else ""
+            # Roku devices often have "Roku", "TCL" manufacturer, or specific Roku model patterns
+            if "roku" in integration.lower() or "roku" in model.lower() or "roku" in manufacturer.lower() or \
+               ("tcl" in manufacturer.lower() and ("roku" in str(attributes).lower() or "app_id" in attributes)):
+                integration = "roku"
+
 
         # Build Friendly Name
         friendly_name = attributes.get("friendly_name", device_name or entity_id.split('.')[1])
