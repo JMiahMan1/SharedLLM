@@ -1,7 +1,0 @@
-INFO:     Will watch for changes in these directories: ['/workspace']
-INFO:     Uvicorn running on http://0.0.0.0:11435 (Press CTRL+C to quit)
-INFO:     Started reloader process [1] using WatchFiles
-INFO:     Started server process [8]
-INFO:     Waiting for application startup.
-2025-12-19 17:05:30,007 [INFO] Loading Global Resources...
-2025-12-19 17:05:30,009 [INFO] Redis Connected.
