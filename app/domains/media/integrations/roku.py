@@ -114,12 +114,37 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      if response.status_code == 200:
                          log.info("[Roku ECP] Successfully sent launch command. Executing navigation macro...")
                          
-                         # Execute verified macro: Wait 15s (Load) -> Select -> Wait 5s -> Select -> Wait 5s -> Play
-                         # This navigates the DLNA menu structure to the video file
+                         # Execute verified macro with Smart Wait:
+                         # 1. Wait for Roku to browse our DLNA server (Signal that UI is ready)
+                         # 2. Select -> Select -> Play
                          import time
                          
-                         log.info("[Roku ECP] Waiting 15s for DLNA load...")
-                         time.sleep(15) 
+                         log.info("[Roku ECP] Waiting for DLNA Browse signal (Smart Wait)...")
+                         start_wait_time = time.time()
+                         dlna_ready = False
+                         
+                         # Smart Wait Loop (up to 45s)
+                         for _ in range(22):
+                             try:
+                                 # Check local DLNA server status
+                                 status_resp = requests.get(f"http://127.0.0.1:11435/dlna/status", timeout=2)
+                                 if status_resp.status_code == 200:
+                                     last_browse = status_resp.json().get("last_browse_timestamp", 0)
+                                     # If browse happened AFTER we started waiting (or very recently)
+                                     if last_browse > start_wait_time:
+                                         log.info(f"[Roku ECP] DLNA Browse detected! (Waited {time.time() - start_wait_time:.1f}s)")
+                                         dlna_ready = True
+                                         break
+                             except Exception as e:
+                                 log.warning(f"[Roku ECP] Status check error: {e}")
+                             time.sleep(2)
+                         
+                         if not dlna_ready:
+                             log.warning("[Roku ECP] DLNA Browse signal TIMEOUT. Proceeding blindly...")
+                         
+                         # Buffer for UI rendering after data load
+                         log.info("[Roku ECP] Buffer wait (4s) for UI rendering...")
+                         time.sleep(4)
                          
                          log.info("[Roku ECP] Sending Select (1/2)...")
                          requests.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20)

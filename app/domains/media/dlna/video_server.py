@@ -13,6 +13,9 @@ SSDP_ADDR = "239.255.255.250"
 SSDP_PORT = 1900
 SERVER_PORT = 11435  # Must match app port
 MANUFACTURER = "SharedLLM"
+
+# Global state for automation sync
+last_browse_time = 0
 MODEL_NAME = "MediaServer"
 FRIENDLY_NAME = "SharedLLM Video Server"
 
@@ -219,6 +222,13 @@ async def content_control(request: Request):
     body_bytes = await request.body()
     body_str = body_bytes.decode()
     
+    # Detect Browse action for automation stats
+    if "Browse" in body_str:
+        import time
+        global last_browse_time
+        last_browse_time = time.time()
+        log.info(f"[DLNA] Detected Browse Action at {last_browse_time}")
+    
     # Very simple parsing
     object_id = "0"
     browse_flag = "BrowseDirectChildren"
@@ -281,3 +291,8 @@ async def content_control(request: Request):
 </s:Envelope>"""
 
     return Response(content=response_body, media_type="text/xml")
+
+@router.get("/status")
+async def get_dlna_status():
+    """Returns the timestamp of the last Browse action to help clients synchronize."""
+    return {"last_browse_timestamp": last_browse_time}
