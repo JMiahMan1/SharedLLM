@@ -309,10 +309,9 @@ async def handle_media_command(
     # [**UNIVERSAL** MASS INTELLIGENCE SWAP] - Run for ALL music requests
     # MASS swap logic removed - now handled per-integration in RokuIntegration and CastIntegration
 
-
-
-        # [**TV INTELLIGENCE SWAP**] - For VIDEO requests, swap speaker/cast to actual TV
-        # If we have a video request but resolved to a speaker/cast, find the TV in the same group
+    # [**TV INTELLIGENCE SWAP**] - For VIDEO requests, swap speaker/cast to actual TV
+    # If we have a video request but resolved to a speaker/cast, find the TV in the same group
+    if intent in ["play_media", "open_app", "watch_video", "view_content"]:
         if is_video_request and integration in ["cast", "music_assistant"]:
             try:
                 # Get the current device's group_id from ChromaDB
