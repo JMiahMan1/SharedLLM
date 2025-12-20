@@ -4,7 +4,9 @@ from app.domains.media.integrations.base import MediaIntegration
 from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
 from app.domains.media.integrations.cast import CastIntegration
 from app.domains.media.integrations.roku import RokuIntegration
+from app.domains.media.integrations.media_assistant_roku import RokuMediaAssistantIntegration
 from app.domains.media.integrations.standard import StandardIntegration
+from app.settings import ROKU_USE_MEDIA_ASSISTANT
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ class IntegrationFactory:
         # Map other integrations to standard for now, or implement specific ones
         "androidtv": StandardIntegration, 
         "roku": RokuIntegration, 
+        "roku_media_assistant": RokuMediaAssistantIntegration,
         "webostv": StandardIntegration,
         "unknown": StandardIntegration
     }
@@ -38,8 +41,11 @@ class IntegrationFactory:
         elif "music" in integration: 
             target = "music_assistant"
         elif integration in ["roku", "tv"]:
-            # Both roku integration and generic tv should use RokuIntegration if available
-            target = integration if integration in cls._handlers else "roku"
+            # Roku Strategy Selection
+            if ROKU_USE_MEDIA_ASSISTANT:
+                target = "roku_media_assistant"
+            else:
+                 target = integration if integration in cls._handlers else "roku"
         else: 
             target = integration if integration in cls._handlers else "standard"
         
