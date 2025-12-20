@@ -144,6 +144,42 @@ class VideoHelperMixin:
             log.warning(f"[VideoHelper] Failed to resolve playlist: {e}")
             return None
 
+    async def _search_and_filter_video_url(self, query: str) -> Optional[str]:
+        """
+        Search for a video URL and filter out non-playable pages (channels, users).
+        Returns the first valid video URL or None.
+        """
+        try:
+            from app.logic.web_search import tool_web_search
+            import re
+            
+            log.info(f"[VideoHelper] Searching for: {query} youtube")
+            search_results = await tool_web_search(f"{query} youtube")
+            urls = re.findall(r'URL: (https?://[^\s]+)', search_results)
+            
+            for url in urls:
+                # Skip channel/user pages (not playable)
+                if any(x in url for x in ["/channel/", "/user/", "/@"]):
+                    log.info(f"[VideoHelper] Skipping Channel URL: {url}")
+                    continue
+                
+                # Prioritize actual video URLs
+                if "youtube.com/watch?v=" in url or "youtu.be/" in url:
+                    log.info(f"[VideoHelper] Found video: {url}")
+                    return url
+                
+                # Fallback to other YouTube URLs (shorts, embed, etc.)
+                if "youtube.com" in url or "youtu.be" in url:
+                    log.info(f"[VideoHelper] Found fallback URL: {url}")
+                    return url
+            
+            log.warning(f"[VideoHelper] No valid video URL found for: {query}")
+            return None
+            
+        except Exception as e:
+            log.error(f"[VideoHelper] Search error: {e}")
+            return None
+
     def _extract_youtube_id(self, url: str) -> str:
         """Extracts video ID from various YouTube URL formats."""
         import re
