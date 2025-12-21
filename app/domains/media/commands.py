@@ -100,15 +100,15 @@ async def _execute_transport_command(
             if metadata: call_kwargs.update(metadata)
             if "entity_id" in call_kwargs: del call_kwargs["entity_id"]
             
-            return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata, **call_kwargs)
+            return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata, redis_client=redis_client, **call_kwargs)
             
-        elif intent == "media_pause":
+        elif intent == "media_pause" or intent == "pause_media":
             return await handler.pause_media(entity_id, user_creds=user_creds)
             
         elif intent == "media_play":
             return await handler.play(entity_id, user_creds=user_creds)
             
-        elif intent == "media_stop":
+        elif intent == "media_stop" or intent == "stop_media":
             return await handler.stop_media(entity_id, user_creds=user_creds)
             
         elif intent == "media_next_track" or intent == "media_next":
