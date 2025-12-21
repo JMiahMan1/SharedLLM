@@ -98,6 +98,7 @@ async def _execute_transport_command(
             # We unpack metadata as kwargs for the handler, but also pass raw metadata if needed
             call_kwargs = {**kwargs} # Copy
             if metadata: call_kwargs.update(metadata)
+            if "entity_id" in call_kwargs: del call_kwargs["entity_id"]
             
             return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata, **call_kwargs)
             
