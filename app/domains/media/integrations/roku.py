@@ -359,9 +359,48 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
     async def next_track(self, entity_id: str, user_creds: Dict) -> Dict[str, Any]:
         """Skip to next track."""
         domain = entity_id.split(".")[0]
-        return await execute_ha_service(domain, "media_next_track", entity_id, user_creds)
+        result = await execute_ha_service(domain, "media_next_track", entity_id, user_creds)
+
+        if result.get("status") == "FAILURE":
+            # Attempt fallback to Music Assistant wrapper
+            return await self._try_ma_fallback(entity_id, "media_next_track", user_creds) or result
+            
+        return result
 
     async def previous_track(self, entity_id: str, user_creds: Dict) -> Dict[str, Any]:
         """Skip to previous track."""
         domain = entity_id.split(".")[0]
-        return await execute_ha_service(domain, "media_previous_track", entity_id, user_creds)
+        result = await execute_ha_service(domain, "media_previous_track", entity_id, user_creds)
+
+        if result.get("status") == "FAILURE":
+            # Attempt fallback to Music Assistant wrapper
+            return await self._try_ma_fallback(entity_id, "media_previous_track", user_creds) or result
+            
+        return result
+
+    async def _try_ma_fallback(self, original_entity_id: str, service: str, user_creds: Dict) -> Any:
+        try:
+             # Try common MASS naming pattern: media_player.mass_[name]
+             name_part = original_entity_id.split(".")[-1]
+             candidates = [f"media_player.mass_{name_part}"]
+             
+             # Also try searching DB for integration=music_assistant
+             from app.settings import GlobalResources
+             if GlobalResources.ha_collection:
+                 docs = GlobalResources.ha_collection.similarity_search(original_entity_id, k=5)
+                 for d in docs:
+                     if d.metadata.get("integration") == "music_assistant":
+                         candidates.append(d.metadata.get("entity_id"))
+             
+             log.info(f"[Roku] Transport failed on {original_entity_id}. Trying MA candidates: {candidates}")
+             
+             for cand in candidates:
+                 res = await execute_ha_service("media_player", service, cand, user_creds)
+                 if res.get("status") == "SUCCESS":
+                     log.info(f"[Roku] MA Fallback SUCCESS on {cand}. Updating context.")
+                     return res
+                     
+        except Exception as e:
+            log.warning(f"[Roku] MA Fallback error: {e}")
+            
+        return None
