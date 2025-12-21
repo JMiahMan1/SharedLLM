@@ -61,11 +61,20 @@ class MusicAssistantIntegration(MediaIntegration):
                 if result and result.get("status") == "SUCCESS":
                     return result
             
+            # Check for failure with 500 error (implies Clean Search but No Results in MA)
+            # Music Assistant throws 500 when specific search returns empty
+            if result and result.get("status") == "FAILURE" and "500" in str(result.get("message", "")):
+                log.warning(f"[MusicAssistantIntegration] MA returned 500, converting to Not Found. Query: '{cleaned_query}'")
+                return {
+                    "status": "FAILURE", 
+                    "message": f"I couldn't find any music matching '{cleaned_query}' in your library."
+                }
+                
             return result or {"status": "FAILURE", "message": "Music Assistant delegation failed"}
             
         except Exception as e:
             log.error(f"[MusicAssistantIntegration] Error: {e}")
-            return {"status": "FAILURE", "message": str(e)}
+            return {"status": "FAILURE", "message": f"I encountered an error trying to play '{cleaned_query}' ({str(e)})"}
 
     def _clean_query(self, query: str, device_name: str = "") -> str:
         """MA specific cleaner."""
