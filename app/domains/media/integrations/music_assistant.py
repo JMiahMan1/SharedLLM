@@ -69,32 +69,27 @@ class MusicAssistantIntegration(MediaIntegration):
 
     def _clean_query(self, query: str, device_name: str = "") -> str:
         """MA specific cleaner."""
-        clean = query.lower()
+        # 1. Normalize: Lowercase and strip apostrophes early to match entity names (e.g. Gracie's -> gracies)
+        clean = query.lower().replace("'", "").replace("’", "")
         
-        # Remove device name if known
+        # 2. Remove device name if known
         if device_name:
-            # Simple case-insensitive removal
-            d_clean = device_name.lower().strip()
+            # Normalize device name too to match the query
+            d_clean = device_name.lower().replace("'", "").replace("’", "").strip()
             # Try to remove "on [device_name]" first
             clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?" + re.escape(d_clean) + r"\b", " ", clean)
             # Remove just the device name
             clean = clean.replace(d_clean, " ")
         
-        # Remove common MA keywords
+        # 3. Remove common MA keywords
         clean = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean)
-        # Remove actions
+        # 4. Remove actions
         clean = re.sub(r"\b(play|please|from|on|open|launch|playback|listen to)\b", " ", clean)
         
-        # Remove "on X" pattern at end if it looks like a device (catch-all)
-        # Matches: "on office tv", "on the office tv", "in the bedroom"
-        # Be careful not to cut off song titles like "Walk on Water"
-        # Strategy: matching common room names or "tv"/"speaker"
-        clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?(office|living|bedroom|kitchen|garage|patio|tv|speaker|soundbar).*$", "", clean)
-        
-        # Remove "the" if standalone
+        # 5. Remove "the" if standalone
         clean = re.sub(r"\bthe\b", "", clean)
         
-        # Remove punctuation
+        # 6. Remove remaining punctuation
         clean = re.sub(r"[^\w\s]", "", clean)
         
         return re.sub(r'\s+', ' ', clean).strip()
