@@ -57,18 +57,28 @@ def _integ_priority(item):
     # ...
 ```
 
-**Fix**: When `is_music=True`, prefer Cast > AndroidTV:
+**Fix**: When `is_music=True`, prefer Cast > AndroidTV; for video, keep AndroidTV > Cast:
 ```python
 def _integ_priority(item):
     integ = item[1]
-    if is_music:  # NEW: Music-specific priority
+    
+    # CRITICAL: Different priorities for music vs video
+    if is_music:  
+        # Music: Prefer Cast/MA (Music Assistant uses Cast devices)
         if "cast" in integ or "music_assistant" in integ: return 10
         if "roku" in integ or "androidtv" in integ: return 5
+    elif is_video:
+        # Video: Prefer TV devices (AndroidTV/Roku) over Cast speakers
+        if "roku" in integ or "androidtv" in integ: return 10
+        if "cast" in integ: return 8
     else:
+        # Default: Prefer TV devices
         if "roku" in integ or "androidtv" in integ: return 10
         if "cast" in integ: return 8
     # ...
 ```
+
+**Key Point**: This ONLY changes priority for music requests. Video requests still prioritize AndroidTV/Roku over Cast.
 
 ### Bug #2: Redis Not Updated in MusicAssistantIntegration
 **File**: `app/domains/media/integrations/music_assistant.py`
