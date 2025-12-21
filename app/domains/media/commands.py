@@ -325,18 +325,22 @@ async def handle_media_command(
          is_transport = intent in ["media_pause", "media_stop", "media_next_track", "media_previous_track", "media_next", "media_previous", "volume_up", "volume_down"]
          
          if is_transport:
-            # [CRITICAL FIX] Check for ACTIVE players first before using stale Redis
-            from app.domains.media.devices import get_active_media_players
-            active_players = await get_active_media_players(user_creds)
-            if active_players:
-                entity_id = active_players[0]  # Use first active player
-                log.info(f"[Active Player] Using currently playing device: {entity_id}")
+            # Priority 1: Check Redis for last explicitly used media entity
+            entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
+            if not entity_id:
+                entity_id = get_last_entity(redis_client, user_creds.get("user"))
+            
+            if entity_id:
+                log.info(f"[Context] Using last media entity from Redis: {entity_id}")
             else:
-                # Fallback to Redis only if no active players
-                entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
-                if not entity_id:
-                    entity_id = get_last_entity(redis_client, user_creds.get("user"))
-                log.info(f"[Fallback] No active players, using last entity from Redis: {entity_id}")
+                # Priority 2: Only if Redis is empty, check for ACTIVE players as fallback
+                from app.domains.media.devices import get_active_media_players
+                active_players = await get_active_media_players(user_creds)
+                if active_players:
+                    entity_id = active_players[0]  # Use first active player
+                    log.info(f"[Active Player Fallback] No Redis context, using currently playing device: {entity_id}")
+                else:
+                    log.warning(f"[No Context] No Redis context and no active players found for transport command")
          else:
             # For play commands, prefer last media entity over general last entity
             entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
