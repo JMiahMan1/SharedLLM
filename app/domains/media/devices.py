@@ -556,14 +556,35 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                     # Handle 2-item or 3-item tuples
                     eid = item[0]
                     integ = item[1]
-                    if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 10
-                    if "cast" in integ or "google_cast" in integ or "sonos" in integ: return 8
+                    domain = eid.split('.')[0]
+                    
+                    # CRITICAL: Different priorities for music vs video vs power
+                    if intent == "turn_off":
+                        # Power Off: Prefer actual remotes or TV integrations over Cast/Speakers
+                        if domain == "remote": return 20
+                        if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 15
+                        if "cast" in integ or "google_cast" in integ: return 5
+                        return 10
+
+                    if is_music:  
+                        # Music: Prefer Cast/MA (Music Assistant uses Cast devices)
+                        if "cast" in integ or "music_assistant" in integ or "sonos" in integ: return 10
+                        if "roku" in integ or "androidtv" in integ or "webostv" in integ: return 5
+                    elif is_video:
+                        # Video: Prefer TV devices (AndroidTV/Roku) over Cast speakers
+                        if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 10
+                        if "cast" in integ or "google_cast" in integ: return 8
+                    else:
+                        # Default: Prefer TV devices
+                        if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 10
+                        if "cast" in integ or "google_cast" in integ or "sonos" in integ: return 8
+
                     if "music_assistant" in integ or "dlna" in integ: return 0
                     return 5
                 
                 exact_matches.sort(key=_integ_priority, reverse=True)
                 
-                log.info(f"Using prioritized exact name match for '{query_name}': {exact_matches[0]} (Candidates: {exact_matches})")
+                log.info(f"Using prioritized exact name match for '{query_name}': {exact_matches[0]} (Entity: {exact_matches[0][0]}, Score: {_integ_priority(exact_matches[0])})")
                 
                 # [Fix] Return 3-item tuple to preserve metadata (Source of Truth)
                 best = exact_matches[0] # (eid, integ, meta) is already in this format as appended above
@@ -573,9 +594,16 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             if prefix_matches and len(query_lower) >= 6:
                 prefix_matches.sort(key=lambda x: len(x[2]))
                 # [Fix] Return 3-item tuple for prefix match as well
-                eid, integ, friendly, meta = prefix_matches[0]
+                # prefix_matches items can be (eid, integ, friendly, meta)
+                match_data = prefix_matches[0]
+                if len(match_data) == 4:
+                    eid, integ, friendly, meta = match_data
+                else: 
+                     # Should not happen based on append above but safety first
+                    eid, integ, friendly, meta = match_data[0], match_data[1], "Unknown", match_data[2]
+                
                 best_match = (eid, integ, meta)
-                log.info(f"Using prefix match for '{query_name}': {best_match[0]} ({prefix_matches[0][2]})")
+                log.info(f"Using prefix match for '{query_name}': {best_match[0]} ({friendly})")
                 return [best_match] if allow_multiple else best_match
 
     except Exception as e:
@@ -739,6 +767,17 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         if tv_candidate:
              return [tv_candidate] if allow_multiple else tv_candidate
 
+        # Fallback 2: Check for Cast devices (Google Cast/Chrome) if not found above
+        # This fixes "Play music on X" where X is a Chromecast but didn't match "speaker" keywords
+        cast_candidate = None
+        for eid, integration, meta in candidates:
+             if "cast" in integration or "google_cast" in integration or "chrome" in eid.lower():
+                  cast_candidate = (eid, integration, meta)
+                  break
+        
+        if cast_candidate:
+             return [cast_candidate] if allow_multiple else cast_candidate
+
         log.warning(f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None.")
         return [] if allow_multiple else (None, None)
 
@@ -796,7 +835,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]): score += 5
 
             is_chrome = "chrome" in integ.lower() or "cast" in integ.lower() or "google_cast" in integ.lower()
-            if is_chrome: score -= 5 # Reduced penalty (was -20) to allow Cast TVs to win if no other TV exists
+            if is_chrome: score -= 25 # HEAVY Penalty for Cast during Power Ops (Prefer Remote/Native)
 
             matches.append((score, eid, integ, c.get("supported_features", {}), c.get("friendly_name")))
 
@@ -865,9 +904,9 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 log.error(f"Group Routing Failed: {e}")
 
     # Fallback to standard selection
-    for eid, integration in candidates:
+    for eid, integration, meta in candidates:
         if preferred_type == "remote" and ("remote" in eid or "androidtv" in integration):
-             return eid, integration
+             return eid, integration, meta
 
     return candidates[0]
 
