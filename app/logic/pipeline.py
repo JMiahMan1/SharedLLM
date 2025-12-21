@@ -544,10 +544,11 @@ async def generate_rag_stream(
             status = res.get("status", "FAILURE")
             msg = res.get("message", "Unknown action.")
             if status == "SUCCESS":
-                new_state = res.get("new_state", "N/A")
-                friendly_name = res.get("friendly_name", "N/A")
+                new_state = res.get("new_state", None)
+                friendly_name = res.get("friendly_name", res.get("entity_id", "N/A"))
                 service = res.get("service", "N/A")
-                action_context += f"- SUCCESS: Command '{service}' sent to {friendly_name}. Verified New State: {new_state}\n"
+                state_msg = f" Verified New State: {new_state}" if new_state else ""
+                action_context += f"- SUCCESS: Command '{service}' sent to {friendly_name}.{state_msg}\n"
                 if service in [
                     "web_search",
                     "timer_list",
