@@ -352,6 +352,7 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                 log.warning(f"[Roku Direct] Launch failed: {resp.status_code} - {resp.text}")
                 return False
                 
+        except Exception as e:
             log.error(f"[Roku Direct] Exception: {e}")
             return False
 
