@@ -899,7 +899,7 @@ def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool)
                 if "turn_off" in caps: score += 10
 
         # MEDIA PLAY
-        elif intent == "play_media":
+        elif intent in ["play_media", "watch_media", "view_content"]:
             if is_music:
                 # [Fix] Global MA Routing: Prioritize specialized MA 'speaker' entities over generic TV entities
                 # This ensures we use the MA integration (which works) instead of generic Cast/TV integration (video-focused)
