@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 API_URL = os.getenv("SERVER_URL", "http://192.168.2.211:11435")
 HA_URL = os.getenv("HA_URL") # Must be provided or read from env if available
 HA_TOKEN = os.getenv("HA_TOKEN") 
-DEVICE_NAME = "Office TV" # Default target
+DEVICE_NAME = "TCL Roku TV" # Default target
 ENTITY_ID = "media_player.28_tcl_roku_tv" # Target entity for state verification
 
 # Setup Logging
