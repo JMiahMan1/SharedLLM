@@ -52,6 +52,14 @@ class MusicAssistantIntegration(MediaIntegration):
             result = await music_assistant_ops.play_media(entity_id, cleaned_query, ctype, user_creds)
             
             if result and result.get("status") == "SUCCESS":
+                # [Context Update] Critical: Update Redis so subsequent commands (Skip/Pause) target this entity
+                redis_client = kwargs.get("redis_client")
+                if redis_client:
+                    from app.domains.media.devices import _set_last_entity
+                    user = user_creds.get("user", "admin")
+                    _set_last_entity(redis_client, user, entity_id)
+                    log.info(f"[MusicAssistantIntegration] Context updated: {user} -> {entity_id}")
+                
                 return result
             
             # Retry with type 'search' if specific type failed
