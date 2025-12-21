@@ -54,6 +54,8 @@ class MusicAssistantIntegration(MediaIntegration):
             if result and result.get("status") == "SUCCESS":
                 # [Context Update] Critical: Update Redis so subsequent commands (Skip/Pause) target this entity
                 redis_client = kwargs.get("redis_client")
+                log.info(f"[MA DEBUG] redis_client in kwargs: {redis_client is not None}, entity_id: {entity_id}")
+                
                 if redis_client:
                     from app.domains.media.devices import _set_last_entity, _set_last_media_entity
                     user = user_creds.get("user", "admin")
