@@ -80,6 +80,11 @@ class MusicAssistantIntegration(MediaIntegration):
             clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?" + re.escape(d_clean) + r"\b", " ", clean)
             # Remove just the device name
             clean = clean.replace(d_clean, " ")
+            
+            # Fuzzy Removal for near-misses (e.g. Grace's vs Gracies)
+            # We always attempt fuzzy removal if exact removal might have missed
+            # The fuzzy cleaner uses a high threshold so it's safe to call
+            clean = self._fuzzy_remove_device(clean, d_clean)
         
         # 3. Remove common MA keywords
         clean = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean)
@@ -93,3 +98,40 @@ class MusicAssistantIntegration(MediaIntegration):
         clean = re.sub(r"[^\w\s]", "", clean)
         
         return re.sub(r'\s+', ' ', clean).strip()
+
+    def _fuzzy_remove_device(self, query: str, device_name: str) -> str:
+        """
+        Attempts to remove the device name from the query using fuzzy matching.
+        Useful when 'Grace\'s TV' is spoken but 'Gracies TV' is the entity.
+        Slows down processing slightly so only used if strict match fails.
+        """
+        import difflib
+        
+        # 1. Normalize both
+        q_tokens = query.split()
+        d_tokens = device_name.split()
+        
+        if not d_tokens or not q_tokens:
+            return query
+            
+        # 2. Check overlap at the end of the query
+        # We assume the device name is mentioned at the end (e.g. "Play X on [Device]")
+        # We try to match the last N tokens where N is len(device_tokens) +/- 1
+        
+        n = len(d_tokens)
+        
+        # Try exact length match at end
+        if len(q_tokens) >= n:
+            suffix = " ".join(q_tokens[-n:])
+            ratio = difflib.SequenceMatcher(None, suffix, device_name).ratio()
+            if ratio > 0.8: # High confidence
+                return " ".join(q_tokens[:-n])
+                
+        # Try N+1 (e.g. "The Living Room TV")
+        if len(q_tokens) >= n + 1:
+            suffix = " ".join(q_tokens[-(n+1):])
+            ratio = difflib.SequenceMatcher(None, suffix, device_name).ratio()
+            if ratio > 0.8:
+                 return " ".join(q_tokens[:-(n+1)])
+                 
+        return query
