@@ -196,6 +196,12 @@ async def contextualize_query(query, user, model):
          log.info(f"[CONTEXT REWRITE] Confirmation '{query}' -> '{refined}'")
          return refined, intent, score, is_high_confidence, intent_locked
 
+    # [OPTIMIZATION] Skip rewrite if intent is already locked/high confidence
+    # This avoids unnecessary LLM calls (and potential timeouts) for clear commands
+    if intent_locked and is_high_confidence:
+        log.info(f"[CONTEXT REWRITE] Skipping rewrite for locked intent: {intent}")
+        return query, intent, score, is_high_confidence, intent_locked
+
     if len(query) > 150:
         return query, intent, score, is_high_confidence, intent_locked
     prompt = CONTEXT_REWRITE_PROMPT.format(history=hist, query=query)
@@ -313,7 +319,7 @@ async def _handle_single_command(
                 "tool_name": "media_command",
                 "parameters": {"intent": intent, "device_name": None} # None enables context lookup or query parsing
              }
-        elif intent in ["media_next", "media_previous", "stop_media", "play_media", "media_play", "media_pause"]:
+        elif intent in ["media_next", "media_previous", "stop_media", "play_media", "media_play", "media_pause", "watch_media"]:
             log.info(f"[FAST PATH] Matched transport intent: {intent}")
             # For transport commands, only set device_name if query contains a device reference
             device_in_query = bool(re.search(r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media)\b", query.lower()))
@@ -322,17 +328,25 @@ async def _handle_single_command(
             device_name = None
             if device_in_query:
                 # Extract device name from query by finding text after "on" or "in"
+                # Improved regex to stop at common end-of-sentence or connector words if needed, but keeping simple for now
                 match = re.search(r"\b(on|in)\s+(the\s+)?(.+)", query.lower())
                 if match:
                     device_part = match.group(3).strip()
                     # Take first few words as device name (avoid including the media title)
                     words = device_part.split()[:3]  # Limit to 3 words
                     device_name = " ".join(words).title()
+            
+            # For play/watch, we should pass the query as media_title if specific params aren't extracted
+            # The handler will clean it up.
+            params = {"intent": intent, "device_name": device_name}
+            if intent in ["play_media", "watch_media"]:
+                params["media_title"] = query # Pass full query lets handler/integration clean it
+                # If we don't pass this, handler might infer it from query anyway, but explicit is better for Fast Path bypassing 
 
             action_plan = {
                 "action": "tool_call",
                 "tool_name": "media_command",
-                "parameters": {"intent": intent, "device_name": device_name}
+                "parameters": params
             }
             log.info(f"[FAST PATH] action_plan set: {action_plan}")
         elif intent in ["open_app"]:
