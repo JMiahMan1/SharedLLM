@@ -352,6 +352,15 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                 log.warning(f"[Roku Direct] Launch failed: {resp.status_code} - {resp.text}")
                 return False
                 
-        except Exception as e:
             log.error(f"[Roku Direct] Exception: {e}")
             return False
+
+    async def next_track(self, entity_id: str, user_creds: Dict) -> Dict[str, Any]:
+        """Skip to next track."""
+        domain = entity_id.split(".")[0]
+        return await execute_ha_service(domain, "media_next_track", entity_id, user_creds)
+
+    async def previous_track(self, entity_id: str, user_creds: Dict) -> Dict[str, Any]:
+        """Skip to previous track."""
+        domain = entity_id.split(".")[0]
+        return await execute_ha_service(domain, "media_previous_track", entity_id, user_creds)
