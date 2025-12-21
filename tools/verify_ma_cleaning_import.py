@@ -45,7 +45,25 @@ def test_cleaning():
     else:
          print("WARN: 'tv' remains in generic query.")
 
-    print("All search hygiene tests passed.")
+
+
+    # Case 4: Fuzzy Mismatch (Grace's vs Gracies)
+    print("\n--- Testing Fuzzy Mismatch ---")
+    query_fuzzy = "Play Reliant K on Grace's TV"
+    device_fuzzy = "Gracies TV"
+    c4 = integration._clean_query(query_fuzzy, device_fuzzy)
+    print(f"Original: '{query_fuzzy}'")
+    print(f"Device:   '{device_fuzzy}'")
+    print(f"Cleaned:  '{c4}'")
+    
+    expected_fuzzy = "reliant k"
+    if c4 == expected_fuzzy:
+        print("PASS: Fuzzy device name stripped.")
+    else:
+        print(f"FAIL: Expected '{expected_fuzzy}', got '{c4}'")
+        exit(1)
+
+    print("\nAll search hygiene tests passed.")
 
 if __name__ == "__main__":
     test_cleaning()
