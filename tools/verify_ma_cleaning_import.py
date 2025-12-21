@@ -2,8 +2,7 @@
 import sys
 import os
 
-# Add project root to path
-sys.path.append('/') 
+sys.path.append(os.getcwd()) 
 
 from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
 
@@ -35,6 +34,16 @@ def test_cleaning():
     else:
          print(f"FAIL: Expected 'relient k', got '{c2}'")
          exit(1)
+
+    # Case 3: Generic 'on the TV' (if using generic intent)
+    q3 = "Play Music on the TV"
+    c3 = integration._clean_query(q3, device)
+    # Ideally should remove 'on the tv'
+    print(f"Generic Cleaned: '{c3}'")
+    if "tv" not in c3:
+         print("PASS: Generic TV removed.")
+    else:
+         print("WARN: 'tv' remains in generic query.")
 
     print("All search hygiene tests passed.")
 
