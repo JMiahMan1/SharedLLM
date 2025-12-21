@@ -30,7 +30,7 @@ def chat_query(query: str, history: list = []) -> Dict[str, Any]:
     log.info(f"User: {query}")
     try:
         start_time = time.time()
-        resp = requests.post(url, json=payload, timeout=60) # Long timeout for download/cast
+        resp = requests.post(url, json=payload, timeout=120) # Long timeout for download/cast
         duration = time.time() - start_time
         resp.raise_for_status()
         data = resp.json()
