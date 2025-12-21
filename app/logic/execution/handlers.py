@@ -83,6 +83,10 @@ async def handle_media_tool(query: str, user_creds: dict, params: dict = None, *
     entity_id = params.get("entity_id") if params else None
     device_name = params.get("device_name") if params else None
     brightness = params.get("brightness") if params else None
+    
+    # Pack remaining params as kwargs to pass through
+    extra_kwargs = {k: v for k, v in (params or {}).items() if k not in ["intent", "entity_id", "device_name", "brightness"]}
+    
     return await handle_media_command(
         intent,
         query,
@@ -92,10 +96,13 @@ async def handle_media_tool(query: str, user_creds: dict, params: dict = None, *
         GlobalResources.redis_client,
         device_name=device_name,
         brightness=brightness,
+        **extra_kwargs
     )
 
 @ActionDispatcher.register("play_media")
 async def handle_play_media(query: str, user_creds: dict, params: dict = None, **kwargs):
+    # Propagate params if any
+    extra_kwargs = params or {}
     return await handle_media_command(
         "play_media",
         query,
@@ -103,6 +110,7 @@ async def handle_play_media(query: str, user_creds: dict, params: dict = None, *
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
+        **extra_kwargs
     )
 
 @ActionDispatcher.register("stop_media")

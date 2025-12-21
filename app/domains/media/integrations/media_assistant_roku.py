@@ -76,15 +76,42 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         """
         log.info(f"[RokuMA] Playing Media: {query} (Entity: {entity_id}) - Type: {media_type}")
         
-        # 1. Get Roku IP
+        # 2. SmartPowerSync - Ensure TV is ON and Awake
+        # Roku 'idle' often means screensaver or standby. We must force wake.
+        remote_entity_id = entity_id.replace("media_player.", "remote.")
+        
+        # Check current state
+        initial_state = await self.get_state(entity_id, user_creds)
+        current_state_value = initial_state.state if initial_state else "unknown"
+        
+        log.info(f"[RokuMA] Smart Power Check: State is '{current_state_value}'")
+        
+        # If OFF or IDLE, wake it up
+        if current_state_value in ["off", "idle", "unavailable", "unknown"]:
+            log.info(f"[RokuMA] Device is {current_state_value}, waking up...")
+            
+            # 1. Turn On Service
+            await self.turn_on(entity_id, user_creds)
+            await asyncio.sleep(2)
+            
+            # 2. Send Home Key (Wakes display from screensaver/eco mode)
+            log.info(f"[RokuMA] Sending Home button to force display wake...")
+            await execute_ha_service("remote", "send_command", remote_entity_id, user_creds, {"command": "Home"}, kwargs.get("redis_client"))
+            await asyncio.sleep(2)
+            
+            # 3. Verify (Optional logging)
+            new_state = await self.get_state(entity_id, user_creds)
+            log.info(f"[RokuMA] Post-Wake State: {new_state.state if new_state else 'None'}")
+
+        # 3. Prepare Common Params
+        params = {}
+        
+        # 4. Get Roku IP (After wake, to ensure networking is active)
         roku_ip = await self._get_roku_ip(entity_id, user_creds)
         if not roku_ip:
             return {"status": "FAILURE", "message": "Roku IP address not found"}
 
-        # 2. Prepare Common Params
-        params = {}
-        
-        # 3. Handle Types
+        # 5. Handle Types
         if media_type == "music":
             # Music Logic
             params["t"] = "a"
