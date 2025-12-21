@@ -111,10 +111,10 @@ async def _execute_transport_command(
         elif intent == "media_stop":
             return await handler.stop_media(entity_id, user_creds=user_creds)
             
-        elif intent == "media_next_track":
+        elif intent == "media_next_track" or intent == "media_next":
             return await handler.next_track(entity_id, user_creds=user_creds)
             
-        elif intent == "media_previous_track":
+        elif intent == "media_previous_track" or intent == "media_previous":
             return await handler.previous_track(entity_id, user_creds=user_creds)
             
         elif intent == "volume_up":
@@ -322,7 +322,7 @@ async def handle_media_command(
     # 2. Second, fallback to last used devices (Contextual/Implicit)
     if not entity_id:
          # Are we just doing a transport command (pause/next) or a play command?
-         is_transport = intent in ["media_pause", "media_stop", "media_next_track", "media_previous_track", "volume_up", "volume_down"]
+         is_transport = intent in ["media_pause", "media_stop", "media_next_track", "media_previous_track", "media_next", "media_previous", "volume_up", "volume_down"]
          
          if is_transport:
             entity_id = get_last_media_entity(redis_client, user_creds.get("user"))
