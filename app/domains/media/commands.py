@@ -29,7 +29,8 @@ async def _execute_transport_command(
     integration: str = "unknown", 
     redis_client = None,
     query: str = "",
-    metadata: Dict[str, Any] = None
+    metadata: Dict[str, Any] = None,
+    **kwargs
 ) -> Dict[str, Any]:
     """
     Executes a single media command on a specific entity using the appropriate MediaIntegration.
@@ -44,6 +45,12 @@ async def _execute_transport_command(
 
         log.info(f"[HANDLE_MEDIA_COMMAND] Called with intent={intent}, entity_id={entity_id}, device_name=None, integration={integration}")
         
+        # Merge extra kwargs into metadata for the handler to use
+        if kwargs and not metadata:
+            metadata = kwargs
+        elif kwargs and metadata:
+            metadata.update(kwargs)
+
         # Route command based on intent
         if intent == "play_media":
             # Determine media type (music vs video) based on query/context
@@ -88,7 +95,11 @@ async def _execute_transport_command(
             log.info(f"[Media Type] Set by intent '{intent}': {media_type}")
             
             # Pass metadata to handler so it can decide on delegation (Source of Truth)
-            return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata)
+            # We unpack metadata as kwargs for the handler, but also pass raw metadata if needed
+            call_kwargs = {**kwargs} # Copy
+            if metadata: call_kwargs.update(metadata)
+            
+            return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata, **call_kwargs)
             
         elif intent == "media_pause":
             return await handler.pause_media(entity_id, user_creds=user_creds)
@@ -240,7 +251,8 @@ async def handle_media_command(
     ha_collection,
     redis_client,
     device_name: str = None,
-    brightness: int = None
+    brightness: int = None,
+    **kwargs
 ) -> List[Dict[str, Any]]:
     """
     Orchestrates the resolution and execution of a media command.
@@ -405,5 +417,9 @@ async def handle_media_command(
     # Ensure metadata is available for passing
     if 'metadata' not in locals():
         metadata = {}
+    
+    # Merge kwargs into metadata just in case
+    if kwargs:
+        metadata.update(kwargs)
         
-    return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query, metadata=metadata)]
+    return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query, metadata=metadata, **kwargs)]
