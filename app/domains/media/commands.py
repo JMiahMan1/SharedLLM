@@ -52,7 +52,7 @@ async def _execute_transport_command(
             metadata.update(kwargs)
 
         # Route command based on intent
-        if intent == "play_media":
+        if intent == "play_media" or intent == "watch_media" or intent == "view_content":
             # Determine media type (music vs video) based on query/context
             # Simple heuristic: "watch" -> video, "listen" -> music.
             # Default to "video" for now if ambiguous, or "music" if integration is music-focused.
