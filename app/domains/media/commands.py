@@ -357,8 +357,20 @@ async def handle_media_command(
                  _set_last_media_entity(redis_client, user, entity_id)
         
         # If we didn't get integration from resolver, try to fetch it
-        if integration == "home_assistant" or integration == "unknown":
-            pass # Skipping redundant lookup - reliance on smart_resolve_entity is preferred.
+        if (integration == "home_assistant" or integration == "unknown") and entity_id:
+            # Try to infer from cached metadata if available
+            try:
+                if ha_collection:
+                    # We use include=["metadatas"] to be efficient
+                    docs = ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    if docs and docs.get("metadatas") and len(docs["metadatas"]) > 0:
+                        meta = docs["metadatas"][0]
+                        found_int = meta.get("integration")
+                        if found_int:
+                            integration = found_int
+                            log.info(f"[Context] Inferred integration '{integration}' for {entity_id} from metadata")
+            except Exception as e:
+                log.warning(f"[Context] Failed to infer integration for {entity_id}: {e}")
 
         # If it's a script/scene/automation, execute immediately via standard handler
         # (This bypasses the complex media logic below)
