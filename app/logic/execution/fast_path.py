@@ -87,9 +87,13 @@ class FastPathExecutor:
             return None
 
         log.info(f"Fast HA Path: Resolved '{clean_q}' -> {eid} ({integration}) via smart_resolve_entity")
-
-        # 7. Execute
+        
         domain = eid.split(".")[0]
+        
+        # [CRITICAL Fix] Abort Fast Path for media players to ensure Integration logic (smart power off) runs
+        if domain == "media_player":
+            log.info(f"Fast HA Path Aborted: Entity {eid} is a media_player. Delegating to Media Orchestrator.")
+            return None
         target_dom = (
             "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
         )
