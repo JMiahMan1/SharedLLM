@@ -19,6 +19,7 @@ from app.logic.web_search import tool_web_search
 from app.domains.media import handle_media_command
 from app.logic.music_assistant_ops import tool_list_playlists, tool_list_radio, tool_music_search
 from app.logic.android_remote_ops import tool_remote_command, tool_launch_app_android
+from app.domains.shared import execute_ha_service
 
 # --- CALENDAR TOOLS ---
 @ActionDispatcher.register("calendar_add")
@@ -111,6 +112,89 @@ async def handle_play_media(query: str, user_creds: dict, params: dict = None, *
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
         **extra_kwargs
+    )
+
+@ActionDispatcher.register("pause_media")
+async def handle_pause_media(query: str, user_creds: dict, params: dict = None, **kwargs):
+    """Handle pause using remote Play button for Roku (toggle)"""
+    # Get last media entity from Redis context
+    user = user_creds.get("user", "admin")
+    last_entity_key = f"rag:last_media_entity:{user}"
+    last_entity = GlobalResources.redis_client.get(last_entity_key)
+    
+    if last_entity:
+        last_entity = last_entity.decode() if isinstance(last_entity, bytes) else last_entity
+        log.info(f"[PAUSE_MEDIA] Using last media entity: {last_entity}")
+        
+        # Check if it's a Roku device (look for roku in entity_id or check metadata)
+        if "roku" in last_entity.lower():
+            # Find remote entity for this Roku device
+            remote_entity = last_entity.replace("media_player.", "remote.")
+            remote_entity = remote_entity.replace("_2n", "_")  # Adjust for Roku naming
+            if "_2n" in last_entity:
+                # For roku_2n0062385487 → remote.28_tcl_roku_tv
+                remote_entity = "remote.28_tcl_roku_tv"
+            
+            log.info(f"[PAUSE_MEDIA] Sending Play button to remote: {remote_entity}")
+            result = await execute_ha_service(
+                "remote",
+                "send_command",
+                remote_entity,
+                user_creds,
+                {"command": "Play"},
+                GlobalResources.redis_client
+            )
+            return [result]
+    
+    # Fallback to standard handler
+    return await handle_media_command(
+        "pause_media",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
+@ActionDispatcher.register("media_play")
+async def handle_media_play(query: str, user_creds: dict, params: dict = None, **kwargs):
+    """Handle resume/play using remote Play button for Roku (toggle)"""
+    # Get last media entity from Redis context
+    user = user_creds.get("user", "admin")
+    last_entity_key = f"rag:last_media_entity:{user}"
+    last_entity = GlobalResources.redis_client.get(last_entity_key)
+    
+    if last_entity:
+        last_entity = last_entity.decode() if isinstance(last_entity, bytes) else last_entity
+        log.info(f"[MEDIA_PLAY] Using last media entity: {last_entity}")
+        
+        # Check if it's a Roku device
+        if "roku" in last_entity.lower():
+            # Find remote entity for this Roku device
+            remote_entity = last_entity.replace("media_player.", "remote.")
+            if "_2n" in last_entity:
+                # For roku_2n0062385487 → remote.28_tcl_roku_tv
+                remote_entity = "remote.28_tcl_roku_tv"
+            
+            log.info(f"[MEDIA_PLAY] Sending Play button to remote: {remote_entity}")
+            result = await execute_ha_service(
+                "remote",
+                "send_command",
+                remote_entity,
+                user_creds,
+                {"command": "Play"},
+                GlobalResources.redis_client
+            )
+            return [result]
+    
+    # Fallback to standard handler
+    return await handle_media_command(
+        "media_play",
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
     )
 
 @ActionDispatcher.register("stop_media")
