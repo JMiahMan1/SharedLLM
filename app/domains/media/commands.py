@@ -358,8 +358,8 @@ async def handle_media_command(
         
         # If we didn't get integration from resolver, try to fetch it
         # [CRITICAL] Force Roku devices to use RokuIntegration
-        # Check metadata for Roku-specific markers (manufacturer, platform, etc)
-        if entity_id and (integration == "home_assistant" or integration == "unknown" or integration == "cast"):
+        # Check metadata for Roku-specific markers (manufacturer, platform, etc) 
+        if entity_id:
             try:
                 if ha_collection:
                     docs = ha_collection.get(ids=[entity_id], include=["metadatas"])
@@ -377,12 +377,15 @@ async def handle_media_command(
                             (found_int and found_int.startswith("roku"))):
                             integration = "roku"
                             log.info(f"[Roku Override] Detected Roku device via metadata (mfr={manufacturer}, model={model}, platform={platform}). Forcing integration='roku' for {entity_id}")
-                        elif found_int and integration in ["home_assistant", "unknown", "cast"]:
-                            # Only override if current integration is not specific
-                            integration = found_int
-                            log.info(f"[Context] Inferred integration '{integration}' for {entity_id} from metadata")
+                        # ALWAYS prefer metadata integration over passed-in parameter
+                        # This fixes Office TV being passed as integration='tv' when it's actually 'cast'
+                        elif found_int and found_int != "unknown":
+                            if integration != found_int:
+                                log.info(f"[Integration Override] Correcting integration from '{integration}' to '{found_int}' based on metadata for {entity_id}")
+                                integration = found_int
             except Exception as e:
                 log.warning(f"[Context] Failed to check metadata for {entity_id}: {e}")
+
 
 
 
