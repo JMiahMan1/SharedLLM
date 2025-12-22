@@ -168,22 +168,35 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
-        Turn off Cast device AND ensuring physical TV sibling is powered off (SmartPowerOff).
+        Turn off Cast device AND physical TV sibling (SmartPowerOff).
+        Mirrors the _ensure_tv_on logic for consistency.
         """
         log.info(f"[Cast] Turning off {entity_id} (SmartPowerOff)")
         
-        # 1. Turn off physical TV if found
-        tv_sibling = await self._get_tv_sibling(entity_id, user_creds)
-        if tv_sibling:
-             try:
-                 # Check state first? Or just send off.
-                 log.info(f"[SmartPowerOff] Turning off TV sibling: {tv_sibling}")
-                 await execute_ha_service("media_player", "turn_off", tv_sibling, user_creds, {}, None)
-             except Exception as e:
-                 log.warning(f"[SmartPowerOff] Failed to turn off {tv_sibling}: {e}")
-                 
+        try:
+            from app.domains.media.devices import get_entity_state
+            
+            # 1. Find and turn off physical TV sibling (if exists)
+            tv_sibling = await self._get_tv_sibling(entity_id, user_creds)
+            
+            if tv_sibling:
+                try:
+                    tv_state = await get_entity_state(tv_sibling, user_creds)
+                    if tv_state not in ["off", "standby", "unavailable"]:
+                        log.info(f"[SmartPowerOff] TV {tv_sibling} is {tv_state}. Turning OFF.")
+                        await execute_ha_service("media_player", "turn_off", tv_sibling, user_creds, {}, None)
+                        # No sleep needed for turn off (faster)
+                    else:
+                        log.info(f"[SmartPowerOff] TV {tv_sibling} is already {tv_state}")
+                except Exception as e:
+                    log.warning(f"[SmartPowerOff] Failed to turn off {tv_sibling}: {e}")
+            else:
+                log.warning(f"[SmartPowerOff] No TV sibling found for {entity_id}")
+                    
+        except Exception as e:
+            log.warning(f"[SmartPowerOff] Error: {e}")
+        
         # 2. Turn off Cast device (stops app/session)
-        # Proceed with standard turn_off
         return await super().turn_off(entity_id, user_creds, **kwargs)
 
     async def _ensure_tv_on(self, entity_id: str, user_creds: Dict):
