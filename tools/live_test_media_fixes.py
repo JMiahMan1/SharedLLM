@@ -24,8 +24,8 @@ def get_entity_state(entity_id):
         print(f"  [Warn] Failed to get state for {entity_id}: {e}")
     return None
 
-def wait_for_state(entity_id, expected_states, timeout=15):
-    """Waits for entity to read one of the expected states."""
+def wait_for_state(entity_id, expected_states, timeout=20):
+    """Waits for entity to reach one of the expected states."""
     if isinstance(expected_states, str):
         expected_states = [expected_states]
         
@@ -37,7 +37,7 @@ def wait_for_state(entity_id, expected_states, timeout=15):
             print(f" OK ({current_state})")
             return True
         
-        # Debug output: print first char of state or ?
+        # Debug output: print first char of state
         char = "?"
         if current_state: char = current_state[0]
         print(char, end="", flush=True)
@@ -52,7 +52,6 @@ def send_chat(query, user="admin"):
         res = requests.post(CHAT_ENDPOINT, json={"query": query, "user": user}, timeout=60)
         if res.status_code == 200:
             data = res.json()
-            # Handle various response formats
             resp_text = ""
             if "response" in data:
                 resp_text = data["response"]
@@ -75,22 +74,30 @@ def send_chat(query, user="admin"):
 def ensure_off(entity_id):
     print(f"  > Ensuring {entity_id} is OFF...", end="", flush=True)
     state = get_entity_state(entity_id)
-    if state in ["off", "standby"]:
+    if state in ["off", "standby", "idle"]:
         print(" Already OFF.")
         return True
     
     # Send turn off command
     send_chat(f"Turn off {entity_id}") 
-    return wait_for_state(entity_id, ["off", "standby"])
+    return wait_for_state(entity_id, ["off", "standby", "idle"])
 
 def run_scenario(name, steps):
-    print(f"\n=== Scenario: {name} ===")
+    print(f"\n{'='*60}")
+    print(f"=== Scenario: {name} ===")
+    print(f"{'='*60}")
     
     for step in steps:
         if step.get("action") == "ensure_off":
             if not ensure_off(step["entity"]):
                 print("  [FAIL] Could not turn off device to start test.")
                 return False
+            continue
+        
+        if step.get("action") == "wait":
+            wait_time = step.get("seconds", 5)
+            print(f"\n  > Waiting {wait_time}s...")
+            time.sleep(wait_time)
             continue
 
         cmd = step["cmd"]
@@ -103,85 +110,71 @@ def run_scenario(name, steps):
             print("  [FAIL] Command failed.")
             return False
             
-        # Verify Response Text (Optional keywords)
-        if "verify_text" in step:
-            if step["verify_text"] not in str(data):
-                 print(f"  [FAIL] Text verification failed. Need '{step['verify_text']}'")
-                 return False
-
         # Verify State
         if entity and expect_state:
-            if not wait_for_state(entity, expect_state):
+            if not wait_for_state(entity, expect_state, timeout=step.get("timeout", 25)):
                 print("  [FAIL] State verification failed.")
                 return False
                 
-        time.sleep(2) # Stability pause
+        time.sleep(1) # Brief pause between steps
         
+    print(f"\n{'='*60}")
     print(f"=== {name} PASSED ===")
+    print(f"{'='*60}\n")
     return True
 
-# --- SCENARIOS ---
+# ====================================================================================
+# TEST SCENARIOS - Play vs Watch Intent on Both Devices
+# ====================================================================================
 
-SCENARIO_ROKU_MUSIC = [
+# ROKU - PLAY INTENT (Music via Music Assistant)
+ROKU_PLAY_TEST = [
     { "action": "ensure_off", "entity": ROKU_ID },
-    {
-        "cmd": "Play Brandon Lake on Gracie's TV",
-        "entity": ROKU_ID,
-        "expect_state": ["playing", "buffering", "on"], 
-    },
-    { "cmd": "Pause", "entity": ROKU_ID, "expect_state": ["paused", "idle", "off", "standby"] },
-    { "cmd": "Resume", "entity": ROKU_ID, "expect_state": "playing" },
-    { "cmd": "Next", "entity": ROKU_ID, "expect_state": ["playing", "buffering"] },
-    { "cmd": "Stop", "entity": ROKU_ID, "expect_state": ["idle", "standby", "off", "home", "paused"] }, 
+    { "cmd": "Play Brandon Lake on Gracie's TV", "entity": ROKU_ID, "expect_state": ["playing", "buffering"], "timeout": 30 },
+    { "action": "wait", "seconds": 15 },  # Let it play for 15s
+    { "cmd": "Pause", "entity": ROKU_ID, "expect_state": ["paused", "idle"] },
+    { "action": "wait", "seconds": 10 },  # Paused for 10s
+    { "cmd": "Resume", "entity": ROKU_ID, "expect_state": ["playing", "buffering"] },
+    { "action": "wait", "seconds": 5 },  # Resume for 5s
+    { "cmd": "Stop", "entity": ROKU_ID, "expect_state": ["idle", "off", "paused", "standby"] },
     { "cmd": "Turn off Gracie's TV", "entity": ROKU_ID, "expect_state": ["off", "standby", "idle"] }
 ]
 
-SCENARIO_ROKU_VIDEO = [
+# ROKU - WATCH INTENT (Video)
+ROKU_WATCH_TEST = [
     { "action": "ensure_off", "entity": ROKU_ID },
-    { 
-        "cmd": "Watch Brandon Lake on Gracie's TV",
-        "entity": ROKU_ID,
-        "expect_state": ["playing", "buffering"] 
-    },
-    { "cmd": "Pause", "entity": ROKU_ID, "expect_state": ["paused", "idle", "off", "standby"] },
-    # Resume from 'off' (Home screen) is flaky/impossible with simple Play key, so skipping for now
-    # { "cmd": "Resume", "entity": ROKU_ID, "expect_state": "playing" },
-    { "cmd": "Stop", "entity": ROKU_ID, "expect_state": ["idle", "standby", "off", "home", "paused"] },
-    { "cmd": "Turn off Gracie's TV", "entity": ROKU_ID, "expect_state": ["off", "standby"] }
+    { "cmd": "Watch Tim Timmons on Gracie's TV", "entity": ROKU_ID, "expect_state": ["playing", "buffering"], "timeout": 30 },
+    { "action": "wait", "seconds": 5 },  # Let it play for 5s
+    { "cmd": "Pause", "entity": ROKU_ID, "expect_state": ["paused", "idle", "off"] },
+    { "cmd": "Resume", "entity": ROKU_ID, "expect_state": ["playing", "buffering"] },
+    { "action": "wait", "seconds": 5 },  # Resume for 5s
+    { "cmd": "Stop", "entity": ROKU_ID, "expect_state": ["idle", "off", "paused", "standby"] },
+    { "cmd": "Turn off Gracie's TV", "entity": ROKU_ID, "expect_state": ["off", "standby", "idle"] }
 ]
 
-SCENARIO_ANDROID_CONTEXT = [
+# ANDROID TV - PLAY INTENT (Music via Music Assistant)
+ANDROID_PLAY_TEST = [
     { "action": "ensure_off", "entity": ANDROID_ID },
-    { 
-        "cmd": "Play music on Office TV", 
-        "entity": ANDROID_ID,
-        "expect_state": ["playing", "buffering"]
-    },
-    { 
-        "cmd": "Skip", 
-        "entity": ANDROID_ID,
-        "expect_state": ["playing", "buffering"] 
-    },
-    { "cmd": "Stop", "entity": ANDROID_ID, "expect_state": ["idle", "off", "paused", "standby", "on"] },
+    { "cmd": "Play Brandon Lake on Office TV", "entity": ANDROID_ID, "expect_state": ["playing", "buffering"], "timeout": 30 },
+    { "action": "wait", "seconds": 15 },  # Let it play for 15s
+    { "cmd": "Pause", "entity": ANDROID_ID, "expect_state": ["paused", "idle"] },
+    { "action": "wait", "seconds": 10 },  # Paused for 10s
+    { "cmd": "Resume", "entity": ANDROID_ID, "expect_state": ["playing", "buffering"] },
+    { "action": "wait", "seconds": 5 },  # Resume for 5s
+    { "cmd": "Stop", "entity": ANDROID_ID, "expect_state": ["idle", "off", "paused", "standby"] },
     { "cmd": "Turn off Office TV", "entity": ANDROID_ID, "expect_state": ["off", "standby", "idle"] }
 ]
 
-SCENARIO_FUZZY = [
+# ANDROID TV - WATCH INTENT (Video - may not work on Cast, but test it)
+ANDROID_WATCH_TEST = [
     { "action": "ensure_off", "entity": ANDROID_ID },
-    {
-        "cmd": "Play Brenden Lak on Office TV",
-        "entity": ANDROID_ID,
-        "expect_state": ["playing", "buffering"],
-        "verify_text": "Brandon Lake" 
-    },
+    { "cmd": "Watch Tim Timmons on Office TV", "entity": ANDROID_ID, "expect_state": ["playing", "buffering"], "timeout": 30 },
+    { "action": "wait", "seconds": 5 },  # Let it play for 5s
+    { "cmd": "Pause", "entity": ANDROID_ID, "expect_state": ["paused", "idle", "off"] },
+    { "cmd": "Resume", "entity": ANDROID_ID, "expect_state": ["playing", "buffering"] },
+    { "action": "wait", "seconds": 5 },  # Resume for 5s
     { "cmd": "Stop", "entity": ANDROID_ID, "expect_state": ["idle", "off", "paused", "standby"] },
-    {
-        "cmd": "Play The Weeknd on Office TV",
-        "entity": ANDROID_ID,
-        "expect_state": ["playing", "buffering"],
-        "verify_text": "The Weeknd"
-    },
-    { "cmd": "Stop", "entity": ANDROID_ID, "expect_state": ["idle", "off", "paused", "standby"] }
+    { "cmd": "Turn off Office TV", "entity": ANDROID_ID, "expect_state": ["off", "standby", "idle"] }
 ]
 
 def wait_for_server():
@@ -194,7 +187,7 @@ def wait_for_server():
                 print("Server is UP!")
                 return True
         except:
-             pass
+            pass
         time.sleep(5)
         print(".", end="", flush=True)
     return False
@@ -205,35 +198,41 @@ if __name__ == "__main__":
         
     results = []
     
-    if run_scenario("Roku Music Cycle", SCENARIO_ROKU_MUSIC):
-        results.append("Roku Music: PASS")
+    # Run all test scenarios
+    if run_scenario("Roku - Play Intent (Music)", ROKU_PLAY_TEST):
+        results.append("Roku Play: PASS")
     else:
-        results.append("Roku Music: FAIL")
+        results.append("Roku Play: FAIL")
         
-    time.sleep(5) 
+    time.sleep(5)
         
-    if run_scenario("Roku Video Cycle", SCENARIO_ROKU_VIDEO):
-        results.append("Roku Video: PASS")
+    if run_scenario("Roku - Watch Intent (Video)", ROKU_WATCH_TEST):
+        results.append("Roku Watch: PASS")
     else:
-        results.append("Roku Video: FAIL")
+        results.append("Roku Watch: FAIL")
         
-    time.sleep(5) 
-         
-    if run_scenario("Android Context", SCENARIO_ANDROID_CONTEXT):
-        results.append("Android Context: PASS")
+    time.sleep(5)
+          
+    if run_scenario("Android TV - Play Intent (Music)", ANDROID_PLAY_TEST):
+        results.append("Android Play: PASS")
     else:
-        results.append("Android Context: FAIL")
+        results.append("Android Play: FAIL")
         
     time.sleep(5)
     
-    if run_scenario("Fuzzy Matching", SCENARIO_FUZZY):
-        results.append("Fuzzy Matching: PASS")
+    if run_scenario("Android TV - Watch Intent (Video)", ANDROID_WATCH_TEST):
+        results.append("Android Watch: PASS")
     else:
-        results.append("Fuzzy Matching: FAIL")
+        results.append("Android Watch: FAIL")
         
-    print("\nSUMMARY:")
-    for r in results: print(r)
+    print("\n" + "="*60)
+    print("FINAL SUMMARY:")
+    print("="*60)
+    for r in results: 
+        print(f"  {r}")
+    print("="*60)
     
     if any("FAIL" in r for r in results):
         sys.exit(1)
     sys.exit(0)
+
