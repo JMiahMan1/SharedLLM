@@ -54,33 +54,15 @@ async def find_tv_sibling(entity_id: str, user_creds: dict) -> str:
     except Exception as e:
         log.warning(f"[SmartPowerSync] ChromaDB lookup failed: {e}")
     
-    # Strategy 2: Fallback to suffix stripping
+    # If no TV sibling found, log all device metadata for debugging
     if not tv_sibling:
-        # Common suffixes for cast devices of TVs
-        base = entity_id
-        for suffix in ["_chrome_2", "_chrome", "_cast", "_speaker"]:
-            base = base.replace(suffix, "")
-        
-        if base != entity_id:
-            # Check if this base entity exists
-            try:
-                base_state = await get_entity_state(base, user_creds)
-                if base_state and base_state != "unknown":
-                    tv_sibling = base
-                    log.info(f"[SmartPowerSync] Found TV sibling via suffix stripping: {tv_sibling}")
-            except:
-                pass
-    
-    # Strategy 3: Try remote entity
-    if not tv_sibling:
-        remote_id = entity_id.replace("media_player", "remote")
-        if remote_id != entity_id:
-            try:
-                remote_state = await get_entity_state(remote_id, user_creds)
-                if remote_state and remote_state != "unknown":
-                    tv_sibling = remote_id
-                    log.info(f"[SmartPowerSync] Found remote sibling: {tv_sibling}")
-            except:
-                pass
+        try:
+            if GlobalResources.ha_collection:
+                current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if current_docs and current_docs.get("metadatas"):
+                    metadata = current_docs["metadatas"][0]
+                    log.warning(f"[SmartPowerSync] No TV sibling found for {entity_id}. Device metadata: {metadata}")
+        except Exception as e:
+            log.warning(f"[SmartPowerSync] Failed to log metadata: {e}")
     
     return tv_sibling if tv_sibling else entity_id
