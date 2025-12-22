@@ -176,7 +176,20 @@ ANDROID_WATCH_TEST = [
     { "cmd": "Stop", "entity": ANDROID_ID, "expect_state": ["idle", "off", "paused", "standby"] },
     { "cmd": "Turn off Office TV", "entity": ANDROID_ID, "expect_state": ["off", "standby", "idle"] }
 ]
-
+# FUZZY MATCHING TESTS
+FUZZY_TEST = [
+    { "action": "ensure_off", "entity": ROKU_ID },
+    # Test 1: "Brendan Lak" -> Brandon Lake
+    { "cmd": "Play Brendan Lak on Gracie's TV", "entity": ROKU_ID, "expect_state": ["playing", "buffering"], "timeout": 35 },
+    { "action": "wait", "seconds": 10 },
+    { "cmd": "Stop", "entity": ROKU_ID, "expect_state": ["idle", "off", "paused", "standby"] },
+    
+    # Test 2: "The Weekend" -> The Weeknd (common spelling error)
+    { "cmd": "Play The Weekend on Gracie's TV", "entity": ROKU_ID, "expect_state": ["playing", "buffering"], "timeout": 35 },
+    { "action": "wait", "seconds": 10 },
+    { "cmd": "Stop", "entity": ROKU_ID, "expect_state": ["idle", "off", "paused", "standby"] },
+    { "cmd": "Turn off Gracie's TV", "entity": ROKU_ID, "expect_state": ["off", "standby", "idle"] }
+]
 def clear_context():
     """Clear Redis context (last entity, last media entity) to prevent test crossover."""
     try:
@@ -247,6 +260,15 @@ if __name__ == "__main__":
         results.append("Android Watch: PASS")
     else:
         results.append("Android Watch: FAIL")
+        
+    # Clear context before next scenario
+    clear_context()    
+    time.sleep(5)
+    
+    if run_scenario("Fuzzy Name Matching", FUZZY_TEST):
+        results.append("Fuzzy Match: PASS")
+    else:
+        results.append("Fuzzy Match: FAIL")
         
     print("\n" + "="*60)
     print("FINAL SUMMARY:")
