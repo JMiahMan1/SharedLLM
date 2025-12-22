@@ -326,7 +326,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             log.warning(f"[RokuMA] No last video found, attempting Play button (may fail)")
         
         # For music or if device is not off, use Play button toggle
-        remote_entity_id = entity_id.replace("media_player.", "remote.")
+        remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
         
         # Send Play button
         result = await execute_ha_service(
@@ -352,8 +352,8 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         """Pause using Play button toggle"""
         log.info(f"[RokuMA] Pausing playback on {entity_id}")
         
-        # Get remote entity
-        remote_entity_id = entity_id.replace("media_player.", "remote.")
+        # Get remote entity from same group
+        remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
         
         # Send Play button (toggles)
         result = await execute_ha_service(
