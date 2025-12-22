@@ -177,6 +177,23 @@ ANDROID_WATCH_TEST = [
     { "cmd": "Turn off Office TV", "entity": ANDROID_ID, "expect_state": ["off", "standby", "idle"] }
 ]
 
+def clear_context():
+    """Clear Redis context (last entity, last media entity) to prevent test crossover."""
+    try:
+        print("  \u003e Clearing Redis context...", end="", flush=True)
+        # Call API endpoint to clear context for admin user
+        payload = {"user": "admin"}
+        res = requests.post(f"{SERVER_URL}/api/context/clear", json=payload, timeout=5)
+        if res.status_code == 200:
+            print(" OK")
+            return True
+        else:
+            print(f" Failed ({res.status_code})")
+            return False
+    except Exception as e:
+        print(f" Error: {e}")
+        return False
+
 def wait_for_server():
     print(f"Waiting for server at {SERVER_URL}...")
     start = time.time()
@@ -203,21 +220,27 @@ if __name__ == "__main__":
         results.append("Roku Play: PASS")
     else:
         results.append("Roku Play: FAIL")
-        
+    
+    # Clear context before next scenario
+    clear_context()    
     time.sleep(5)
         
     if run_scenario("Roku - Watch Intent (Video)", ROKU_WATCH_TEST):
         results.append("Roku Watch: PASS")
     else:
         results.append("Roku Watch: FAIL")
-        
+    
+    # Clear context before next scenario
+    clear_context()    
     time.sleep(5)
           
     if run_scenario("Android TV - Play Intent (Music)", ANDROID_PLAY_TEST):
         results.append("Android Play: PASS")
     else:
         results.append("Android Play: FAIL")
-        
+    
+    # Clear context before next scenario
+    clear_context()    
     time.sleep(5)
     
     if run_scenario("Android TV - Watch Intent (Video)", ANDROID_WATCH_TEST):
