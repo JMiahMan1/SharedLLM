@@ -108,7 +108,9 @@ app.include_router(android_tv.router)
 app.include_router(webos.router)
 app.include_router(roku.router)
 from app.routers import context
+from app.routers import music_assistant # Added import
 app.include_router(context.router)
+app.include_router(music_assistant.router) # Added include
 
 # --- Models ---
 class ChatMessage(BaseModel):
