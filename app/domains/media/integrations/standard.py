@@ -89,28 +89,62 @@ class StandardIntegration(MediaIntegration):
         domain = entity_id.split(".")[0]
         return await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
 
-    async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
-        """
-        Turn on the media player device.
-        Includes Smart Power logic to turn on related TV siblings.
-        """
-        log.info(f"[StandardIntegration] Turning on {entity_id}")
-        
-        # 1. Standard Turn On
-        domain = entity_id.split(".")[0]
-        result = await execute_ha_service(domain, "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
-        
-        # 2. Smart Power: Check for TV Sibling (if this device isn't a TV itself)
-        # Often users say "Turn on Office TV" but it resolves to a Cast device.
+    async def _get_remote_sibling(self, entity_id: str) -> str:
+        """Find a remote entity in the same group."""
         try:
             from app.settings import GlobalResources
             if GlobalResources.ha_collection:
                 docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
                 if docs and docs.get("metadatas"):
                     meta = docs["metadatas"][0]
+                    group_id = meta.get("group_id")
                     
-                    # Check if I am NOT a TV (avoid loops)
-                    # Checking device_class or integration
+                    if group_id and group_id != "unknown":
+                        # Search for remote in the same group
+                        group_docs = GlobalResources.ha_collection._collection.get(
+                            where={"group_id": group_id},
+                            include=["metadatas"]
+                        )
+                        if group_docs and group_docs.get("metadatas"):
+                            for d_meta in group_docs["metadatas"]:
+                                cand_id = d_meta.get("entity_id")
+                                if cand_id.startswith("remote."):
+                                    log.info(f"[StandardIntegration] Found remote sibling: {cand_id}")
+                                    return cand_id
+        except Exception as e:
+            log.warning(f"[StandardIntegration] Remote sibling lookup failed: {e}")
+        return None
+
+    async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Turn on the media player device.
+        Prioritizes Remote entity for reliable power control (Android TV Remote).
+        """
+        log.info(f"[StandardIntegration] Turning on {entity_id}")
+        
+        # 0. Check for Remote Sibling (Preferred for Power)
+        remote_sibling = await self._get_remote_sibling(entity_id)
+        if remote_sibling:
+             log.info(f"[StandardIntegration] Using remote sibling {remote_sibling} for turn_on")
+             # Try turn_on first (androidtv_remote supports this)
+             res = await execute_ha_service("remote", "turn_on", remote_sibling, user_creds, {}, kwargs.get("redis_client"))
+             if res.get("status") == "SUCCESS":
+                 return res
+             # Fallback to Power Toggle command if turn_on fails or isn't supported
+             log.info(f"[StandardIntegration] Remote turn_on failed or unsupported, trying 'Power' command...")
+             return await execute_ha_service("remote", "send_command", remote_sibling, user_creds, {"command": "POWER"}, kwargs.get("redis_client"))
+
+        # 1. Standard Turn On
+        domain = entity_id.split(".")[0]
+        result = await execute_ha_service(domain, "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        
+        # 2. Smart Power: Check for TV Sibling (as before)
+        try:
+            from app.settings import GlobalResources
+            if GlobalResources.ha_collection:
+                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if docs and docs.get("metadatas"):
+                    meta = docs["metadatas"][0]
                     integ = meta.get("integration", "").lower()
                     attrs_str = meta.get("attributes", "{}")
                     is_tv = "tv" in integ or "tv" in attrs_str.lower()
@@ -118,7 +152,6 @@ class StandardIntegration(MediaIntegration):
                     if not is_tv:
                         group_id = meta.get("group_id")
                         if group_id and group_id != "unknown":
-                            # Search for a TV in the same group
                             group_docs = GlobalResources.ha_collection._collection.get(
                                 where={"group_id": group_id},
                                 include=["metadatas"]
@@ -138,11 +171,17 @@ class StandardIntegration(MediaIntegration):
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Turn off the media player device.
-        For Android TV, use androidtv.turn_off service for actual power off.
+        Prioritizes Remote entity for reliable power control.
         """
         log.info(f"[StandardIntegration] Turning off {entity_id}")
         
-        # Check if this is an Android TV device via metadata
+        # 0. Check for Remote Sibling
+        remote_sibling = await self._get_remote_sibling(entity_id)
+        if remote_sibling:
+             log.info(f"[StandardIntegration] Using remote sibling {remote_sibling} for turn_off")
+             return await execute_ha_service("remote", "turn_off", remote_sibling, user_creds, {}, kwargs.get("redis_client"))
+
+        # For Android TV (Legacy/Direct Check)
         is_android_tv = False
         try:
             from app.settings import GlobalResources
@@ -152,25 +191,14 @@ class StandardIntegration(MediaIntegration):
                     meta = docs["metadatas"][0]
                     integration = meta.get("integration", "").lower()
                     platform = meta.get("platform", "").lower()
-                    
                     if "androidtv" in integration or "androidtv" in platform or "android" in platform:
                         is_android_tv = True
-                        log.info(f"[StandardIntegration] Detected Android TV device: {entity_id}")
-        except Exception as e:
-            log.warning(f"[StandardIntegration] Failed to check Android TV: {e}")
+        except Exception: 
+            pass
         
-        # For Android TV, use androidtv.turn_off service for actual power off
         if is_android_tv:
-            try:
-                log.info(f"[StandardIntegration] Using androidtv.turn_off for {entity_id}")
-                return await execute_ha_service("androidtv", "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
-            except Exception as e:
-                log.warning(f"[StandardIntegration] androidtv.turn_off failed, falling back to remote: {e}")
-                # Fallback to remote
-                remote_id = entity_id.replace("media_player.", "remote.")
-                return await execute_ha_service("remote", "turn_off", remote_id, user_creds, {}, kwargs.get("redis_client"))
+            return await execute_ha_service("androidtv", "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
         
-        # For other devices, use standard turn_off
         domain = entity_id.split(".")[0]
         return await execute_ha_service(domain, "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
 
