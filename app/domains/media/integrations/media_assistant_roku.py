@@ -240,6 +240,48 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         # Send Home to exit app
         return await self.stop_media(entity_id, user_creds, **kwargs)
 
+    async def _get_roku_remote(self, entity_id: str, user_creds: Dict) -> Optional[str]:
+        """
+        Find the remote entity for this Roku device by checking the same group.
+        """
+        from app.settings import GlobalResources
+        
+        remote_entity = None
+        
+        # Strategy 1: ChromaDB group lookup
+        try:
+            if GlobalResources.ha_collection:
+                current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if current_docs and current_docs.get("metadatas"):
+                    current_group_id = current_docs["metadatas"][0].get("group_id")
+                    
+                    if current_group_id and current_group_id != "unknown":
+                        # Find all devices in same group
+                        group_docs = GlobalResources.ha_collection._collection.get(
+                            where={"group_id": current_group_id},
+                            include=["metadatas"]
+                        )
+                        
+                        if group_docs and group_docs.get("metadatas"):
+                            for metadata in group_docs["metadatas"]:
+                                candidate_id = metadata.get("entity_id")
+                                candidate_domain = candidate_id.split('.')[0] if candidate_id else None
+                                
+                                # Find remote entity in the same group
+                                if (candidate_domain == "remote" and candidate_id != entity_id):
+                                    remote_entity = candidate_id
+                                    log.info(f"[RokuMA] Found remote entity via group: {remote_entity}")
+                                    return remote_entity
+        except Exception as e:
+            log.warning(f"[RokuMA] ChromaDB lookup failed: {e}")
+        
+        # Strategy 2: Fallback to simple replacement
+        if not remote_entity:
+            remote_entity = entity_id.replace("media_player.", "remote.")
+            log.info(f"[RokuMA] Using fallback remote entity: {remote_entity}")
+        
+        return remote_entity
+
     async def play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Resume/play for Roku.
