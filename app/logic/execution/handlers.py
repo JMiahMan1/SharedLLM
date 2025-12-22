@@ -21,6 +21,39 @@ from app.logic.music_assistant_ops import tool_list_playlists, tool_list_radio, 
 from app.logic.android_remote_ops import tool_remote_command, tool_launch_app_android
 from app.domains.shared import execute_ha_service
 
+# Helper function for finding remote entity
+async def _find_remote_entity_for_device(entity_id: str) -> str:
+    """Find the remote entity for a given device using group lookup"""
+    try:
+        if GlobalResources.ha_collection:
+            current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+            if current_docs and current_docs.get("metadatas"):
+                current_group_id = current_docs["metadatas"][0].get("group_id")
+                
+                if current_group_id and current_group_id != "unknown":
+                    # Find all devices in same group
+                    group_docs = GlobalResources.ha_collection._collection.get(
+                        where={"group_id": current_group_id},
+                        include=["metadatas"]
+                    )
+                    
+                    if group_docs and group_docs.get("metadatas"):
+                        for metadata in group_docs["metadatas"]:
+                            candidate_id = metadata.get("entity_id")
+                            candidate_domain = candidate_id.split('.')[0] if candidate_id else None
+                            
+                            # Find remote entity in the same group
+                            if candidate_domain == "remote" and candidate_id != entity_id:
+                                log.info(f"[REMOTE LOOKUP] Found remote entity via group: {candidate_id}")
+                                return candidate_id
+    except Exception as e:
+        log.warning(f"[REMOTE LOOKUP] ChromaDB lookup failed: {e}")
+    
+    # Fallback: simple string replacement
+    fallback = entity_id.replace("media_player.", "remote.")
+    log.info(f"[REMOTE LOOKUP] Using fallback: {fallback}")
+    return fallback
+
 # --- CALENDAR TOOLS ---
 @ActionDispatcher.register("calendar_add")
 async def handle_calendar_add(query: str, user_creds: dict, model: str, **kwargs):
@@ -126,25 +159,22 @@ async def handle_pause_media(query: str, user_creds: dict, params: dict = None, 
         last_entity = last_entity.decode() if isinstance(last_entity, bytes) else last_entity
         log.info(f"[PAUSE_MEDIA] Using last media entity: {last_entity}")
         
-        # Check if it's a Roku device (look for roku in entity_id or check metadata)
+        # Check if it's a Roku device
         if "roku" in last_entity.lower():
-            # Find remote entity for this Roku device
-            remote_entity = last_entity.replace("media_player.", "remote.")
-            remote_entity = remote_entity.replace("_2n", "_")  # Adjust for Roku naming
-            if "_2n" in last_entity:
-                # For roku_2n0062385487 → remote.28_tcl_roku_tv
-                remote_entity = "remote.28_tcl_roku_tv"
+            # Find remote entity via group lookup (same logic as RokuMediaAssistantIntegration)
+            remote_entity = await _find_remote_entity_for_device(last_entity)
             
-            log.info(f"[PAUSE_MEDIA] Sending Play button to remote: {remote_entity}")
-            result = await execute_ha_service(
-                "remote",
-                "send_command",
-                remote_entity,
-                user_creds,
-                {"command": "Play"},
-                GlobalResources.redis_client
-            )
-            return [result]
+            if remote_entity:
+                log.info(f"[PAUSE_MEDIA] Sending Play button to remote: {remote_entity}")
+                result = await execute_ha_service(
+                    "remote",
+                    "send_command",
+                    remote_entity,
+                    user_creds,
+                    {"command": "Play"},
+                    GlobalResources.redis_client
+                )
+                return [result]
     
     # Fallback to standard handler
     return await handle_media_command(
@@ -170,22 +200,20 @@ async def handle_media_play(query: str, user_creds: dict, params: dict = None, *
         
         # Check if it's a Roku device
         if "roku" in last_entity.lower():
-            # Find remote entity for this Roku device
-            remote_entity = last_entity.replace("media_player.", "remote.")
-            if "_2n" in last_entity:
-                # For roku_2n0062385487 → remote.28_tcl_roku_tv
-                remote_entity = "remote.28_tcl_roku_tv"
+            # Find remote entity via group lookup
+            remote_entity = await _find_remote_entity_for_device(last_entity)
             
-            log.info(f"[MEDIA_PLAY] Sending Play button to remote: {remote_entity}")
-            result = await execute_ha_service(
-                "remote",
-                "send_command",
-                remote_entity,
-                user_creds,
-                {"command": "Play"},
-                GlobalResources.redis_client
-            )
-            return [result]
+            if remote_entity:
+                log.info(f"[MEDIA_PLAY] Sending Play button to remote: {remote_entity}")
+                result = await execute_ha_service(
+                    "remote",
+                    "send_command",
+                    remote_entity,
+                    user_creds,
+                    {"command": "Play"},
+                    GlobalResources.redis_client
+                )
+                return [result]
     
     # Fallback to standard handler
     return await handle_media_command(
