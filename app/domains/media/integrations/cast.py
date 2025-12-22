@@ -207,6 +207,17 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         except Exception as e:
             log.warning(f"[SmartPowerOff] Error: {e}")
         
+        # 1.5. Force stop any active playback before turning off
+        try:
+            cast_state = await get_entity_state(entity_id, user_creds)
+            if cast_state in ["playing", "buffering"]:
+                log.info(f"[Cast]  Stopping active playback before turn_off (state: {cast_state})")
+                await self.stop_media(entity_id, user_creds, **kwargs)
+                import asyncio
+                await asyncio.sleep(0.3)
+        except Exception as e:
+            log.warning(f"[Cast] stop_media failed: {e}")
+        
         # 2. Turn off Cast device (stops app/session)
         return await super().turn_off(entity_id, user_creds, **kwargs)
 
