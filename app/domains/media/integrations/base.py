@@ -212,33 +212,23 @@ class VideoHelperMixin:
 
     async def _download_and_serve_video(self, url: str) -> Optional[str]:
         """
-        Download video locally and return HTTP URL for streaming.
-        Uses progressive download - returns as soon as initial buffer is ready.
+        Get direct stream URL using yt-dlp (no download needed).
         """
         try:
-            from app.utils.video_cache import download_video_progressive, get_video_id
+            log.info(f"[VideoHelper] Extracting direct stream URL for {url}")
             
-            # Get unique video ID
-            video_id = get_video_id(url)
-            log.info(f"[VideoHelper] Starting progressive download for video {video_id}")
+            # Use _extract_direct_stream_url which already exists and works
+            stream_url = await self._extract_direct_stream_url(url)
             
-            # Download with initial buffer
-            file_path, ready = await download_video_progressive(url, video_id)
-            
-            if not ready or not file_path:
-                log.error(f"[VideoHelper] Progressive download failed for {url}")
+            if stream_url:
+                log.info(f"[VideoHelper] Direct stream URL ready: {stream_url[:100]}...")
+                return stream_url
+            else:
+                log.error(f"[VideoHelper] Failed to extract stream URL from {url}")
                 return None
-            
-            # Return local streaming URL
-            # Using server's external IP so devices can access it
-            from app.settings import SERVER_URL
-            local_url = f"{SERVER_URL}/cast_video/{video_id}.mp4"
-            log.info(f"[VideoHelper] Video ready at: {local_url}")
-            
-            return local_url
-            
+                
         except Exception as e:
-            log.error(f"[VideoHelper] Download and serve error: {e}")
+            log.error(f"[VideoHelper] Stream extraction error: {e}")
             return None
 
     async def _extract_direct_stream_url(self, url: str) -> str:
