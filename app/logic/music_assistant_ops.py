@@ -21,10 +21,29 @@ async def _get_ma_player() -> str:
         pass
     return "media_player.mass" # Fallback
 
+async def _get_ma_config_id(user_creds: dict) -> Optional[str]:
+    """Find the Config Entry ID for Music Assistant (Required for service calls)."""
+    ha_url = user_creds.get("ha_url")
+    token = user_creds.get("ha_token")
+    if not ha_url or not token: return None
+    
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        # Fetch all config entries
+        url = f"{ha_url}/api/config/config_entries/entry"
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            entries = r.json()
+            for entry in entries:
+                if entry.get("domain") in ["music_assistant", "mass"]:
+                    return entry.get("entry_id")
+    except Exception as e:
+        log.error(f"[MA CONFIG] Error fetching config entries: {e}")
+    return None
+
 async def browse_music_library(entity_id: str, user_creds: dict, media_type: str = "playlist") -> dict:
     """
     Browse Music Assistant library using native `music_assistant.get_library` service.
-    This provides cleaner data than the generic media_player.browse_media.
     """
     ha_url = user_creds.get("ha_url")
     token = user_creds.get("ha_token")
@@ -38,24 +57,21 @@ async def browse_music_library(entity_id: str, user_creds: dict, media_type: str
     }
     
     try:
-        # We don't strictly *need* an entity_id for get_library if we target the integration, 
-        # but the service call often takes a config_entry_id or just works globally on the integration instance.
-        # However, calling the service via REST API usually requires just passing the data.
-        
-        # Use music_assistant.get_library
-        # It's a service call that returns response data (requires HA 2023.7+)
+        config_id = await _get_ma_config_id(user_creds)
+        if not config_id:
+            log.error("[MA BROWSE] Could not find Music Assistant config_entry_id!")
+            return {"status": "FAILURE", "message": "Music Assistant Integration not found in HA Config."}
+
         service_url = f"{ha_url}/api/services/music_assistant/get_library?return_response=true"
         
-        # Mapping our types to MA types
-        # MA Types: artist, album, track, radio, playlist
-        
         payload = {
+            "config_entry_id": config_id,
             "media_type": media_type,
-            "limit": 5000, # Fetch a large chunk for sync/search
+            "limit": 5000, 
             "order_by": "name"
         }
         
-        log.info(f"[MA BROWSE] Calling music_assistant.get_library for {media_type} (Limit 5000)")
+        log.info(f"[MA BROWSE] Calling music_assistant.get_library for {media_type} (ID: {config_id})")
         response = requests.post(service_url, json=payload, headers=headers, timeout=20)
         
         if response.status_code != 200:
