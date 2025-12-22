@@ -332,6 +332,66 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         # Send Home button to exit app (goes to idle/home = off)
         return await self.stop_media(entity_id, user_creds, **kwargs)
     
+    async def play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Resume/play media on Roku. For Music Assistant, Pause button acts as play/pause toggle.
+        """
+        log.info(f"[Roku] Resuming playback on {entity_id}")
+        
+        # Get remote entity
+        remote_entity_id = entity_id.replace("media_player.", "remote.")
+        
+        # Send Pause key (toggles play/pause for Music Assistant)
+        from app.domains.shared import execute_ha_service
+        result = await execute_ha_service(
+            "remote",
+            "send_command",
+            remote_entity_id,
+            user_creds,
+            {"command": "Play"},  # Play button for resume
+            kwargs.get("redis_client")
+        )
+        
+        if result.get("status") == "SUCCESS":
+            return {
+                "status": "SUCCESS",
+                "message": "Resumed playback",
+                "entity_id": entity_id,
+                "service": "remote.send_command"
+            }
+        
+        return result
+    
+    async def pause_media(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Pause media on Roku using Pause button.
+        """
+        log.info(f"[Roku] Pausing playback on {entity_id}")
+        
+        # Get remote entity
+        remote_entity_id = entity_id.replace("media_player.", "remote.")
+        
+        # Send Pause key
+        from app.domains.shared import execute_ha_service
+        result = await execute_ha_service(
+            "remote",
+            "send_command",
+            remote_entity_id,
+            user_creds,
+            {"command": "Play"},  # Play button also pauses (toggle)
+            kwargs.get("redis_client")
+        )
+        
+        if result.get("status") == "SUCCESS":
+            return {
+                "status": "SUCCESS",
+                "message": "Paused playback",
+                "entity_id": entity_id,
+                "service": "remote.send_command"
+            }
+        
+        return result
+    
     async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
         """Get Roku IP address using SSDP network discovery"""
         import requests
