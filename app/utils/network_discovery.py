@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from app.settings import run_blocking
 
 log = logging.getLogger(__name__)
 
@@ -184,7 +185,8 @@ class NetworkDeviceDiscovery:
             # If no devices found via port scan, try SSDP
             if not discovered:
                 log.info(f"[Discovery] Port scan found nothing, trying SSDP for {protocol.device_type}...")
-                devices = self._ssdp_discover(protocol, timeout)
+                # Run blocking SSDP in thread pool
+                devices = await run_blocking(lambda: self._ssdp_discover(protocol, timeout))
                 discovered.extend(devices)
         
         # Cache results in Redis if available
