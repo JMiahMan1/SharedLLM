@@ -121,19 +121,36 @@ async def tool_music_search(query: str, user_creds: dict, redis_client=None) -> 
     
     results = []
     
+    import difflib
+    
     # Browse Artist, Album, Track in parallel? (For now sequential)
     for mtype in ["artist", "album", "track", "radio", "podcast"]:
         res = await browse_music_library(ma_entity, user_creds, media_type=mtype)
         if res["status"] == "SUCCESS":
             for item in res["items"]:
+                # 1. Exact/Substring match (Fast)
                 if q_low in item["title"].lower():
                     item["type"] = mtype
                     results.append(item)
+                    continue
+                    
+                # 2. Fuzzy match (Slower but robust for "Brenden" -> "Brandon")
+                # Threshold > 0.7 covers minor typos
+                ratio = difflib.SequenceMatcher(None, q_low, item["title"].lower()).ratio()
+                if ratio > 0.7:
+                     item["type"] = mtype
+                     item["match_score"] = ratio
+                     results.append(item)
     
     # Format
     if results:
-        # Sort by exact match?
-        results.sort(key=lambda x: q_low not in x["title"].lower()) # Simple sort
+        # Sort by match score (descending) then title length (shorter is usually better match)
+        # Note: 'match_score' only exists for fuzzy ones. Exact matches need high priority.
+        def get_score(x):
+            if q_low in x["title"].lower(): return 1.0
+            return x.get("match_score", 0.0)
+            
+        results.sort(key=get_score, reverse=True)
         
         lines = []
         for r in results[:15]:
