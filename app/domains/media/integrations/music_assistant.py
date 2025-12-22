@@ -76,7 +76,7 @@ class MusicAssistantIntegration(MediaIntegration):
             # If search failed (likely 500 or not found), try searching the library broadly
             # to find a close match (e.g. "Brenden Lak" -> "Brandon Lake")
             log.info(f"[MusicAssistantIntegration] Play failed for '{cleaned_query}'. Attempting fuzzy library search...")
-            search_res = await music_assistant_ops.tool_music_search(cleaned_query, user_creds)
+            search_res = await music_assistant_ops.tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
             
             if search_res.get("status") == "SUCCESS" and search_res.get("results"):
                 best_match = search_res["results"][0]
