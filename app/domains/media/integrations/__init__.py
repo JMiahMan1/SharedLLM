@@ -38,6 +38,9 @@ MEDIA_INTENTS = [
 
 # Regex intent mapping used by pipeline.py
 REGEX_INTENT_MAP = {
+    # Power commands MUST be first to prevent "turn off" from matching "play"
+    r"\bturn\s+off\b": "turn_off",
+    r"\bturn\s+on\b": "turn_on",  
     r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)": "open_app",
     r"\b(watch|view)\b": "watch_media",  # Video intent (default: cast device)
     r"\b(play)\b": "play_media",          # Music intent (default: music assistant)
