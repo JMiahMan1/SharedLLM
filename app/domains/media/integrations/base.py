@@ -44,8 +44,23 @@ class MediaIntegration(ABC):
         """
         Execute turn_on command.
         """
+        raise NotImplementedError("turn_on must be implemented by subclass")
+        
+    async def pause_media(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Pause media playback.
+        Default: Call media_player.media_pause
+        """
         from app.domains.shared import execute_ha_service
-        return await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, None)
+        return await execute_ha_service("media_player", "media_pause", entity_id, user_creds, {}, None)
+    
+    async def play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Resume/play media playback.
+        Default: Call media_player.media_play_pause (toggles play/pause)
+        """
+        from app.domains.shared import execute_ha_service
+        return await execute_ha_service("media_player", "media_play_pause", entity_id, user_creds, {}, None)
 
 
 async def unwrap_entity_if_needed(
