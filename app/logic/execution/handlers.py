@@ -180,7 +180,7 @@ async def handle_pause_media(query: str, user_creds: dict, params: dict = None, 
     return await handle_media_command(
         "pause_media",
         query,
-        None,
+        last_entity,
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
@@ -219,7 +219,7 @@ async def handle_media_play(query: str, user_creds: dict, params: dict = None, *
     return await handle_media_command(
         "media_play",
         query,
-        None,
+        last_entity,
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
