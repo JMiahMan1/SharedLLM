@@ -24,7 +24,7 @@ def get_entity_state(entity_id):
         print(f"  [Warn] Failed to get state for {entity_id}: {e}")
     return None
 
-def wait_for_state(entity_id, expected_states, timeout=60):
+def wait_for_state(entity_id, expected_states, timeout=15):
     """Waits for entity to read one of the expected states."""
     if isinstance(expected_states, str):
         expected_states = [expected_states]
