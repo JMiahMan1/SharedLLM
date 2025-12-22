@@ -319,7 +319,7 @@ async def _handle_single_command(
                 "tool_name": "media_command",
                 "parameters": {"intent": intent, "device_name": None} # None enables context lookup or query parsing
              }
-        elif intent in ["media_next", "media_previous", "stop_media", "play_media", "media_play", "media_pause", "watch_media", "turn_on", "turn_off", "toggle"]:
+        elif intent in ["media_next", "media_previous", "stop_media", "play_media", "media_play", "media_pause", "pause_media", "watch_media", "turn_on", "turn_off", "toggle"]:
             log.info(f"[FAST PATH] Matched transport intent: {intent}")
             # For transport commands, only set device_name if query contains a device reference
             device_in_query = bool(re.search(r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media)\b", query.lower()))
