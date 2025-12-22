@@ -88,6 +88,9 @@ async def browse_music_library(entity_id: str, user_creds: dict, media_type: str
         
         data = response.json()
         
+        # DEBUG: Inspect raw data to identify why items are empty
+        log.info(f"[MA DEBUG] Raw Response for {media_type}: {str(data)[:500]}...")
+        
         # Safety check on response format
         items_data = []
         if isinstance(data, dict):
