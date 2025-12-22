@@ -107,6 +107,8 @@ app.include_router(video_server.router)
 app.include_router(android_tv.router)
 app.include_router(webos.router)
 app.include_router(roku.router)
+from app.routers import context
+app.include_router(context.router)
 
 # --- Models ---
 class ChatMessage(BaseModel):
