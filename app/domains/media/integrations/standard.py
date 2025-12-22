@@ -92,10 +92,48 @@ class StandardIntegration(MediaIntegration):
     async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Turn on the media player device.
+        Includes Smart Power logic to turn on related TV siblings.
         """
         log.info(f"[StandardIntegration] Turning on {entity_id}")
+        
+        # 1. Standard Turn On
         domain = entity_id.split(".")[0]
-        return await execute_ha_service(domain, "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        result = await execute_ha_service(domain, "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        
+        # 2. Smart Power: Check for TV Sibling (if this device isn't a TV itself)
+        # Often users say "Turn on Office TV" but it resolves to a Cast device.
+        try:
+            from app.settings import GlobalResources
+            if GlobalResources.ha_collection:
+                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if docs and docs.get("metadatas"):
+                    meta = docs["metadatas"][0]
+                    
+                    # Check if I am NOT a TV (avoid loops)
+                    # Checking device_class or integration
+                    integ = meta.get("integration", "").lower()
+                    attrs_str = meta.get("attributes", "{}")
+                    is_tv = "tv" in integ or "tv" in attrs_str.lower()
+                    
+                    if not is_tv:
+                        group_id = meta.get("group_id")
+                        if group_id and group_id != "unknown":
+                            # Search for a TV in the same group
+                            group_docs = GlobalResources.ha_collection._collection.get(
+                                where={"group_id": group_id},
+                                include=["metadatas"]
+                            )
+                            if group_docs and group_docs.get("metadatas"):
+                                for d_meta in group_docs["metadatas"]:
+                                    cand_id = d_meta.get("entity_id")
+                                    cand_integ = d_meta.get("integration", "").lower()
+                                    if cand_id != entity_id and ("tv" in cand_integ or "roku" in cand_integ):
+                                        log.info(f"[StandardIntegration] Smart Power: Found TV sibling {cand_id}. Turning ON.")
+                                        await execute_ha_service(cand_id.split('.')[0], "turn_on", cand_id, user_creds, {}, kwargs.get("redis_client"))
+        except Exception as e:
+            log.warning(f"[StandardIntegration] Smart Power check failed: {e}")
+            
+        return result
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
