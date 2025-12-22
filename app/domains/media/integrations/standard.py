@@ -62,6 +62,33 @@ class StandardIntegration(MediaIntegration):
 
         redis_client = kwargs.get("redis_client")
         
+        # AUTO POWER-ON CHECK (Android TV only - Roku has its own integration)
+        try:
+            from app.domains.shared import get_entity_state
+            state = await get_entity_state(entity_id, user_creds)
+            
+            # Check if device is Android TV by looking at metadata
+            is_android = False
+            try:
+                from app.settings import GlobalResources
+                if GlobalResources.ha_collection:
+                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                    if docs and docs.get("metadatas"):
+                        integration = docs["metadatas"][0].get("integration", "").lower()
+                        is_android = "android" in integration
+            except Exception:
+                pass
+            
+            # Auto-power-on for Android TV if device is off
+            if is_android and state in ["off", "standby", "idle"]:
+                log.info(f"[StandardIntegration] Device {entity_id} is {state}. Auto-powering on...")
+                await self.turn_on(entity_id, user_creds, **kwargs)
+                # Wait for device to be ready
+                await asyncio.sleep(3)
+                log.info(f"[StandardIntegration] Device powered on, proceeding with play_media")
+        except Exception as e:
+            log.warning(f"[StandardIntegration] Auto-power-on check failed: {e}")
+        
         # CLEAN QUERY
         cleaned_query = self._clean_query(query, media_type, entity_id, kwargs.get("device_name"))
         log.info(f"[StandardIntegration] Play on {entity_id} | Type: {media_type} | Query: '{cleaned_query}'")
