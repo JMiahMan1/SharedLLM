@@ -75,13 +75,16 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
 
         # If device is playing (e.g., Music Assistant session), stop it first
         # to prevent session conflicts when switching to video
+        # [Session Clearing for Video Playback]
+        # Always stop active session before starting video to ensure clean state.
+        # This handles cases where HA state lag reports 'idle' but device is actually playing (e.g. Music Assistant).
         if media_type == "video":
-            from app.domains.media.devices import get_entity_state
-            current_state = await get_entity_state(entity_id, user_creds)
-            if current_state in ["playing", "paused", "buffering"]:
-                log.info(f"[Session Clear] Device {entity_id} is {current_state}. Stopping before video playback.")
+            log.info(f"[Session Clear] Force stopping previous session on {entity_id} before video.")
+            try:
                 await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, None)
-                await asyncio.sleep(1)  # Brief wait for stop to complete
+                await asyncio.sleep(1)  # Wait for stop to take effect
+            except Exception as e:
+                log.warning(f"[Session Clear] Stop failed (ignoring): {e}")
         
         # [SmartPowerSync]
         await self._ensure_tv_on(entity_id, user_creds)
