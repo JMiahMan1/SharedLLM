@@ -357,26 +357,33 @@ async def handle_media_command(
                  _set_last_media_entity(redis_client, user, entity_id)
         
         # If we didn't get integration from resolver, try to fetch it
-        # [CRITICAL] Force Roku entities to use RokuIntegration
-        # Roku entities sometimes have integration='cast' in metadata due to MA wrapping
-        # but they need Roku-specific methods (play/pause toggle, idle=off, etc)
-        if entity_id and "roku" in entity_id.lower():
-            integration = "roku"
-            log.info(f"[Roku Override] Forcing integration='roku' for {entity_id}")
-        elif (integration == "home_assistant" or integration == "unknown") and entity_id:
-            # Try to infer from cached metadata if available
+        # [CRITICAL] Force Roku devices to use RokuIntegration
+        # Check metadata for Roku-specific markers (manufacturer, platform, etc)
+        if entity_id and (integration == "home_assistant" or integration == "unknown" or integration == "cast"):
             try:
                 if ha_collection:
-                    # We use include=["metadatas"] to be efficient
                     docs = ha_collection.get(ids=[entity_id], include=["metadatas"])
                     if docs and docs.get("metadatas") and len(docs["metadatas"]) > 0:
                         meta = docs["metadatas"][0]
-                        found_int = meta.get("integration")
-                        if found_int:
+                        
+                        # Check multiple indicators for Roku devices
+                        manufacturer = meta.get("manufacturer", "").lower()
+                        model = meta.get("model", "").lower()
+                        platform = meta.get("platform", "").lower()
+                        found_int = meta.get("integration", "").lower()
+                        
+                        # Roku detection: manufacturer="Roku" OR platform="roku" OR integration starts with "roku"
+                        if ("roku" in manufacturer or "roku" in platform or 
+                            (found_int and found_int.startswith("roku"))):
+                            integration = "roku"
+                            log.info(f"[Roku Override] Detected Roku device via metadata (mfr={manufacturer}, model={model}, platform={platform}). Forcing integration='roku' for {entity_id}")
+                        elif found_int and integration in ["home_assistant", "unknown", "cast"]:
+                            # Only override if current integration is not specific
                             integration = found_int
                             log.info(f"[Context] Inferred integration '{integration}' for {entity_id} from metadata")
             except Exception as e:
-                log.warning(f"[Context] Failed to infer integration for {entity_id}: {e}")
+                log.warning(f"[Context] Failed to check metadata for {entity_id}: {e}")
+
 
 
         # If it's a script/scene/automation, execute immediately via standard handler
