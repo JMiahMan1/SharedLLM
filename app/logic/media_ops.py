@@ -27,10 +27,13 @@ from app.domains.media.integrations import (
     REGEX_INTENT_MAP
 )
 
+from app.domains.media.commands import handle_media_command
+
 log = logging.getLogger(__name__)
 
 # Re-export key functions for backward compatibility
 __all__ = [
+    "handle_media_command",
     "smart_resolve_entity",
     "get_last_entity",
     "get_last_media_entity",
