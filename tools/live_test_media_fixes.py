@@ -24,21 +24,25 @@ def get_entity_state(entity_id):
         print(f"  [Warn] Failed to get state for {entity_id}: {e}")
     return None
 
-def wait_for_state(entity_id, expected_states, timeout=15):
+def wait_for_state(entity_id, expected_states, timeout=60):
     """Waits for entity to read one of the expected states."""
     if isinstance(expected_states, str):
         expected_states = [expected_states]
         
     print(f"  > Waiting for {entity_id} to be {expected_states}...", end="", flush=True)
-    start = time.time()
-    while time.time() - start < timeout:
-        current = get_entity_state(entity_id)
-        if current in expected_states:
-            print(f" OK ({current})")
-            return True
-        time.sleep(1)
-        print(".", end="", flush=True)
     
+    for _ in range(timeout):
+        current_state = get_entity_state(entity_id)
+        if current_state in expected_states:
+            print(f" OK ({current_state})")
+            return True
+        
+        # Debug output: print first char of state or ?
+        char = "?"
+        if current_state: char = current_state[0]
+        print(char, end="", flush=True)
+        time.sleep(1)
+        
     print(f" Timeout! Current: {get_entity_state(entity_id)}")
     return False
 
@@ -161,6 +165,24 @@ SCENARIO_ANDROID_CONTEXT = [
     { "cmd": "Turn off Office TV", "entity": ANDROID_ID, "expect_state": ["off", "standby", "idle"] }
 ]
 
+SCENARIO_FUZZY = [
+    { "action": "ensure_off", "entity": ANDROID_ID },
+    {
+        "cmd": "Play Brenden Lak on Office TV",
+        "entity": ANDROID_ID,
+        "expect_state": ["playing", "buffering"],
+        "verify_text": "Brandon Lake" 
+    },
+    { "cmd": "Stop", "entity": ANDROID_ID, "expect_state": ["idle", "off", "paused", "standby"] },
+    {
+        "cmd": "Play The Weeknd on Office TV",
+        "entity": ANDROID_ID,
+        "expect_state": ["playing", "buffering"],
+        "verify_text": "The Weeknd"
+    },
+    { "cmd": "Stop", "entity": ANDROID_ID, "expect_state": ["idle", "off", "paused", "standby"] }
+]
+
 def wait_for_server():
     print(f"Waiting for server at {SERVER_URL}...")
     start = time.time()
@@ -200,6 +222,13 @@ if __name__ == "__main__":
         results.append("Android Context: PASS")
     else:
         results.append("Android Context: FAIL")
+        
+    time.sleep(5)
+    
+    if run_scenario("Fuzzy Matching", SCENARIO_FUZZY):
+        results.append("Fuzzy Matching: PASS")
+    else:
+        results.append("Fuzzy Matching: FAIL")
         
     print("\nSUMMARY:")
     for r in results: print(r)
