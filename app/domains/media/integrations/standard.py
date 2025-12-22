@@ -100,8 +100,39 @@ class StandardIntegration(MediaIntegration):
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Turn off the media player device.
+        For Android TV, use androidtv.turn_off service for actual power off.
         """
         log.info(f"[StandardIntegration] Turning off {entity_id}")
+        
+        # Check if this is an Android TV device via metadata
+        is_android_tv = False
+        try:
+            from app.settings import GlobalResources
+            if GlobalResources.ha_collection:
+                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if docs and docs.get("metadatas"):
+                    meta = docs["metadatas"][0]
+                    integration = meta.get("integration", "").lower()
+                    platform = meta.get("platform", "").lower()
+                    
+                    if "androidtv" in integration or "androidtv" in platform or "android" in platform:
+                        is_android_tv = True
+                        log.info(f"[StandardIntegration] Detected Android TV device: {entity_id}")
+        except Exception as e:
+            log.warning(f"[StandardIntegration] Failed to check Android TV: {e}")
+        
+        # For Android TV, use androidtv.turn_off service for actual power off
+        if is_android_tv:
+            try:
+                log.info(f"[StandardIntegration] Using androidtv.turn_off for {entity_id}")
+                return await execute_ha_service("androidtv", "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
+            except Exception as e:
+                log.warning(f"[StandardIntegration] androidtv.turn_off failed, falling back to remote: {e}")
+                # Fallback to remote
+                remote_id = entity_id.replace("media_player.", "remote.")
+                return await execute_ha_service("remote", "turn_off", remote_id, user_creds, {}, kwargs.get("redis_client"))
+        
+        # For other devices, use standard turn_off
         domain = entity_id.split(".")[0]
         return await execute_ha_service(domain, "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
 
