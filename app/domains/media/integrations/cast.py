@@ -273,12 +273,14 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                                 except:
                                     device_class = None
                                 
-                                # Find actual TV device (device_class == "tv"), not Cast or MA devices
-                                if (device_class == "tv" and 
+                                # Check based on device_class OR known TV integration
+                                is_tv_integration = candidate_integration in ["androidtv", "webostv", "samsungtv", "braviatv", "roku", "esphome"]
+                                
+                                if ((device_class == "tv" or is_tv_integration) and 
                                     candidate_integration != "music_assistant" and
                                     candidate_id != entity_id):
                                     tv_sibling = candidate_id
-                                    log.info(f"[Cast] Found TV sibling via group: {tv_sibling}")
+                                    log.info(f"[Cast] Found TV sibling via group: {tv_sibling} (integ: {candidate_integration})")
                                     return tv_sibling
         except Exception as e:
             log.warning(f"[Cast] ChromaDB lookup failed: {e}")
