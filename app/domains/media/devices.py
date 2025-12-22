@@ -522,6 +522,13 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 integration = meta.get("integration", "unknown")
                 domain = entity_id.split('.')[0] if entity_id else ""
 
+                # CRITICAL FIX: Check for exact entity ID match FIRST (before friendly name)
+                # This handles explicit entity IDs like "media_player.office_tv_chrome_2"
+                if entity_id and entity_id.lower() == query_lower:
+                    log.info(f"[ENTITY ID EXACT MATCH] '{query_name}' → {entity_id}")
+                    exact_matches.append((entity_id, integration, meta))
+                    continue  # Skip further checks for this entity
+
                 # Skip non-actionable domains for media intents
                 media_intents = ["play_media", "stop_media", "media_next", "media_previous", "pause", "resume", "open_app", "volume_up", "volume_down", "volume_set", "volume_mute", "media_pause", "media_play"]
                 if intent in media_intents and domain not in ["media_player", "remote"]:
