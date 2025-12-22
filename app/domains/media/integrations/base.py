@@ -216,7 +216,7 @@ class VideoHelperMixin:
         """
         try:
             from app.utils.video_cache import download_video_progressive, get_video_id
-            from app.settings import BASE_URL
+            from app.settings import SERVER_URL
             
             log.info(f"[VideoHelper] Downloading video for local streaming: {url}")
             
@@ -231,7 +231,7 @@ class VideoHelperMixin:
                 return None
             
             # Return local HTTP URL for Cast to stream
-            local_url = f"{BASE_URL}/cast_video/{file_path.name}"
+            local_url = f"{SERVER_URL}/cast_video/{file_path.name}"
             log.info(f"[VideoHelper] Video ready for streaming at: {local_url}")
             return local_url
             
