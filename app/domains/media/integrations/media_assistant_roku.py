@@ -221,24 +221,27 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         return await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
-        """Turn off Roku - idle is off for Roku"""
+        """Turn off Roku - send explicit PowerOff command"""
         from app.domains.media.devices import get_entity_state
         
         log.info(f"[RokuMA] Turning off {entity_id}")
         
-        # Check if already off (idle/off/standby)
-        state = await get_entity_state(entity_id, user_creds)
-        if state in ["idle", "off", "standby"]:
-            log.info(f"[RokuMA] {entity_id} is already off (state: {state})")
-            return {
-                "status": "SUCCESS",
-                "message": f"Roku is already off.",
-                "entity_id": entity_id,
-                "service": "turn_off"
-            }
-        
-        # Send Home to exit app
-        return await self.stop_media(entity_id, user_creds, **kwargs)
+        # Get remote entity
+        remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
+        if not remote_entity_id:
+             # Fallback if no remote found (unlikely)
+             remote_entity_id = entity_id.replace("media_player.", "remote.")
+
+        # Send PowerOff button
+        # This is more effective for Roku TVs than just Home (which only exits apps)
+        return await execute_ha_service(
+            "remote", 
+            "send_command", 
+            remote_entity_id, 
+            user_creds, 
+            {"command": "PowerOff"}, 
+            kwargs.get("redis_client")
+        )
 
     async def _get_roku_remote(self, entity_id: str, user_creds: Dict) -> Optional[str]:
         """
