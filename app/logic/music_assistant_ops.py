@@ -94,10 +94,9 @@ async def browse_music_library(entity_id: str, user_creds: dict, media_type: str
         # Safety check on response format
         items_data = []
         if isinstance(data, dict):
-             # It might be in 'response' key depending on HA version/wrapper?
-             # But 'return_response=true' usually returns the dictionary directly or inside 'response'.
-             # Let's handle both.
-             if "items" in data:
+             if "service_response" in data and isinstance(data["service_response"], dict):
+                 items_data = data["service_response"].get("items", [])
+             elif "items" in data:
                  items_data = data["items"]
              elif "response" in data and isinstance(data["response"], dict) and "items" in data["response"]:
                  items_data = data["response"]["items"]
