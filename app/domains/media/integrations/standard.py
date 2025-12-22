@@ -89,6 +89,22 @@ class StandardIntegration(MediaIntegration):
         domain = entity_id.split(".")[0]
         return await execute_ha_service(domain, "play_media", entity_id, user_creds, service_data, redis_client)
 
+    async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Turn on the media player device.
+        """
+        log.info(f"[StandardIntegration] Turning on {entity_id}")
+        domain = entity_id.split(".")[0]
+        return await execute_ha_service(domain, "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+
+    async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Turn off the media player device.
+        """
+        log.info(f"[StandardIntegration] Turning off {entity_id}")
+        domain = entity_id.split(".")[0]
+        return await execute_ha_service(domain, "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
+
     async def _search_video_url(self, search_query: str) -> str:
         """Search Whoogle for a YouTube URL."""
         log.info(f"[StandardIntegration] Searching Whoogle for '{search_query} youtube'...")
