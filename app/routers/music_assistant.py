@@ -60,5 +60,5 @@ async def get_cache_stats(
         "status": "SUCCESS", 
         "stats": stats, 
         "total_items": total,
-        "last_updated": last_update.decode() if last_update else "Never"
+        "last_updated": last_update if last_update else "Never"
     }
