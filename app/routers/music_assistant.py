@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, Query
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import logging
 
 from app.settings import GlobalResources
-from app.routers.auth import get_current_user_creds
+from app.users import get_user_creds # Correct import
 
 log = logging.getLogger(__name__)
 
@@ -19,13 +19,14 @@ class SyncRequest(BaseModel):
 @router.post("/sync")
 async def sync_library(
     request: SyncRequest,
-    background_tasks: BackgroundTasks,
-    user_creds: Dict[str, Any] = Depends(get_current_user_creds)
+    background_tasks: BackgroundTasks
 ):
     """
     Trigger background sync of Music Assistant library to Redis cache.
     """
     from app.logic import music_assistant_ops
+    
+    user_creds = get_user_creds(request.user)
     
     # Run in background to avoid blocking response
     background_tasks.add_task(
@@ -38,7 +39,7 @@ async def sync_library(
 
 @router.get("/stats")
 async def get_cache_stats(
-    user_creds: Dict[str, Any] = Depends(get_current_user_creds)
+    user: str = Query("admin", description="User to check stats for")
 ):
     """
     Get stats about cached music items.
