@@ -357,7 +357,13 @@ async def handle_media_command(
                  _set_last_media_entity(redis_client, user, entity_id)
         
         # If we didn't get integration from resolver, try to fetch it
-        if (integration == "home_assistant" or integration == "unknown") and entity_id:
+        # [CRITICAL] Force Roku entities to use RokuIntegration
+        # Roku entities sometimes have integration='cast' in metadata due to MA wrapping
+        # but they need Roku-specific methods (play/pause toggle, idle=off, etc)
+        if entity_id and "roku" in entity_id.lower():
+            integration = "roku"
+            log.info(f"[Roku Override] Forcing integration='roku' for {entity_id}")
+        elif (integration == "home_assistant" or integration == "unknown") and entity_id:
             # Try to infer from cached metadata if available
             try:
                 if ha_collection:
@@ -371,6 +377,7 @@ async def handle_media_command(
                             log.info(f"[Context] Inferred integration '{integration}' for {entity_id} from metadata")
             except Exception as e:
                 log.warning(f"[Context] Failed to infer integration for {entity_id}: {e}")
+
 
         # If it's a script/scene/automation, execute immediately via standard handler
         # (This bypasses the complex media logic below)
