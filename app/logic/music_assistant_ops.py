@@ -23,7 +23,8 @@ async def _get_ma_player() -> str:
 
 async def browse_music_library(entity_id: str, user_creds: dict, media_type: str = "playlist") -> dict:
     """
-    Browse Music Assistant library to list playlists, artists, albums, etc.
+    Browse Music Assistant library using native `music_assistant.get_library` service.
+    This provides cleaner data than the generic media_player.browse_media.
     """
     ha_url = user_creds.get("ha_url")
     token = user_creds.get("ha_token")
@@ -37,39 +38,64 @@ async def browse_music_library(entity_id: str, user_creds: dict, media_type: str
     }
     
     try:
-        if not entity_id: entity_id = await _get_ma_player()
+        # We don't strictly *need* an entity_id for get_library if we target the integration, 
+        # but the service call often takes a config_entry_id or just works globally on the integration instance.
+        # However, calling the service via REST API usually requires just passing the data.
         
-        # Call browse_media service
-        service_url = f"{ha_url}/api/services/media_player/browse_media?return_response=true"
+        # Use music_assistant.get_library
+        # It's a service call that returns response data (requires HA 2023.7+)
+        service_url = f"{ha_url}/api/services/music_assistant/get_library?return_response=true"
+        
+        # Mapping our types to MA types
+        # MA Types: artist, album, track, radio, playlist
+        
         payload = {
-            "entity_id": entity_id,
-            "media_content_type": "library",
-            "media_content_id": f"library://{media_type}"
+            "media_type": media_type,
+            "limit": 5000, # Fetch a large chunk for sync/search
+            "order_by": "name"
         }
         
-        log.info(f"[MA BROWSE] Browsing {media_type} on {entity_id}")
-        response = requests.post(service_url, json=payload, headers=headers, timeout=10)
+        log.info(f"[MA BROWSE] Calling music_assistant.get_library for {media_type} (Limit 5000)")
+        response = requests.post(service_url, json=payload, headers=headers, timeout=20)
         
         if response.status_code != 200:
             log.error(f"[MA BROWSE] Failed: {response.status_code} - {response.text}")
             return {
                 "status": "FAILURE",
-                "message": f"Failed to browse library: {response.status_code}"
+                "message": f"Failed to get library: {response.status_code}"
             }
         
-        # Parse browse response
-        data = response.json()
-        items = []
+        # Parse response
+        # The service response structure usually matches the 'response_variable' content directly in REST?
+        # Typically it returns {"result": { ... }} or just the JSON if return_response=true.
+        # Structure: {'items': [...], 'count': N, 'limit': ...}
         
-        # Navigate the media browser response
-        if "children" in data:
-            for child in data["children"]:
-                items.append({
-                    "title": child.get("title", "Unknown"),
-                    "media_content_id": child.get("media_content_id"),
-                    "media_content_type": child.get("media_content_type"),
-                    "can_play": child.get("can_play", False)
-                })
+        data = response.json()
+        
+        # Safety check on response format
+        items_data = []
+        if isinstance(data, dict):
+             # It might be in 'response' key depending on HA version/wrapper?
+             # But 'return_response=true' usually returns the dictionary directly or inside 'response'.
+             # Let's handle both.
+             if "items" in data:
+                 items_data = data["items"]
+             elif "response" in data and isinstance(data["response"], dict) and "items" in data["response"]:
+                 items_data = data["response"]["items"]
+        
+        items = []
+        for item in items_data:
+            # MA returns 'name' usually, 'title' in old browse_media?
+            # Standardizing on 'title' for our app
+            title = item.get("name") or item.get("title") or "Unknown"
+            uri = item.get("uri") or item.get("item_id")
+            
+            items.append({
+                "title": title,
+                "media_content_id": uri,
+                "media_content_type": media_type,
+                "can_play": True # items in library are playable
+            })
         
         log.info(f"[MA BROWSE] Found {len(items)} {media_type}s")
         return {
