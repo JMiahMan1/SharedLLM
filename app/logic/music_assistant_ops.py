@@ -40,7 +40,7 @@ async def browse_music_library(entity_id: str, user_creds: dict, media_type: str
         if not entity_id: entity_id = await _get_ma_player()
         
         # Call browse_media service
-        service_url = f"{ha_url}/api/services/media_player/browse_media"
+        service_url = f"{ha_url}/api/services/media_player/browse_media?return_response=true"
         payload = {
             "entity_id": entity_id,
             "media_content_type": "library",
