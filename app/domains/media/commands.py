@@ -296,8 +296,24 @@ async def handle_media_command(
 
             if isinstance(resolved, list):
                 if resolved:
-                    log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
-                    return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
+                    # [Fix] If only 1 entity resolved, treat as single command to allow Context Update (below)
+                    if len(resolved) == 1:
+                         single_res = resolved[0]
+                         if isinstance(single_res, tuple):
+                             if len(single_res) == 3:
+                                 entity_id, integration, metadata = single_res
+                             else:
+                                 entity_id, integration = single_res
+                         else:
+                             # Document fallback
+                             entity_id = single_res.metadata.get("entity_id")
+                             integration = single_res.metadata.get("integration", "unknown")
+                         
+                         log.info(f"[Device Fallback] Resolved single entity from list: {entity_id}")
+                         # Proceed to standard execution flow (fall through)
+                    else:
+                        log.info(f"[Device Fallback] Resolved {len(resolved)} entities. Executing Batch.")
+                        return await execute_batch_command(resolved, intent, query, user_creds, ha_collection, redis_client)
                 else:
                      log.info(f"[Device Fallback] No devices found for {cleaned_for_res}")
             elif isinstance(resolved, tuple):
