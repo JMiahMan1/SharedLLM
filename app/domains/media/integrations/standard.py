@@ -185,6 +185,10 @@ class StandardIntegration(MediaIntegration):
              await execute_ha_service(entity_id.split('.')[0], "media_stop", entity_id, user_creds, {}, kwargs.get("redis_client"))
              await asyncio.sleep(1)
              
+             # Send HOME to exit app (ensures state clears)
+             await execute_ha_service("remote", "send_command", remote_sibling, user_creds, {"command": "HOME"}, kwargs.get("redis_client"))
+             await asyncio.sleep(1)
+
              # Send Turn Off
              return await execute_ha_service("remote", "turn_off", remote_sibling, user_creds, {}, kwargs.get("redis_client"))
 
