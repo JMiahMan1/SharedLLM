@@ -176,6 +176,17 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             resp = requests.post(base_url, params=params, timeout=10)
             
             if resp.status_code == 200:
+                # Store last video URL if this was a video playback
+                if media_type == "video":
+                    redis_client = kwargs.get("redis_client")
+                    if redis_client:
+                        user = user_creds.get("user", "admin")
+                        last_video_key = f"roku_last_video:{entity_id}:{user}"
+                        # Store the original query (before local stream conversion)
+                        original_query = kwargs.get("original_query", query)
+                        redis_client.setex(last_video_key, 3600, original_query)  # 1 hour TTL
+                        log.info(f"[RokuMA] Stored last video URL for resume: {original_query}")
+                
                 return {
                      "status": "SUCCESS",
                      "message": f"Launched Media-Assistant on {entity_id}",
@@ -230,10 +241,49 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         return await self.stop_media(entity_id, user_creds, **kwargs)
 
     async def play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
-        """Resume/play using Play button toggle"""
+        """
+        Resume/play for Roku.
+        - For music: Use Play button toggle (works with Music Assistant)
+        - For video: If device is 'off' (app exited), re-launch last video via Media Assistant
+        """
+        from app.domains.media.devices import get_entity_state
+        
         log.info(f"[RokuMA] Resuming playback on {entity_id}")
         
-        # Get remote entity
+        # Check current state
+        state = await get_entity_state(entity_id, user_creds)
+        log.info(f"[RokuMA] Current state: {state}")
+        
+        # If device is 'off', video app has exited - need to re-launch
+        if state == "off":
+            log.info(f"[RokuMA] Device is off (video app exited). Checking for last video to re-launch...")
+            
+            # Check if we have a last video URL stored
+            redis_client = kwargs.get("redis_client")
+            if redis_client:
+                # Try to get last video from Redis
+                user = user_creds.get("user", "admin")
+                last_video_key = f"roku_last_video:{entity_id}:{user}"
+                
+                try:
+                    last_video_url = redis_client.get(last_video_key)
+                    if last_video_url:
+                        log.info(f"[RokuMA] Re-launching last video: {last_video_url}")
+                        # Re-launch using play_media
+                        return await self.play_media(
+                            entity_id,
+                            last_video_url.decode() if isinstance(last_video_url, bytes) else last_video_url,
+                            "video",
+                            user_creds,
+                            **kwargs
+                        )
+                except Exception as e:
+                    log.warning(f"[RokuMA] Failed to get last video: {e}")
+            
+            # If no last video, fall back to Play button (may not work)
+            log.warning(f"[RokuMA] No last video found, attempting Play button (may fail)")
+        
+        # For music or if device is not off, use Play button toggle
         remote_entity_id = entity_id.replace("media_player.", "remote.")
         
         # Send Play button
