@@ -71,17 +71,6 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                 ma_integration = MusicAssistantIntegration()
                 return await ma_integration.play_media(entity_id, query, media_type, user_creds, **kwargs)
         
-        # [Video Routing for Android TV]
-        # For Watch intent, route video to the actual TV device (device_class='tv'), not Cast player
-        if media_type == "video":
-            tv_device = await self._get_tv_sibling(entity_id, user_creds)
-            if tv_device:
-                log.info(f"[Cast] Video request routing to TV device {tv_device} instead of Cast player {entity_id}")
-                # Use Standard/AndroidTV integration for the TV device
-                from app.domains.media.integrations.standard import StandardIntegration
-                standard_integration = StandardIntegration()
-                return await standard_integration.play_media(tv_device, query, media_type, user_creds, **kwargs)
-        
         # [Session Clearing for Video Playback]
 
         # If device is playing (e.g., Music Assistant session), stop it first
@@ -218,6 +207,7 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         except Exception as e:
             log.warning(f"[Cast] stop_media failed: {e}")
         
+        # 2. Turn off Cast device (stops app/session)
         # 2. Turn off Cast device (stops app/session)
         return await super().turn_off(entity_id, user_creds, **kwargs)
 
