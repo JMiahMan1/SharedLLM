@@ -318,8 +318,6 @@ async def _handle_single_command(
                 "action": "tool_call",
                 "tool_name": "media_command",
                 "parameters": {"intent": intent, "device_name": None} # None enables context lookup or query parsing
-                "tool_name": "media_command",
-                "parameters": {"intent": intent, "device_name": None} # None enables context lookup or query parsing
              }
         elif intent in ["media_next", "media_previous", "stop_media", "play_media", "media_play", "media_pause", "watch_media", "turn_on", "turn_off", "toggle"]:
             log.info(f"[FAST PATH] Matched transport intent: {intent}")
