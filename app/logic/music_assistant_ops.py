@@ -224,8 +224,8 @@ async def tool_music_search(query: str, user_creds: dict, redis_client=None) -> 
                     # 1. Exact/Substring in Cache
                     # 2. Fuzzy in Cache
                     
-                    # Get close matches (cutoff=0.6 to catch 'Brendan' -> 'Brandon')
-                    matches = difflib.get_close_matches(query, titles, n=3, cutoff=0.6)
+                    # Get close matches (cutoff=0.4 to catch 'Brendan' -> 'Brandon' broadly)
+                    matches = difflib.get_close_matches(query, titles, n=3, cutoff=0.4)
                     
                     for match in matches:
                         # Reconstruct basic item structure

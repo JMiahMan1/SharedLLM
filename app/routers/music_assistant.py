@@ -47,10 +47,19 @@ async def get_cache_stats(
     stats = {}
     total = 0
     
+    import json
     for mtype in ["artist", "album", "track", "playlist", "radio"]:
         key = f"ma_cache:{mtype}"
         redis = GlobalResources.redis_client
-        count = redis.llen(key) if redis and redis.exists(key) else 0
+        count = 0
+        if redis and redis.exists(key):
+             try:
+                 data = redis.get(key)
+                 if data:
+                     items = json.loads(data)
+                     count = len(items)
+             except:
+                 pass
         stats[mtype] = count
         total += count
         
