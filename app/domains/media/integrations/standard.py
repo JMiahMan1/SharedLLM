@@ -81,7 +81,8 @@ class StandardIntegration(MediaIntegration):
             
             # Auto-power-on for Android TV if device is off
             if is_android and state in ["off", "standby", "idle"]:
-                log.info(f"[StandardIntegration] Device {entity_id} is {state}. Auto-powering on...")
+            if state in ["off", "standby", "idle"]:
+                log.info(f"[StandardIntegration] Device {entity_id} is {state}. Auto-powering on before play...")
                 await self.turn_on(entity_id, user_creds, **kwargs)
                 # Wait for device to be ready
                 await asyncio.sleep(3)
