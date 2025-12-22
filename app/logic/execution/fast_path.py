@@ -50,12 +50,20 @@ class FastPathExecutor:
             return None
 
         # 5. Clean query for resolution
-        clean_q = q_low
-        for phrase in [
-            "turn on", "turn off", "toggle", "play", "stop", "the", "please", " on ", "open", "close"
-        ]:
-            clean_q = clean_q.replace(phrase, " ")
-        clean_q = clean_q.strip()
+        # CRITICAL FIX: Preserve explicit entity IDs (media_player.xxx, remote.xxx, etc.)
+        q_low = query.lower()
+        if "media_player." in q_low or "remote." in q_low or "light." in q_low or "switch." in q_low:
+            # Explicit entity ID - don't clean it
+            clean_q = query.strip()
+            log.info(f"[Fast Path] Using explicit entity ID: {clean_q}")
+        else:
+            # Natural language - clean phrases
+            clean_q = q_low
+            for phrase in [
+                "turn on", "turn off", "toggle", "play", "stop", "the", "please", " on ", "open", "close"
+            ]:
+                clean_q = clean_q.replace(phrase, " ")
+            clean_q = clean_q.strip()
         
         if not clean_q:
             return None
