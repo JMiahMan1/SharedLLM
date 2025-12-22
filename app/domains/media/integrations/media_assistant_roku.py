@@ -203,3 +203,83 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         return await execute_ha_service(
             "remote", "send_command", remote_entity_id, user_creds, {"command": "Home"}, kwargs.get("redis_client")
         )
+
+    async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Turn on Roku device"""
+        log.info(f"[RokuMA] Turning on {entity_id}")  
+        return await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+
+    async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Turn off Roku - idle is off for Roku"""
+        from app.domains.media.devices import get_entity_state
+        
+        log.info(f"[RokuMA] Turning off {entity_id}")
+        
+        # Check if already off (idle/off/standby)
+        state = await get_entity_state(entity_id, user_creds)
+        if state in ["idle", "off", "standby"]:
+            log.info(f"[RokuMA] {entity_id} is already off (state: {state})")
+            return {
+                "status": "SUCCESS",
+                "message": f"Roku is already off.",
+                "entity_id": entity_id,
+                "service": "turn_off"
+            }
+        
+        # Send Home to exit app
+        return await self.stop_media(entity_id, user_creds, **kwargs)
+
+    async def play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Resume/play using Play button toggle"""
+        log.info(f"[RokuMA] Resuming playback on {entity_id}")
+        
+        # Get remote entity
+        remote_entity_id = entity_id.replace("media_player.", "remote.")
+        
+        # Send Play button
+        result = await execute_ha_service(
+            "remote",
+            "send_command",
+            remote_entity_id,
+            user_creds,
+            {"command": "Play"},
+            kwargs.get("redis_client")
+        )
+        
+        if result.get("status") == "SUCCESS":
+            return {
+                "status": "SUCCESS",
+                "message": "Resumed playback",
+                "entity_id": entity_id,
+                "service": "remote.send_command"
+            }
+        
+        return result
+
+    async def pause_media(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Pause using Play button toggle"""
+        log.info(f"[RokuMA] Pausing playback on {entity_id}")
+        
+        # Get remote entity
+        remote_entity_id = entity_id.replace("media_player.", "remote.")
+        
+        # Send Play button (toggles)
+        result = await execute_ha_service(
+            "remote",
+            "send_command",
+            remote_entity_id,
+            user_creds,
+            {"command": "Play"},
+            kwargs.get("redis_client")
+        )
+        
+        if result.get("status") == "SUCCESS":
+            return {
+                "status": "SUCCESS",
+                "message": "Paused playback",
+                "entity_id": entity_id,
+                "service": "remote.send_command"
+            }
+        
+        return result
+
