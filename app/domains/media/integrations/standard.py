@@ -2,7 +2,9 @@ from typing import Dict, Any, List
 import logging
 import re
 from app.domains.media.integrations.base import MediaIntegration
+from app.domains.media.integrations.base import MediaIntegration
 from app.domains.shared import execute_ha_service
+import asyncio
 
 log = logging.getLogger(__name__)
 
@@ -179,6 +181,11 @@ class StandardIntegration(MediaIntegration):
         remote_sibling = await self._get_remote_sibling(entity_id)
         if remote_sibling:
              log.info(f"[StandardIntegration] Using remote sibling {remote_sibling} for turn_off")
+             # Force Stop first (Helps Cast devices release locks)
+             await execute_ha_service(entity_id.split('.')[0], "media_stop", entity_id, user_creds, {}, kwargs.get("redis_client"))
+             await asyncio.sleep(1)
+             
+             # Send Turn Off
              return await execute_ha_service("remote", "turn_off", remote_sibling, user_creds, {}, kwargs.get("redis_client"))
 
         # For Android TV (Legacy/Direct Check)
