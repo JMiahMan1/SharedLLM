@@ -309,8 +309,29 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             }
         
         return result
-    
 
+    async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Turn off Roku device. Note: Roku devices report 'idle' when off/on home screen.
+        """
+        from app.domains.media.devices import get_entity_state
+        
+        log.info(f"[Roku] Turning off {entity_id}")
+        
+        # Check current state - Roku uses 'idle' for off/home screen
+        state = await get_entity_state(entity_id, user_creds)
+        if state in ["idle", "off", "standby"]:
+            log.info(f"[Roku] {entity_id} is already off (state: {state})")
+            return {
+                "status": "SUCCESS",
+                "message": f"Roku is already off.",
+                "entity_id": entity_id,
+                "service": "turn_off"
+            }
+        
+        # Send Home button to exit app (goes to idle/home = off)
+        return await self.stop_media(entity_id, user_creds, **kwargs)
+    
     async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
         """Get Roku IP address using SSDP network discovery"""
         import requests
