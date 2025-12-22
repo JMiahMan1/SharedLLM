@@ -156,7 +156,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             params["t"] = "v"
             params["u"] = local_url
             params["videoName"] = kwargs.get("media_title", "Video")
-            params["videoFormat"] = "mp4" # Force mp4 as we use yt-dlp to serve mp4
+            params["videoFormat"] = "hls" if "m3u8" in local_url else "mp4"
             
             log.info(f"[RokuMA] Video Params: {params}")
 
