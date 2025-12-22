@@ -247,6 +247,8 @@ class StandardIntegration(MediaIntegration):
     def _clean_query(self, query: str, media_type: str, entity_id: str, device_name: str = None) -> str:
         """Clean the query string."""
         cleaned = query.lower()
+        # Remove possessives (e.g. "gracie's" -> "gracie")
+        cleaned = cleaned.replace("'s", "")
         
         # Remove device names
         targets_to_remove = ["office tv", "master bedroom tv", "gracie tv", "tv", "speaker"]
