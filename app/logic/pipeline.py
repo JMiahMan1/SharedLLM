@@ -319,7 +319,7 @@ async def _handle_single_command(
                 "tool_name": "media_command",
                 "parameters": {"intent": intent, "device_name": None} # None enables context lookup or query parsing
              }
-        elif intent in ["media_next", "media_previous", "stop_media", "play_media", "media_play", "media_pause", "pause_media", "watch_media", "turn_on", "turn_off", "toggle"]:
+        elif intent in ["media_next", "media_previous", "stop_media", "play_media", "watch_media", "turn_on", "turn_off", "toggle"]:
             log.info(f"[FAST PATH] Matched transport intent: {intent}")
             # For transport commands, only set device_name if query contains a device reference
             device_in_query = bool(re.search(r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media)\b", query.lower()))
@@ -341,12 +341,20 @@ async def _handle_single_command(
             params = {"intent": intent, "device_name": device_name}
             if intent in ["play_media", "watch_media"]:
                 params["media_title"] = query # Pass full query lets handler/integration clean it
-                # If we don't pass this, handler might infer it from query anyway, but explicit is better for Fast Path bypassing 
 
             action_plan = {
                 "action": "tool_call",
                 "tool_name": "media_command",
                 "parameters": params
+            }
+            log.info(f"[FAST PATH] action_plan set: {action_plan}")
+        elif intent in ["pause_media", "media_play"]:
+            # Special handling for pause/resume - call dedicated handlers
+            log.info(f"[FAST PATH] Matched pause/resume intent: {intent}")
+            action_plan = {
+                "action": "tool_call",
+                "tool_name": intent,  # Call pause_media or media_play handler directly
+                "parameters": {}
             }
             log.info(f"[FAST PATH] action_plan set: {action_plan}")
         elif intent in ["open_app"]:
