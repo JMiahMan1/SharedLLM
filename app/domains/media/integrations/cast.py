@@ -198,6 +198,70 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         
         # 2. Turn off Cast device (stops app/session)
         return await super().turn_off(entity_id, user_creds, **kwargs)
+    
+    async def pause_media(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Pause media. For video on Android TV, route to physical TV device.
+        """
+        from app.domains.media.devices import get_entity_state
+        
+        # Check if currently playing video
+        state_obj = await get_entity_state(entity_id, user_creds, return_full=True)
+        media_type = state_obj.get("attributes", {}).get("media_content_type") if state_obj else None
+        
+        if media_type in ["video", "movie", "tvshow"]:
+            tv_device = await self._get_tv_sibling(entity_id, user_creds)
+            if tv_device:
+                log.info(f"[Cast] Routing pause to TV device {tv_device} for video playback")
+                from app.domains.media.integrations.standard import StandardIntegration
+                standard = StandardIntegration()
+                return await standard.pause_media(tv_device, user_creds, **kwargs)
+        
+        # For music or no TV sibling, use default
+        return await super().pause_media(entity_id, user_creds, **kwargs)
+    
+    async def play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Resume playback. For video on Android TV, route to physical TV device.
+        """
+        from app.domains.media.devices import get_entity_state
+        
+        # Check last media type
+        state_obj = await get_entity_state(entity_id, user_creds, return_full=True)
+        media_type = state_obj.get("attributes", {}).get("media_content_type") if state_obj else None
+        
+        if media_type in ["video", "movie", "tvshow"]:
+            tv_device = await self._get_tv_sibling(entity_id, user_creds)
+            if tv_device:
+                log.info(f"[Cast] Routing resume to TV device {tv_device} for video playback")
+                from app.domains.media.integrations.standard import StandardIntegration
+                standard = StandardIntegration()
+                return await standard.play(tv_device, user_creds, **kwargs)
+        
+        # For music or no TV sibling, use default
+        return await super().play(entity_id, user_creds, **kwargs)
+    
+    async def stop_media(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Stop media. For video on Android TV, route to physical TV device.
+        """
+        from app.domains.media.devices import get_entity_state
+        
+        # Check if currently playing video
+        state_obj = await get_entity_state(entity_id, user_creds, return_full=True)
+        media_type = state_obj.get("attributes", {}).get("media_content_type") if state_obj else None
+        
+        if media_type in ["video", "movie", "tvshow"]:
+            tv_device = await self._get_tv_sibling(entity_id, user_creds)
+            if tv_device:
+                log.info(f"[Cast] Routing stop to TV device {tv_device} for video playback")
+                from app.domains.media.integrations.standard import StandardIntegration
+                standard = StandardIntegration()
+                return await standard.stop_media(tv_device, user_creds, **kwargs)
+        
+        # For music or no TV sibling, use default
+        return await super().stop_media(entity_id, user_creds, **kwargs)
+
 
     async def _ensure_tv_on(self, entity_id: str, user_creds: Dict):
         """
