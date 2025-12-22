@@ -248,6 +248,7 @@ class VideoHelperMixin:
                     'quiet': True,
                     'no_warnings': True,
                     'noplaylist': True,
+                    'cookiesfrombrowser': ('firefox',),  # Extract cookies from Firefox browser
                 }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
