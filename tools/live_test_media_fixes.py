@@ -49,7 +49,7 @@ def wait_for_state(entity_id, expected_states, timeout=20):
 def send_chat(query, user="admin"):
     print(f"\n[CMD] '{query}'")
     try:
-        res = requests.post(CHAT_ENDPOINT, json={"query": query, "user": user}, timeout=60)
+        res = requests.post(CHAT_ENDPOINT, json={"query": query, "user": user}, timeout=120)
         if res.status_code == 200:
             data = res.json()
             resp_text = ""

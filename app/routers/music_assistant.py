@@ -1,65 +1,62 @@
-from fastapi import APIRouter, HTTPException, Request, Body
-from typing import Optional
+from fastapi import APIRouter, Depends, BackgroundTasks
 from pydantic import BaseModel
+from typing import Dict, Any, Optional
+import logging
 
-from app.logic import music_assistant_ops
-from app.settings import get_user_creds
+from app.settings import GlobalResources, redis_client
+from app.routers.auth import get_current_user_creds
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api/ma",
-    tags=["Music Assistant"]
+    prefix="/api/music",
+    tags=["MusicAssistant"]
 )
 
-# --- Request Models ---
-class PlayRequest(BaseModel):
-    entity_id: str
-    media_id: str
-    media_type: str = "music"
+class SyncRequest(BaseModel):
+    user: str = "admin"
 
-class ControlRequest(BaseModel):
-    entity_id: str
-    command: str  # play, pause, stop, next, previous
+@router.post("/sync")
+async def sync_library(
+    request: SyncRequest,
+    background_tasks: BackgroundTasks,
+    user_creds: Dict[str, Any] = Depends(get_current_user_creds)
+):
+    """
+    Trigger background sync of Music Assistant library to Redis cache.
+    """
+    from app.logic import music_assistant_ops
+    
+    # Run in background to avoid blocking response
+    background_tasks.add_task(
+        music_assistant_ops.sync_library_to_redis,
+        user_creds,
+        redis_client
+    )
+    
+    return {"status": "SUCCESS", "message": "Library sync started in background"}
 
-# --- Endpoints ---
-
-@router.get("/search")
-async def search_library(q: str):
-    """Search for tracks, artists, albums."""
-    # Using dummy creds logic for now or extracting from request if auth middleware existed
-    # For now, we reuse the pattern of existing tools which pull global/env creds via helpers if needed
-    # But get_user_creds() defaults to environment variables if no user provided.
-    creds = get_user_creds()
-    result = await music_assistant_ops.tool_music_search(q, creds)
-    if result["status"] == "FAILURE":
-        raise HTTPException(status_code=404, detail=result["message"])
-    return result
-
-@router.get("/playlists")
-async def list_playlists():
-    """List all playlists."""
-    creds = get_user_creds()
-    result = await music_assistant_ops.tool_list_playlists("", creds)
-    if result["status"] == "FAILURE":
-        raise HTTPException(status_code=500, detail=result["message"])
-    return result
-
-@router.post("/play")
-async def play_media(req: PlayRequest):
-    """Play a specific item on a device."""
-    creds = get_user_creds()
-    result = await music_assistant_ops.play_media(req.entity_id, req.media_id, req.media_type, creds)
-    if result["status"] == "FAILURE":
-        raise HTTPException(status_code=500, detail=result["message"])
-    return result
-
-@router.post("/control")
-async def control_player(req: ControlRequest):
-    """Control media player transport."""
-    creds = get_user_creds()
-    if req.command not in ["play", "pause", "stop", "next", "previous"]:
-        raise HTTPException(status_code=400, detail=f"Invalid command: {req.command}")
+@router.get("/stats")
+async def get_cache_stats(
+    user_creds: Dict[str, Any] = Depends(get_current_user_creds)
+):
+    """
+    Get stats about cached music items.
+    """
+    stats = {}
+    total = 0
+    
+    for mtype in ["artist", "album", "track", "playlist", "radio"]:
+        key = f"ma_cache:{mtype}"
+        count = redis_client.llen(key) if redis_client.exists(key) else 0
+        stats[mtype] = count
+        total += count
         
-    result = await music_assistant_ops.control_player(req.entity_id, req.command, creds)
-    if result["status"] == "FAILURE":
-        raise HTTPException(status_code=500, detail=result["message"])
-    return result
+    last_update = redis_client.get("ma_cache:updated_at")
+    
+    return {
+        "status": "SUCCESS", 
+        "stats": stats, 
+        "total_items": total,
+        "last_updated": last_update.decode() if last_update else "Never"
+    }
