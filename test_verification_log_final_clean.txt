@@ -1,0 +1,11 @@
+Waiting for server at http://192.168.2.211:11435...
+Server is UP!
+
+============================================================
+=== Scenario: Roku - Play Intent (Music) ===
+============================================================
+  > Ensuring media_player.roku_2n0062385487 is OFF... Already OFF.
+
+[CMD] 'Play Brandon Lake on Gracie's TV'
+  [Resp] Done.
+  > Waiting for media_player.roku_2n0062385487 to be ['playing', 'buffering']...iii

@@ -112,49 +112,132 @@ def _format_list_result(result: dict, type_name: str) -> dict:
         return {"status": "SUCCESS", "message": message, "items": items, "service": f"list_{type_name}"}
     return result
 
+async def sync_library_to_redis(user_creds: dict, redis_client) -> dict:
+    """
+    Syncs the entire Music Assistant library (titles) to Redis for robust fuzzy matching.
+    """
+    import json
+    import time
+    
+    if not redis_client:
+        return {"status": "FAILURE", "message": "Redis client not available"}
+
+    ma_entity = await _get_ma_player()
+    sync_types = ["artist", "album", "track", "playlist", "radio"]
+    total_synced = 0
+    
+    log.info("[MA SYNC] Starting library sync to Redis...")
+    
+    for mtype in sync_types:
+        try:
+            # Browse full library for type
+            # browse_music_library iterates paging? No, currently fetches one page.
+            # Usually 'library://artist' returns the main list. 
+            # If it's huge, browse_media might truncate (HA limit), but it's the best we have via REST.
+            res = await browse_music_library(ma_entity, user_creds, media_type=mtype)
+            
+            if res["status"] == "SUCCESS":
+                items = res.get("items", [])
+                titles = [item["title"] for item in items]
+                
+                # Store as JSON list
+                key = f"ma_cache:{mtype}"
+                redis_client.setex(key, 86400, json.dumps(titles)) # 24h Expire
+                
+                log.info(f"[MA SYNC] Synced {len(titles)} {mtype}s to {key}")
+                total_synced += len(titles)
+            else:
+                log.warning(f"[MA SYNC] Failed to browse {mtype}: {res.get('message')}")
+                
+        except Exception as e:
+            log.error(f"[MA SYNC] Error syncing {mtype}: {e}")
+
+    # Set timestamp
+    redis_client.set("ma_cache:updated_at", str(time.time()))
+    log.info(f"[MA SYNC] Complete. Total items: {total_synced}")
+    return {"status": "SUCCESS", "total": total_synced}
+
+
 async def tool_music_search(query: str, user_creds: dict, redis_client=None) -> dict:
     """
-    Search Music Assistant library for Tracks, Artists, Albums matching the query.
+    Search Music Assistant library.
+    Step 1: Check Redis Cache for fuzzy match (Fast, handles typos like 'Brendan' -> 'Brandon').
+    Step 2: Fallback to live browsing/search (Slow).
     """
     ma_entity = await _get_ma_player()
     q_low = query.lower()
-    
     results = []
-    
     import difflib
+    import json
     
-    # Browse Artist, Album, Track in parallel? (For now sequential)
+    # --- STEP 1: CACHE SEARCH ---
+    if redis_client:
+        cache_hit = False
+        for mtype in ["artist", "album", "track", "playlist", "radio"]:
+            key = f"ma_cache:{mtype}"
+            try:
+                data = redis_client.get(key)
+                if data:
+                    titles = json.loads(data)
+                    # 1. Exact/Substring in Cache
+                    # 2. Fuzzy in Cache
+                    
+                    # Get close matches (cutoff=0.6 to catch 'Brendan' -> 'Brandon')
+                    matches = difflib.get_close_matches(query, titles, n=3, cutoff=0.6)
+                    
+                    for match in matches:
+                        # Reconstruct basic item structure
+                        score = difflib.SequenceMatcher(None, q_low, match.lower()).ratio()
+                        results.append({
+                            "title": match,
+                            "type": mtype,
+                            "match_score": score,
+                            "source": "cache"
+                        })
+                        cache_hit = True
+            except Exception as e:
+                log.warning(f"[MA CACHE] Error reading {key}: {e}")
+                
+        if cache_hit and results:
+            log.info(f"[MA SEARCH] Found {len(results)} matches in Redis Cache.")
+            # Sort and return immediately if we have high confidence?
+            # Or mix with live? 
+            # If we have a > 0.8 match in cache, it's likely what they want.
+            results.sort(key=lambda x: x["match_score"], reverse=True)
+            if results[0]["match_score"] > 0.8:
+                 return _format_search_results(query, results)
+                 
+    # --- STEP 2: LIVE SEARCH (Fallback) ---
+    log.info(f"[MA SEARCH] Cache miss or low confidence. Falling back to live browse...")
+    
+    # (Existing Logic)
     for mtype in ["artist", "album", "track", "radio", "podcast"]:
         res = await browse_music_library(ma_entity, user_creds, media_type=mtype)
         if res["status"] == "SUCCESS":
             for item in res["items"]:
-                # 1. Exact/Substring match (Fast)
                 if q_low in item["title"].lower():
                     item["type"] = mtype
+                    item["source"] = "live"
                     results.append(item)
                     continue
-                    
-                # 2. Fuzzy match (Slower but robust for "Brenden" -> "Brandon")
-                # Threshold > 0.7 covers minor typos
                 ratio = difflib.SequenceMatcher(None, q_low, item["title"].lower()).ratio()
                 if ratio > 0.7:
                      item["type"] = mtype
                      item["match_score"] = ratio
+                     item["source"] = "live"
                      results.append(item)
-    
-    # Format
+
+    return _format_search_results(query, results)
+
+def _format_search_results(query, results):
     if results:
-        # Sort by match score (descending) then title length (shorter is usually better match)
-        # Note: 'match_score' only exists for fuzzy ones. Exact matches need high priority.
-        def get_score(x):
-            if q_low in x["title"].lower(): return 1.0
-            return x.get("match_score", 0.0)
-            
-        results.sort(key=get_score, reverse=True)
+        # Sort
+        results.sort(key=lambda x: x.get("match_score", 0 if query.lower() in x["title"].lower() else 0), reverse=True)
         
         lines = []
         for r in results[:15]:
-            lines.append(f"- [{r['type'].upper()}] {r['title']}")
+            src = f"[{r.get('source', 'live').upper()}]"
+            lines.append(f"- [{r['type'].upper()}] {r['title']} {src}")
             
         message = f"Found {len(results)} matches for '{query}':\n" + "\n".join(lines)
         return {"status": "SUCCESS", "message": message, "results": results}
