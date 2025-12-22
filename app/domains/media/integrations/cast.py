@@ -166,75 +166,34 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
 
         return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
 
+    async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Turn off Cast device AND ensuring physical TV sibling is powered off (SmartPowerOff).
+        """
+        log.info(f"[Cast] Turning off {entity_id} (SmartPowerOff)")
+        
+        # 1. Turn off physical TV if found
+        tv_sibling = await self._get_tv_sibling(entity_id, user_creds)
+        if tv_sibling:
+             try:
+                 # Check state first? Or just send off.
+                 log.info(f"[SmartPowerOff] Turning off TV sibling: {tv_sibling}")
+                 await execute_ha_service("media_player", "turn_off", tv_sibling, user_creds, {}, None)
+             except Exception as e:
+                 log.warning(f"[SmartPowerOff] Failed to turn off {tv_sibling}: {e}")
+                 
+        # 2. Turn off Cast device (stops app/session)
+        # Proceed with standard turn_off
+        return await super().turn_off(entity_id, user_creds, **kwargs)
+
     async def _ensure_tv_on(self, entity_id: str, user_creds: Dict):
         """
         Finds the physical TV sibling for this Cast device and turns it on if needed.
-        
-        NOTE: This SmartPowerSync logic is designed for Android TV integration.
-        Other TV platforms (Roku, Samsung, LG/WebOS) may have different:
-        - Entity structures
-        - Integration names ("roku", "samsungtv", "webostv" vs "androidtv")
-        - Device grouping patterns
-        
-        The device_class="tv" check works reliably for Android TV but may need
-        platform-specific adjustments for other TV types.
         """
         try:
-            from app.settings import GlobalResources
             from app.domains.media.devices import get_entity_state
             
-            tv_sibling = None
-            
-            # Strategy 1: ChromaDB group lookup
-            try:
-                if GlobalResources.ha_collection:
-                    current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
-                    if current_docs and current_docs.get("metadatas"):
-                        current_group_id = current_docs["metadatas"][0].get("group_id")
-                        
-                        if current_group_id and current_group_id != "unknown":
-                            log.info(f"[SmartPowerSync] Searching for TV in group {current_group_id}")
-                            
-                            # Find all devices in same group
-                            group_docs = GlobalResources.ha_collection._collection.get(
-                                where={"group_id": current_group_id},
-                                include=["metadatas"]
-                            )
-                            
-                            if group_docs and group_docs.get("metadatas"):
-                                for metadata in group_docs["metadatas"]:
-                                    candidate_id = metadata.get("entity_id")
-                                    candidate_integration = metadata.get("integration", "")
-                                    
-                                    # Parse attributes to check device_class
-                                    attrs_str = metadata.get("attributes", "{}")
-                                    try:
-                                        import json
-                                        attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
-                                        device_class = attrs.get("device_class")
-                                    except:
-                                        device_class = None
-                                    
-                                    # Find actual TV device (device_class == "tv"), not Cast or MA devices
-                                    if (device_class == "tv" and 
-                                        candidate_integration != "music_assistant" and
-                                        candidate_id != entity_id):
-                                        tv_sibling = candidate_id
-                                        log.info(f"[SmartPowerSync] Found TV sibling via group: {tv_sibling}")
-                                        break
-            except Exception as e:
-                log.warning(f"[SmartPowerSync] ChromaDB lookup failed: {e}")
-            
-            # Strategy 2: Fallback to suffix stripping
-            if not tv_sibling:
-                # Common suffixes for cast devices of TVs
-                base = entity_id
-                for suffix in ["_chrome_2", "_chrome", "_cast", "_speaker"]:
-                    base = base.replace(suffix, "")
-                
-                if base != entity_id:
-                     tv_sibling = base
-                     log.info(f"[SmartPowerSync] Found TV sibling via suffix stripping: {tv_sibling}")
+            tv_sibling = await self._get_tv_sibling(entity_id, user_creds)
             
             if tv_sibling:
                 try:
@@ -252,3 +211,62 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                 
         except Exception as e:
             log.warning(f"[SmartPowerSync] Error: {e}")
+
+    async def _get_tv_sibling(self, entity_id: str, user_creds: Dict) -> Optional[str]:
+        """
+        Helper to find the physical TV associated with a Cast device.
+        """
+        from app.settings import GlobalResources
+        
+        tv_sibling = None
+        
+        # Strategy 1: ChromaDB group lookup
+        try:
+            if GlobalResources.ha_collection:
+                current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if current_docs and current_docs.get("metadatas"):
+                    current_group_id = current_docs["metadatas"][0].get("group_id")
+                    
+                    if current_group_id and current_group_id != "unknown":
+                        # Find all devices in same group
+                        group_docs = GlobalResources.ha_collection._collection.get(
+                            where={"group_id": current_group_id},
+                            include=["metadatas"]
+                        )
+                        
+                        if group_docs and group_docs.get("metadatas"):
+                            for metadata in group_docs["metadatas"]:
+                                candidate_id = metadata.get("entity_id")
+                                candidate_integration = metadata.get("integration", "")
+                                
+                                # Parse attributes to check device_class
+                                attrs_str = metadata.get("attributes", "{}")
+                                try:
+                                    import json
+                                    attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
+                                    device_class = attrs.get("device_class")
+                                except:
+                                    device_class = None
+                                
+                                # Find actual TV device (device_class == "tv"), not Cast or MA devices
+                                if (device_class == "tv" and 
+                                    candidate_integration != "music_assistant" and
+                                    candidate_id != entity_id):
+                                    tv_sibling = candidate_id
+                                    log.info(f"[Cast] Found TV sibling via group: {tv_sibling}")
+                                    return tv_sibling
+        except Exception as e:
+            log.warning(f"[Cast] ChromaDB lookup failed: {e}")
+        
+        # Strategy 2: Fallback to suffix stripping
+        # Common suffixes for cast devices of TVs
+        base = entity_id
+        for suffix in ["_chrome_2", "_chrome", "_cast", "_speaker"]:
+            base = base.replace(suffix, "")
+        
+        if base != entity_id:
+             tv_sibling = base
+             log.info(f"[Cast] Found TV sibling via suffix stripping: {tv_sibling}")
+             return tv_sibling
+             
+        return None

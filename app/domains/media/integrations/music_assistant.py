@@ -72,6 +72,21 @@ class MusicAssistantIntegration(MediaIntegration):
                 if result and result.get("status") == "SUCCESS":
                     return result
             
+            # [Fuzzy Fallback]
+            # If search failed (likely 500 or not found), try searching the library broadly
+            # to find a close match (e.g. "Brenden Lak" -> "Brandon Lake")
+            log.info(f"[MusicAssistantIntegration] Play failed for '{cleaned_query}'. Attempting fuzzy library search...")
+            search_res = await music_assistant_ops.tool_music_search(cleaned_query, user_creds)
+            
+            if search_res.get("status") == "SUCCESS" and search_res.get("results"):
+                best_match = search_res["results"][0]
+                new_title = best_match["title"]
+                log.info(f"[MusicAssistantIntegration] Fuzzy match found: '{cleaned_query}' -> '{new_title}' ({best_match['type']})")
+                
+                # Retry play with corrected title
+                # We inferred the type from the search result, so use it if possible or stick to best effort
+                return await music_assistant_ops.play_media(entity_id, new_title, best_match["type"], user_creds)
+            
             # Check for failure with 500 error (implies Clean Search but No Results in MA)
             # Music Assistant throws 500 when specific search returns empty
             if result and result.get("status") == "FAILURE" and "500" in str(result.get("message", "")):
