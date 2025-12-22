@@ -212,23 +212,31 @@ class VideoHelperMixin:
 
     async def _download_and_serve_video(self, url: str) -> Optional[str]:
         """
-        Get direct stream URL using yt-dlp (no download needed).
+        Download video using yt-dlp and return local URL for streaming.
         """
         try:
-            log.info(f"[VideoHelper] Extracting direct stream URL for {url}")
+            from app.utils.video_cache import download_video_progressive, get_video_id
+            from app.settings import BASE_URL
             
-            # Use _extract_direct_stream_url which already exists and works
-            stream_url = await self._extract_direct_stream_url(url)
+            log.info(f"[VideoHelper] Downloading video for local streaming: {url}")
             
-            if stream_url:
-                log.info(f"[VideoHelper] Direct stream URL ready: {stream_url[:100]}...")
-                return stream_url
-            else:
-                log.error(f"[VideoHelper] Failed to extract stream URL from {url}")
+            # Generate unique ID for this video
+            video_id = get_video_id(url)
+            
+            # Download video progressively (returns when buffer is ready)
+            file_path, ready = await download_video_progressive(url, video_id)
+            
+            if not ready or not file_path:
+                log.error(f"[VideoHelper] Failed to download video from {url}")
                 return None
-                
+            
+            # Return local HTTP URL for Cast to stream
+            local_url = f"{BASE_URL}/cast_video/{file_path.name}"
+            log.info(f"[VideoHelper] Video ready for streaming at: {local_url}")
+            return local_url
+            
         except Exception as e:
-            log.error(f"[VideoHelper] Stream extraction error: {e}")
+            log.error(f"[VideoHelper] Video download error: {e}")
             return None
 
     async def _extract_direct_stream_url(self, url: str) -> str:
