@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import logging
 
-from app.settings import GlobalResources, redis_client
+from app.settings import GlobalResources
 from app.routers.auth import get_current_user_creds
 
 log = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ async def sync_library(
     background_tasks.add_task(
         music_assistant_ops.sync_library_to_redis,
         user_creds,
-        redis_client
+        GlobalResources.redis_client
     )
     
     return {"status": "SUCCESS", "message": "Library sync started in background"}
@@ -48,11 +48,12 @@ async def get_cache_stats(
     
     for mtype in ["artist", "album", "track", "playlist", "radio"]:
         key = f"ma_cache:{mtype}"
-        count = redis_client.llen(key) if redis_client.exists(key) else 0
+        redis = GlobalResources.redis_client
+        count = redis.llen(key) if redis and redis.exists(key) else 0
         stats[mtype] = count
         total += count
         
-    last_update = redis_client.get("ma_cache:updated_at")
+    last_update = GlobalResources.redis_client.get("ma_cache:updated_at") if GlobalResources.redis_client else None
     
     return {
         "status": "SUCCESS", 
