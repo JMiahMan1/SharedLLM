@@ -114,6 +114,46 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
     return "unknown"
 
 
+async def find_group_sibling(entity_id: str, match_func) -> Optional[str]:
+    """
+    Generic helper to find a sibling in the same group that matches criteria.
+    Uses ChromaDB for group_id lookup.
+    
+    Args:
+        entity_id: The reference entity ID
+        match_func: Function taking metadata dict and returning bool
+        
+    Returns:
+        entity_id of matching sibling or None
+    """
+    try:
+        if GlobalResources.ha_collection:
+            # 1. Get Group ID for current device
+            current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+            if current_docs and current_docs.get("metadatas"):
+                current_group_id = current_docs["metadatas"][0].get("group_id")
+                
+                if current_group_id and current_group_id != "unknown":
+                    # 2. Get all members of the group
+                    group_docs = GlobalResources.ha_collection._collection.get(
+                        where={"group_id": current_group_id},
+                        include=["metadatas"]
+                    )
+                    
+                    if group_docs and group_docs.get("metadatas"):
+                        for metadata in group_docs["metadatas"]:
+                            candidate_id = metadata.get("entity_id")
+                            if candidate_id == entity_id: continue
+                            
+                            if match_func(metadata):
+                                log.info(f"[Group Lookup] Found sibling for {entity_id}: {candidate_id}")
+                                return candidate_id
+    except Exception as e:
+        log.warning(f"[Group Lookup] Error resolving group for {entity_id}: {e}")
+        
+    return None
+
+
 async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client) -> dict:
     """
     Fetch and cache device capabilities from Home Assistant.
