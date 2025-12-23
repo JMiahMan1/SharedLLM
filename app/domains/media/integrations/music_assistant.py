@@ -30,7 +30,39 @@ class MusicAssistantIntegration(MediaIntegration):
     async def play_media(self, entity_id: str, query: str, media_type: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Execute play_media logic for Music Assistant.
+        Redirects VIDEO requests to underlying Cast/TV device.
         """
+        # [Video Redirection]
+        if media_type == "video" or "watch" in kwargs.get("intent", ""):
+            log.info(f"[MusicAssistantIntegration] Video request detected for {entity_id}. Attempting redirect to underlying device...")
+            
+            from app.domains.media.devices import find_group_sibling
+            
+            # Find sibling that is NOT Music Assistant (e.g. Cast, AndroidTV)
+            def is_cast_or_tv(m):
+                integ = m.get("integration", "")
+                return integ in ["cast", "google_cast", "androidtv", "roku", "webostv", "samsungtv", "esphome"] and "music_assistant" not in integ
+
+            target_id = await find_group_sibling(entity_id, is_cast_or_tv)
+
+            if target_id:
+                log.info(f"[Video Redirection] Redirecting {entity_id} (MA) -> {target_id} (Underlying)")
+                
+                # Instantiate CastIntegration (or factory?) to handle the new target
+                # We assume CastIntegration is safe default for discovered targets, or use StandardIntegration which routes dynamically?
+                # Using StandardIntegration logic or finding the right integration class?
+                # Actually, simply calling the COMMAND handler with the new entity ID is safest, but we are inside integration.
+                # Better: Instantiate CastIntegration directly if we know it's cast, or rely on factory.
+                
+                # Check integration of target to pick class
+                # For now, simplistic approach: Most underlying are Cast.
+                from app.domains.media.integrations.cast import CastIntegration
+                cast_int = CastIntegration()
+                # Pass explicit media_type="video"
+                return await cast_int.play_media(target_id, query, "video", user_creds, **kwargs)
+            else:
+                log.warning(f"[Video Redirection] Could not find underlying device for {entity_id}. Attempting standard MA playback (may fail).")
+
         from app.logic import music_assistant_ops 
         
         # 1. Clean Query
