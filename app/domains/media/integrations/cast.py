@@ -79,9 +79,14 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         # Always stop active session before starting video to ensure clean state.
         # This handles cases where HA state lag reports 'idle' but device is actually playing (e.g. Music Assistant).
         if media_type == "video":
-            log.info(f"[Session Clear] Force stopping previous session on {entity_id} before video.")
+            # Find Music Assistant wrapper in the same group to stop it
+            # This is more robust than assuming entity_id + "_2" or similar
+            ma_wrapper = await self._get_ma_wrapper(entity_id)
+            target_stop = ma_wrapper if ma_wrapper else entity_id
+            
+            log.info(f"[Session Clear] Force stopping previous session on {target_stop} before video.")
             try:
-                await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, None)
+                await execute_ha_service("media_player", "media_stop", target_stop, user_creds, {}, None)
                 await asyncio.sleep(1)  # Wait for stop to take effect
             except Exception as e:
                 log.warning(f"[Session Clear] Stop failed (ignoring): {e}")
@@ -242,21 +247,53 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
 
     async def _get_tv_sibling(self, entity_id: str, user_creds: Dict) -> Optional[str]:
         """
-        Helper to find the physical TV associated with a Cast device.
+        Find physical TV sibling using group capability lookup.
+        """
+        # Define capability matcher for TV
+        def is_tv(metadata):
+            integ = metadata.get("integration", "")
+            # Check device_class from attributes
+            attrs_str = metadata.get("attributes", "{}")
+            device_class = None
+            try:
+                import json
+                attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
+                device_class = attrs.get("device_class")
+            except: pass
+            
+            # Match
+            return (integ in ["androidtv", "webostv", "samsungtv", "braviatv", "roku", "esphome"] or 
+                    device_class == "tv") and integ != "music_assistant"
+
+        return await self._find_group_sibling(entity_id, is_tv)
+
+    async def _get_ma_wrapper(self, entity_id: str) -> Optional[str]:
+        """
+        Find Music Assistant wrapper sibling using group capability lookup.
+        """
+        return await self._find_group_sibling(entity_id, lambda m: m.get("integration") == "music_assistant" or m.get("app_id") == "music_assistant")
+
+    async def _find_group_sibling(self, entity_id: str, match_func) -> Optional[str]:
+        """
+        Generic helper to find a sibling in the same group that matches criteria.
+        
+        Args:
+            entity_id: The reference entity ID
+            match_func: Function taking metadata dict and returning bool
+            
+        Returns:
+            entity_id of matching sibling or None
         """
         from app.settings import GlobalResources
-        
-        tv_sibling = None
-        
-        # Strategy 1: ChromaDB group lookup
         try:
             if GlobalResources.ha_collection:
+                # 1. Get Group ID for current device
                 current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
                 if current_docs and current_docs.get("metadatas"):
                     current_group_id = current_docs["metadatas"][0].get("group_id")
                     
                     if current_group_id and current_group_id != "unknown":
-                        # Find all devices in same group
+                        # 2. Get all members of the group
                         group_docs = GlobalResources.ha_collection._collection.get(
                             where={"group_id": current_group_id},
                             include=["metadatas"]
@@ -265,38 +302,12 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                         if group_docs and group_docs.get("metadatas"):
                             for metadata in group_docs["metadatas"]:
                                 candidate_id = metadata.get("entity_id")
-                                candidate_integration = metadata.get("integration", "")
+                                if candidate_id == entity_id: continue
                                 
-                                # Parse attributes to check device_class
-                                attrs_str = metadata.get("attributes", "{}")
-                                try:
-                                    import json
-                                    attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
-                                    device_class = attrs.get("device_class")
-                                except:
-                                    device_class = None
-                                
-                                # Check based on device_class OR known TV integration
-                                is_tv_integration = candidate_integration in ["androidtv", "webostv", "samsungtv", "braviatv", "roku", "esphome"]
-                                
-                                if ((device_class == "tv" or is_tv_integration) and 
-                                    candidate_integration != "music_assistant" and
-                                    candidate_id != entity_id):
-                                    tv_sibling = candidate_id
-                                    log.info(f"[Cast] Found TV sibling via group: {tv_sibling} (integ: {candidate_integration})")
-                                    return tv_sibling
+                                if match_func(metadata):
+                                    log.info(f"[Group Lookup] Found sibling for {entity_id}: {candidate_id}")
+                                    return candidate_id
         except Exception as e:
-            log.warning(f"[Cast] ChromaDB lookup failed: {e}")
-        
-        # Strategy 2: Fallback to suffix stripping
-        # Common suffixes for cast devices of TVs
-        base = entity_id
-        for suffix in ["_chrome_2", "_chrome", "_cast", "_speaker"]:
-            base = base.replace(suffix, "")
-        
-        if base != entity_id:
-             tv_sibling = base
-             log.info(f"[Cast] Found TV sibling via suffix stripping: {tv_sibling}")
-             return tv_sibling
-             
+            log.warning(f"[Group Lookup] Error resolving group for {entity_id}: {e}")
+            
         return None
