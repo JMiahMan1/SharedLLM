@@ -66,3 +66,9 @@ langchain-huggingface
 duckduckgo-search
 PyMuPDF
 yt-dlp
+pandas
+openpyxl
+python-docx
+mutagen
+mobi
+html2text
