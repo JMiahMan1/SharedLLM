@@ -97,7 +97,7 @@ class AlarmAudioManager:
                     {
                         "media_player_entity_id": target,
                         "message": tts_msg,
-                        "options": {"announce": True}
+                        "announce": True
                     }, 
                     redis_client
                 )
