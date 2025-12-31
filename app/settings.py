@@ -152,6 +152,7 @@ Available Tools:
 16. 'note_delete' (Delete a note file. Params: 'title')
 17. 'music_list' (List playlists or radio stations in Music Assistant)
 18. 'music_search' (Search Music Assistant library for artist/album/track)
+19. 'ha_notify' (Send a persistent notification to Home Assistant. Params: 'message', 'title')
 
 CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Set an alarm for 8am" -> timer_add

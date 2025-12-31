@@ -357,7 +357,25 @@ async def handle_web_search(query: str, user_creds: dict = None, model: str = No
     res = await tool_web_search(query)
     return {"status": "SUCCESS", "message": res, "service": "web_search"}
 
-@ActionDispatcher.register("intent_learn")
-async def handle_intent_learn(params: dict = None, **kwargs):
     res = f"Cannot learn '{params.get('phrase', '')}' with current prompt context." if params else "Cannot learn phrase."
     return {"status": "FAILURE", "message": res, "service": "intent_learn"}
+
+@ActionDispatcher.register("ha_notify")
+async def handle_ha_notify(query: str, user_creds: dict, params: dict = None, **kwargs):
+    """
+    Sends a persistent notification to Home Assistant.
+    Params: 'message', 'title' (optional)
+    """
+    message = params.get("message", query)
+    title = params.get("title", "SharedLLM Notification")
+    
+    # We use execute_ha_service directly
+    result = await execute_ha_service(
+        "persistent_notification",
+        "create",
+        "persistent_notification.sharedllm", # Dummy entity_id needed for the function signature, usually ignored by this service or handled generically
+        user_creds,
+        {"message": message, "title": title},
+        GlobalResources.redis_client
+    )
+    return {"status": "SUCCESS", "message": f"Notification sent: {message}", "service": "ha_notify"}
