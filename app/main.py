@@ -297,11 +297,14 @@ async def generate(req: GenerateRequest):
     }
 
 # --- Ingestion Endpoints with Background Tasks ---
-def _run_sync(path):
-    """Runs a python script and captures both stdout and stderr."""
+def _run_sync(path, args=None):
+    """Runs a python script and captures both stdout and stderr with optional args."""
     try: 
+        cmd = ["python", path]
+        if args:
+            cmd.extend(args)
         result = subprocess.run(
-            ["python", path], 
+            cmd, 
             capture_output=True, 
             text=True
         )
@@ -312,10 +315,10 @@ def _run_sync(path):
     except Exception as e: 
         return f"Error executing subprocess: {e}"
 
-async def _run_background_ingest(script_name: str):
+async def _run_background_ingest(script_name: str, args: Optional[List[str]] = None):
     """Helper to run ingestion script in thread pool then reload RAG."""
-    log.info(f"--- Started Background Ingestion: {script_name} ---")
-    output = await run_blocking(_run_sync, f"/app/{script_name}")
+    log.info(f"--- Started Background Ingestion: {script_name} (Args: {args}) ---")
+    output = await run_blocking(_run_sync, f"/app/{script_name}", args)
     
     # Log output for debugging
     log.info(f"--- {script_name} Finished ---")
@@ -338,9 +341,10 @@ async def ing_ha(bg_tasks: BackgroundTasks):
     return {"status": "accepted", "msg": "Home Assistant ingestion started in background."}
 
 @app.post("/ingest/nextcloud")
-async def ing_nc(bg_tasks: BackgroundTasks):
-    bg_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py")
-    return {"status": "accepted", "msg": "Nextcloud ingestion started in background."}
+async def ing_nc(bg_tasks: BackgroundTasks, path: Optional[str] = None):
+    args = ["--path", path] if path else []
+    bg_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py", args)
+    return {"status": "accepted", "msg": f"Nextcloud ingestion started in background{' for ' + path if path else ''}."}
 
 @app.post("/ingest/all")
 async def ing_all(bg_tasks: BackgroundTasks):
