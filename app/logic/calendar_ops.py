@@ -76,15 +76,16 @@ def _get_user_default_cal(user: str, redis_client) -> Optional[str]:
     return None
 
 def _normalize_event_time(dt_value):
-    """Converts ANY event time to naive local time for comparison."""
+    """Converts ANY event time to AWARE local time."""
     local_tz = _get_local_tz()
     
     if isinstance(dt_value, datetime):
         if dt_value.tzinfo is None:
-            return dt_value
-        return dt_value.astimezone(local_tz).replace(tzinfo=None)
+            # Assume naive times from server are UTC
+            return dt_value.replace(tzinfo=tz.tzutc()).astimezone(local_tz)
+        return dt_value.astimezone(local_tz)
     elif isinstance(dt_value, date):
-        return datetime.combine(dt_value, datetime.min.time())
+        return datetime.combine(dt_value, datetime.min.time()).replace(tzinfo=local_tz)
     return None
 
 async def extract_event_data(query: str, model: str) -> Dict[str, str]:
@@ -159,36 +160,25 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                     # Strategy 1: Search with expansion
                     events = cal.search(start=start_search, end=end_search, event=True, expand=True)
                     
-                    # Strategy 2: If empty, try direct .events() and manual filter
+                    # Strategy 2: Fallback to .events() if search report is uncooperative
                     if not events:
-                        log.debug(f"[CALENDAR] No search results for {cal_name}, falling back to .events()")
+                        log.debug(f"[CALENDAR] No search results for {cal_name}, checking all events...")
                         all_ev = cal.events()
                         events = []
-                        log.info(f"[CALENDAR] {cal_name} .events() raw count: {len(all_ev)}")
                         for ev in all_ev:
                             try:
                                 vo = ev.vobject_instance
-                                if not hasattr(vo, 'vevent'): 
-                                    log.debug(f"[CALENDAR] Skipping {cal_name} event: no vevent")
-                                    continue
+                                if not hasattr(vo, 'vevent'): continue
                                 ve = vo.vevent
                                 summary = ve.summary.value if hasattr(ve, 'summary') else "No Summary"
                                 raw_dt = ve.dtstart.value
                                 start_dt = _normalize_event_time(raw_dt)
                                 
-                                log.info(f"[CALENDAR] Found Event: '{summary}' | Raw: {raw_dt} | Norm: {start_dt}")
-                                
-                                # Filter: Recent past (-1 day) to near future (+14 days)
+                                # Filter manually: -1 day to +14 days
                                 if start_dt and (now_aware - timedelta(days=1)) <= start_dt <= (now_aware + timedelta(days=14)):
                                     events.append(ev)
-                                else:
-                                    log.debug(f"[CALENDAR] Filtered out {summary}: {start_dt} not in range")
-                            except Exception as e: 
-                                log.debug(f"[CALENDAR] Error parsing {cal_name} event: {e}")
-                                continue
-                    
-                    if events:
-                        log.info(f"[CALENDAR] Found {len(events)} events in {cal_name}")
+                                    log.info(f"[CALENDAR] Match: '{summary}' on {cal_name} at {start_dt}")
+                            except: continue
                     
                     for ev in events:
                         try:
