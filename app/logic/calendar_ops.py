@@ -156,8 +156,25 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                     continue
 
                 try:
-                    # Search with aware datetimes (caldav handles conversion)
+                    # Strategy 1: Search with expansion
                     events = cal.search(start=start_search, end=end_search, event=True, expand=True)
+                    
+                    # Strategy 2: If empty, try direct .events() and manual filter
+                    if not events:
+                        log.debug(f"[CALENDAR] No search results for {cal_name}, falling back to .events()")
+                        all_ev = cal.events()
+                        events = []
+                        for ev in all_ev:
+                            try:
+                                vo = ev.vobject_instance
+                                if not hasattr(vo, 'vevent'): continue
+                                ve = vo.vevent
+                                start_dt = _normalize_event_time(ve.dtstart.value)
+                                # Filter: Recent past (-1 day) to near future (+14 days)
+                                if start_dt and (now_aware - timedelta(days=1)) <= start_dt <= (now_aware + timedelta(days=14)):
+                                    events.append(ev)
+                            except: continue
+                    
                     if events:
                         log.info(f"[CALENDAR] Found {len(events)} events in {cal_name}")
                     
