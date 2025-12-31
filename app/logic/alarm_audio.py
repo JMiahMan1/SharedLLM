@@ -5,7 +5,7 @@ import asyncio
 import time
 from typing import Dict, List, Optional
 from app.settings import ALARM_KEYWORDS_PATH, ALARM_SOUNDS_DIR, log, run_blocking, HA_URL
-from .media_ops import execute_ha_service, get_active_media_players, get_available_media_players, get_last_entity
+from .media_ops import execute_ha_service, get_active_media_players, get_available_media_players, get_last_entity, get_entity_state
 
 class AlarmAudioManager:
     def __init__(self):
@@ -88,14 +88,20 @@ class AlarmAudioManager:
         log.info(f"Triggering Alarm '{title}' on {targets}. Sound: {sound_file} x{repeat}")
 
         for target in targets:
-            # Step 0: Stop existing media to prevent auto-resume interleaving
+            # Step 0: Check if media is currently playing & Pause
+            was_playing = False
             try:
-                await execute_ha_service(
-                    "media_player", "media_stop", target, user_creds, {}, redis_client
-                )
-                await asyncio.sleep(0.5)
+                initial_state = await get_entity_state(target, user_creds)
+                was_playing = initial_state.get("state") == "playing"
+                
+                if was_playing:
+                    log.info(f"Music is playing on {target}, pausing for alarm...")
+                    await execute_ha_service(
+                        "media_player", "media_pause", target, user_creds, {}, redis_client
+                    )
+                    await asyncio.sleep(0.5)
             except Exception as e:
-                log.warning(f"Failed to stop media on {target} before alarm: {e}")
+                log.warning(f"Failed to pause media on {target} before alarm: {e}")
 
             # Step A: TTS (Using Piper per user request)
             try:
@@ -139,5 +145,15 @@ class AlarmAudioManager:
 
             except Exception as e:
                 log.error(f"Error during alarm loop on {target}: {e}")
+            
+            # Step C: Resume music if it was playing
+            if was_playing:
+                try:
+                    log.info(f"Resuming music on {target}...")
+                    await execute_ha_service(
+                        "media_player", "media_play", target, user_creds, {}, redis_client
+                    )
+                except Exception as e:
+                    log.warning(f"Failed to resume music on {target}: {e}")
 
 audio_manager = AlarmAudioManager()
