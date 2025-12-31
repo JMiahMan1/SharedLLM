@@ -561,6 +561,21 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
         # If targeted, we don't delete anything, we just update/add the target.
         pass
 
+    # If targeted, we process ONLY the files in nc_state (which is just the target(s))
+    # BUT we must update the global TOC cache to avoid re-syncing this later.
+    if target_rel_path:
+        # Load global cache efficiently
+        global_toc = load_toc_cache()
+        if not global_toc: global_toc = {}
+        
+        # Merge our fresh targeted probe into global cache
+        for fpath, fmeta in nc_state.items():
+            global_toc[fpath] = fmeta
+            
+        # Persist the update
+        save_toc_cache(global_toc)
+        logger.info(f"Updated TOC cache with {len(nc_state)} targeted items.")
+    
     # --- RETROFIT LOGIC ---
     for path, info in nc_state.items():
         db_record = db_state.get(path)
