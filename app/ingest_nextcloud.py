@@ -493,45 +493,44 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
         logger.info(f"Targeted ingestion requested for: {target_rel_path}")
         root_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/")
         target_url = urljoin(root_url, requests.utils.quote(target_rel_path))
-        if not target_url.endswith("/") and "." not in os.path.basename(target_rel_path):
-             target_url += "/"
         
         nc_state = {}
-        # Probe the target
-        subdirs, files = scan_single_folder(target_url)
-        nc_state.update(files)
         
-        # If it's a directory, we scan its children recursively
-        if subdirs:
-             logger.info(f"Target is a directory based on prompt. Scanning subdirectories...")
-             for sub in subdirs:
-                  list_files_parallel(sub, nc_state)
-        elif not files:
-             # It might be a file that scan_single_folder didn't catch because it was checking Depth 1
-             # and the URL pointed directly to the file. Let's try to infer if it's a file.
-             cat = get_file_category(target_rel_path)
-             if cat != "unknown":
-                  logger.info(f"Target appears to be a single file: {target_rel_path}")
-                  # We need an etag. Let's do a PROPFIND Depth 0
-                  try:
-                       logger.info(f"Probing {target_url} with Depth 0...")
-                       resp = requests.request("PROPFIND", target_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), headers={"Depth": "0"}, timeout=30, verify=False)
-                       logger.info(f"Probe Status: {resp.status_code}")
-                       if resp.status_code == 207:
-                            root = ET.fromstring(resp.content)
-                            res = root.find("d:response", NAMESPACES)
-                            prop = res.find("d:propstat/d:prop", NAMESPACES) if res is not None else None
-                            if prop is not None:
-                                etag = prop.find("d:getetag", NAMESPACES).text.strip('"') if prop.find("d:getetag", NAMESPACES) is not None else "unknown"
-                                size = prop.find("d:getcontentlength", NAMESPACES).text if prop.find("d:getcontentlength", NAMESPACES) is not None else "0"
-                                nc_state[target_rel_path] = {"etag": etag, "category": cat, "size": size}
-                                logger.info(f"Probe Successful. Added {target_rel_path} to state.")
+        # 1. Try treating it as a SINGLE FILE first (Naive Probe)
+        logger.info(f"Probing {target_url} as single file (Depth 0)...")
+        try:
+             resp = requests.request("PROPFIND", target_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), headers={"Depth": "0"}, timeout=30, verify=False)
+             logger.info(f"Probe Status: {resp.status_code}")
+             
+             if resp.status_code == 207:
+                  root = ET.fromstring(resp.content)
+                  res = root.find("d:response", NAMESPACES)
+                  prop = res.find("d:propstat/d:prop", NAMESPACES) if res is not None else None
+                  
+                  is_collection = False
+                  if prop is not None:
+                       if prop.find("d:resourcetype/d:collection", NAMESPACES) is not None:
+                            is_collection = True
+                  
+                  if not is_collection:
+                       cat = get_file_category(target_rel_path)
+                       if cat != "unknown" and prop:
+                           etag = prop.find("d:getetag", NAMESPACES).text.strip('"') if prop.find("d:getetag", NAMESPACES) is not None else "unknown"
+                           size = prop.find("d:getcontentlength", NAMESPACES).text if prop.find("d:getcontentlength", NAMESPACES) is not None else "0"
+                           nc_state[target_rel_path] = {"etag": etag, "category": cat, "size": size}
+                           logger.info(f"Single file identified. Etag: {etag}, Size: {size}")
                        else:
-                            logger.warning(f"Probe failed with status {resp.status_code}")
-                  except Exception as e:
-                       logger.warning(f"Depth 0 probe failed for {target_rel_path}: {e}")
+                           logger.warning(f"File found but category '{cat}' unknown or props missing.")
+                  else:
+                       logger.info("Target is a directory (Collection). Switching to recursive scan.")
+                       if not target_url.endswith("/"): target_url += "/"
+                       list_files_parallel(target_url, nc_state)
              else:
-                  logger.warning(f"Category for {target_rel_path} is unknown. Skipping.")
+                  logger.warning(f"Probe failed {resp.status_code}. Trying recursive scan as fallback...")
+                  if not target_url.endswith("/"): target_url += "/"
+                  list_files_parallel(target_url, nc_state)
+        except Exception as e:
+             logger.error(f"Targeted probe error: {e}")
     else:
         nc_state = load_toc_cache()
         if not nc_state:
