@@ -85,7 +85,9 @@ def _normalize_event_time(dt_value):
             return dt_value.replace(tzinfo=tz.tzutc()).astimezone(local_tz)
         return dt_value.astimezone(local_tz)
     elif isinstance(dt_value, date):
-        return datetime.combine(dt_value, datetime.min.time()).replace(tzinfo=local_tz)
+        # All-day events: return as Midnight local
+        target = datetime.combine(dt_value, datetime.min.time())
+        return target.replace(tzinfo=local_tz)
     return None
 
 async def extract_event_data(query: str, model: str) -> Dict[str, str]:
@@ -141,16 +143,12 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
             client = _get_cal_client(user_creds)
             found_events = []
             calendars = client.principal().calendars()
-            log.info(f"[CALENDAR] Discovered {len(calendars)} calendars.")
             
-            # Use aware datetimes for search (from current local time - 1h to +7 days)
             local_tz = _get_local_tz()
             now_aware = datetime.now(local_tz)
             start_search = now_aware - timedelta(hours=1)
             end_search = now_aware + timedelta(days=7)
             
-            log.info(f"[CALENDAR] Searching {len(calendars)} calendars from {start_search.strftime('%Y-%m-%d %I:%M %p')}")
-
             for cal in calendars:
                 cal_name = cal.name or "Untitled"
                 if any(x in cal_name.lower() for x in ["birthday", "contact", "holiday"]):
@@ -162,7 +160,6 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                     
                     # Strategy 2: Fallback to .events() if search report is uncooperative
                     if not events:
-                        log.debug(f"[CALENDAR] No search results for {cal_name}, checking all events...")
                         all_ev = cal.events()
                         events = []
                         for ev in all_ev:
@@ -170,14 +167,10 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                                 vo = ev.vobject_instance
                                 if not hasattr(vo, 'vevent'): continue
                                 ve = vo.vevent
-                                summary = ve.summary.value if hasattr(ve, 'summary') else "No Summary"
-                                raw_dt = ve.dtstart.value
-                                start_dt = _normalize_event_time(raw_dt)
-                                
-                                # Filter manually: -1 day to +14 days
-                                if start_dt and (now_aware - timedelta(days=1)) <= start_dt <= (now_aware + timedelta(days=14)):
+                                start_dt = _normalize_event_time(ve.dtstart.value)
+                                # Filter manually: -1 day to +7 days
+                                if start_dt and (now_aware - timedelta(days=1)) <= start_dt <= (now_aware + timedelta(days=7)):
                                     events.append(ev)
-                                    log.info(f"[CALENDAR] Match: '{summary}' on {cal_name} at {start_dt}")
                             except: continue
                     
                     for ev in events:
@@ -185,22 +178,17 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                             vo = ev.vobject_instance
                             if not hasattr(vo, 'vevent'): continue
                             ve = vo.vevent
-                            
                             summary = ve.summary.value if hasattr(ve, 'summary') else "No Summary"
                             start_dt = _normalize_event_time(ve.dtstart.value)
-                            
                             if start_dt:
                                 t_str = start_dt.strftime("%Y-%m-%d %I:%M %p")
                                 found_events.append(f"- [{t_str}] {summary} ({cal_name})")
-                        except Exception as inner_e:
-                            log.debug(f"[CALENDAR] Error parsing event in {cal_name}: {inner_e}")
-                            continue
+                        except: continue
 
                 except Exception as e:
                     log.warning(f"Error reading calendar '{cal_name}': {e}")
                     pass
             
-            # Sort events by time
             found_events.sort()
             return "Upcoming Events:\n" + "\n".join(found_events) if found_events else "No events found on your calendars."
         
@@ -227,7 +215,6 @@ async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str, 
         if dt.hour < 7:
             dt = dt + timedelta(hours=12)
 
-    local_tz = _get_local_tz()
     dt_aware = dt.replace(tzinfo=local_tz) 
     dt_utc = dt_aware.astimezone(tz.tzutc())
 
@@ -271,6 +258,8 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
     local_tz = _get_local_tz()
     if target_time_str:
         target_dt = dateparser.parse(target_time_str, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now(local_tz).replace(tzinfo=None)})
+        if target_dt:
+            target_dt = target_dt.replace(tzinfo=local_tz)
         # Check if the user only gave a date (e.g. "tomorrow") without a time
         if target_dt and "at" not in target_time_str and ":" not in target_time_str:
              target_date_only = True
@@ -290,13 +279,26 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
             
             # Expanded search window to ensure we catch events
             now_aware = datetime.now(local_tz)
-            search_start = (target_dt.replace(tzinfo=local_tz) - timedelta(days=1)) if target_dt else (now_aware - timedelta(days=1))
+            search_start = (target_dt - timedelta(days=1)) if target_dt else (now_aware - timedelta(days=1))
             search_end = search_start + timedelta(days=60)
 
             for c in calendars:
                 if not _is_cal_writable(c, user_creds['user'], redis_client): continue
                 try:
+                    # Robust lookup: Combined search and .events() fallback
                     events = c.search(start=search_start, end=search_end, event=True, expand=True)
+                    if not events:
+                        all_ev = c.events()
+                        events = []
+                        for ev in all_ev:
+                             try:
+                                 ve = ev.vobject_instance.vevent
+                                 ev_start = _normalize_event_time(ve.dtstart.value)
+                                 # Fallback filter: covers the search window
+                                 if ev_start and search_start <= ev_start <= search_end:
+                                      events.append(ev)
+                             except: continue
+
                     for ev in events:
                         ve = ev.vobject_instance.vevent
                         event_summary = ve.summary.value.lower()
@@ -354,11 +356,11 @@ async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: st
     
     local_tz = _get_local_tz()
     dt = dateparser.parse(new_start, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now(local_tz).replace(tzinfo=None)})
+    if not dt: return {"status": "FAILURE", "message": f"Invalid date: {new_start}", "service": "calendar_update"}
     
     if "am" not in new_start.lower() and "pm" not in new_start.lower() and dt.hour < 7:
         dt = dt + timedelta(hours=12)
 
-    local_tz = _get_local_tz()
     dt_aware = dt.replace(tzinfo=local_tz)
     dt_utc = dt_aware.astimezone(tz.tzutc())
 
@@ -376,7 +378,18 @@ async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: st
             for c in calendars:
                 if not _is_cal_writable(c, user_creds['user'], redis_client): continue
                 try:
-                    events = c.search(start=start_search, end=end_search, event=True, expand=True)
+                    events = c.search(start=now_aware - timedelta(days=1), end=now_aware + timedelta(days=60), event=True, expand=True)
+                    if not events:
+                        all_ev = c.events()
+                        events = []
+                        for ev in all_ev:
+                             try:
+                                 ve = ev.vobject_instance.vevent
+                                 ev_start = _normalize_event_time(ve.dtstart.value)
+                                 if ev_start and (now_aware - timedelta(days=1)) <= ev_start <= (now_aware + timedelta(days=60)):
+                                      events.append(ev)
+                             except: continue
+
                     for ev in events:
                         ve = ev.vobject_instance.vevent
                         summary_lower = ve.summary.value.lower()
