@@ -363,6 +363,14 @@ async def _handle_single_command(
                 "tool_name": "media_command",
                 "parameters": {"intent": intent, "device_name": query, "media": query}
              }
+        elif intent in ["set_brightness", "dim", "brighten", "set_color"]:
+            log.info(f"[FAST PATH] Matched lighting intent: {intent}")
+            action_plan = {
+                "action": "tool_call",
+                "tool_name": intent,  # Route to the registered handler
+                "parameters": {}
+            }
+            log.info(f"[FAST PATH] action_plan set: {action_plan}")
         
         if action_plan:
             log.info(f"[FAST ORCHESTRA] Bypassing LLM for {intent}")
