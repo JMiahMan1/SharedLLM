@@ -137,13 +137,18 @@ async def _create_timer_entry(
     sound_display = sound_settings.get("sound", "default_alarm.wav")
     
     # Resolve Target Display
+    # Resolve Target Display
     target_display = "Follow Me"
     if target_device:
         # Explicit target (e.g. "Office TV")
         target_display = target_device_name or target_device.split(".")[-1].replace("_", " ").title()
-    elif origin_device and origin_device.startswith("media_player."):
-        # Implicit origin
+    elif origin_device:
+        # Implicit origin (Last active device or Source)
+        # We want to show the user WHERE it will ring, even if implied
         target_display = origin_device.split(".")[-1].replace("_", " ").title()
+        if "media_player" not in origin_device:
+             # Add a hint if it's not a media player (might just be a trigger source)
+             target_display += " (Source)"
         
     timer_obj = {
         "id": str(uuid.uuid4()),
