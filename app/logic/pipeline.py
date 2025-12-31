@@ -348,12 +348,12 @@ async def _handle_single_command(
                 "parameters": params
             }
             log.info(f"[FAST PATH] action_plan set: {action_plan}")
-        elif intent in ["pause_media", "media_play"]:
+        elif intent in ["pause_media", "media_play", "timer_pause", "timer_resume", "timer_delete"]:
             # Special handling for pause/resume - call dedicated handlers
-            log.info(f"[FAST PATH] Matched pause/resume intent: {intent}")
+            log.info(f"[FAST PATH] Matched control intent: {intent}")
             action_plan = {
                 "action": "tool_call",
-                "tool_name": intent,  # Call pause_media or media_play handler directly
+                "tool_name": intent,  # Call handler by intent name directly
                 "parameters": {}
             }
             log.info(f"[FAST PATH] action_plan set: {action_plan}")
