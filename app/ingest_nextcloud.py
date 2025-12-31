@@ -409,29 +409,69 @@ def get_db_state(vectordb) -> Dict[str, Dict]:
         return state
     except: return {}
 
-def sync_nextcloud_files():
+def sync_nextcloud_files(target_rel_path: Optional[str] = None):
     if not os.path.exists(INGESTION_TEMP_DIR): os.makedirs(INGESTION_TEMP_DIR)
     
-    logger.info(f"--- Starting Parallel Nextcloud Ingestion (Smart & Optimized) ---")
+    logger.info(f"--- Starting Nextcloud Ingestion (Target: {target_rel_path or 'Entire Library'}) ---")
     
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vectordb = Chroma(collection_name="nextcloud_docs", embedding_function=embeddings, persist_directory=CHROMA_DIR)
 
     db_state = get_db_state(vectordb)
-    nc_state = load_toc_cache()
     
-    if not nc_state:
-        nc_state = {}
+    # If a specific path is provided, we skip the full scan and just probe that item
+    if target_rel_path:
+        logger.info(f"Targeted ingestion requested for: {target_rel_path}")
         root_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/")
-        list_files_parallel(root_url, nc_state)
-        save_toc_cache(nc_state)
+        target_url = urljoin(root_url, requests.utils.quote(target_rel_path))
+        if not target_url.endswith("/") and "." not in os.path.basename(target_rel_path):
+             target_url += "/"
+        
+        nc_state = {}
+        # Probe the target
+        subdirs, files = scan_single_folder(target_url)
+        nc_state.update(files)
+        
+        # If it's a directory, we scan its children recursively
+        if subdirs:
+             logger.info(f"Target is a directory based on prompt. Scanning subdirectories...")
+             for sub in subdirs:
+                  list_files_parallel(sub, nc_state)
+        elif not files:
+             # It might be a file that scan_single_folder didn't catch because it was checking Depth 1
+             # and the URL pointed directly to the file. Let's try to infer if it's a file.
+             cat = get_file_category(target_rel_path)
+             if cat != "unknown":
+                  logger.info(f"Target appears to be a single file: {target_rel_path}")
+                  # We need an etag. Let's do a PROPFIND Depth 0
+                  try:
+                       resp = requests.request("PROPFIND", target_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), headers={"Depth": "0"}, timeout=30, verify=False)
+                       if resp.status_code == 207:
+                            root = ET.fromstring(resp.content)
+                            prop = root.find(".//d:prop", NAMESPACES)
+                            etag = prop.find("d:getetag", NAMESPACES).text.strip('"') if prop.find("d:getetag", NAMESPACES) is not None else "unknown"
+                            size = prop.find("d:getcontentlength", NAMESPACES).text if prop.find("d:getcontentlength", NAMESPACES) is not None else "0"
+                            nc_state[target_rel_path] = {"etag": etag, "category": cat, "size": size}
+                  except: pass
+    else:
+        nc_state = load_toc_cache()
+        if not nc_state:
+            nc_state = {}
+            root_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/")
+            list_files_parallel(root_url, nc_state)
+            save_toc_cache(nc_state)
     
     to_ingest = []
-    files_to_remove = [path for path in db_state if path not in nc_state]
-    if files_to_remove:
-        for path in files_to_remove:
-            try: vectordb._collection.delete(where={"source": path})
-            except: pass
+    # ONLY remove files if we did a full scan (nc_state is the whole library)
+    if not target_rel_path:
+        files_to_remove = [path for path in db_state if path not in nc_state]
+        if files_to_remove:
+            for path in files_to_remove:
+                try: vectordb._collection.delete(where={"source": path})
+                except: pass
+    else:
+        # If targeted, we don't delete anything, we just update/add the target.
+        pass
 
     # --- RETROFIT LOGIC ---
     for path, info in nc_state.items():
@@ -584,4 +624,9 @@ def sync_nextcloud_files():
     logger.info(f"Sync finished.")
 
 if __name__ == "__main__":
-    sync_nextcloud_files()
+    import argparse
+    parser = argparse.ArgumentParser(description="NextCloud Ingestion Service")
+    parser.add_argument("--path", type=str, help="Specific file or folder path to ingest (relative to user root)")
+    args = parser.parse_args()
+    
+    sync_nextcloud_files(target_rel_path=args.path)
