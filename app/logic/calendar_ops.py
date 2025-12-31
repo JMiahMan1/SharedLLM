@@ -142,11 +142,11 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
             calendars = client.principal().calendars()
             log.info(f"[CALENDAR] Discovered {len(calendars)} calendars.")
             
-            # Use aware UTC datetimes for search window
+            # Use naive UTC datetimes for widest compatibility (server usually assumes UTC if naive)
             now_utc = datetime.now(tz.tzutc())
-            start_search = now_utc - timedelta(hours=1)
-            end_search = now_utc + timedelta(days=7)
-            log.info(f"[CALENDAR] Searching from {start_search} to {end_search} (UTC)")
+            start_search = (now_utc - timedelta(hours=1)).replace(tzinfo=None)
+            end_search = (now_utc + timedelta(days=7)).replace(tzinfo=None)
+            log.info(f"[CALENDAR] Searching from {start_search} to {end_search} (Naive UTC)")
 
             for cal in calendars:
                 cal_name = cal.name or "Untitled"
@@ -157,9 +157,16 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                 
                 try:
                     log.debug(f"[CALENDAR] Searching calendar: {cal_name} ({cal.url})")
-                    # Search with aware UTC datetimes
+                    # Try search with expansion
                     events = cal.search(start=start_search, end=end_search, event=True, expand=True)
-                    log.info(f"[CALENDAR] Found {len(events)} events in {cal_name}")
+                    
+                    # If empty, try without expansion
+                    if not events:
+                         events = cal.search(start=start_search, end=end_search, event=True, expand=False)
+                         if events: log.info(f"[CALENDAR] Found {len(events)} events in {cal_name} WITHOUT expansion")
+                    else:
+                         log.info(f"[CALENDAR] Found {len(events)} events in {cal_name} WITH expansion")
+                    
                     for ev in events:
                         ve = ev.vobject_instance.vevent
                         # Normalize time to local for display
