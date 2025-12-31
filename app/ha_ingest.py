@@ -94,7 +94,8 @@ def fetch_ha_data(ha_url: str = None, ha_token: str = None) -> Tuple[List[Dict[s
               "model": {{ (device_attr(did, 'model') or 'unknown') | to_json }},
               "name": {{ (device_attr(did, 'name') or 'unknown') | to_json }},
               "area_id": {{ (area_id(did) or '') | to_json }},
-              "area_name": {{ (area_name(did) or '') | to_json }}
+              "area_name": {{ (area_name(did) or '') | to_json }},
+              "identifiers": {{ device_attr(did, 'identifiers') | list | to_json }}
             }{{ "," if not loop.last else "" }}
             {% endfor %}
           ]
@@ -152,13 +153,26 @@ def get_device_info(entity_id: str, device_registry: Dict[str, Any], entity_regi
         if not area_id:
             area_id = device.get("area_id")
             
-        integration = (device.get("manufacturer", "") + " " + device.get("model", "")).strip()
-        device_name = device.get("name_by_user") or device.get("name") or ""
-        
-        if platform and "integration" not in integration.lower():
-            integration = platform
+        # Identifier-based Tell: The first element of the first identifier usually matches the integration domain
+        idents = device.get("identifiers", [])
+        ident_tell = ""
+        if idents and isinstance(idents[0], (list, tuple)) and len(idents[0]) > 0:
+             ident_tell = idents[0][0]
 
-    if not integration.strip():
+        manufacturer = device.get("manufacturer", "")
+        model = device.get("model", "")
+        
+        # Priority: 1. Identifiers tell, 2. platform from registry, 3. manufacturer/model combo
+        if ident_tell and ident_tell != "unknown":
+             integration = ident_tell
+        elif platform and platform != "unknown":
+             integration = platform
+        else:
+             integration = (manufacturer + " " + model).strip()
+             
+        device_name = device.get("name_by_user") or device.get("name") or ""
+
+    if not integration.strip() or integration == "unknown":
         integration = platform
         
     area_name = area_registry.get(area_id, "") if area_id else ""
@@ -223,7 +237,7 @@ def ingest_ha_metadata(ha_url: str = None, ha_token: str = None):
                 last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
                 if last_updated < cutoff_time:
                     stale_count += 1
-                    # continue  <-- DISABLED Stale filtering to ensure we get ALL devices
+                    continue
             except Exception:
                 pass
 
@@ -252,25 +266,18 @@ def ingest_ha_metadata(ha_url: str = None, ha_token: str = None):
         platform = registry_entry.get("platform", "unknown")
         device_id = registry_entry.get("device_id")
         
-        # --- MUSIC ASSISTANT SELF-CORRECTION ---
-        # If integration is unknown but it has MA attributes, force it.
+        # --- INTEGRATION SPECIFIC ENHANCEMENTS ---
         if "music_assistant" not in integration.lower() and (
-            "mass_player_type" in attributes or "active_queue" in attributes
+            "mass_player_type" in attributes or "active_queue" in attributes or "mass_player_id" in attributes
         ):
             integration = "music_assistant"
         
-        # --- ROKU SELF-CORRECTION ---
-        # Detect Roku devices via HA's platform or Roku-specific attributes
-        # Don't use manufacturer alone (TCL makes both Roku and Android TVs)
-        if "music_assistant" not in integration.lower():
-            # Check if HA already detected it as Roku
-            if platform and "roku" in platform.lower():
-                integration = "roku"
-            else:
-                # Check for Roku-specific attributes (app_id, app_name are Roku ECP attributes)
-                model = device_registry.get(device_id, {}).get("model", "") if device_id else ""
-                if "roku" in model.lower() or ("app_id" in attributes and "app_name" in attributes):
-                    integration = "roku"
+        if integration in ["unknown", "androidtv_remote", "cast"]:
+             # Refine generic or internal names
+             if "com.google.android" in str(attributes.get("app_id", "")) or "cast" in str(attributes.get("app_id", "")):
+                  integration = "chromecast"
+             elif "androidtv" in integration:
+                  integration = "android_tv"
 
 
         # Build Friendly Name
