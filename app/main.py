@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Fixed imports with Fallback
@@ -90,6 +91,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# Mount Static Files for Simple Web UI
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Register Routers
 app.include_router(music_assistant.router)
