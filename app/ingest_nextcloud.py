@@ -23,6 +23,12 @@ try:
     import html2text
     import openpyxl
     import pandas as pd
+    import mutagen
+    from mutagen.id3 import ID3
+    from mutagen.mp3 import MP3
+    from mutagen.flac import FLAC
+    from mutagen.mp4 import MP4
+    from mutagen.oggvorbis import OggVorbis
 except ImportError as e:
     print(f"ERROR: Missing required ingestion library: {e}")
     sys.exit(1)
@@ -155,6 +161,60 @@ def extract_spreadsheet_schema(file_path: str, filename: str) -> str:
     except Exception as e:
         logger.warning(f"Failed to extract schema for {filename}: {e}")
         return f"DATA FILE: {filename}. Could not parse structure automatically."
+
+# ----------------------
+# Multimedia Metadata Extraction (NEW)
+# ----------------------
+
+def extract_media_metadata(file_path: str) -> Dict[str, Any]:
+    """Extracts technical and tag metadata from audio/video files using mutagen."""
+    meta = {
+        "title": None, "artist": None, "album": None, "year": None, "genre": None,
+        "duration": 0, "bitrate": 0, "sample_rate": 0, "encoding": "unknown"
+    }
+    ext = os.path.splitext(file_path)[1].lower()
+    
+    try:
+        audio = mutagen.File(file_path)
+        if audio is None: return meta
+        
+        # Technical Stats
+        if hasattr(audio, 'info'):
+            meta["duration"] = getattr(audio.info, 'length', 0)
+            meta["bitrate"] = getattr(audio.info, 'bitrate', 0)
+            meta["sample_rate"] = getattr(audio.info, 'sample_rate', 0)
+            
+            # Simple encoding detection
+            if ext == ".mp3": meta["encoding"] = "mp3"
+            elif ext == ".flac": meta["encoding"] = "flac"
+            elif ext == ".ogg": meta["encoding"] = "ogg"
+            elif ext in [".m4a", ".mp4"]: meta["encoding"] = "aac/mp4"
+            else: meta["encoding"] = type(audio.info).__name__
+
+        # ID3 / Tags
+        # Mutagen abstracts most tags into a dictionary-like interface
+        tags = audio.tags
+        if tags:
+            # Common tag keys across formats (Mutagen attempts normalization)
+            if ext == ".mp3":
+                # MP3 uses ID3
+                meta["title"] = str(tags.get('TIT2', ''))
+                meta["artist"] = str(tags.get('TPE1', ''))
+                meta["album"] = str(tags.get('TALB', ''))
+                meta["year"] = str(tags.get('TDRC', tags.get('TYER', '')))
+                meta["genre"] = str(tags.get('TCON', ''))
+            else:
+                # Vorbis/FLAC/MP4 use names
+                meta["title"] = str(tags.get('title', [''])[0])
+                meta["artist"] = str(tags.get('artist', [''])[0])
+                meta["album"] = str(tags.get('album', [''])[0])
+                meta["year"] = str(tags.get('date', [''])[0])
+                meta["genre"] = str(tags.get('genre', [''])[0])
+
+    except Exception as e:
+        logger.warning(f"Metadata extraction failed for {file_path}: {e}")
+        
+    return {k: v for k, v in meta.items() if v} # Remove empty values
 
 # ----------------------
 # Text & Book Extraction (UPDATED)
@@ -448,11 +508,14 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
                        resp = requests.request("PROPFIND", target_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), headers={"Depth": "0"}, timeout=30, verify=False)
                        if resp.status_code == 207:
                             root = ET.fromstring(resp.content)
-                            prop = root.find(".//d:prop", NAMESPACES)
-                            etag = prop.find("d:getetag", NAMESPACES).text.strip('"') if prop.find("d:getetag", NAMESPACES) is not None else "unknown"
-                            size = prop.find("d:getcontentlength", NAMESPACES).text if prop.find("d:getcontentlength", NAMESPACES) is not None else "0"
-                            nc_state[target_rel_path] = {"etag": etag, "category": cat, "size": size}
-                  except: pass
+                            res = root.find("d:response", NAMESPACES)
+                            prop = res.find("d:propstat/d:prop", NAMESPACES) if res is not None else None
+                            if prop is not None:
+                                etag = prop.find("d:getetag", NAMESPACES).text.strip('"') if prop.find("d:getetag", NAMESPACES) is not None else "unknown"
+                                size = prop.find("d:getcontentlength", NAMESPACES).text if prop.find("d:getcontentlength", NAMESPACES) is not None else "0"
+                                nc_state[target_rel_path] = {"etag": etag, "category": cat, "size": size}
+                  except Exception as e:
+                       logger.warning(f"Depth 0 probe failed for {target_rel_path}: {e}")
     else:
         nc_state = load_toc_cache()
         if not nc_state:
@@ -544,14 +607,49 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
 
         # --- ROUTE 2: MEDIA ---
         if category == "media":
+            logger.info(f"Processing MEDIA Metadata: {fname}")
+            temp_path = os.path.join(INGESTION_TEMP_DIR, f"{doc_id_base}_{fname}")
+            encoded_path = requests.utils.quote(rel_path)
+            file_url = urljoin(NEXTCLOUD_URL, f"/remote.php/dav/files/{NEXTCLOUD_USER}/{encoded_path}")
+            
             try:
+                # Download small chunk for metadata if possible, but mutagen often needs the whole file for ID3/info
+                # We'll download the file like books/spreadsheets.
+                with requests.get(file_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), stream=True, verify=False, timeout=600) as r:
+                    r.raise_for_status()
+                    with open(temp_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+                
+                media_meta = extract_media_metadata(temp_path)
+                
+                # Build a rich descriptive string for the page_content
+                desc_parts = [f"Media File: {fname}", f"Path: {rel_path}"]
+                if media_meta.get("title"): desc_parts.append(f"Title: {media_meta['title']}")
+                if media_meta.get("artist"): desc_parts.append(f"Artist: {media_meta['artist']}")
+                if media_meta.get("album"): desc_parts.append(f"Album: {media_meta['album']}")
+                
+                tech_details = []
+                if media_meta.get("encoding"): tech_details.append(f"Encoding: {media_meta['encoding']}")
+                if media_meta.get("bitrate"): tech_details.append(f"Bitrate: {int(media_meta['bitrate']/1000)}kbps")
+                if media_meta.get("duration"): 
+                    m, s = divmod(int(media_meta['duration']), 60)
+                    tech_details.append(f"Duration: {m}:{s:02d}")
+                
+                if tech_details:
+                    desc_parts.append(f"Technical: {', '.join(tech_details)}")
+                
+                desc_parts.append(f"Size: {size} bytes")
+                
                 meta_doc = Document(
-                    page_content=f"Media File: {fname}\nPath: {rel_path}\nSize: {size} bytes",
-                    metadata={**common_metadata, "type": "media", "category": "audio_video", "chunk": 0}
+                    page_content="\n".join(desc_parts),
+                    metadata={**common_metadata, **media_meta, "type": "media", "category": "audio_video", "chunk": 0}
                 )
                 vectordb.add_documents([meta_doc])
                 processed_count += 1
-            except Exception: pass
+            except Exception as e:
+                logger.error(f"Error processing media {fname}: {e}")
+            finally:
+                if os.path.exists(temp_path): os.remove(temp_path)
             continue
 
         # --- ROUTE 3: TEXT & BOOKS (UPDATED) ---
