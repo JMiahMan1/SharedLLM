@@ -230,6 +230,9 @@ def ingest_ha_metadata(ha_url: str = None, ha_token: str = None):
     skipped_count = 0
     stale_count = 0
     
+    # Create a lookup dict for easy entity access
+    states_dict = {s['entity_id']: s for s in states}
+    
     # Cutoff for 'Active' Devices (30 Days)
     cutoff_time = datetime.now(timezone.utc) - timedelta(days=30)
     logger.info(f"Checking for entites older than: {cutoff_time.isoformat()}")
