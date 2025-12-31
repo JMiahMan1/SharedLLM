@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SharedLLM Timer Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.7);
+            --accent-color: #00d2ff;
+            --accent-gradient: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            --alarm-color: #ff512f;
+            --alarm-gradient: linear-gradient(90deg, #dd2476, #ff512f);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        h1 {
+            font-weight: 300;
+            margin-bottom: 2rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        #timer-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .timer-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .timer-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        .timer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .timer-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .timer-type {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            padding: 0.25rem 0.75rem;
+            border-radius: 50px;
+            font-weight: 600;
+        }
+
+        .type-timer {
+            background: rgba(0, 210, 255, 0.2);
+            color: #00d2ff;
+        }
+
+        .type-alarm {
+            background: rgba(255, 81, 47, 0.2);
+            color: #ff512f;
+        }
+
+        .timer-display {
+            font-size: 3.5rem;
+            font-weight: 300;
+            text-align: center;
+            margin: 1.5rem 0;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -2px;
+        }
+
+        .timer-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .progress-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 4px;
+            background: var(--accent-gradient);
+            width: 100%;
+            transform-origin: left;
+            transition: transform 1s linear;
+        }
+
+        .paused .timer-display {
+            opacity: 0.5;
+            animation: pulse 2s infinite;
+        }
+        
+        .paused .progress-bar {
+            background: #ffa751; /* Orange for pause */
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 0.8; }
+            100% { opacity: 0.5; }
+        }
+
+        /* Empty State */
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 4rem;
+            color: var(--text-secondary);
+            font-size: 1.2rem;
+            background: var(--card-bg);
+            border-radius: 20px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>Active Timers</h1>
+
+    <div id="timer-container">
+        <!-- Timers will be injected here -->
+        <div class="empty-state">Loading timers...</div>
+    </div>
+
+    <script>
+        const API_URL = '/api/timer/list';
+        const container = document.getElementById('timer-container');
+
+        async function fetchTimers() {
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const timers = await response.json();
+                renderTimers(timers);
+            } catch (error) {
+                console.error('Error fetching timers:', error);
+                container.innerHTML = `<div class="empty-state">Unable to load timers. API Offline?</div>`;
+            }
+        }
+
+        function formatDuration(totalSeconds) {
+            if (totalSeconds < 0) return "Expired";
+            
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = Math.floor(totalSeconds % 60);
+
+            const pad = (n) => n.toString().padStart(2, '0');
+            
+            if (hours > 0) {
+                return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+            }
+            return `${pad(minutes)}:${pad(seconds)}`;
+        }
+
+        function renderTimers(timers) {
+            if (timers.length === 0) {
+                container.innerHTML = `<div class="empty-state">No active timers</div>`;
+                return;
+            }
+
+            container.innerHTML = timers.map(timer => {
+                const isPaused = timer.active === false;
+                let remaining = 0;
+                let originalTotal = 600; // Default fallback for progress bar
+                let progress = 100;
+
+                if (isPaused) {
+                    remaining = timer.remaining_seconds || 0;
+                } else {
+                    const expiresAt = new Date(timer.expires_at);
+                    if (timer.expires_at.includes("Z")) {
+                         // Already UTC iso? Python might output local iso without Z.
+                         // timer_ops outputs isoformat(). Date() parses it in local time usually.
+                    }
+                    remaining = (expiresAt - new Date()) / 1000;
+                    
+                    // Estimate total duration for progress bar (rough, since we don't store start_time)
+                    // We can default progress to full width for now or calc if we added start_time
+                    progress = 100; 
+                }
+
+                // If expired and not recurrence, maybe don't show? Or show as "Ringing"?
+                if (remaining < -5) return ''; // Hide old expired ones
+
+                const displayTime = formatDuration(Math.max(0, remaining));
+                const typeLabel = timer.type === 'alarm' ? 'Alarm' : 'Timer';
+                const typeClass = timer.type === 'alarm' ? 'type-alarm' : 'type-timer';
+                const pauseClass = isPaused ? 'paused' : '';
+                
+                // Recurrence text
+                const subText = timer.recurrence ? `Repeats: ${timer.recurrence}` : (timer.target_device ? `Target: ${timer.target_device}` : '');
+
+                return `
+                    <div class="timer-card ${pauseClass}">
+                        <div class="timer-header">
+                            <span class="timer-title">${timer.title}</span>
+                            <span class="timer-type ${typeClass}">${typeLabel}</span>
+                        </div>
+                        <div class="timer-display">${displayTime}</div>
+                        <div class="timer-meta">
+                            ${subText ? `<div class="meta-row"><span>${subText}</span></div>` : ''}
+                            <div class="meta-row"><span>ID: ${timer.id.substring(0, 8)}...</span></div>
+                        </div>
+                        ${!isPaused ? `<div class="progress-bar" style="transform: scaleX(1)"></div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Poll every 1 second
+        fetchTimers();
+        setInterval(fetchTimers, 1000);
+
+    </script>
+</body>
+</html>
