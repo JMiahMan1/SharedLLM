@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -42,6 +43,7 @@
             letter-spacing: 2px;
             background: var(--accent-gradient);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
@@ -138,15 +140,24 @@
             opacity: 0.5;
             animation: pulse 2s infinite;
         }
-        
+
         .paused .progress-bar {
-            background: #ffa751; /* Orange for pause */
+            background: #ffa751;
+            /* Orange for pause */
         }
 
         @keyframes pulse {
-            0% { opacity: 0.5; }
-            50% { opacity: 0.8; }
-            100% { opacity: 0.5; }
+            0% {
+                opacity: 0.5;
+            }
+
+            50% {
+                opacity: 0.8;
+            }
+
+            100% {
+                opacity: 0.5;
+            }
         }
 
         /* Empty State */
@@ -159,9 +170,9 @@
             background: var(--card-bg);
             border-radius: 20px;
         }
-
     </style>
 </head>
+
 <body>
 
     <h1>Active Timers</h1>
@@ -189,13 +200,13 @@
 
         function formatDuration(totalSeconds) {
             if (totalSeconds < 0) return "Expired";
-            
+
             const hours = Math.floor(totalSeconds / 3600);
             const minutes = Math.floor((totalSeconds % 3600) / 60);
             const seconds = Math.floor(totalSeconds % 60);
 
             const pad = (n) => n.toString().padStart(2, '0');
-            
+
             if (hours > 0) {
                 return `${hours}:${pad(minutes)}:${pad(seconds)}`;
             }
@@ -219,14 +230,14 @@
                 } else {
                     const expiresAt = new Date(timer.expires_at);
                     if (timer.expires_at.includes("Z")) {
-                         // Already UTC iso? Python might output local iso without Z.
-                         // timer_ops outputs isoformat(). Date() parses it in local time usually.
+                        // Already UTC iso? Python might output local iso without Z.
+                        // timer_ops outputs isoformat(). Date() parses it in local time usually.
                     }
                     remaining = (expiresAt - new Date()) / 1000;
-                    
+
                     // Estimate total duration for progress bar (rough, since we don't store start_time)
                     // We can default progress to full width for now or calc if we added start_time
-                    progress = 100; 
+                    progress = 100;
                 }
 
                 // If expired and not recurrence, maybe don't show? Or show as "Ringing"?
@@ -236,9 +247,14 @@
                 const typeLabel = timer.type === 'alarm' ? 'Alarm' : 'Timer';
                 const typeClass = timer.type === 'alarm' ? 'type-alarm' : 'type-timer';
                 const pauseClass = isPaused ? 'paused' : '';
-                
-                // Recurrence text
-                const subText = timer.recurrence ? `Repeats: ${timer.recurrence}` : (timer.target_device ? `Target: ${timer.target_device}` : '');
+
+                // Metadata Rows
+                const rows = [];
+                if (timer.recurrence) rows.push(`Repeats: ${timer.recurrence}`);
+                if (timer.target_display) rows.push(`📺 ${timer.target_display}`);
+                if (timer.sound_display) rows.push(`🔊 ${timer.sound_display.replace(".wav", "")}`);
+
+                const metaHtml = rows.map(r => `<div class="meta-row"><span>${r}</span></div>`).join('');
 
                 return `
                     <div class="timer-card ${pauseClass}">
@@ -248,8 +264,8 @@
                         </div>
                         <div class="timer-display">${displayTime}</div>
                         <div class="timer-meta">
-                            ${subText ? `<div class="meta-row"><span>${subText}</span></div>` : ''}
-                            <div class="meta-row"><span>ID: ${timer.id.substring(0, 8)}...</span></div>
+                            ${metaHtml}
+                            <div class="meta-row"><span style="font-size: 0.7em; opacity: 0.5;">ID: ${timer.id.substring(0, 8)}</span></div>
                         </div>
                         ${!isPaused ? `<div class="progress-bar" style="transform: scaleX(1)"></div>` : ''}
                     </div>
@@ -263,4 +279,5 @@
 
     </script>
 </body>
+
 </html>

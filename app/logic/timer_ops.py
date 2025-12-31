@@ -132,6 +132,19 @@ async def _create_timer_entry(
     if expires_at.tzinfo is not None:
         expires_at = expires_at.replace(tzinfo=None)
 
+    # Resolve Metadata for UI Display
+    sound_settings = audio_manager.get_sound_settings(title)
+    sound_display = sound_settings.get("sound", "default_alarm.wav")
+    
+    # Resolve Target Display
+    target_display = "Follow Me"
+    if target_device:
+        # Explicit target (e.g. "Office TV")
+        target_display = target_device_name or target_device.split(".")[-1].replace("_", " ").title()
+    elif origin_device and origin_device.startswith("media_player."):
+        # Implicit origin
+        target_display = origin_device.split(".")[-1].replace("_", " ").title()
+        
     timer_obj = {
         "id": str(uuid.uuid4()),
         "type": "alarm" if is_alarm else "timer",
@@ -141,7 +154,10 @@ async def _create_timer_entry(
         "origin_device": origin_device,
         "target_device": target_device,
         "active": True,
-        "recurrence": recurrence
+        "recurrence": recurrence,
+        # Metadata for UI
+        "target_display": target_display,
+        "sound_display": sound_display
     }
 
     saved_id = await storage.add_timer(timer_obj, redis_client)
@@ -285,16 +301,16 @@ async def _extract_target_device(query: str, ha_collection):
             
     if target_device_name and ha_collection:
         # Try 'play_media' first (covers TVs/Speakers)
-        tid, _ = await smart_resolve_entity(target_device_name, "play_media", ha_collection)
-        if tid:
-            target_device = tid
+        resolved = await smart_resolve_entity(target_device_name, "play_media", ha_collection)
+        if resolved and resolved[0]:
+            target_device = resolved[0]
             log.info(f"Timer Extraction: Resolved '{target_device_name}' -> {target_device}")
         else:
             # Fallback: Try generic 'turn_on' if media resolve fails (e.g. for switches/lights used as alarms)
             log.info(f"Timer Extraction: No media device found for '{target_device_name}', trying generic resolution.")
-            tid, _ = await smart_resolve_entity(target_device_name, "turn_on", ha_collection)
-            if tid:
-                target_device = tid
+            resolved = await smart_resolve_entity(target_device_name, "turn_on", ha_collection)
+            if resolved and resolved[0]:
+                target_device = resolved[0]
                 log.info(f"Timer Extraction: Resolved generic '{target_device_name}' -> {target_device}")
 
     return target_device, target_device_name
