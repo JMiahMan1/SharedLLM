@@ -142,6 +142,14 @@ class AlarmAudioManager:
                         break 
 
                     await asyncio.sleep(3)
+                    
+                    # Keep music paused between beeps to prevent auto-resume
+                    if was_playing and i < repeat - 1:  # Don't pause after last beep
+                        try:
+                            await execute_ha_service(
+                                "media_player", "media_pause", target, user_creds, {}, redis_client
+                            )
+                        except: pass
 
             except Exception as e:
                 log.error(f"Error during alarm loop on {target}: {e}")
