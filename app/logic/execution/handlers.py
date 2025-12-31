@@ -285,15 +285,18 @@ async def handle_turn_off(query: str, user_creds: dict, params: dict = None, **k
 @ActionDispatcher.register("set_color")
 async def handle_set_color(query: str, user_creds: dict, params: dict = None, **kwargs):
     """Route color commands to lighting domain"""
-    from app.domains.lighting.commands import handle_light_command
-    from app.logic.match_entity import match_entity_fuzzy
+    from app.logic.light_ops import handle_light_command
+    from app.logic.media_ops import smart_resolve_entity
     
     # Extract entity from query
     entity_id = params.get("entity_id") if params else None
     if not entity_id:
-        matched = await match_entity_fuzzy(query, user_creds, GlobalResources.ha_collection)
-        if matched:
-            entity_id = matched.get("entity_id")
+        # Use smart_resolve_entity which supports lighting domain
+        resolved = await smart_resolve_entity(query, "set_color", GlobalResources.ha_collection)
+        if resolved and isinstance(resolved, tuple) and len(resolved) >= 1:
+            entity_id = resolved[0]
+        elif resolved and isinstance(resolved, list) and len(resolved) > 0:
+            entity_id = resolved[0][0]
     
     if not entity_id:
         return [{"status": "FAILURE", "message": "Could not identify which light to control.", "service": "set_color"}]
@@ -303,6 +306,7 @@ async def handle_set_color(query: str, user_creds: dict, params: dict = None, **
     if domain == "light":
         return await handle_light_command("set_color", query, entity_id, user_creds, GlobalResources.redis_client)
     else:
+        # Some media players support colors (Ambilight, etc.)
         return await handle_media_command("set_color", query, entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
 
 @ActionDispatcher.register("set_brightness")
@@ -310,17 +314,19 @@ async def handle_set_color(query: str, user_creds: dict, params: dict = None, **
 @ActionDispatcher.register("brighten")
 async def handle_brightness(query: str, user_creds: dict, params: dict = None, **kwargs):
     """Route brightness commands to lighting domain"""
-    from app.domains.lighting.commands import handle_light_command
-    from app.logic.match_entity import match_entity_fuzzy
+    from app.logic.light_ops import handle_light_command
+    from app.logic.media_ops import smart_resolve_entity
     
     intent = params.get("intent") if params and "intent" in params else "set_brightness"
     
     # Extract entity from query
     entity_id = params.get("entity_id") if params else None
     if not entity_id:
-        matched = await match_entity_fuzzy(query, user_creds, GlobalResources.ha_collection)
-        if matched:
-            entity_id = matched.get("entity_id")
+        resolved = await smart_resolve_entity(query, intent, GlobalResources.ha_collection)
+        if resolved and isinstance(resolved, tuple) and len(resolved) >= 1:
+            entity_id = resolved[0]
+        elif resolved and isinstance(resolved, list) and len(resolved) > 0:
+            entity_id = resolved[0][0]
     
     if not entity_id:
         return [{"status": "FAILURE", "message": "Could not identify which light to control.", "service": intent}]
