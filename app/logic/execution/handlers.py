@@ -284,33 +284,53 @@ async def handle_turn_off(query: str, user_creds: dict, params: dict = None, **k
 
 @ActionDispatcher.register("set_color")
 async def handle_set_color(query: str, user_creds: dict, params: dict = None, **kwargs):
-    return await handle_media_command(
-        "set_color",
-        query,
-        None,
-        user_creds,
-        GlobalResources.ha_collection,
-        GlobalResources.redis_client,
-    )
+    """Route color commands to lighting domain"""
+    from app.domains.lighting.commands import handle_light_command
+    from app.logic.match_entity import match_entity_fuzzy
+    
+    # Extract entity from query
+    entity_id = params.get("entity_id") if params else None
+    if not entity_id:
+        matched = await match_entity_fuzzy(query, user_creds, GlobalResources.ha_collection)
+        if matched:
+            entity_id = matched.get("entity_id")
+    
+    if not entity_id:
+        return [{"status": "FAILURE", "message": "Could not identify which light to control.", "service": "set_color"}]
+    
+    # Route to lighting domain for lights, media domain for others
+    domain = entity_id.split('.')[0]
+    if domain == "light":
+        return await handle_light_command("set_color", query, entity_id, user_creds, GlobalResources.redis_client)
+    else:
+        return await handle_media_command("set_color", query, entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
 
 @ActionDispatcher.register("set_brightness")
 @ActionDispatcher.register("dim")
 @ActionDispatcher.register("brighten")
 async def handle_brightness(query: str, user_creds: dict, params: dict = None, **kwargs):
-    """Handle brightness adjustment commands"""
-    intent = params.get("intent") if params and "intent" in params else "set_brightness"
-    # Map dim/brighten to set_brightness for the underlying handler
-    if intent in ["dim", "brighten"]:
-        intent = "set_brightness"
+    """Route brightness commands to lighting domain"""
+    from app.domains.lighting.commands import handle_light_command
+    from app.logic.match_entity import match_entity_fuzzy
     
-    return await handle_media_command(
-        intent,
-        query,
-        None,
-        user_creds,
-        GlobalResources.ha_collection,
-        GlobalResources.redis_client,
-    )
+    intent = params.get("intent") if params and "intent" in params else "set_brightness"
+    
+    # Extract entity from query
+    entity_id = params.get("entity_id") if params else None
+    if not entity_id:
+        matched = await match_entity_fuzzy(query, user_creds, GlobalResources.ha_collection)
+        if matched:
+            entity_id = matched.get("entity_id")
+    
+    if not entity_id:
+        return [{"status": "FAILURE", "message": "Could not identify which light to control.", "service": intent}]
+    
+    # Route to lighting domain for lights
+    domain = entity_id.split('.')[0]
+    if domain == "light":
+        return await handle_light_command(intent, query, entity_id, user_creds, GlobalResources.redis_client)
+    else:
+        return await handle_media_command(intent, query, entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
 
 # --- MUSIC ASSISTANT TOOLS ---
 @ActionDispatcher.register("list_playlists")
