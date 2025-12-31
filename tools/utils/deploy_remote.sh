@@ -34,6 +34,12 @@ echo "Branch: $BRANCH"
 
 ssh "$HOST" << EOF
     cd "$DIR"
+    # Prune pycache using Docker to bypass root permission issues BEFORE git ops
+    echo "Pruning __pycache__ via Docker..."
+    if [ -d "app" ]; then
+        docker run --rm -v "\$(pwd)/app:/app" -w /app alpine find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+    fi
+
     echo "Fetching latest code..."
     git fetch origin
     
@@ -42,8 +48,6 @@ ssh "$HOST" << EOF
     git reset --hard origin/$BRANCH
     git pull origin $BRANCH
     
-    # Prune pycache to prevent lingering issues
-    find app -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
 
     echo "Recreating Docker container to apply config..."
     docker compose up -d --build --force-recreate
