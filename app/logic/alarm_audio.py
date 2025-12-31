@@ -97,19 +97,18 @@ class AlarmAudioManager:
             except Exception as e:
                 log.warning(f"Failed to stop media on {target} before alarm: {e}")
 
-            # Step A: TTS (Wrapped in Try/Except to prevent crashes)
+            # Step A: TTS (Using Explicit TTS Service for reliability)
             try:
-                result = await execute_ha_service(
-                    "media_player", "play_media", target, user_creds,
-                    {"media_content_id": tts_msg, "media_content_type": "text"},
+                # Use standard Google Translate TTS which is usually available
+                # Fallback note: specific HA setups might use 'tts.cloud_say' or 'tts.speak'
+                await execute_ha_service(
+                    "tts", "google_translate_say", target, user_creds,
+                    {"message": tts_msg}, 
                     redis_client
                 )
-                if result.get("status") == "FAILURE":
-                     log.warning(f"TTS Failed on {target}. Continuing to sound...")
+                await asyncio.sleep(5) # Wait for speech to finish
             except Exception as e:
                 log.error(f"TTS Exception for alarm '{title}' on {target}: {e}")
-
-            await asyncio.sleep(4)
 
             # Step B: Sound Loop (Fixed for Google Cast 500 Error)
             base_url = HA_URL.rstrip('/') if HA_URL else ""
