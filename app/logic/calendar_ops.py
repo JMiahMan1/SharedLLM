@@ -160,17 +160,36 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                     # Try search with expansion
                     events = cal.search(start=start_search, end=end_search, event=True, expand=True)
                     
-                    # If empty, try without expansion
+                    # If empty, try without expansion and broader
                     if not events:
                          events = cal.search(start=start_search, end=end_search, event=True, expand=False)
-                         if events: log.info(f"[CALENDAR] Found {len(events)} events in {cal_name} WITHOUT expansion")
-                    else:
-                         log.info(f"[CALENDAR] Found {len(events)} events in {cal_name} WITH expansion")
+                    
+                    # Last resort: Try all events and filter manually
+                    if not events:
+                         all_ev = cal.search(event=True)
+                         events = []
+                         for ev in all_ev:
+                             try:
+                                 ve = ev.vobject_instance.vevent
+                                 dt = _normalize_event_time(ve.dtstart.value)
+                                 # If it's within 30 days, we'll take it for debug
+                                 if abs((dt - datetime.now()).days) < 30:
+                                     events.append(ev)
+                             except: pass
+                         if events: log.info(f"[CALENDAR] Found {len(events)} events in {cal_name} via MANUAL filtering")
+
+                    if events:
+                         log.info(f"[CALENDAR] Found {len(events)} total events to process in {cal_name}")
                     
                     for ev in events:
                         ve = ev.vobject_instance.vevent
                         # Normalize time to local for display
                         start_dt = _normalize_event_time(ve.dtstart.value)
+                        
+                        # Only show if in the future or recent past (7 days)
+                        if (start_dt - datetime.now()).days > 7 or (datetime.now() - start_dt).days > 1:
+                            continue
+
                         t_str = start_dt.strftime("%Y-%m-%d %I:%M %p")
                         found_events.append(f"- [{t_str}] {ve.summary.value} ({cal_name})")
                 except Exception as e:
