@@ -164,16 +164,28 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                         log.debug(f"[CALENDAR] No search results for {cal_name}, falling back to .events()")
                         all_ev = cal.events()
                         events = []
+                        log.info(f"[CALENDAR] {cal_name} .events() raw count: {len(all_ev)}")
                         for ev in all_ev:
                             try:
                                 vo = ev.vobject_instance
-                                if not hasattr(vo, 'vevent'): continue
+                                if not hasattr(vo, 'vevent'): 
+                                    log.debug(f"[CALENDAR] Skipping {cal_name} event: no vevent")
+                                    continue
                                 ve = vo.vevent
-                                start_dt = _normalize_event_time(ve.dtstart.value)
+                                summary = ve.summary.value if hasattr(ve, 'summary') else "No Summary"
+                                raw_dt = ve.dtstart.value
+                                start_dt = _normalize_event_time(raw_dt)
+                                
+                                log.info(f"[CALENDAR] Found Event: '{summary}' | Raw: {raw_dt} | Norm: {start_dt}")
+                                
                                 # Filter: Recent past (-1 day) to near future (+14 days)
                                 if start_dt and (now_aware - timedelta(days=1)) <= start_dt <= (now_aware + timedelta(days=14)):
                                     events.append(ev)
-                            except: continue
+                                else:
+                                    log.debug(f"[CALENDAR] Filtered out {summary}: {start_dt} not in range")
+                            except Exception as e: 
+                                log.debug(f"[CALENDAR] Error parsing {cal_name} event: {e}")
+                                continue
                     
                     if events:
                         log.info(f"[CALENDAR] Found {len(events)} events in {cal_name}")
