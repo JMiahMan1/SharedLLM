@@ -74,7 +74,7 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
     for attempt in range(2): 
         try:
             def _post():
-                return requests.post(url, json=payload, headers=headers, timeout=5.0)
+                return requests.post(url, json=payload, headers=headers, timeout=10.0)
 
             r = await run_blocking(_post)
 
@@ -150,6 +150,6 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
         "status": "FAILURE", 
         "message": f"Failed: {last_err}", 
         "entity_id": entity_id,
-        "friendly_name": entity_id.split(".")[-1].replace("_", " ").title() if entity_id else "System",
+        "friendly_name": friendly_name if 'friendly_name' in locals() else (entity_id.split(".")[-1].replace("_", " ").title() if entity_id else "System"),
         "service": f"{domain}.{service}"
     }
