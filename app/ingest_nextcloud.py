@@ -464,19 +464,28 @@ def save_toc_cache(files: Dict[str, Dict]):
         with open(TOC_CACHE_FILE, 'w') as f: json.dump(data, f)
     except: pass
 
-def get_db_state(vectordb) -> Dict[str, Dict]:
-    logger.info("Fetching current database state...")
+def get_db_state(vectordb, target_source: Optional[str] = None) -> Dict[str, Dict]:
+    logger.info("Fetching database state...")
     try:
-        results = vectordb.get(include=["metadatas"])
+        # Optimization: If targeted, only fetch that specific document
+        if target_source:
+             results = vectordb.get(where={"source": target_source}, include=["metadatas"])
+        else:
+             # Warning: This is heavy for large DBs. Consider pagination in future.
+             results = vectordb.get(include=["metadatas"])
+             
         state = {}
-        for meta in results["metadatas"]:
-            if meta and "source" in meta:
-                state[meta["source"]] = {
-                    "etag": meta.get("etag", "unknown"),
-                    "type": meta.get("type", "unknown")
-                }
+        if results and results.get("metadatas"):
+            for meta in results["metadatas"]:
+                if meta and "source" in meta:
+                    state[meta["source"]] = {
+                        "etag": meta.get("etag", "unknown"),
+                        "type": meta.get("type", "unknown")
+                    }
         return state
-    except: return {}
+    except Exception as e:
+        logger.warning(f"Failed to fetch DB state: {e}")
+        return {}
 
 def sync_nextcloud_files(target_rel_path: Optional[str] = None):
     if not os.path.exists(INGESTION_TEMP_DIR): os.makedirs(INGESTION_TEMP_DIR)
@@ -486,7 +495,8 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vectordb = Chroma(collection_name="nextcloud_docs", embedding_function=embeddings, persist_directory=CHROMA_DIR)
 
-    db_state = get_db_state(vectordb)
+    # Optimization: Pass target to get_db_state to allow filtered fetch
+    db_state = get_db_state(vectordb, target_source=target_rel_path)
     
     # If a specific path is provided, we skip the full scan and just probe that item
     if target_rel_path:
