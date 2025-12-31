@@ -88,6 +88,15 @@ class AlarmAudioManager:
         log.info(f"Triggering Alarm '{title}' on {targets}. Sound: {sound_file} x{repeat}")
 
         for target in targets:
+            # Step 0: Stop existing media to prevent auto-resume interleaving
+            try:
+                await execute_ha_service(
+                    "media_player", "media_stop", target, user_creds, {}, redis_client
+                )
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                log.warning(f"Failed to stop media on {target} before alarm: {e}")
+
             # Step A: TTS (Wrapped in Try/Except to prevent crashes)
             try:
                 result = await execute_ha_service(
