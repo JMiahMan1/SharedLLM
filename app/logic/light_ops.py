@@ -385,7 +385,8 @@ async def handle_light_command(intent: str, query: str, entity_id: str, user_cre
         
         # Parse brightness from query text
         log.debug(f"[BRIGHTNESS] Parsing brightness from query: '{query}'")
-        pct_match = re.search(r"(\d+)\s*%", query)
+        # Support both % and "percent"
+        pct_match = re.search(r"(\d+)\s*(?:%|percent)", query, re.IGNORECASE)
         if pct_match:
             pct = int(pct_match.group(1))
             brightness = int((pct / 100.0) * 255)
@@ -396,7 +397,7 @@ async def handle_light_command(intent: str, query: str, entity_id: str, user_cre
         # Relative adjustments (only if no percentage found)
         if brightness is None:
             if intent == "dim":
-                brightness = 70  # ~30% brightness
+                brightness = 51  # ~20% brightness for "dim" command
             elif intent == "brighten":
                 brightness = 255  # Max brightness
         
@@ -405,7 +406,7 @@ async def handle_light_command(intent: str, query: str, entity_id: str, user_cre
         
         service = "turn_on"
         service_data = {"brightness": max(1, min(255, brightness))}
-        log.info(f"Setting {entity_id} brightness to {brightness}")
+        log.info(f"Setting {entity_id} brightness to {brightness} (from intent {intent})")
         
         return [await execute_ha_service(domain, service, entity_id, user_creds, service_data, redis_client)]
     
