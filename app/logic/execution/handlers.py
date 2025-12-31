@@ -293,6 +293,25 @@ async def handle_set_color(query: str, user_creds: dict, params: dict = None, **
         GlobalResources.redis_client,
     )
 
+@ActionDispatcher.register("set_brightness")
+@ActionDispatcher.register("dim")
+@ActionDispatcher.register("brighten")
+async def handle_brightness(query: str, user_creds: dict, params: dict = None, **kwargs):
+    """Handle brightness adjustment commands"""
+    intent = params.get("intent") if params and "intent" in params else "set_brightness"
+    # Map dim/brighten to set_brightness for the underlying handler
+    if intent in ["dim", "brighten"]:
+        intent = "set_brightness"
+    
+    return await handle_media_command(
+        intent,
+        query,
+        None,
+        user_creds,
+        GlobalResources.ha_collection,
+        GlobalResources.redis_client,
+    )
+
 # --- MUSIC ASSISTANT TOOLS ---
 @ActionDispatcher.register("list_playlists")
 async def handle_list_playlists(query: str, user_creds: dict, **kwargs):
