@@ -72,3 +72,5 @@ python-docx
 mutagen
 mobi
 html2text
+vobject
+icalendar
