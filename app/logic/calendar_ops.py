@@ -98,7 +98,7 @@ async def extract_event_data(query: str, model: str) -> Dict[str, str]:
         return {"summary": summary.strip(), "start_time": time_str.strip(), "calendar_target": None}
 
     # 2. Regex Fallback for DELETE/CANCEL
-    match_del = re.search(r"(?:delete|cancel|remove) (?:the )?(.+?) (?:at|on|for) (.+)", query, re.IGNORECASE)
+    match_del = re.search(r"(?:delete|cancel|remove|clear) (?:the )?(.+?) (?:at|on|for) (.+)", query, re.IGNORECASE)
     if match_del:
         summary, time_str = match_del.groups()
         return {"summary": summary.strip(), "start_time": time_str.strip(), "calendar_target": None}
@@ -252,6 +252,8 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
     keyword = data.get("summary", "")
     target_time_str = data.get("start_time")
     
+    log.info(f"[DELETE TOOL] Input: keyword='{keyword}', target_time='{target_time_str}'")
+
     target_dt = None
     target_date_only = False
     
