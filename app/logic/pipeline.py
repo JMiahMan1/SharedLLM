@@ -725,19 +725,34 @@ async def generate_rag_stream(
 
             use_simple = True
 
-    template_to_use = SIMPLE_RAG_TEMPLATE if use_simple else RAG_TEMPLATE
-    prompt = template_to_use.format(
-        system_prompt=base_sys_prompt,
-        sys_info=sys_info,
-        ha_ctx=ha_ctx,
-        nc_ctx=nc_ctx,
-        search_ctx=search_ctx,
-        cal_ctx=cal_ctx,
-        query=refined,
-        action_context=action_context,
-    )
     if action_context and not use_simple:
         prompt += f"\n{action_context}"
+    
+    # Retrieve history for the final prompts
+    from .utils import get_history_context
+    history_text = get_history_context(user) or ""
+
+    template_to_use = SIMPLE_RAG_TEMPLATE if use_simple else RAG_TEMPLATE
+    
+    # Format based on which template is used (SIMPLE doesn't use history/context)
+    if use_simple:
+         prompt = template_to_use.format(
+            sys_info=sys_info,
+            query=refined,
+            action_context=action_context
+        )
+    else:
+        prompt = template_to_use.format(
+            system_prompt=base_sys_prompt,
+            sys_info=sys_info,
+            ha_ctx=ha_ctx,
+            nc_ctx=nc_ctx,
+            search_ctx=search_ctx,
+            cal_ctx=cal_ctx,
+            history=history_text,
+            query=refined,
+            action_context=action_context,
+        )
 
     yield builder.chunk(role="assistant")
     r = None
