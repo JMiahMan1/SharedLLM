@@ -140,27 +140,31 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
             client = _get_cal_client(user_creds)
             found_events = []
             calendars = client.principal().calendars()
+            log.info(f"[CALENDAR] Discovered {len(calendars)} calendars.")
             
             # Use aware datetimes for search (from current local time - 1h to +7 days)
             local_tz = _get_local_tz()
             now_local = datetime.now(local_tz)
             start_search = (now_local - timedelta(hours=1))
             end_search = (now_local + timedelta(days=7))
+            log.info(f"[CALENDAR] Searching from {start_search} to {end_search}")
 
             for cal in calendars:
                 cal_name = cal.name or "Untitled"
                 # Skip noise calendars
                 if any(x in cal_name.lower() for x in ["birthday", "contact", "holiday"]):
+                    log.debug(f"[CALENDAR] Skipping noise calendar: {cal_name}")
                     continue
                 
                 try:
-                    # Search range is aware, caldav should handle conversion to UTC if needed
+                    log.debug(f"[CALENDAR] Searching calendar: {cal_name} ({cal.url})")
                     events = cal.search(start=start_search, end=end_search, event=True, expand=True)
+                    log.info(f"[CALENDAR] Found {len(events)} events in {cal_name}")
                     for ev in events:
                         ve = ev.vobject_instance.vevent
                         # Normalize time to local for display
                         start_dt = _normalize_event_time(ve.dtstart.value)
-                        t_str = start_dt.strftime("%Y-%m-%d %H:%M")
+                        t_str = start_dt.strftime("%Y-%m-%d %I:%M %p")
                         found_events.append(f"- [{t_str}] {ve.summary.value} ({cal_name})")
                 except Exception as e:
                     log.warning(f"Error reading calendar '{cal_name}': {e}")
