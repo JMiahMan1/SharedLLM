@@ -288,16 +288,37 @@ def ingest_ha_metadata(ha_url: str = None, ha_token: str = None):
         # but keep MA as a secondary 'capability' in the description.
         is_mass = "music_assistant" in integration.lower() or "mass_" in str(attributes) or "active_queue" in attributes
         
-        # Refine names
-        if integration in ["unknown", "androidtv_remote", "cast"]:
-             if "com.google.android" in str(attributes.get("app_id", "")) or "cast" in str(attributes.get("app_id", "")):
-                  integration = "chromecast"
-             elif "androidtv" in integration:
-                  integration = "android_tv"
+        # Mapping: Domain -> Friendly Integration Name
+        DOMAIN_MAP = {
+            "androidtv_remote": "android_tv",
+            "google_cast": "chromecast",
+            "cast": "chromecast",
+            "roku": "roku",
+            "smartthings": "smartthings",
+            "webostv": "webos_tv",
+            "braviatv": "bravia_tv"
+        }
         
-        # If it's a device we know is Roku/AndroidTV but it's currently shows as music_assistant, 
-        # we might want to mention the hardware integration is primary.
-        # But for now, let's just make sure the 'integration' field reflects the hardware if known.
+        if integration.lower() in DOMAIN_MAP:
+            integration = DOMAIN_MAP[integration.lower()]
+        
+        # Use attributes as secondary refinement if still unknown
+        if integration == "unknown" or integration == "chromecast":
+             if "com.google.android" in str(attributes.get("app_id", "")):
+                  integration = "android_tv"
+             elif "cast" in str(attributes.get("app_id", "")) or "cast" in platform.lower():
+                  integration = "chromecast"
+        
+        # If it's Music Assistant, try to find the linked hardware integration in the description
+        if is_mass and (integration == "music_assistant" or integration == "unknown"):
+             # Look at active_queue or mass_player_id
+             mass_target = attributes.get("active_queue") or attributes.get("mass_player_id")
+             if mass_target and mass_target in states_dict:
+                 target_info = get_device_info(mass_target, device_registry, entity_registry, area_registry)
+                 if target_info[1] and target_info[1] != "unknown":
+                      integration = target_info[1]
+                      if integration.lower() in DOMAIN_MAP:
+                           integration = DOMAIN_MAP[integration.lower()]
         
         # Build Friendly Name
 
