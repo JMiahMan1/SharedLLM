@@ -142,12 +142,11 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
             calendars = client.principal().calendars()
             log.info(f"[CALENDAR] Discovered {len(calendars)} calendars.")
             
-            # Use aware datetimes for search (from current local time - 1h to +7 days)
-            local_tz = _get_local_tz()
-            now_local = datetime.now(local_tz)
-            start_search = (now_local - timedelta(hours=1))
-            end_search = (now_local + timedelta(days=7))
-            log.info(f"[CALENDAR] Searching from {start_search} to {end_search}")
+            # Use aware UTC datetimes for search window
+            now_utc = datetime.now(tz.tzutc())
+            start_search = now_utc - timedelta(hours=1)
+            end_search = now_utc + timedelta(days=7)
+            log.info(f"[CALENDAR] Searching from {start_search} to {end_search} (UTC)")
 
             for cal in calendars:
                 cal_name = cal.name or "Untitled"
@@ -158,6 +157,7 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                 
                 try:
                     log.debug(f"[CALENDAR] Searching calendar: {cal_name} ({cal.url})")
+                    # Search with aware UTC datetimes
                     events = cal.search(start=start_search, end=end_search, event=True, expand=True)
                     log.info(f"[CALENDAR] Found {len(events)} events in {cal_name}")
                     for ev in events:
