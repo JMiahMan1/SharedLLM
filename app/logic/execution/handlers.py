@@ -103,12 +103,12 @@ async def handle_timer_delete(query: str, user_creds: dict, **kwargs):
     return await tool_timer_delete(query, user_creds, GlobalResources.redis_client)
 
 @ActionDispatcher.register("timer_pause")
-async def handle_timer_pause(query: str, **kwargs):
-    return await tool_timer_pause(query)
+async def handle_timer_pause(query: str, user_creds: dict, **kwargs):
+    return await tool_timer_pause(query, user_creds, GlobalResources.redis_client)
 
 @ActionDispatcher.register("timer_resume")
-async def handle_timer_resume(query: str, **kwargs):
-    return await tool_timer_resume(query)
+async def handle_timer_resume(query: str, user_creds: dict, **kwargs):
+    return await tool_timer_resume(query, user_creds, GlobalResources.redis_client)
 
 # --- MEDIA TOOLS ---
 @ActionDispatcher.register("media_command")
