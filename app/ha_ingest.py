@@ -98,6 +98,15 @@ def fetch_ha_data(ha_url: str = None, ha_token: str = None) -> Tuple[List[Dict[s
               "identifiers": {{ device_attr(did, 'identifiers') | list | to_json }}
             }{{ "," if not loop.last else "" }}
             {% endfor %}
+          ],
+          "entities": [
+            {% for entity_id in states | map(attribute='entity_id') | list %}
+            {
+              "entity_id": {{ entity_id | to_json }},
+              "device_id": {{ device_id(entity_id) | to_json }},
+              "area_id": {{ area_id(entity_id) | to_json }}
+            }{{ "," if not loop.last else "" }}
+            {% endfor %}
           ]
         }
         """
@@ -109,7 +118,15 @@ def fetch_ha_data(ha_url: str = None, ha_token: str = None) -> Tuple[List[Dict[s
             if resp.status_code == 200:
                 data = resp.json()
                 device_registry_list = data.get("devices", [])
+                fallback_entities = data.get("entities", [])
                 
+                # Populate Entity Registry from fallback if still empty
+                if not entity_registry_list:
+                     entity_registry_list = [
+                         {"entity_id": e["entity_id"], "device_id": e["device_id"], "area_id": e["area_id"], "platform": "unknown"}
+                         for e in fallback_entities
+                     ]
+
                 # Reconstruct Area Registry from the flat device list
                 area_registry_list = []
                 _seen_areas = set()
@@ -267,17 +284,22 @@ def ingest_ha_metadata(ha_url: str = None, ha_token: str = None):
         device_id = registry_entry.get("device_id")
         
         # --- INTEGRATION SPECIFIC ENHANCEMENTS ---
-        if "music_assistant" not in integration.lower() and (
-            "mass_player_type" in attributes or "active_queue" in attributes or "mass_player_id" in attributes
-        ):
-            integration = "music_assistant"
+        # Prioritize hardware integration over Music Assistant for general features
+        # but keep MA as a secondary 'capability' in the description.
+        is_mass = "music_assistant" in integration.lower() or "mass_" in str(attributes) or "active_queue" in attributes
         
+        # Refine names
         if integration in ["unknown", "androidtv_remote", "cast"]:
-             # Refine generic or internal names
              if "com.google.android" in str(attributes.get("app_id", "")) or "cast" in str(attributes.get("app_id", "")):
                   integration = "chromecast"
              elif "androidtv" in integration:
                   integration = "android_tv"
+        
+        # If it's a device we know is Roku/AndroidTV but it's currently shows as music_assistant, 
+        # we might want to mention the hardware integration is primary.
+        # But for now, let's just make sure the 'integration' field reflects the hardware if known.
+        
+        # Build Friendly Name
 
 
         # Build Friendly Name
