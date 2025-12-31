@@ -350,6 +350,3 @@ async def handle_light_command(intent: str, query: str, entity_id: str, user_cre
     
     log.info(f"[LIGHT] Executing turn_on on {entity_id} with data {service_data}")
     return [await execute_ha_service("light", "turn_on", entity_id, user_creds, service_data, redis_client)]
-    
-    else:
-        return [{"status": "FAILURE", "message": f"Unsupported light command: {intent}", "entity_id": entity_id, "service": intent}]
