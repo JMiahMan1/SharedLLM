@@ -145,10 +145,8 @@ async def _create_timer_entry(
     elif origin_device:
         # Implicit origin (Last active device or Source)
         # We want to show the user WHERE it will ring, even if implied
-        target_display = origin_device.split(".")[-1].replace("_", " ").title()
-        if "media_player" not in origin_device:
-             # Add a hint if it's not a media player (might just be a trigger source)
-             target_display += " (Source)"
+        friendly = origin_device.split(".")[-1].replace("_", " ").title()
+        target_display = f"{friendly} (Follow Me)"
         
     timer_obj = {
         "id": str(uuid.uuid4()),
