@@ -150,54 +150,41 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
 
             for cal in calendars:
                 cal_name = cal.name or "Untitled"
-                # Skip noise calendars
                 if any(x in cal_name.lower() for x in ["birthday", "contact", "holiday"]):
-                    log.debug(f"[CALENDAR] Skipping noise calendar: {cal_name}")
                     continue
-                
-                try:
-                    log.debug(f"[CALENDAR] Searching calendar: {cal_name} ({cal.url})")
-                    # Try search with expansion
-                    events = cal.search(start=start_search, end=end_search, event=True, expand=True)
-                    
-                    # If empty, try without expansion and broader
-                    if not events:
-                         events = cal.search(start=start_search, end=end_search, event=True, expand=False)
-                    
-                    # Last resort: Try all events and filter manually
-                    if not events:
-                         all_ev = cal.search(event=True)
-                         events = []
-                         for ev in all_ev:
-                             try:
-                                 ve = ev.vobject_instance.vevent
-                                 dt = _normalize_event_time(ve.dtstart.value)
-                                 # If it's within 30 days, we'll take it for debug
-                                 if abs((dt - datetime.now()).days) < 30:
-                                     events.append(ev)
-                             except: pass
-                         if events: log.info(f"[CALENDAR] Found {len(events)} events in {cal_name} via MANUAL filtering")
 
-                    if events:
-                         log.info(f"[CALENDAR] Found {len(events)} total events to process in {cal_name}")
+                try:
+                    log.info(f"[CAL_BRUTE] Processing calendar: {cal_name}")
+                    all_events = cal.events()
+                    log.info(f"[CAL_BRUTE] {cal_name} has {len(all_events)} total events.")
                     
-                    for ev in events:
-                        ve = ev.vobject_instance.vevent
-                        # Normalize time to local for display
-                        start_dt = _normalize_event_time(ve.dtstart.value)
-                        
-                        # Only show if in the future or recent past (7 days)
-                        if (start_dt - datetime.now()).days > 7 or (datetime.now() - start_dt).days > 1:
+                    for ev in all_events:
+                        try:
+                            vo = ev.vobject_instance
+                            if not hasattr(vo, 'vevent'): continue
+                            ve = vo.vevent
+                            
+                            summary = ve.summary.value if hasattr(ve, 'summary') else "No Summary"
+                            dt_start = ve.dtstart.value if hasattr(ve, 'dtstart') else None
+                            
+                            log.info(f"[CAL_EVENT] Local: {cal_name} | Event: '{summary}' | Start: {dt_start}")
+                            
+                            if dt_start:
+                                norm_dt = _normalize_event_time(dt_start)
+                                if norm_dt:
+                                    t_str = norm_dt.strftime("%Y-%m-%d %I:%M %p")
+                                    found_events.append(f"- [{t_str}] {summary} ({cal_name})")
+                        except Exception as inner_e:
+                            log.debug(f"[CAL_BRUTE] Error parsing event in {cal_name}: {inner_e}")
                             continue
 
-                        t_str = start_dt.strftime("%Y-%m-%d %I:%M %p")
-                        found_events.append(f"- [{t_str}] {ve.summary.value} ({cal_name})")
                 except Exception as e:
                     log.warning(f"Error reading calendar '{cal_name}': {e}")
                     pass
             
             # Sort events by time
             found_events.sort()
+            log.info(f"[CAL_BRUTE] Final found_events count: {len(found_events)}")
             return "Upcoming Events:\n" + "\n".join(found_events) if found_events else "No events found on your calendars."
         
         return await run_blocking(_fetch)
