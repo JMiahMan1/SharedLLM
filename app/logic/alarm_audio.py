@@ -145,11 +145,11 @@ class AlarmAudioManager:
                     # Wait for alarm to play (most alarm sounds are 1-2 seconds)
                     await asyncio.sleep(2)
                     
-                    # Stop playback to prevent auto-resume between beeps
+                    # Pause playback to prevent auto-resume between beeps
                     if was_playing:
                         try:
                             await execute_ha_service(
-                                "media_player", "media_stop", target, user_creds, {}, redis_client
+                                "media_player", "media_pause", target, user_creds, {}, redis_client
                             )
                         except: pass
 
