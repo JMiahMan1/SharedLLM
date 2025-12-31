@@ -725,9 +725,6 @@ async def generate_rag_stream(
 
             use_simple = True
 
-    if action_context and not use_simple:
-        prompt += f"\n{action_context}"
-    
     # Retrieve history for the final prompts
     from .utils import get_history_context
     history_text = get_history_context(user) or ""
@@ -753,6 +750,10 @@ async def generate_rag_stream(
             query=refined,
             action_context=action_context,
         )
+        # Append action context for non-simple templates if available
+        if action_context:
+            prompt += f"\n{action_context}"
+
 
     yield builder.chunk(role="assistant")
     r = None
