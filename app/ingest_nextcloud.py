@@ -195,26 +195,35 @@ def extract_media_metadata(file_path: str) -> Dict[str, Any]:
         # Mutagen abstracts most tags into a dictionary-like interface
         tags = audio.tags
         if tags:
-            # Common tag keys across formats (Mutagen attempts normalization)
             if ext == ".mp3":
-                # MP3 uses ID3
-                meta["title"] = str(tags.get('TIT2', ''))
-                meta["artist"] = str(tags.get('TPE1', ''))
-                meta["album"] = str(tags.get('TALB', ''))
-                meta["year"] = str(tags.get('TDRC', tags.get('TYER', '')))
-                meta["genre"] = str(tags.get('TCON', ''))
+                try:
+                    from mutagen.easyid3 import EasyID3
+                    easy_tags = EasyID3(file_path)
+                    meta["title"] = easy_tags.get('title', [None])[0]
+                    meta["artist"] = easy_tags.get('artist', [None])[0]
+                    meta["album"] = easy_tags.get('album', [None])[0]
+                    meta["year"] = easy_tags.get('date', [None])[0]
+                    meta["genre"] = easy_tags.get('genre', [None])[0]
+                except Exception as e:
+                    logger.debug(f"EasyID3 failed, falling back to raw ID3: {e}")
+                    # Raw ID3 fallback
+                    meta["title"] = str(tags.get('TIT2')) if 'TIT2' in tags else None
+                    meta["artist"] = str(tags.get('TPE1')) if 'TPE1' in tags else None
+                    meta["album"] = str(tags.get('TALB')) if 'TALB' in tags else None
+                    meta["year"] = str(tags.get('TDRC', tags.get('TYER'))) if ('TDRC' in tags or 'TYER' in tags) else None
+                    meta["genre"] = str(tags.get('TCON')) if 'TCON' in tags else None
             else:
                 # Vorbis/FLAC/MP4 use names
-                meta["title"] = str(tags.get('title', [''])[0])
-                meta["artist"] = str(tags.get('artist', [''])[0])
-                meta["album"] = str(tags.get('album', [''])[0])
-                meta["year"] = str(tags.get('date', [''])[0])
-                meta["genre"] = str(tags.get('genre', [''])[0])
+                meta["title"] = tags.get('title', [None])[0] if tags.get('title') else None
+                meta["artist"] = tags.get('artist', [None])[0] if tags.get('artist') else None
+                meta["album"] = tags.get('album', [None])[0] if tags.get('album') else None
+                meta["year"] = tags.get('date', [None])[0] if tags.get('date') else None
+                meta["genre"] = tags.get('genre', [None])[0] if tags.get('genre') else None
 
     except Exception as e:
         logger.warning(f"Metadata extraction failed for {file_path}: {e}")
         
-    return {k: v for k, v in meta.items() if v} # Remove empty values
+    return {k: v for k, v in meta.items() if v is not None} # Remove empty values
 
 # ----------------------
 # Text & Book Extraction (UPDATED)
