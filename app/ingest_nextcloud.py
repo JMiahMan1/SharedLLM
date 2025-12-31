@@ -514,7 +514,9 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
                   logger.info(f"Target appears to be a single file: {target_rel_path}")
                   # We need an etag. Let's do a PROPFIND Depth 0
                   try:
+                       logger.info(f"Probing {target_url} with Depth 0...")
                        resp = requests.request("PROPFIND", target_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), headers={"Depth": "0"}, timeout=30, verify=False)
+                       logger.info(f"Probe Status: {resp.status_code}")
                        if resp.status_code == 207:
                             root = ET.fromstring(resp.content)
                             res = root.find("d:response", NAMESPACES)
@@ -523,8 +525,13 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
                                 etag = prop.find("d:getetag", NAMESPACES).text.strip('"') if prop.find("d:getetag", NAMESPACES) is not None else "unknown"
                                 size = prop.find("d:getcontentlength", NAMESPACES).text if prop.find("d:getcontentlength", NAMESPACES) is not None else "0"
                                 nc_state[target_rel_path] = {"etag": etag, "category": cat, "size": size}
+                                logger.info(f"Probe Successful. Added {target_rel_path} to state.")
+                       else:
+                            logger.warning(f"Probe failed with status {resp.status_code}")
                   except Exception as e:
                        logger.warning(f"Depth 0 probe failed for {target_rel_path}: {e}")
+             else:
+                  logger.warning(f"Category for {target_rel_path} is unknown. Skipping.")
     else:
         nc_state = load_toc_cache()
         if not nc_state:
