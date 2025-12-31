@@ -261,7 +261,7 @@ async def get_ha_state_proxy(entity_id: str, request: Request):
 async def rag_query(body: CompletionRequest, request: Request):
     user = request.headers.get("X-RAG-User") or body.user or "admin"
     query = body.query or (body.messages[-1].content if body.messages else "")
-    refined, intent, score, is_high_confidence = await contextualize_query(query, user, body.model)
+    refined, intent, score, is_high_confidence, intent_locked = await contextualize_query(query, user, body.model)
     creds = get_user_creds(user)
     cmd = await try_handle_compound_command(refined, creds, body.model, intent, score, is_high_confidence)
     if cmd: return {"response": cmd}
