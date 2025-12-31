@@ -88,16 +88,14 @@ class AlarmAudioManager:
         log.info(f"Triggering Alarm '{title}' on {targets}. Sound: {sound_file} x{repeat}")
 
         for target in targets:
-            # Step A: TTS (Using Piper with announcement mode for auto-ducking)
+            # Step A: TTS (Using Piper - ducking handled automatically by TTS service)
             try:
-                log.info(f"Playing TTS announcement to {target} with ducking...")
-                # Using 'tts.speak' with announce: true for automatic ducking
+                log.info(f"Playing TTS announcement to {target}...")
                 await execute_ha_service(
                     "tts", "speak", "tts.piper", user_creds,
                     {
                         "media_player_entity_id": target,
-                        "message": tts_msg,
-                        "announce": True
+                        "message": tts_msg
                     }, 
                     redis_client
                 )
