@@ -566,7 +566,9 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
         db_record = db_state.get(path)
         should_process = False
         
-        if not db_record:
+        if target_rel_path:
+             should_process = True # Force update if targeted
+        elif not db_record:
             should_process = True
         elif db_record["etag"] != info["etag"]:
             should_process = True
@@ -578,11 +580,8 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
             if expected_category == "spreadsheet" and current_type != "spreadsheet_metadata":
                 should_process = True
             
-            # Retrofit: Books (Ensure we have the new 'book_card' type)
+            # Retrofit: Books
             elif expected_category == "book" and (current_type != "book_card" and current_type != "book_summary"):
-                 # Note: checking if it has *any* of the new types might be safest, 
-                 # but sticking to user logic: update if it doesn't match new standard.
-                 # User's snippet logic: if expected_category == "book" and current_type != "book_card": should_process = True
                  should_process = True
 
         if should_process:
