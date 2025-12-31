@@ -97,18 +97,21 @@ class AlarmAudioManager:
             except Exception as e:
                 log.warning(f"Failed to stop media on {target} before alarm: {e}")
 
-            # Step A: TTS (Using Explicit TTS Service for reliability)
+            # Step A: TTS (Using Piper per user request)
             try:
-                # Use standard Google Translate TTS which is usually available
-                # Fallback note: specific HA setups might use 'tts.cloud_say' or 'tts.speak'
+                # Using 'tts.speak' which is the modern standard for Piper/Whisper
+                # Targeting 'tts.piper' provider explicitly
                 await execute_ha_service(
-                    "tts", "google_translate_say", target, user_creds,
-                    {"message": tts_msg}, 
+                    "tts", "speak", "tts.piper", user_creds,
+                    {
+                        "media_player_entity_id": target,
+                        "message": tts_msg
+                    }, 
                     redis_client
                 )
                 await asyncio.sleep(5) # Wait for speech to finish
             except Exception as e:
-                log.error(f"TTS Exception for alarm '{title}' on {target}: {e}")
+                log.error(f"Piper TTS Exception for alarm '{title}' on {target}: {e}")
 
             # Step B: Sound Loop (Fixed for Google Cast 500 Error)
             base_url = HA_URL.rstrip('/') if HA_URL else ""
