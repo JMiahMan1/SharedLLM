@@ -381,9 +381,99 @@ async def tool_timer_delete(query: str, user_creds: Dict[str, str], redis_client
     return {"status": "FAILURE", "message": "Could not find a matching timer to delete.", "service": "timer_delete"}
 
 
-async def tool_timer_pause(query: str) -> Dict[str, Union[str, bool]]:
-    return {"status": "FAILURE", "message": "Pause functionality not yet fully implemented.", "service": "timer_pause"}
+async def tool_timer_pause(query: str, user_creds: Dict[str, str], redis_client=None) -> Dict[str, Union[str, bool]]:
+    query_low = query.lower()
+    timers = await storage.list_timers(redis_client)
+    
+    # Filter for ACTIVE timers
+    # Note: 'active' might be missing in older records, assume True if missing
+    active_candidates = [t for t in timers if t.get("active", True)]
+    
+    if not active_candidates:
+        return {"status": "FAILURE", "message": "No active timers found to pause.", "service": "timer_pause"}
+
+    target_timer = None
+    
+    # 1. Try Name Match
+    for t in active_candidates:
+        if t["title"].lower() in query_low or query_low in t["title"].lower():
+            target_timer = t
+            break
+            
+    # 2. Single Candidate Fallback
+    if not target_timer and len(active_candidates) == 1:
+        target_timer = active_candidates[0]
+        
+    if not target_timer:
+        return {"status": "FAILURE", "message": f"Which timer do you want to pause? I found {len(active_candidates)} active timers.", "service": "timer_pause"}
+
+    # Execute Pause
+    try:
+        expires_at = datetime.fromisoformat(target_timer["expires_at"])
+        if expires_at.tzinfo: expires_at = expires_at.replace(tzinfo=None)
+        
+        remaining = expires_at - datetime.now()
+        
+        if remaining.total_seconds() <= 0:
+             return {"status": "FAILURE", "message": "That timer has already expired.", "service": "timer_pause"}
+
+        await storage.update_timer(target_timer["id"], {
+            "active": False,
+            "remaining_seconds": remaining.total_seconds()
+        }, redis_client)
+        
+        rem_str = str(remaining).split('.')[0]
+        return {"status": "SUCCESS", "message": f"Paused '{target_timer['title']}'. Remaining time: {rem_str}.", "service": "timer_pause"}
+        
+    except Exception as e:
+        log.error(f"Pause Error: {e}")
+        return {"status": "FAILURE", "message": "Failed to pause timer due to a system error.", "service": "timer_pause"}
 
 
-async def tool_timer_resume(query: str) -> Dict[str, Union[str, bool]]:
-    return {"status": "FAILURE", "message": "Resume functionality not yet fully implemented.", "service": "timer_resume"}
+async def tool_timer_resume(query: str, user_creds: Dict[str, str], redis_client=None) -> Dict[str, Union[str, bool]]:
+    query_low = query.lower()
+    timers = await storage.list_timers(redis_client)
+    
+    # Filter for PAUSED timers (active=False)
+    paused_candidates = [t for t in timers if t.get("active") is False]
+    
+    if not paused_candidates:
+        return {"status": "FAILURE", "message": "No paused timers found to resume.", "service": "timer_resume"}
+
+    target_timer = None
+    
+    # 1. Try Name Match
+    for t in paused_candidates:
+        if t["title"].lower() in query_low or query_low in t["title"].lower():
+            target_timer = t
+            break
+            
+    # 2. Single Candidate Fallback
+    if not target_timer and len(paused_candidates) == 1:
+        target_timer = paused_candidates[0]
+        
+    if not target_timer:
+        return {"status": "FAILURE", "message": f"Which timer do you want to resume? I found {len(paused_candidates)} paused timers.", "service": "timer_resume"}
+
+    # Execute Resume
+    try:
+        remaining_seconds = target_timer.get("remaining_seconds")
+        if not remaining_seconds:
+             return {"status": "FAILURE", "message": "Could not determine remaining time for this timer.", "service": "timer_resume"}
+
+        new_expires_at = datetime.now() + timedelta(seconds=float(remaining_seconds))
+        
+        await storage.update_timer(target_timer["id"], {
+            "active": True,
+            "expires_at": new_expires_at.isoformat(),
+            # storage.update_timer does a dictionary merge/update. 
+            # We explicitly set remaining_seconds to None/0? 
+            # Or just ignore it if active is True. The scheduler checks active flag.
+            "remaining_seconds": 0 
+        }, redis_client)
+        
+        return {"status": "SUCCESS", "message": f"Resumed '{target_timer['title']}'. New time: {new_expires_at.strftime('%I:%M %p')}.", "service": "timer_resume"}
+
+    except Exception as e:
+        log.error(f"Resume Error: {e}")
+        return {"status": "FAILURE", "message": "Failed to resume timer due to a system error.", "service": "timer_resume"}
