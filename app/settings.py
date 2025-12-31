@@ -189,6 +189,9 @@ RAG_TEMPLATE = """{system_prompt}
 {search_ctx}
 {cal_ctx}
 
+### CHAT HISTORY
+{history}
+
 ### USER QUERY
 {query}
 """
