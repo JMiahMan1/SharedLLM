@@ -88,30 +88,16 @@ class AlarmAudioManager:
         log.info(f"Triggering Alarm '{title}' on {targets}. Sound: {sound_file} x{repeat}")
 
         for target in targets:
-            # Step 0: Check if media is currently playing & Pause
-            was_playing = False
+            # Step A: TTS (Using Piper with announcement mode for auto-ducking)
             try:
-                initial_state = await get_entity_state(target, user_creds)
-                was_playing = initial_state.get("state") == "playing"
-                
-                if was_playing:
-                    log.info(f"Music is playing on {target}, pausing for alarm...")
-                    await execute_ha_service(
-                        "media_player", "media_pause", target, user_creds, {}, redis_client
-                    )
-                    await asyncio.sleep(0.5)
-            except Exception as e:
-                log.warning(f"Failed to pause media on {target} before alarm: {e}")
-
-            # Step A: TTS (Using Piper per user request)
-            try:
-                # Using 'tts.speak' which is the modern standard for Piper/Whisper
-                # Targeting 'tts.piper' provider explicitly
+                log.info(f"Playing TTS announcement to {target} with ducking...")
+                # Using 'tts.speak' with announce: true for automatic ducking
                 await execute_ha_service(
                     "tts", "speak", "tts.piper", user_creds,
                     {
                         "media_player_entity_id": target,
-                        "message": tts_msg
+                        "message": tts_msg,
+                        "options": {"announce": True}
                     }, 
                     redis_client
                 )
@@ -131,10 +117,15 @@ class AlarmAudioManager:
 
             try:
                 for i in range(repeat):
-                    # Play alarm sound
+                    # Play alarm sound with announcement mode for auto-ducking
+                    log.info(f"Playing alarm beep {i+1}/{repeat} with ducking...")
                     result = await execute_ha_service(
                         "media_player", "play_media", target, user_creds,
-                        {"media_content_id": full_path, "media_content_type": "music"},
+                        {
+                            "media_content_id": full_path, 
+                            "media_content_type": "music",
+                            "announce": True
+                        },
                         redis_client
                     )
                     
@@ -142,20 +133,12 @@ class AlarmAudioManager:
                         log.warning(f"Alarm Playback Failed on {target}: {result.get('message')}")
                         break 
 
-                    # Wait for alarm to play (most alarm sounds are 1-2 seconds)
+                    # Wait for alarm to play
                     await asyncio.sleep(2)
 
             except Exception as e:
                 log.error(f"Error during alarm loop on {target}: {e}")
             
-            # Step C: Resume music if it was playing
-            if was_playing:
-                try:
-                    log.info(f"Resuming music on {target}...")
-                    await execute_ha_service(
-                        "media_player", "media_play", target, user_creds, {}, redis_client
-                    )
-                except Exception as e:
-                    log.warning(f"Failed to resume music on {target}: {e}")
+            # Note: No manual resume needed - announcement mode auto-restores playback
 
 audio_manager = AlarmAudioManager()
