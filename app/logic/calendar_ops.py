@@ -267,9 +267,11 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
     if not keyword and not target_dt:
         return {"status": "FAILURE", "message": "Please provide an event name or time to delete.", "service": "calendar_delete"}
 
-    # Prepare cleaning
-    original_keyword = keyword
-    cleaned_keyword = re.sub(r"\b(appointment|meeting|event|session)\b", "", keyword, flags=re.IGNORECASE).strip()
+    # Support for "all" or "everything"
+    delete_all = False
+    if keyword and any(x in keyword.lower() for x in ["all", "everything", "every"]):
+        delete_all = True
+        log.info("[CALENDAR] 'Delete All' mode activated.")
 
     try:
         def _delete():
@@ -277,7 +279,7 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
             calendars = client.principal().calendars()
             count = 0
             
-            # Expanded search window to ensure we catch events
+            # Expanded search window
             now_aware = datetime.now(local_tz)
             search_start = (target_dt - timedelta(days=1)) if target_dt else (now_aware - timedelta(days=1))
             search_end = search_start + timedelta(days=60)
@@ -285,7 +287,7 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
             for c in calendars:
                 if not _is_cal_writable(c, user_creds['user'], redis_client): continue
                 try:
-                    # Robust lookup: Combined search and .events() fallback
+                    # Robust lookup
                     events = c.search(start=search_start, end=search_end, event=True, expand=True)
                     if not events:
                         all_ev = c.events()
@@ -294,7 +296,6 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
                              try:
                                  ve = ev.vobject_instance.vevent
                                  ev_start = _normalize_event_time(ve.dtstart.value)
-                                 # Fallback filter: covers the search window
                                  if ev_start and search_start <= ev_start <= search_end:
                                       events.append(ev)
                              except: continue
@@ -306,26 +307,42 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
                         
                         log.info(f"[DELETE DEBUG] Checking: '{event_summary}' at {event_start_local} (Cal: {c.name})")
 
+                        if delete_all:
+                             # If target_dt is set, only delete all on that day
+                             if target_dt:
+                                 if event_start_local.date() == target_dt.date():
+                                     log.info(f"[DELETE DEBUG] MATCHED (ALL)! Deleting '{event_summary}'")
+                                     ev.delete()
+                                     count += 1
+                                 continue
+                             else:
+                                 log.info(f"[DELETE DEBUG] MATCHED (TOTAL sweep)! Deleting '{event_summary}'")
+                                 ev.delete()
+                                 count += 1
+                                 continue
+
                         # --- FILTER 1: TIME CHECK ---
                         if target_dt:
                             if target_date_only:
-                                if event_start_local.date() != target_dt.date(): 
-                                    log.debug(f"[DELETE DEBUG] Date mismatch: {event_start_local.date()} != {target_dt.date()}")
-                                    continue
+                                if event_start_local.date() != target_dt.date(): continue
                             else:
                                 diff = abs((event_start_local - target_dt).total_seconds())
-                                if diff > 1800: 
-                                    log.debug(f"[DELETE DEBUG] Time mismatch: diff {diff}s > 1800s")
-                                    continue 
+                                if diff > 1800: continue 
 
                         # --- FILTER 2: NAME CHECK ---
                         if keyword:
                             matched_name = False
+                            # Broaden matching: split keywords and check if any significant word matches
+                            kw_parts = [p for p in re.split(r'\s+', cleaned_keyword.lower()) if len(p) > 3]
+                            if not kw_parts: kw_parts = [cleaned_keyword.lower()]
+                            
                             if keyword.lower() in ["event", "appointment", "meeting"] and target_dt:
                                 matched_name = True
                             elif original_keyword.lower() in event_summary:
                                 matched_name = True
                             elif cleaned_keyword and cleaned_keyword.lower() in event_summary:
+                                matched_name = True
+                            elif any(part in event_summary for part in kw_parts):
                                 matched_name = True
                             
                             if not matched_name:
@@ -335,10 +352,6 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
                         log.info(f"[DELETE DEBUG] MATCHED! Deleting '{event_summary}'")
                         ev.delete()
                         count += 1
-                        # Do not break here if we want to delete ALL matching events
-                        # break 
-                    # if count > 0: break # Keep going to other calendars if needed? 
-                    # Actually, usually we only want to delete one, but if we're debugging multiple...
                 except: pass
             return count
 
