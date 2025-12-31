@@ -142,11 +142,13 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
             calendars = client.principal().calendars()
             log.info(f"[CALENDAR] Discovered {len(calendars)} calendars.")
             
-            # Use naive UTC datetimes for widest compatibility (server usually assumes UTC if naive)
-            now_utc = datetime.now(tz.tzutc())
-            start_search = (now_utc - timedelta(hours=1)).replace(tzinfo=None)
-            end_search = (now_utc + timedelta(days=7)).replace(tzinfo=None)
-            log.info(f"[CALENDAR] Searching from {start_search} to {end_search} (Naive UTC)")
+            # Use aware datetimes for search (from current local time - 1h to +7 days)
+            local_tz = _get_local_tz()
+            now_aware = datetime.now(local_tz)
+            start_search = now_aware - timedelta(hours=1)
+            end_search = now_aware + timedelta(days=7)
+            
+            log.info(f"[CALENDAR] Searching {len(calendars)} calendars from {start_search.strftime('%Y-%m-%d %I:%M %p')}")
 
             for cal in calendars:
                 cal_name = cal.name or "Untitled"
@@ -154,28 +156,25 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
                     continue
 
                 try:
-                    log.info(f"[CAL_BRUTE] Processing calendar: {cal_name}")
-                    all_events = cal.events()
-                    log.info(f"[CAL_BRUTE] {cal_name} has {len(all_events)} total events.")
+                    # Search with aware datetimes (caldav handles conversion)
+                    events = cal.search(start=start_search, end=end_search, event=True, expand=True)
+                    if events:
+                        log.info(f"[CALENDAR] Found {len(events)} events in {cal_name}")
                     
-                    for ev in all_events:
+                    for ev in events:
                         try:
                             vo = ev.vobject_instance
                             if not hasattr(vo, 'vevent'): continue
                             ve = vo.vevent
                             
                             summary = ve.summary.value if hasattr(ve, 'summary') else "No Summary"
-                            dt_start = ve.dtstart.value if hasattr(ve, 'dtstart') else None
+                            start_dt = _normalize_event_time(ve.dtstart.value)
                             
-                            log.info(f"[CAL_EVENT] Local: {cal_name} | Event: '{summary}' | Start: {dt_start}")
-                            
-                            if dt_start:
-                                norm_dt = _normalize_event_time(dt_start)
-                                if norm_dt:
-                                    t_str = norm_dt.strftime("%Y-%m-%d %I:%M %p")
-                                    found_events.append(f"- [{t_str}] {summary} ({cal_name})")
+                            if start_dt:
+                                t_str = start_dt.strftime("%Y-%m-%d %I:%M %p")
+                                found_events.append(f"- [{t_str}] {summary} ({cal_name})")
                         except Exception as inner_e:
-                            log.debug(f"[CAL_BRUTE] Error parsing event in {cal_name}: {inner_e}")
+                            log.debug(f"[CALENDAR] Error parsing event in {cal_name}: {inner_e}")
                             continue
 
                 except Exception as e:
@@ -184,7 +183,6 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
             
             # Sort events by time
             found_events.sort()
-            log.info(f"[CAL_BRUTE] Final found_events count: {len(found_events)}")
             return "Upcoming Events:\n" + "\n".join(found_events) if found_events else "No events found on your calendars."
         
         return await run_blocking(_fetch)
