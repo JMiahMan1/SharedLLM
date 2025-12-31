@@ -301,36 +301,44 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
 
                     for ev in events:
                         ve = ev.vobject_instance.vevent
-                        event_summary = ve.summary.value.lower()
+                        event_summary = ve.summary.value.lower() if hasattr(ve, 'summary') else "no summary"
                         event_start_local = _normalize_event_time(ve.dtstart.value)
                         
-                        log.info(f"Checking event: '{event_summary}' at {event_start_local}")
+                        log.info(f"[DELETE DEBUG] Checking: '{event_summary}' at {event_start_local} (Cal: {c.name})")
 
                         # --- FILTER 1: TIME CHECK ---
                         if target_dt:
                             if target_date_only:
-                                # Match just the day
-                                if event_start_local.date() != target_dt.date(): continue
+                                if event_start_local.date() != target_dt.date(): 
+                                    log.debug(f"[DELETE DEBUG] Date mismatch: {event_start_local.date()} != {target_dt.date()}")
+                                    continue
                             else:
-                                # Match exact time (allow 30m leeway)
                                 diff = abs((event_start_local - target_dt).total_seconds())
-                                if diff > 1800: continue 
+                                if diff > 1800: 
+                                    log.debug(f"[DELETE DEBUG] Time mismatch: diff {diff}s > 1800s")
+                                    continue 
 
                         # --- FILTER 2: NAME CHECK ---
                         if keyword:
+                            matched_name = False
                             if keyword.lower() in ["event", "appointment", "meeting"] and target_dt:
-                                pass 
+                                matched_name = True
                             elif original_keyword.lower() in event_summary:
-                                pass
+                                matched_name = True
                             elif cleaned_keyword and cleaned_keyword.lower() in event_summary:
-                                pass
-                            else:
+                                matched_name = True
+                            
+                            if not matched_name:
+                                log.debug(f"[DELETE DEBUG] Name mismatch: '{keyword}' not in '{event_summary}'")
                                 continue 
 
+                        log.info(f"[DELETE DEBUG] MATCHED! Deleting '{event_summary}'")
                         ev.delete()
                         count += 1
-                        break 
-                    if count > 0: break
+                        # Do not break here if we want to delete ALL matching events
+                        # break 
+                    # if count > 0: break # Keep going to other calendars if needed? 
+                    # Actually, usually we only want to delete one, but if we're debugging multiple...
                 except: pass
             return count
 
