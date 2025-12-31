@@ -131,6 +131,7 @@ class AlarmAudioManager:
 
             try:
                 for i in range(repeat):
+                    # Play alarm sound
                     result = await execute_ha_service(
                         "media_player", "play_media", target, user_creds,
                         {"media_content_id": full_path, "media_content_type": "music"},
@@ -141,13 +142,14 @@ class AlarmAudioManager:
                         log.warning(f"Alarm Playback Failed on {target}: {result.get('message')}")
                         break 
 
-                    await asyncio.sleep(3)
+                    # Wait for alarm to play (most alarm sounds are 1-2 seconds)
+                    await asyncio.sleep(2)
                     
-                    # Keep music paused between beeps to prevent auto-resume
-                    if was_playing and i < repeat - 1:  # Don't pause after last beep
+                    # Stop playback to prevent auto-resume between beeps
+                    if was_playing:
                         try:
                             await execute_ha_service(
-                                "media_player", "media_pause", target, user_creds, {}, redis_client
+                                "media_player", "media_stop", target, user_creds, {}, redis_client
                             )
                         except: pass
 
