@@ -647,10 +647,29 @@ def sync_nextcloud_files(target_rel_path: Optional[str] = None):
                 media_meta = extract_media_metadata(temp_path)
                 
                 # Build a rich descriptive string for the page_content
+                # EMPHASIS: Repeat key terms to boost semantic ranking against large texts (Aristotle)
                 desc_parts = [f"Media File: {fname}", f"Path: {rel_path}"]
-                if media_meta.get("title"): desc_parts.append(f"Title: {media_meta['title']}")
-                if media_meta.get("artist"): desc_parts.append(f"Artist: {media_meta['artist']}")
-                if media_meta.get("album"): desc_parts.append(f"Album: {media_meta['album']}")
+                
+                title = media_meta.get("title")
+                artist = media_meta.get("artist")
+                album = media_meta.get("album")
+                
+                if title:
+                    desc_parts.append(f"Title: {title}")
+                    desc_parts.append(f"Song Name: {title}") # Synonym for retrieval
+                
+                if artist:
+                    desc_parts.append(f"Artist: {artist}")
+                    desc_parts.append(f"Performer: {artist}") # Synonym
+                    
+                if album:
+                     desc_parts.append(f"Album: {album}")
+                
+                # Semantic boosters
+                if title and artist:
+                     desc_parts.append(f"Music Track: {title} by {artist}")
+                     desc_parts.append(f"Audio Track: {title} by {artist}")
+
                 
                 tech_details = []
                 if media_meta.get("encoding"): tech_details.append(f"Encoding: {media_meta['encoding']}")
