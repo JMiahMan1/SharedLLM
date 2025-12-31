@@ -73,6 +73,15 @@ async def handle_calendar_list(user_creds: dict, **kwargs):
         "service": "calendar_list",
     }
 
+@ActionDispatcher.register("calendar_read")
+async def handle_calendar_read(user_creds: dict, **kwargs):
+    events = await tool_calendar_read(user_creds, GlobalResources.redis_client)
+    return {
+        "status": "SUCCESS",
+        "message": events if events else "No upcoming events found.",
+        "service": "calendar_read"
+    }
+
 @ActionDispatcher.register("calendar_delete")
 async def handle_calendar_delete(query: str, user_creds: dict, model: str, **kwargs):
     return await tool_calendar_delete(query, user_creds, model, GlobalResources.redis_client)

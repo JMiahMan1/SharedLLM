@@ -84,13 +84,21 @@ DEFAULT_PHRASES = {
         "book a meeting",
         "add to calendar",
     ],
-    "calendar_list": [
-        "list calendar",
-        "show schedule",
+    "calendar_read": [
         "what is on my calendar",
         "check agenda",
         "list events",
         "what do i have today",
+        "upcoming events",
+        "show my schedule",
+        "am i busy",
+        "what am i doing",
+    ],
+    "calendar_list": [
+        "list calendar",
+        "show available calendars",
+        "what calendars do i have",
+        "list all calendars",
     ],
     "calendar_delete": [
         "delete event",

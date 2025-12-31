@@ -514,6 +514,8 @@ async def generate_rag_stream(
     action_results = await try_handle_compound_command(refined, creds, model, intent, score, is_high_confidence, intent_locked)
 
     # Handle failed no-search intents directly (don't call LLM)
+    # NOTE: We only skip LLM for core ACTION intents that failed to resolve.
+    # Informational intents (list, read) should ALWAYS fall through to LLM/RAG if tool execution was skipped.
     no_search_intents = [
         "turn_on", "turn_off", "toggle", "play_media", "stop_media",
         "media_next", "media_previous", "open_app", "volume_up",
@@ -521,9 +523,7 @@ async def generate_rag_stream(
         "alarm_add", "timer_delete", "timer_pause", "timer_resume",
         "calendar_add", "calendar_delete", "calendar_update",
         "dim", "brighten", "set_brightness", "set_color",
-        "note_add", "note_append", "note_delete",
-        "timer_list", "calendar_list", "calendar_read", "note_list", "note_read",
-        "music_list", "list_playlists", "list_radio"
+        "note_add", "note_append", "note_delete"
     ]
     if action_results is None and intent in no_search_intents:
         # All actions failed for a no-search intent, return a generic failure message
