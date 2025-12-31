@@ -45,6 +45,11 @@ REGEX_INTENT_MAP = {
     r"\b(watch|view)\b": "watch_media",  # Video intent (default: cast device)
     r"\b(play)\b": "play_media",          # Music intent (default: music assistant)
     r"\b(stop)\b": "stop_media",
+    # Timer control patterns (specific matches before generic ones)
+    r"\bpause\s+(the\s+)?(?:timer|alarm)\b": "timer_pause",
+    r"\bresume\s+(the\s+)?(?:timer|alarm)\b": "timer_resume",
+    r"\b(?:cancel|stop|delete|remove)\s+(the\s+)?(?:timer|alarm)\b": "timer_delete",
+
     r"\b(pause)\b": "pause_media",
     r"\b(resume|unpause)\b": "media_play",
     r"\b(skip|next)\b": "media_next",
