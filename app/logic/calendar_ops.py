@@ -140,21 +140,40 @@ async def tool_calendar_read(user_creds: Dict[str, str], redis_client) -> str:
             client = _get_cal_client(user_creds)
             found_events = []
             calendars = client.principal().calendars()
-            now = datetime.now()
-            end = now + timedelta(days=7)
+            
+            # Use aware datetimes for search (from current local time - 1h to +7 days)
+            local_tz = _get_local_tz()
+            now_local = datetime.now(local_tz)
+            start_search = (now_local - timedelta(hours=1))
+            end_search = (now_local + timedelta(days=7))
+
             for cal in calendars:
-                if redis_client and redis_client.get(_get_writable_cache_key(str(cal.url))) == "0": continue
+                cal_name = cal.name or "Untitled"
+                # Skip noise calendars
+                if any(x in cal_name.lower() for x in ["birthday", "contact", "holiday"]):
+                    continue
+                
                 try:
-                    events = cal.search(start=now, end=end, event=True, expand=True)
+                    # Search range is aware, caldav should handle conversion to UTC if needed
+                    events = cal.search(start=start_search, end=end_search, event=True, expand=True)
                     for ev in events:
                         ve = ev.vobject_instance.vevent
+                        # Normalize time to local for display
                         start_dt = _normalize_event_time(ve.dtstart.value)
                         t_str = start_dt.strftime("%Y-%m-%d %H:%M")
-                        found_events.append(f"- [{t_str}] {ve.summary.value} ({cal.name})")
-                except: pass
-            return "Upcoming Events:\n" + "\n".join(found_events) if found_events else "No events found."
+                        found_events.append(f"- [{t_str}] {ve.summary.value} ({cal_name})")
+                except Exception as e:
+                    log.warning(f"Error reading calendar '{cal_name}': {e}")
+                    pass
+            
+            # Sort events by time
+            found_events.sort()
+            return "Upcoming Events:\n" + "\n".join(found_events) if found_events else "No events found on your calendars."
+        
         return await run_blocking(_fetch)
-    except: return ""
+    except Exception as e:
+        log.error(f"Global calendar read error: {e}")
+        return ""
 
 async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str, redis_client) -> Dict[str, Union[str, bool]]:
     if not NEXTCLOUD_URL: return {"status": "FAILURE", "message": "Error: Nextcloud not configured.", "service": "calendar_add"}
@@ -166,7 +185,8 @@ async def tool_calendar_add(query: str, user_creds: Dict[str, str], model: str, 
     if not summary or not start: 
         return {"status": "FAILURE", "message": "Missing event details.", "service": "calendar_add"}
     
-    dt = dateparser.parse(start, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now()})
+    local_tz = _get_local_tz()
+    dt = dateparser.parse(start, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now(local_tz).replace(tzinfo=None)})
     if not dt: return {"status": "FAILURE", "message": f"Invalid date: {start}", "service": "calendar_add"}
 
     if "am" not in start.lower() and "pm" not in start.lower():
@@ -214,8 +234,9 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
     target_dt = None
     target_date_only = False
     
+    local_tz = _get_local_tz()
     if target_time_str:
-        target_dt = dateparser.parse(target_time_str, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now()})
+        target_dt = dateparser.parse(target_time_str, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now(local_tz).replace(tzinfo=None)})
         # Check if the user only gave a date (e.g. "tomorrow") without a time
         if target_dt and "at" not in target_time_str and ":" not in target_time_str:
              target_date_only = True
@@ -234,8 +255,9 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
             count = 0
             
             # Expanded search window to ensure we catch events
-            search_start = (target_dt - timedelta(days=1)) if target_dt else datetime.now()
-            search_end = search_start + timedelta(days=30)
+            now_aware = datetime.now(local_tz)
+            search_start = (target_dt.replace(tzinfo=local_tz) - timedelta(days=1)) if target_dt else (now_aware - timedelta(days=1))
+            search_end = search_start + timedelta(days=60)
 
             for c in calendars:
                 if not _is_cal_writable(c, user_creds['user'], redis_client): continue
@@ -296,7 +318,8 @@ async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: st
     if not keyword or not new_start: 
         return {"status": "FAILURE", "message": "Missing details.", "service": "calendar_update"}
     
-    dt = dateparser.parse(new_start, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now()})
+    local_tz = _get_local_tz()
+    dt = dateparser.parse(new_start, settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': datetime.now(local_tz).replace(tzinfo=None)})
     
     if "am" not in new_start.lower() and "pm" not in new_start.lower() and dt.hour < 7:
         dt = dt + timedelta(hours=12)
@@ -312,8 +335,9 @@ async def tool_calendar_update(query: str, user_creds: Dict[str, str], model: st
             client = _get_cal_client(user_creds)
             calendars = client.principal().calendars()
             count = 0
-            start_search = datetime.now()
-            end_search = start_search + timedelta(days=30)
+            now_aware = datetime.now(local_tz)
+            start_search = now_aware - timedelta(days=1)
+            end_search = start_search + timedelta(days=60)
             
             for c in calendars:
                 if not _is_cal_writable(c, user_creds['user'], redis_client): continue
