@@ -49,21 +49,32 @@ class TestEntityResolution(unittest.IsolatedAsyncioTestCase):
         
         # TEST 1: Turn Off (Power)
         # Should prefer the Android TV integration because it controls the actual hardware power
-        eid, integration = await smart_resolve_entity("Office TV", "turn_off", mock_collection)
+        eid, integration, _ = await smart_resolve_entity("Office TV", "turn_off", mock_collection)
         print(f"\n[Turn Off] Resolved: {eid} ({integration})")
         
-        # CURRENTLY: This might fail or be flaky depending on list order without the fix.
-        # We want to assertion to be Android TV.
         self.assertEqual(eid, "media_player.office_tv_android")
         self.assertEqual(integration, "androidtv")
 
         # TEST 2: Play Music
         # Should prefer Music Assistant
-        eid_music, int_music = await smart_resolve_entity("Office TV", "play_media", mock_collection, is_music=True)
+        eid_music, int_music, _ = await smart_resolve_entity("Office TV", "play_media", mock_collection, is_music=True)
         print(f"[Play Music] Resolved: {eid_music} ({int_music})")
         
         self.assertEqual(eid_music, "media_player.office_tv_mass")
         self.assertEqual(int_music, "music_assistant")
+
+        # TEST 3: Watch Video
+        # Should prefer Android TV (Hardware) or Cast
+        eid_video, int_video, _ = await smart_resolve_entity("Office TV", "watch_media", mock_collection, is_video=True)
+        print(f"[Watch Video] Resolved: {eid_video} ({int_video})")
+        self.assertEqual(eid_video, "media_player.office_tv_android")
+
+        # TEST 4: Ambiguous "Play" (No music flag)
+        # Should prefer Music Assistant if ambiguous?
+        # Current Logic: If ambiguous, MA gets +50, TV gets +20. So MA wins.
+        eid_amb, int_amb, _ = await smart_resolve_entity("Office TV", "play_media", mock_collection)
+        print(f"[Ambiguous Play] Resolved: {eid_amb} ({int_amb})")
+        self.assertEqual(int_amb, "music_assistant")
 
 if __name__ == '__main__':
     unittest.main()

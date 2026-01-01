@@ -273,6 +273,8 @@ class StandardIntegration(MediaIntegration):
         """Clean the query string by removing device names and action words."""
         cleaned = query.lower()
         
+        log.info(f"[QueryCleaning] Input: '{query}', device_name: '{device_name}'")
+        
         # Generic platform/integration identifiers that are safe to remove
         generic_terms = ["tv", "television", "speaker", "the"]
         
@@ -284,6 +286,8 @@ class StandardIntegration(MediaIntegration):
         # Sort by length (longest first) to avoid partial matches
         targets_to_remove = sorted(set(targets_to_remove + generic_terms), key=len, reverse=True)
         
+        log.info(f"[QueryCleaning] Targets to remove: {targets_to_remove}")
+        
         for name in targets_to_remove:
             if name and len(name) > 1 and name in cleaned:
                 # Remove device name with common prepositions
@@ -294,6 +298,8 @@ class StandardIntegration(MediaIntegration):
         # Remove action words
         cleaned = re.sub(r"\b(play|please|from|listen to|watch|view)\b", "", cleaned).strip()
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        
+        log.info(f"[QueryCleaning] Output: '{cleaned}'")
         
         return cleaned
 
