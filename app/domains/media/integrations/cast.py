@@ -52,18 +52,17 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                       is_ma = check_ma_attrs(attrs)
             
             # 2. Fallback to Chroma Lookup (Only if metadata missing) - [Legacy/Backup]
-            if not is_ma and not metadata:
-                from app.settings import GlobalResources
-                try:
-                    # Logic here might fail on suffixes, but it's a backup.
-                    docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
-                    if docs and docs.get("metadatas"):
-                        import json
-                        attrs_str = docs["metadatas"][0].get("attributes", "{}")
-                        attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
-                        is_ma = check_ma_attrs(attrs)
                 except Exception as e:
                     log.warning(f"[Cast] Failed to check MA wrapper status: {e}")
+
+            # 3. [Robustness Fix] If NOT confirmed MA yet, try to find a sibling MA wrapper
+            # Use this wrapper as the target for the music command
+            if not is_ma:
+                ma_wrapper = await self._get_ma_wrapper(entity_id)
+                if ma_wrapper:
+                    log.info(f"[Cast] Found Music Assistant wrapper ({ma_wrapper}) for {entity_id}. Swapping target for Music request.")
+                    entity_id = ma_wrapper
+                    is_ma = True
 
             if is_ma:
                 log.info(f"[Cast] Music request on MA wrapper (Source of Truth), delegating to MusicAssistantIntegration")
