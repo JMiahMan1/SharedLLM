@@ -65,7 +65,7 @@ def main():
 
     finally:
         log.info("\n--- Teardown: Restoring Device State ---")
-        stop_query = "Stop music on Office TV"
+        stop_query = "Turn off Office TV"
         log.info(f">> Sending Cleanup Query: '{stop_query}'")
         remote_query(stop_query)
         log.info("Cleanup command sent.")
