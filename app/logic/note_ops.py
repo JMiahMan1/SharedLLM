@@ -86,6 +86,26 @@ async def append_note(title: str, content: str) -> dict:
     except Exception as e:
         return {"status": "error", "msg": str(e)}
 
+async def update_note(title: str, content: str) -> dict:
+    """Overwrites an existing note with new raw content."""
+    if not (NEXTCLOUD_URL and NEXTCLOUD_USER and NEXTCLOUD_PASS):
+        return {"status": "error", "msg": "Nextcloud credentials missing"}
+
+    safe_title = "".join([c for c in title if c.isalnum() or c in " -_"]).strip()
+    filename = f"{safe_title}.md"
+    url = _get_webdav_url(filename)
+
+    def _write():
+        return requests.put(url, data=content.encode('utf-8'), auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), verify=False)
+
+    try:
+        resp = await run_blocking(_write)
+        if resp.status_code in [200, 201, 204]:
+            return {"status": "success", "msg": f"Note '{safe_title}' updated."}
+        return {"status": "error", "msg": f"WebDAV Error: {resp.status_code}"}
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
+
 async def read_note(title: str) -> dict:
     """Reads a note's content directly from WebDAV."""
     if not (NEXTCLOUD_URL and NEXTCLOUD_USER and NEXTCLOUD_PASS):
@@ -143,6 +163,12 @@ async def tool_note_append(title: str, content: str):
     Appends text to a note. Useful for lists.
     """
     return await append_note(title, content)
+
+async def tool_note_update(title: str, content: str):
+    """
+    Overwrites a note with new content.
+    """
+    return await update_note(title, content)
 
 async def tool_note_read(title: str):
     """
