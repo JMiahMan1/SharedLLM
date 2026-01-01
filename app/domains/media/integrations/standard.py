@@ -272,39 +272,27 @@ class StandardIntegration(MediaIntegration):
     def _clean_query(self, query: str, media_type: str, entity_id: str, device_name: str = None) -> str:
         """Clean the query string by removing device names and action words."""
         cleaned = query.lower()
-        # Remove possessives (e.g. "gracie's" -> "gracie")
-        cleaned = cleaned.replace("'s", "")
         
-        # Generic device type identifiers to remove
-        targets_to_remove = ["tv", "television", "speaker", "roku", "chromecast", "cast"]
+        # Generic platform/integration identifiers that are safe to remove
+        generic_terms = ["tv", "television", "speaker", "the"]
         
-        # Add the actual device name if provided
+        # Add the actual device name if explicitly provided
+        targets_to_remove = []
         if device_name: 
             targets_to_remove.append(device_name.lower())
-            # Also add variant without common suffixes
-            base_name = device_name.lower().replace(" tv", "").replace(" television", "").replace(" speaker", "")
-            if base_name and base_name not in targets_to_remove:
-                targets_to_remove.append(base_name)
         
-        # Extract name from entity_id if possible (e.g. media_player.office_tv_chrome -> "office tv chrome")
-        if entity_id:
-             ename = entity_id.split(".")[-1].replace("_", " ").lower()
-             if ename not in targets_to_remove:
-                 targets_to_remove.append(ename)
-             # Also try without common integration suffixes
-             base_ename = ename.replace("media player", "").replace("roku", "").replace("chromecast", "").replace("chrome", "").strip()
-             if base_ename and base_ename not in targets_to_remove:
-                 targets_to_remove.append(base_ename)
-             
         # Sort by length (longest first) to avoid partial matches
-        targets_to_remove = sorted(set(targets_to_remove), key=len, reverse=True)
+        targets_to_remove = sorted(set(targets_to_remove + generic_terms), key=len, reverse=True)
         
         for name in targets_to_remove:
-            if name and len(name) > 1 and name in cleaned:  # Avoid single-char removals
-                cleaned = re.sub(f"\\b(on|in|at|to)?\\s*(the)?\\s*{re.escape(name)}\\b", " ", cleaned)
+            if name and len(name) > 1 and name in cleaned:
+                # Remove device name with common prepositions
+                cleaned = re.sub(f"\\b(on|in|at|to)\\s+(the\\s+)?{re.escape(name)}\\b", " ", cleaned)
+                # Also remove standalone
+                cleaned = re.sub(f"\\b{re.escape(name)}\\b", " ", cleaned)
 
         # Remove action words
-        cleaned = re.sub(r"\b(play|please|from|on|listen to|watch|view)\b", "", cleaned).strip()
+        cleaned = re.sub(r"\b(play|please|from|listen to|watch|view)\b", "", cleaned).strip()
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         
         return cleaned
