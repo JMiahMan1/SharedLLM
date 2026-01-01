@@ -275,15 +275,33 @@ class StandardIntegration(MediaIntegration):
         # Remove possessives (e.g. "gracie's" -> "gracie")
         cleaned = cleaned.replace("'s", "")
         
-        # Remove device names
-        targets_to_remove = ["office tv", "master bedroom tv", "gracie tv", "tv", "speaker"]
-        if device_name: targets_to_remove.append(device_name.lower())
+        # Remove device names (including common variations)
+        targets_to_remove = [
+            "office tv", "office", 
+            "master bedroom tv", "master bedroom",
+            "gracie tv", "gracies tv", "gracie", "gracies",
+            "living room tv", "living room",
+            "tv", "speaker", "roku", "chromecast"
+        ]
+        if device_name: 
+            targets_to_remove.append(device_name.lower())
+            # Also add variant without common suffixes
+            base_name = device_name.lower().replace(" tv", "").replace(" speaker", "")
+            if base_name:
+                targets_to_remove.append(base_name)
         
         # Extract name from entity_id if possible
         if entity_id:
              ename = entity_id.split(".")[-1].replace("_", " ").lower()
              targets_to_remove.append(ename)
+             # Also try without common prefixes like 'media_player.'
+             base_ename = ename.replace("media player", "").replace("roku", "").replace("chromecast", "").strip()
+             if base_ename:
+                 targets_to_remove.append(base_ename)
              
+        # Sort by length (longest first) to avoid partial matches
+        targets_to_remove = sorted(set(targets_to_remove), key=len, reverse=True)
+        
         for name in targets_to_remove:
             if name and name in cleaned:
                 cleaned = re.sub(f"\\b(on|in|at|to)?\\s*(the)?\\s*{re.escape(name)}\\b", " ", cleaned)
@@ -293,6 +311,7 @@ class StandardIntegration(MediaIntegration):
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         
         return cleaned
+
         
     async def next_track(self, entity_id: str, user_creds: Dict) -> Dict[str, Any]:
         """Skip to next track."""
