@@ -514,6 +514,166 @@ async def resolve_multiple_entities_with_pattern(
     return matching_entities
 
 
+def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music: bool, is_video: bool) -> int:
+    """
+    Scores a candidate entity based on the intent and media type.
+    Higher score = better match.
+    
+    Args:
+        candidate: Tuple of (entity_id, integration, metadata) or dict/object with these attributes.
+        intent: The intent string (e.g., "turn_off", "play_media").
+        is_music: Boolean, true if intent is music-related.
+        is_video: Boolean, true if intent is video-related.
+        
+    Returns:
+        Integer score.
+    """
+    # Normalize candidate input
+    metadata = {}
+    if isinstance(candidate, (tuple, list)):
+        eid = candidate[0]
+        integ = candidate[1]
+        if len(candidate) > 2: metadata = candidate[2]
+    elif isinstance(candidate, dict):
+        eid = candidate.get("eid") or candidate.get("entity_id")
+        integ = candidate.get("integration", "unknown")
+        # Fallback to using candidate itself as metadata if unstructured
+        metadata = candidate.get("metadata", candidate) 
+    else:
+        # Fallback for unexpected types
+        return 0
+
+    domain = eid.split('.')[0]
+    integ = str(integ).lower()
+    friendly_name = str(metadata.get("friendly_name", "")).lower()
+    attrs = str(metadata.get("attributes", ""))
+    
+    # Handle capabilities (could be list or string depending on source)
+    caps = metadata.get("capabilities", [])
+    if isinstance(caps, str): caps = caps.split(",")
+    # If supported_features dict is available, check keys
+    supp_feats = metadata.get("supported_features", {})
+    if isinstance(supp_feats, dict):
+        caps.extend(supp_feats.keys())
+    
+    caps_set = set(str(c).lower().strip() for c in caps)
+
+    # --- Scoring Logic (Consolidated from _route_by_intent) ---
+
+    score = 0
+
+    # 1. POWER COMMANDS
+    if intent in ["turn_off", "turn_on", "toggle"]:
+        if domain == "remote": 
+            return 100
+        if "remote" in friendly_name: 
+            return 95 # High priority for "Office TV Remote"
+        if integration == "androidtv_remote":
+             return 90
+        
+        # Hardware devices (TVs with remotes) are preferred for power control
+        HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "samsungtv", "apple_tv", "braviatv"]
+        if any(x in integ for x in HW_TV_INTEGRATIONS): 
+            return 20
+        
+        if domain == "switch": 
+            return 15 # Smart plug?
+            
+        # Deprioritize cast/chrome for power
+        if any(x in integ for x in ["cast", "google_cast", "sonos"]) or "_chrome" in eid: 
+            return -50
+            
+        # Music Assistant players are software entities
+        if "music_assistant" in integ or "dlna" in integ: 
+            return -10
+        
+        if "turn_off" in caps_set: return 10
+        return 5
+
+    # 2. MEDIA PLAY / WATCH
+    elif intent in ["play_media", "watch_media", "view_content", "media_play"]:
+        if is_music:
+            # Checking for MA explicit attributes
+            has_ma_attr = "mass_player_type" in attrs or "music_assistant" in attrs
+            is_speaker = "speaker" in integ or "dlna" in integ or "sonos" in integ
+            
+            if "music_assistant" in integ: return 200 # Native MA Provider (Best)
+            elif has_ma_attr: return 150 # Wrapper with MA capability
+            elif is_speaker: return 50
+            elif "play_media" in caps_set: return 10
+            
+            # Penalize Cast/Chrome for music if we have other options (prefer MA)
+            # But Cast is still better than a TV for audio sometimes? 
+            # Actually user wants to prioritize MA heavily.
+            if "cast" in integ or "chrome" in eid: return 5 # Acceptable but low
+            
+            return 0
+
+        elif is_video:
+            # STRICT prohibition on Audio-only devices
+            if any(x in integ for x in ["sonos", "music_assistant", "audio", "spotify", "squeeze"]):
+                return -100
+            
+            HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "braviatv", "samsungtv", "apple_tv", "firetv", "tv"]
+            if any(x in integ for x in HW_TV_INTEGRATIONS):
+                return 100
+            elif "cast" in integ or "google_cast" in integ:
+                return 90  # Cast is good for video but prefer native TV
+            
+            # Generic
+            return 5
+
+        else:
+            # Ambiguous Intent
+            if "music_assistant" in integ: return 50
+            if any(x in integ for x in ["roku", "androidtv"]): return 20 
+            if "play_media" in caps_set: return 10
+            return 0
+
+    # 3. REMOTE CONTROL (Navigation)
+    elif intent.startswith("nav_"):
+        if domain == "remote": return 100
+        if "androidtv_remote" in integ: return 90
+        # Media players can sometimes handle nav via services, but remotes are best
+        if any(x in integ for x in ["roku", "androidtv"]): return 50
+        return 0
+
+    # 4. APP LAUNCH
+    elif intent == "open_app":
+        # Prioritize Smart Players that run apps
+        if "cast" in integ or "androidtv" in integ or "roku" in integ or "webos" in integ:
+            if domain == "media_player": return 100
+        if domain == "remote": return 50
+        return 0
+
+    # 5. PLAYBACK CONTROLS (Pause, Resume, Stop)
+    elif intent in ["pause", "resume", "media_pause", "media_play", "media_stop", "stop_media", "media_next_track", "media_previous_track", "media_next", "media_previous"]:
+        if domain == "media_player":
+            # Prioritize Hardware TVs over Cast (so "Stop" stops the TV app, not just the cast background)
+            HW_TV_INTEGRATIONS = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv"]
+            if any(x in integ for x in HW_TV_INTEGRATIONS):
+                 return 150 # Boost above standard 100
+            elif "cast" in integ: 
+                 return 110
+            return 100
+            
+        elif domain == "remote":
+             return -50 # Remotes often don't support direct service calls like 'media_pause'
+        return 0
+
+    # 6. VOLUME CONTROLS
+    elif intent in ["volume_up", "volume_down", "volume_mute", "volume_set"]:
+         if domain == "media_player": return 100
+         if domain == "remote": return 50
+         return 0
+
+    # Default fallback
+    if any(x in integ for x in ["roku", "androidtv", "webostv"]): 
+        return 10
+    
+    return 5
+
+
 async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False, is_video: bool = False, allow_multiple: bool = False) -> list:
     """
     Resolves the best entity (or entities) based on query and intent.
@@ -528,13 +688,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     # 0. Setup & lazy imports
     try:
         from app.settings import GlobalResources, run_blocking
-        from langchain_chroma import Chroma
         from app.logic.pattern_matching import detect_number_pattern, filter_entities_by_pattern
     except ImportError:
         log.error("Could not import dependencies for resolution.")
-        return [] if allow_multiple else (None, None)
+        return [] if allow_multiple else (None, None, {})
 
-    # 1. Detect Entity Grouping/Pattern (Numbers, Locations, Directions, Plurals)
     # 1. Detect Entity Grouping/Pattern (Numbers, Locations, Directions, Plurals)
     patterns = detect_number_pattern(query_name) # Aliased to detect_entity_pattern
     if patterns:
@@ -548,8 +706,11 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
     try:
         # Get ALL entities from ChromaDB for exact matching
+        # Use passed collection if available, otherwise GlobalResources
+        collection_source = ha_collection if ha_collection else GlobalResources.ha_collection
+        
         all_results = await run_blocking(
-            lambda: GlobalResources.ha_collection.get()
+            lambda: collection_source.get()
         )
 
         if all_results and all_results.get("metadatas"):
@@ -597,44 +758,23 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
             # Return exact match immediately, but prioritize native integrations if multiple
             if exact_matches:
-                # Sort: Prefer non-MASS, non-DLNA
-                # Priority: Roku/AndroidTV/WebOS > Cast > Others > MASS/DLNA
-                def _integ_priority(item):
-                    # Handle 2-item or 3-item tuples
-                    eid = item[0]
-                    integ = item[1]
-                    domain = eid.split('.')[0]
-                    
-                    # CRITICAL: Different priorities for music vs video vs power
-                    if intent == "turn_off":
-                        # Power Off: Prefer actual remotes or TV integrations over Cast/Speakers
-                        if domain == "remote": return 20
-                        if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 15
-                        if "cast" in integ or "google_cast" in integ: return 5
-                        return 10
+                # Sort using the shared helper
+                def _helper_score(item):
+                    # item is (eid, integ, meta)
+                    return _score_candidate_for_intent_and_media_type(item, intent, is_music, is_video)
+                
+                exact_matches.sort(key=_helper_score, reverse=True)
+                
+                # Filter out negative scores (strictly filtered out)
+                exact_matches = [m for m in exact_matches if _helper_score(m) > -50]
 
-                    if is_music:  
-                        # Music: Prefer Cast/MA (Music Assistant uses Cast devices)
-                        if "cast" in integ or "music_assistant" in integ or "sonos" in integ: return 10
-                        if "roku" in integ or "androidtv" in integ or "webostv" in integ: return 5
-                    elif is_video:
-                        # Video: Prefer TV devices (AndroidTV/Roku) over Cast speakers
-                        if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 10
-                        if "cast" in integ or "google_cast" in integ: return 8
-                    else:
-                        # Default: Prefer TV devices
-                        if "roku" in integ or "androidtv" in integ or "webostv" in integ or "samsungtv" in integ: return 10
-                        if "cast" in integ or "google_cast" in integ or "sonos" in integ: return 8
+                if not exact_matches:
+                    log.info(f"All exact matches filtered out by strict intent rules.")
+                    return [] if allow_multiple else (None, None, {})
 
-                    if "music_assistant" in integ or "dlna" in integ: return 0
-                    return 5
+                best = exact_matches[0]
+                log.info(f"Using prioritized exact name match for '{query_name}': {best} (Entity: {best[0]}, Score: {_helper_score(best)})")
                 
-                exact_matches.sort(key=_integ_priority, reverse=True)
-                
-                log.info(f"Using prioritized exact name match for '{query_name}': {exact_matches[0]} (Entity: {exact_matches[0][0]}, Score: {_integ_priority(exact_matches[0])})")
-                
-                # [Fix] Return 3-item tuple to preserve metadata (Source of Truth)
-                best = exact_matches[0] # (eid, integ, meta) is already in this format as appended above
                 return [best] if allow_multiple else best
 
             # Return best prefix match
@@ -768,295 +908,89 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 return filtered_tuples
             return [filtered_tuples[0]] # Should not happen if allow_multiple forced True
 
-    # 5. Standard Priority Logic
-    # Reconstruct simple candidates list for legacy logic
-    candidates = [(c["eid"], c["integration"], c["metadata"]) for c in raw_candidates]
-
-    # Priority Logic for Music/Power/Etc
-
-    # --- ENFORCED PRIORITY FOR MUSIC ---
-    # --- MUSIC PRIORITY (Boost MA devices) ---
-    if is_music:
-        ma_candidate = None
-        # First pass: Look for exact Music Assistant match
-
-        for c in raw_candidates:
-             eid = c["eid"]
-             integ = c["integration"]
-             meta = c.get("metadata", {})
-             attrs = meta.get("attributes", "")
-
-             # Check for explicit integration OR metadata signature
-             is_ma = "music_assistant" in integ or "music_assistant" in str(attrs) or "mass_player" in str(attrs)
-
-             if is_ma:
-                 ma_candidate = (eid, integ)
-                 break
-
-        # Second pass: If no MA match, look for "speaker" type devices that aren't strict TVs
-        if not ma_candidate:
-             for eid, integration, meta in candidates:
-                  if "speaker" in eid or "audio" in integration:
-                       ma_candidate = (eid, integration, meta)
-                       break
-
-        if ma_candidate:
-            return [ma_candidate] if allow_multiple else ma_candidate
-
-        # Fallback: If no MA device found, we return the best TV candidate (if exists),
-        # but we log a warning because we expected music.
-        tv_candidate = None
-        for eid, integration, meta in candidates:
-            if eid.startswith("media_player.") and any(x in eid.lower() for x in ["tv", "chromecast", "shield", "androidtv"]):
-                if tv_candidate is None:
-                    tv_candidate = (eid, integration, meta)
-
-        if tv_candidate:
-             return [tv_candidate] if allow_multiple else tv_candidate
-
-        # Fallback 2: Check for Cast devices (Google Cast/Chrome) if not found above
-        # This fixes "Play music on X" where X is a Chromecast but didn't match "speaker" keywords
-        cast_candidate = None
-        for eid, integration, meta in candidates:
-             if "cast" in integration or "google_cast" in integration or "chrome" in eid.lower():
-                  cast_candidate = (eid, integration, meta)
-                  break
-        
-        if cast_candidate:
-             return [cast_candidate] if allow_multiple else cast_candidate
-
-        log.warning(f"Strict Music Mode: No suitable music player found for '{query_name}'. Returning None.")
-        return [] if allow_multiple else (None, None)
-
-    # --- POWER/HARDWARE PRIORITY ---
-    if intent in ["turn_on", "turn_off", "toggle"]:
-        HW_INTEGRATIONS_POWER = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv", "esphome", "tasmota", "shelly", "hue", "lutron_caseta", "kodi", "vlc", "denonavr", "yamaha"]
-
-        # Capability Enrichment (Re-added)
-        from app.settings import get_user_creds
-        redis_client = GlobalResources.redis_client
-        admin_creds = get_user_creds("admin")
-
-        enriched_candidates = []
-        for c in raw_candidates:
-             try:
-                 caps = await get_device_capabilities(c["eid"], admin_creds, redis_client)
-                 real_int = caps.get("integration", c["integration"])
-                 if real_int == "unknown": real_int = c["integration"]
-                 enriched_candidates.append({
-                     "eid": c["eid"],
-                     "integration": real_int,
-                     "supported_features": caps.get("features_breakdown", {}),
-                     "friendly_name": caps.get("friendly_name", c["friendly_name"])
-                 })
-             except:
-                 enriched_candidates.append({"eid": c["eid"], "integration": c["integration"], "supported_features": {}, "friendly_name": c["friendly_name"]})
-
-        matches = []
-        for c in enriched_candidates:
-            score = 0
-            integ = c["integration"]
-            eid = c["eid"]
-            feats = c["supported_features"]
-
-            if integ in HW_INTEGRATIONS_POWER: score += 20
-            if feats.get("turn_off"): score += 10
-            
-            # Intent Analysis / Media Type Inference
-            # Global Policy: "Play" -> Music, "Watch" -> Video
-            q_lower = query_name.lower()
-            
-            # Check for explicit Video keywords
-            is_video = "watch" in q_lower or "view" in q_lower or "video" in q_lower or "movie" in q_lower or "show" in q_lower or "netflix" in q_lower or "youtube" in q_lower
-            
-            # Check for explicit Music keywords
-            is_music = "listen" in q_lower or "music" in q_lower or "song" in q_lower or "radio" in q_lower or "spotify" in q_lower
-            
-            # [Global Policy Logic]
-            # If intent is "play_media" and NOT explicit video -> Default to Music
-            if intent == "play_media" and not is_video:
-                is_music = True
-            
-            # Special: "Play X on Y" without "watch" should be music.
-            # The commands.py logic does this too, but we need it HERE for Group Routing to pick the MA entity.
-            if any(x in eid.lower() for x in ["tv", "projector", "receiver", "remote"]): score += 5
-
-            is_chrome = "chrome" in integ.lower() or "cast" in integ.lower() or "google_cast" in integ.lower()
-            if is_chrome: score -= 25 # HEAVY Penalty for Cast during Power Ops (Prefer Remote/Native)
-
-            matches.append((score, eid, integ, c.get("supported_features", {}), c.get("friendly_name")))
-
-        if matches:
-            matches.sort(key=lambda x: x[0], reverse=True)
-            res = (matches[0][1], matches[0][2], {"supported_features": matches[0][3], "friendly_name": matches[0][4]})
-            return [res] if allow_multiple else res
-
-    # --- FALLBACK / GENERIC ---
-    preferred_type = "generic"
-    if intent == "play_media":
-         APP_PACKAGES = ["netflix", "youtube", "hulu", "plex", "spotify", "disney"]  # This should be imported from integrations
-         q_low = query_name.lower()
-         if any(app in q_low for app in APP_PACKAGES) or is_video:
-             preferred_type = "android"
-
-    elif intent in ["open_app"]:
-        preferred_type = "android"
-
-    elif intent in ["turn_on", "turn_off", "toggle"] or intent.startswith("nav_"):
-        preferred_type = "android" # Prefer hardware for these if no explicit match above
-
-    best_candidate = None
+    # 5. Standard Priority Logic using Helper
+    scored_candidates = []
+    for c in raw_candidates:
+         # Enrich for helper
+         score = _score_candidate_for_intent_and_media_type(c, intent, is_music, is_video)
+         scored_candidates.append((score, c))
+    
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    
+    if not scored_candidates:
+         return [] if allow_multiple else (None, None)
+         
+    best_score, best_dict = scored_candidates[0]
+    log.info(f"Smart Resolution Selected: {best_dict['eid']} (Score: {best_score})")
+    
+    # Check for hard disqualification
+    if best_score <= -100:
+         log.warning("Best candidate disqualified by strict intent rules.")
+         return [] if allow_multiple else (None, None)
 
     # ---------------------------------------------------------
-    # CAPABILITY / GROUP ROUTING (NEW)
+    # CAPABILITY / GROUP ROUTING
     # ---------------------------------------------------------
-    # If we found a match, check if it belongs to a Device Group.
-    # If so, fetch the whole group and route based on Intent.
+    # Check if the BEST candidate belongs to a group and if we should route to a better member
+    # (e.g. "Living Room" -> Group -> Music Assistant Speaker)
+    
+    top_meta = best_dict["metadata"]
+    group_id = top_meta.get("group_id")
+    
+    if group_id and group_id != "unknown":
+        log.info(f"Match found in Group: {group_id} (Entity: {best_dict['eid']})")
+        try:
+             # Access underlying chromadb collection if available
+             if hasattr(ha_collection, "_collection"):
+                  group_res = ha_collection._collection.get(where={"group_id": group_id})
+                  
+                  if group_res and group_res.get("metadatas"):
+                       members = group_res["metadatas"]
+                       log.info(f"Group {group_id} has {len(members)} members.")
 
-    top_doc = None
-    if results:
-         # Handle (Doc, Score) tuple or just Doc
-         item = results[0]
-         if isinstance(item, tuple): top_doc = item[0]
-         else: top_doc = item
+                       # ROUTING LOGIC - Use existing helper
+                       selected = _route_by_intent(intent, members, is_music, is_video)
+                       if selected:
+                            eid = selected.get("entity_id")
+                            integ = selected.get("integration", "unknown")
+                            log.info(f"Capability Routing diverted {best_dict['eid']} -> {eid} ({integ}) for intent {intent}")
+                            
+                            qt = (eid, integ, selected)
+                            
+                            # If allowing multiple, we might want to return the whole group?
+                            # For now, if routed, strict return single best.
+                            if allow_multiple:
+                                return [qt] 
+                            return qt
+        except Exception as e:
+            log.error(f"Group Routing Failed: {e}")
 
-    if top_doc:
-        group_id = top_doc.metadata.get("group_id")
+    # Return best matches
+    if allow_multiple:
+         # Return top 5 valid candidates
+         return [(x[1]["eid"], x[1]["integration"], x[1]["metadata"]) for x in scored_candidates if x[0] > -50][:5]
 
-        if group_id:
-            log.info(f"match found in Group: {group_id} (via {top_doc.page_content[:20]}...)")
-            try:
-                # Fetch all group members from Chroma
-                # Note: ha_collection is Langchain wrapper. Access internal collection if possible,
-                # or rely on metadata from the search result if we indexed enough?
-                # Better to query. keys: "entity_id", "integration", "capabilities", "domain"
-
-                # Access underlying chromadb collection if available
-                if hasattr(ha_collection, "_collection"):
-                     group_res = ha_collection._collection.get(where={"group_id": group_id})
-                     # group_res keys: ids, metadatas, documents...
-
-                     if group_res and group_res.get("metadatas"):
-                          members = group_res["metadatas"]
-                          log.info(f"Group {group_id} has {len(members)} members.")
-
-                          # ROUTING LOGIC
-                          selected = _route_by_intent(intent, members, is_music, is_video)
-                          if selected:
-                               log.info(f"Capability Routing used {selected['entity_id']} ({selected.get('integration')}) for intent {intent}")
-                               # Return 3-item tuple to preserve metadata (Source of Truth)
-                               return (selected["entity_id"], selected.get("integration", "unknown"), selected)
-
-            except Exception as e:
-                log.error(f"Group Routing Failed: {e}")
-
-    # Fallback to standard selection
-    for eid, integration, meta in candidates:
-        if preferred_type == "remote" and ("remote" in eid or "androidtv" in integration):
-             return eid, integration, meta
-
-    return candidates[0]
+    return (best_dict["eid"], best_dict["integration"], best_dict["metadata"])
 
 
 def _route_by_intent(intent: str, members: list, is_music: bool, is_video: bool) -> dict:
     """Selects best entity from a group based on intent and capabilities."""
-
-    # Score candidates
+    
+    # Score candidates using the shared helper
     scored = []
 
     for m in members:
-        score = 0
-        eid = m.get("entity_id", "")
-        domain = m.get("domain", "")
-        integration = m.get("integration", "unknown")
-        caps = m.get("capabilities", "").split(",")
-
-        friendly_name = m.get("friendly_name", "").lower()
-
-        # POWER
-        if intent in ["turn_on", "turn_off", "toggle"]:
-            if domain == "remote": score += 100
-            elif "remote" in friendly_name: score += 95 # High priority for "Office TV Remote"
-            elif integration == "androidtv_remote": score += 90
-            elif domain == "switch": score += 50 # Smart plug?
-            elif domain == "media_player":
-                # Deprioritize cast/chrome for power
-                if "cast" in integration or "_chrome" in eid: score -= 50
-                if "turn_off" in caps: score += 10
-
-        # MEDIA PLAY
-        elif intent in ["play_media", "watch_media", "view_content"]:
-            if is_music:
-                # [Fix] Global MA Routing: Prioritize specialized MA 'speaker' entities over generic TV entities
-                # This ensures we use the MA integration (which works) instead of generic Cast/TV integration (video-focused)
-                # We prioritize ANY entity with 'mass_player_type' for music.
-                attrs = m.get("attributes", "")
-                has_ma_attr = "mass_player_type" in str(attrs) or "music_assistant" in str(attrs)
-                
-                is_speaker = "speaker" in integration or "dlna" in integration
-                
-                if integration == "music_assistant": score += 200 # Native MA Provider (Best)
-                elif has_ma_attr: score += 150 # Wrapper with MA capability (Critical for Cast/Roku)
-                elif is_speaker: score += 50
-                elif "play_media" in caps: score += 10
-                
-                # Penalize Cast/Chrome if we want Music and have other options
-                if "cast" in integration or "chrome" in eid: score -= 50
-
-            elif is_video:
-                # Prioritize native TV integrations for video
-                HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "braviatv", "samsungtv", "apple_tv", "tv"]
-                if any(x in integration for x in HW_TV_INTEGRATIONS):
-                    score += 100
-                elif "cast" in integration:
-                    score += 90  # Cast is good for video but prefer native TV
-                elif integration == "music_assistant" or integration == "speaker":
-                    score -= 50  # Music Assistant wrapper shouldn't handle video
-                elif "play_media" in caps:
-                    score += 10
-            else:
-                # Ambiguous
-                if integration == "music_assistant": score += 50
-                elif "play_media" in caps: score += 10
-
-        # REMOTE CONTROL
-        elif intent.startswith("nav_"):
-            if domain == "remote": score += 100
-            elif integration == "androidtv_remote": score += 90
-
-        # APP LAUNCH (Merge with remote but prioritize Smart Players)
-        elif intent == "open_app":
-            if "cast" in integration or "androidtv" in integration:
-                if domain == "media_player": score += 100
-            elif domain == "remote": score += 50
-
-        # PLAYBACK CONTROLS (Pause, Resume, Stop, Next, Prev)
-        # Prioritize media_player entities over remotes/others
-        # PLAYBACK CONTROLS (Pause, Resume, Stop, Next, Prev)
-        # Prioritize media_player entities over remotes/others
-        elif intent in ["pause", "resume", "media_pause", "media_play", "media_stop", "stop_media", "media_next_track", "media_previous_track"]:
-            if domain == "media_player":
-                score += 100
-                
-                # Prioritize Hardware TVs (Android, WebOS, Roku) over generic Cast
-                # This ensures "Stop Office TV" targets the TV integration, not the Chromecast dongle
-                HW_INTEGRATIONS_TV = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv"]
-                if any(x in integration for x in HW_INTEGRATIONS_TV):
-                     score += 50 
-                elif "cast" in integration: 
-                     score += 10 # Cast is valid secondary
-                     
-            elif domain == "remote":
-                 score -= 50 # Remotes often don't support direct media_pause service calls
-
-        # VOLUME CONTROLS
-        elif intent in ["volume_up", "volume_down", "volume_mute", "volume_set"]:
-             if domain == "media_player": score += 100
-             elif domain == "remote": score += 50 # Remotes can often do volume
-
+        # m is a metadata dict (eid, integration, etc)
+        # Helper expects tuple or dict. passing dict m should work.
+        score = _score_candidate_for_intent_and_media_type(m, intent, is_music, is_video)
         scored.append((score, m))
 
     scored.sort(key=lambda x: x[0], reverse=True)
+    
     if scored:
-        return scored[0][1]
+        best_score, best_member = scored[0]
+        # Only return if it's a positive/neutral match (filtered out negatives)
+        if best_score > -50:
+            return best_member
+            
     return None
