@@ -12,7 +12,8 @@ from app.logic.timer_ops import (
     tool_timer_pause, tool_timer_resume, tool_alarm_add
 )
 from app.logic.note_ops import (
-    tool_note_add, tool_note_append, tool_note_read, tool_note_delete, tool_note_update
+    tool_note_add, tool_note_append, tool_note_read, tool_note_delete, tool_note_update,
+    tool_note_check_off
 )
 from app.logic.web_search import tool_web_search
 
