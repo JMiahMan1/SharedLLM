@@ -568,11 +568,13 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
             return 100
         if "remote" in friendly_name: 
             return 95 # High priority for "Office TV Remote"
-        if integration == "androidtv_remote":
+        
+        # High priority for Android TV integrations (Control visible as media_player but acts like remote)
+        if integ == "androidtv_remote" or "androidtv" in integ:
              return 90
         
         # Hardware devices (TVs with remotes) are preferred for power control
-        HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "samsungtv", "apple_tv", "braviatv"]
+        HW_TV_INTEGRATIONS = ["roku", "webostv", "samsungtv", "apple_tv", "braviatv"]
         if any(x in integ for x in HW_TV_INTEGRATIONS): 
             return 20
         
