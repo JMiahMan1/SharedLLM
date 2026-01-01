@@ -405,10 +405,31 @@ async def handle_note_update(query: str, params: dict = None, **kwargs):
 
 @ActionDispatcher.register("note_check_off")
 async def handle_note_check_off(query: str, params: dict = None, **kwargs):
+    import re
     p = params or {}
-    # Use query as item if not in params
-    item = p.get("item", query)
-    res = await tool_note_check_off(p.get("title", "Shopping List"), item)
+    
+    title = p.get("title")
+    item = p.get("item")
+
+    # If parameters missing parameters (likely regex route), try to extract from query
+    if not item or item == query:
+        # Try to extract "item" and "title" from natural language
+        # Pattern: "Check off [Item] in [Title]"
+        match = re.search(r"(?:check|mark|tick)\s+(?:off|done|complete)?\s*(?P<item>.+?)\s+(?:in|from|on)\s+(?P<title>.+?)$", query, re.IGNORECASE)
+        if match:
+            item = match.group("item")
+            title = title or match.group("title") # Only override if not set
+        else:
+            # Fallback: "Check off [Item]" (implied Shopping List)
+            match = re.search(r"(?:check|mark|tick)\s+(?:off|done|complete)?\s*(?P<item>.+)", query, re.IGNORECASE)
+            if match:
+                item = match.group("item")
+    
+    # Defaults
+    title = title or "Shopping List"
+    item = item or query
+
+    res = await tool_note_check_off(title, item)
     return {"status": "SUCCESS" if not isinstance(res, dict) or res.get("status") == "success" else "FAILURE", "message": str(res), "service": "note_check_off"}
 
 # --- SEARCH & MISC ---
