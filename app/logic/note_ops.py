@@ -86,6 +86,42 @@ async def append_note(title: str, content: str) -> dict:
     except Exception as e:
         return {"status": "error", "msg": str(e)}
 
+async def check_off_item(title: str, item_name: str) -> dict:
+    """Marks an item as completed in a note list (e.g., [ ] -> [x])."""
+    # 1. Read Note
+    res = await read_note(title)
+    if res.get("status") != "success":
+        return res
+    
+    content = res.get("content", "")
+    lines = content.split('\n')
+    updated_lines = []
+    found = False
+    
+    # 2. Find and Modify
+    for line in lines:
+        if item_name.lower() in line.lower() and not line.strip().startswith("[x]"):
+            # Supports standard bullet points or checkboxes
+            if line.strip().startswith("- [ ]"):
+                updated_lines.append(line.replace("- [ ]", "- [x]", 1))
+            elif line.strip().startswith("- "):
+                updated_lines.append(line.replace("- ", "- [x] ", 1))
+            elif line.strip().startswith("* "):
+                updated_lines.append(line.replace("* ", "* [x] ", 1))
+            else:
+                # Just prepend [x]
+                updated_lines.append(f"[x] {line}")
+            found = True
+        else:
+            updated_lines.append(line)
+            
+    if not found:
+        return {"status": "error", "msg": f"Item '{item_name}' not found or already checked."}
+        
+    # 3. Write Back
+    new_content = "\n".join(updated_lines)
+    return await update_note(title, new_content)
+
 async def update_note(title: str, content: str) -> dict:
     """Overwrites an existing note with new raw content."""
     if not (NEXTCLOUD_URL and NEXTCLOUD_USER and NEXTCLOUD_PASS):
@@ -169,6 +205,13 @@ async def tool_note_update(title: str, content: str):
     Overwrites a note with new content.
     """
     return await update_note(title, content)
+
+async def tool_note_check_off(title: str, item: str):
+    """
+    Marks an item as done in a note/list.
+    """
+    res = await check_off_item(title, item)
+    return res.get("msg") or res
 
 async def tool_note_read(title: str):
     """
