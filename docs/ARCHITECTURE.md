@@ -93,57 +93,78 @@ Music Assistant creates "wrapper" entities that control the actual hardware.
 
 **Problem**: When music plays via MA on `office_tv_chrome_2`, Redis should store `office_tv_chrome_2`, NOT `office_tv`.
 
-### 5. Entity Resolution Priority
+### 5. Entity Resolution Strategy (New Scoring Logic)
 
-For **"Office TV"** query:
-1. **Exact Name Match**: Searches all entities for `friendly_name == "Office TV"`
-2. **Integration Priority** (if multiple matches):
-   - Roku/AndroidTV/WebOS > Cast > Others > MA/DLNA
-3. **For MUSIC**: Should prefer Cast (MA-capable) over Android TV remote
+The system now uses a **Score-Based Resolution** mechanism (`_score_candidate_for_intent_and_media_type`) rather than simple priority lists. This ensures robust handling of ambiguous queries like "Watch vs Listen".
 
-**Current Bug**: Exact name match returns `media_player.office_tv` (Android TV) instead of `media_player.office_tv_chrome_2` (Cast device that MA uses)
+**Scoring Factors**:
+1. **Intent Matching**:
+   - **"search/watch/view"** (Video Intent):
+     - **+100**: Hardware TVs (Roku, Android TV, WebOS).
+     - **+90**: Cast Video devices (Chromecast).
+     - **-100 (HARD REJECT)**: Audio-only devices (Sonos, Music Assistant, Generic Speakers).
+   - **"play/listen"** (Audio Intent):
+     - **+200**: Music Assistant (Native support).
+     - **+150**: MA-capable wrappers.
+     - **+50**: Generic Speakers.
+   - **"turn_off/on"** (Power):
+     - **+100**: Infrared/Bluetooth Remotes.
+     - **+20**: Physical TVs.
+     - **-10**: Software players (Music Assistant).
 
-## Current Issues & Regression
+2. **Refined Matching Flow**:
+   1. **Exact Match**: Checks for exact friendly name match. If found, scores it.
+   2. **Prefix Match**: Checks for prefix.
+   3. **Similarity Search**: Queries ChromaDB for semantic matches.
+   4. **Scoring & Filtering**: All candidates are scored. Any candidate with Score < -50 is discarded. The highest score wins.
 
-### Issue #1: Redis Not Updated on MA Playback
-**File**: `app/domains/media/integrations/music_assistant.py`
-**Line**: 54-62
-**Problem**: `_set_last_media_entity()` is called, but context not persisting
-**Suspect**: `redis_client` not being passed through kwargs from CastIntegration delegation
+**Dynamic Grouping**:
+Legacy HA groups are supported, but the system now prioritizes **Ad-Hoc Grouping** via pattern matching (e.g., "Kitchen and Living Room", "All Lights").
 
-**Fix Needed**: Verify kwargs chain:
+#### Entity Resolution Flow
+```mermaid
+graph TD
+    A[User Query] --> B{Pattern Detection}
+    B -- "All/Every/Location" --> C[Return Multiple Candidates]
+    B -- No Pattern --> D{Exact or Prefix Match?}
+    
+    D -- Yes --> E[Score & Filter Candidates]
+    D -- No --> F[Vector Search (ChromaDB)]
+    F --> E
+    
+    E --> G{Check Intent}
+    G -- "Watch/Video" --> H(Score: TV +100, Cast +90, Audio -100)
+    G -- "Play/Listen" --> I(Score: MusicAssistant +200, Speaker +50, TV +20)
+    G -- "Turn Off" --> J(Score: Remote +100, TV +20, MA -10)
+    
+    H --> K[Select Highest Score > -50]
+    I --> K
+    J --> K
+    
+    K --> L[Return Entity ID]
 ```
-CastIntegration.play_media() 
-  → MusicAssistantIntegration.play_media(kwargs)
-  → kwargs.get("redis_client") should work
-```
 
-### Issue #2: Wrong Entity Resolved for Music
-**File**: `app/domains/media/devices.py`
-**Function**: `smart_resolve_entity()`
-**Line**: ~536 (exact match section)
-**Problem**: When query is "Office TV", returns `media_player.office_tv` (Android) instead of `media_player.office_tv_chrome_2` (Cast)
+### 6. Verification & Robustness
+A dedicated tool `tools/verify_robustness.py` is used for **Live Integration Testing** without hardware side-effects where possible.
+- **Dynamic Discovery**: Fetches *real* entity IDs from the live HA instance (via `app.utils.ha_fetch`).
+- **Mock ChromaDB**: Simulates the vector database in-memory to test resolution logic without polluting the production DB.
+- **Ping Test**: Verifies API health.
 
-**Why**: Exact name match finds BOTH entities with friendly_name "Office TV":
-1. `media_player.office_tv` (Android TV, integration=androidtv)
-2. `media_player.office_tv_chrome_2` (Cast, integration=cast)
+## Resolved Issues (v2 Refactor)
 
-Integration priority (line 555-564) prefers Roku/AndroidTV > Cast.
+### ✅ Fixed: Wrong Entity for "Watch" vs "Listen"
+**Old Behavior**: "Watch Office TV" often selected the generic `media_player.office_tv` (Android Remote) even if `media_player.office_tv_chrome` was better for casting, or vice-versa.
+**New Behavior**: 
+- "Watch..." -> Prioritizes Android/Roku integration (Score: 100).
+- "Play music..." -> Prioritizes Music Assistant/Cast (Score: 150+).
 
-**Fix Needed**: For `is_music=True` requests, reverse priority to prefer Cast > AndroidTV (since MA uses Cast devices).
+### ✅ Fixed: Synthetic Entity Pollution
+**Old Behavior**: `ha_ingest.py` created "logical" entities for every group/zone, cluttering the DB.
+**New Behavior**: Strict filtering of `group.` domain. Only physical/system-level entities are ingested.
 
-### Issue #3: Compound Command Splitting
-**File**: Likely in `app/logic/` (compound command handler)
-**Problem**: "Play Brand and Lake on Office TV" gets split into:
-- "Play Brand" → Resolves to wrong device (Loft TV)
-- "Play Lake on Office TV" → Resolves correctly (Office TV)
-
-Each sub-command updates Redis, so final value is from LAST command, not the successful one.
-
-**Fix Needed**: Either:
-1. Don't split artist names (detect "and" in music context)
-2. Only update Redis from successful commands
-3. Update Redis AFTER all batch commands complete, using the successful device
+### ✅ Fixed: Dependency Resilience
+**Old Behavior**: Heavy AI dependencies (`langchain_chroma`) prevented lightweight tool usage.
+**New Behavior**: `app/utils/ha_fetch.py` allows fetching HA data with only `requests`, enabling robust monitoring tools.
 
 ## Successful Working Parts
 
