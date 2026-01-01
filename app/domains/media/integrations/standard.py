@@ -270,40 +270,37 @@ class StandardIntegration(MediaIntegration):
         return None
 
     def _clean_query(self, query: str, media_type: str, entity_id: str, device_name: str = None) -> str:
-        """Clean the query string."""
+        """Clean the query string by removing device names and action words."""
         cleaned = query.lower()
         # Remove possessives (e.g. "gracie's" -> "gracie")
         cleaned = cleaned.replace("'s", "")
         
-        # Remove device names (including common variations)
-        targets_to_remove = [
-            "office tv", "office", 
-            "master bedroom tv", "master bedroom",
-            "gracie tv", "gracies tv", "gracie", "gracies",
-            "living room tv", "living room",
-            "tv", "speaker", "roku", "chromecast"
-        ]
+        # Generic device type identifiers to remove
+        targets_to_remove = ["tv", "television", "speaker", "roku", "chromecast", "cast"]
+        
+        # Add the actual device name if provided
         if device_name: 
             targets_to_remove.append(device_name.lower())
             # Also add variant without common suffixes
-            base_name = device_name.lower().replace(" tv", "").replace(" speaker", "")
-            if base_name:
+            base_name = device_name.lower().replace(" tv", "").replace(" television", "").replace(" speaker", "")
+            if base_name and base_name not in targets_to_remove:
                 targets_to_remove.append(base_name)
         
-        # Extract name from entity_id if possible
+        # Extract name from entity_id if possible (e.g. media_player.office_tv_chrome -> "office tv chrome")
         if entity_id:
              ename = entity_id.split(".")[-1].replace("_", " ").lower()
-             targets_to_remove.append(ename)
-             # Also try without common prefixes like 'media_player.'
-             base_ename = ename.replace("media player", "").replace("roku", "").replace("chromecast", "").strip()
-             if base_ename:
+             if ename not in targets_to_remove:
+                 targets_to_remove.append(ename)
+             # Also try without common integration suffixes
+             base_ename = ename.replace("media player", "").replace("roku", "").replace("chromecast", "").replace("chrome", "").strip()
+             if base_ename and base_ename not in targets_to_remove:
                  targets_to_remove.append(base_ename)
              
         # Sort by length (longest first) to avoid partial matches
         targets_to_remove = sorted(set(targets_to_remove), key=len, reverse=True)
         
         for name in targets_to_remove:
-            if name and name in cleaned:
+            if name and len(name) > 1 and name in cleaned:  # Avoid single-char removals
                 cleaned = re.sub(f"\\b(on|in|at|to)?\\s*(the)?\\s*{re.escape(name)}\\b", " ", cleaned)
 
         # Remove action words
