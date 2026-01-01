@@ -56,11 +56,12 @@ def main():
     except:
         log.warning("Ping Failed (Method Not Allowed or Timeout), proceeding to Chat API.")
 
-    # 2. Test "Watch" (Video Search & Stream)
-    # User specifically wants to verify the "Search -> Download -> Stream" pipeline
-    test_query("Watch funny cat videos on Office TV", expected_device_substr="Office TV") 
-    # Ideally we'd look for "Downloading" or "streaming" in the response logic, 
-    # but "Done" or "Playing" is the standard success message.
+    try:
+        # 2. Test "Watch" (Video Search & Stream)
+        # User specifically wants to verify the "Search -> Download -> Stream" pipeline
+        test_query("Watch funny cat videos on Office TV", expected_device_substr="Office TV") 
+        # Ideally we'd look for "Downloading" or "streaming" in the response logic, 
+        # but "Done" or "Playing" is the standard success message.
 
         # 3. Test "Play" (Music)
         # Expecting Music Assistant or Cast, NOT Android TV native
@@ -71,8 +72,8 @@ def main():
         
     finally:
         log.info("\n--- Teardown: Restoring Device State ---")
-        log.info("Sending 'Stop music on Office TV' to ensure device is clean...")
-        test_query("Stop music on Office TV")
+        log.info("Sending 'Turn off Office TV' to ensure device returns to OFF state...")
+        test_query("Turn off Office TV")
         log.info("Teardown complete.")
 
 if __name__ == "__main__":
