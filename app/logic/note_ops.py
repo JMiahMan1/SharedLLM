@@ -68,7 +68,7 @@ async def append_note(title: str, content: str) -> dict:
 
     # 2. Append
     existing_text = current_content.get("content", "")
-    new_text = f"{existing_text}\n\n- {content}" # Append as list item by default for shopping lists etc
+    new_text = f"{existing_text}\n\n- [ ] {content}" # Append as checklist item by default
 
     # 3. Write back
     safe_title = "".join([c for c in title if c.isalnum() or c in " -_"]).strip()
