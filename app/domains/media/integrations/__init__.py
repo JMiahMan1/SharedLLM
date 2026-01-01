@@ -66,5 +66,10 @@ REGEX_INTENT_MAP = {
     r"\bturn\s+.+\s+(?:to\s+)?(red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
     r"\b(dim|darken|lower)\b": "dim",
     r"\b(brighten|brighter|increase)\b": "brighten",
+    r"\b(brighten|brighter|increase)\b": "brighten",
     r"\b(brightness|bright)\b": "set_brightness",
+
+    # Note Check-off (High Priority Deterministic Match)
+    r"\b(check|tick|mark)\s+(off|done|complete)\b": "note_check_off",
+    r"\b(check|mark)\s+.+\s+(off|done|complete)\b": "note_check_off",
 }
