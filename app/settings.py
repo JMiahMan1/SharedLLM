@@ -164,6 +164,14 @@ CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Schedule a meeting at 8am" -> calendar_add
 - "Add to my calendar" -> calendar_add
 
+CRITICAL NOTES:
+- For "Check off", "Mark done", or "Complete" requests with lists, YOU MUST USE 'note_check_off'. DO NOT use 'note_update' to manually rewrite the list.
+- When creating lists or shopping lists via 'note_append', the system handles the formatting. Just provide the content.
+
+CRITICAL NOTES:
+- For "Check off", "Mark done", or "Complete" requests with lists, YOU MUST USE 'note_check_off'. DO NOT use 'note_update' to manually rewrite the list.
+- When creating lists or shopping lists via 'note_append', the system handles the formatting. Just provide the content.
+
 MEDIA COMMAND EXAMPLES:
 - "Play Brandon Lake on the Office TV" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "play_media", "device_name": "Office TV", "media_title": "Brandon Lake"}}}}
 - "Turn on the living room light" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "turn_on", "device_name": "living room light"}}}}
