@@ -12,7 +12,7 @@ from app.logic.timer_ops import (
     tool_timer_pause, tool_timer_resume, tool_alarm_add
 )
 from app.logic.note_ops import (
-    tool_note_add, tool_note_append, tool_note_read, tool_note_delete
+    tool_note_add, tool_note_append, tool_note_read, tool_note_delete, tool_note_update
 )
 from app.logic.web_search import tool_web_search
 
@@ -394,6 +394,14 @@ async def handle_note_delete(params: dict = None, **kwargs):
     p = params or {}
     res = await tool_note_delete(p.get("title", ""))
     return {"status": "SUCCESS" if "deleted" in res.lower() else "FAILURE", "message": res, "service": "note_delete"}
+
+@ActionDispatcher.register("note_update")
+async def handle_note_update(query: str, params: dict = None, **kwargs):
+    p = params or {}
+    # Use query as content if not in params, or default to empty
+    content = p.get("content", query)
+    res = await tool_note_update(p.get("title", ""), content)
+    return {"status": "SUCCESS" if res.get("status") == "success" else "FAILURE", "message": res.get("msg", ""), "service": "note_update"}
 
 # --- SEARCH & MISC ---
 @ActionDispatcher.register("web_search")
