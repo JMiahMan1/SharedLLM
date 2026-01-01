@@ -330,8 +330,12 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
     if media_type.startswith("library://"):
         types_to_try = ["library"]
     elif media_type in ["music", "search"]:
-        # Priority: Artist > Track > Playlist > Radio
-        types_to_try = ["artist", "track", "playlist", "radio"]
+        # Priority: Artist > Track > Playlist (Radio removed by user request)
+        types_to_try = ["artist", "track", "playlist"]
+        # Only add radio if the query explicitly mentions it or as a last resort if enabled?
+        # User said "unless it's specified", so we strictly exclude it from generic "music"
+        if "radio" in media_id.lower():
+             types_to_try.append("radio")
     else:
         # Explicit type passed? Try that, then fallback if it looks like a search
         types_to_try = [media_type]
