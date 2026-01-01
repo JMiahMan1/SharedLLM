@@ -14,7 +14,10 @@ import logging
 log = logging.getLogger(__name__)
 
 # Cache directory
-CACHE_DIR = Path(os.getenv("CAST_CACHE_DIR", "/workspace/temp/cast_videos"))
+# Cache directory
+# Fallback to local temp dir if /workspace (Docker) is missing
+default_path = "/workspace/temp/cast_videos" if Path("/workspace").exists() else "temp/cast_videos"
+CACHE_DIR = Path(os.getenv("CAST_CACHE_DIR", default_path))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configuration
