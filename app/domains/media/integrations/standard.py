@@ -270,30 +270,18 @@ class StandardIntegration(MediaIntegration):
         return None
 
     def _clean_query(self, query: str, media_type: str, entity_id: str, device_name: str = None) -> str:
-        """Clean the query string by removing device names and action words."""
+        """Clean the query string by removing the device name and action words."""
         cleaned = query.lower()
         
         log.info(f"[QueryCleaning] Input: '{query}', device_name: '{device_name}'")
         
-        # Generic platform/integration identifiers that are safe to remove
-        generic_terms = ["tv", "television", "speaker", "the"]
-        
-        # Add the actual device name if explicitly provided
-        targets_to_remove = []
-        if device_name: 
-            targets_to_remove.append(device_name.lower())
-        
-        # Sort by length (longest first) to avoid partial matches
-        targets_to_remove = sorted(set(targets_to_remove + generic_terms), key=len, reverse=True)
-        
-        log.info(f"[QueryCleaning] Targets to remove: {targets_to_remove}")
-        
-        for name in targets_to_remove:
-            if name and len(name) > 1 and name in cleaned:
-                # Remove device name with common prepositions
-                cleaned = re.sub(f"\\b(on|in|at|to)\\s+(the\\s+)?{re.escape(name)}\\b", " ", cleaned)
-                # Also remove standalone
-                cleaned = re.sub(f"\\b{re.escape(name)}\\b", " ", cleaned)
+        # ONLY remove the actual device name from metadata, nothing generic
+        if device_name:
+            device_lower = device_name.lower()
+            # Remove "on [device_name]", "to [device_name]", etc.
+            cleaned = re.sub(f"\\b(on|in|at|to)\\s+{re.escape(device_lower)}\\b", " ", cleaned, flags=re.IGNORECASE)
+            # Also remove standalone device name
+            cleaned = re.sub(f"\\b{re.escape(device_lower)}\\b", " ", cleaned, flags=re.IGNORECASE)
 
         # Remove action words
         cleaned = re.sub(r"\b(play|please|from|listen to|watch|view)\b", "", cleaned).strip()
