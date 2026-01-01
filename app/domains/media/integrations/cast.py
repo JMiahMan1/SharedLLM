@@ -52,8 +52,7 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                       is_ma = check_ma_attrs(attrs)
             
             # 2. Fallback to Chroma Lookup (Only if metadata missing) - [Legacy/Backup]
-                except Exception as e:
-                    log.warning(f"[Cast] Failed to check MA wrapper status: {e}")
+
 
             # 3. [Robustness Fix] If NOT confirmed MA yet, try to find a sibling MA wrapper
             # Use this wrapper as the target for the music command
