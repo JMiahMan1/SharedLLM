@@ -60,6 +60,7 @@ def main():
         # 2. Test "Watch" (Video Search & Stream)
         # User specifically wants to verify the "Search -> Download -> Stream" pipeline
         test_query("Watch funny cat videos on Office TV", expected_device_substr="Office TV") 
+        test_query("Watch funny cat videos on Gracies TV", expected_device_substr="Gracies TV")
         # Ideally we'd look for "Downloading" or "streaming" in the response logic, 
         # but "Done" or "Playing" is the standard success message.
 
@@ -67,8 +68,11 @@ def main():
         # Expecting Music Assistant or Cast, NOT Android TV native
         test_query("Play heavy metal on Office TV", expected_device_substr="Office TV")
 
-        # 4. Test Power
+        # 4. Test Power (Office TV)
         test_query("Turn off Office TV", expected_device_substr="Office TV")
+
+        # 5. Test Power (Roku - Gracies TV)
+        test_query("Turn off Gracies TV", expected_device_substr="Gracies TV")
         
     finally:
         log.info("\n--- Teardown: Restoring Device State ---")
