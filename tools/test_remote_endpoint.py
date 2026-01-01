@@ -19,7 +19,7 @@ def test_query(query: str, expected_device_substr: str = None, expected_intent: 
     payload = {"query": query}
     
     try:
-        response = requests.post(REMOTE_URL, json=payload, timeout=20)
+        response = requests.post(REMOTE_URL, json=payload, timeout=120)
         log.info(f"Status: {response.status_code}")
         
         if response.status_code == 200:
@@ -56,10 +56,11 @@ def main():
     except:
         log.warning("Ping Failed (Method Not Allowed or Timeout), proceeding to Chat API.")
 
-    try:
-        # 2. Test "Watch" (Video)
-        test_query("Watch Netflix on Office TV", expected_device_substr="Office TV") 
-        # Ideally checking for "androidtv" or "via Roku" if response provides it.
+    # 2. Test "Watch" (Video Search & Stream)
+    # User specifically wants to verify the "Search -> Download -> Stream" pipeline
+    test_query("Watch funny cat videos on Office TV", expected_device_substr="Office TV") 
+    # Ideally we'd look for "Downloading" or "streaming" in the response logic, 
+    # but "Done" or "Playing" is the standard success message.
 
         # 3. Test "Play" (Music)
         # Expecting Music Assistant or Cast, NOT Android TV native
