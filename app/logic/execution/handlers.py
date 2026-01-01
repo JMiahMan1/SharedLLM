@@ -403,6 +403,14 @@ async def handle_note_update(query: str, params: dict = None, **kwargs):
     res = await tool_note_update(p.get("title", ""), content)
     return {"status": "SUCCESS" if res.get("status") == "success" else "FAILURE", "message": res.get("msg", ""), "service": "note_update"}
 
+@ActionDispatcher.register("note_check_off")
+async def handle_note_check_off(query: str, params: dict = None, **kwargs):
+    p = params or {}
+    # Use query as item if not in params
+    item = p.get("item", query)
+    res = await tool_note_check_off(p.get("title", "Shopping List"), item)
+    return {"status": "SUCCESS" if not isinstance(res, dict) or res.get("status") == "success" else "FAILURE", "message": str(res), "service": "note_check_off"}
+
 # --- SEARCH & MISC ---
 @ActionDispatcher.register("web_search")
 async def handle_web_search(query: str, user_creds: dict = None, model: str = None, **kwargs):

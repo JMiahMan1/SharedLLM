@@ -60,6 +60,16 @@ DEFAULT_PHRASES = {
         "stop video",
         "pause video",
     ],
+    # Notes - Check Off
+    "note_check_off": [
+        "check off",
+        "tick off",
+        "mark off",
+        "check done",
+        "mark done",
+        "check complete",
+        "mark complete",
+    ],
     "media_next": ["next track", "skip song", "next song", "skip", "next video"],
     "media_previous": [
         "previous track",
