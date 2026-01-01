@@ -213,8 +213,21 @@ async def tool_music_search(query: str, user_creds: dict, redis_client=None) -> 
     results = []
     import difflib
     import json
+    import re
     
-    # --- STEP 1: CACHE SEARCH ---
+    # Clean Query
+    # Remove "search for", "find", "list" prefixes common in LLM tool usage
+    q_clean = re.sub(r"^(search|find|list|show|play)\s+(for|me)?\s*", "", query.lower()).strip()
+    q_clean = re.sub(r"\s+by\s+", " ", q_clean) # "songs by Pink" -> "songs Pink" -> often just "Pink" if we are lucky? 
+    # Better: "songs by X" -> X
+    if " by " in q_clean:
+        q_clean = q_clean.split(" by ")[-1]
+        
+    # Remove "songs", "music", "tracks"
+    q_clean = re.sub(r"\b(songs|music|tracks|artist|album)\b", "", q_clean).strip()
+    
+    q_low = q_clean.lower()
+    log.info(f"[MA SEARCH] Cleaning '{query}' -> '{q_clean}'")
     if redis_client:
         cache_hit = False
         for mtype in ["artist", "album", "track", "playlist", "radio"]:
@@ -227,7 +240,7 @@ async def tool_music_search(query: str, user_creds: dict, redis_client=None) -> 
                     # 2. Fuzzy in Cache
                     
                     # Get close matches (cutoff=0.4 to catch 'Brendan' -> 'Brandon' broadly)
-                    matches = difflib.get_close_matches(query, titles, n=3, cutoff=0.4)
+                    matches = difflib.get_close_matches(q_clean, titles, n=3, cutoff=0.4)
                     
                     for match in matches:
                         # Reconstruct basic item structure
