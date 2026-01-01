@@ -152,7 +152,7 @@ Available Tools:
 16. 'note_read' (Read a specific note file. Params: 'title')
 17. 'note_delete' (Delete a note file. Params: 'title')
 18. 'note_update' (Overwrite/Update a note. Params: 'title', 'content')
-19. 'note_check_off' (Mark an item as done in a list. Params: 'title', 'item')
+19. 'note_check_off' (REQUIRED for checking off items. Converts '[ ]' to '[x]'. Params: 'title', 'item')
 20. 'music_list' (List playlists or radio stations in Music Assistant)
 21. 'music_search' (Search Music Assistant library for artist/album/track)
 22. 'ha_notify' (Send a persistent notification to Home Assistant. Params: 'message', 'title')
@@ -162,11 +162,11 @@ CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Remind me in 10 minutes" -> timer_add
 - "Wake me up at 7" -> timer_add
 - "Schedule a meeting at 8am" -> calendar_add
-- "Add to my calendar" -> calendar_add
 
-CRITICAL NOTES:
-- For "Check off", "Mark done", or "Complete" requests with lists, YOU MUST USE 'note_check_off'. DO NOT use 'note_update' to manually rewrite the list.
-- When creating lists or shopping lists via 'note_append', the system handles the formatting. Just provide the content.
+CRITICAL INSTRUCTION:
+- IF the user asks to "check off", "tick", "mark done", or "complete" an item in a list/note, YOU MUST output a tool call for 'note_check_off'.
+- DO NOT refuse. DO NOT apologize. DO NOT say you cannot do it. JUST CALL THE TOOL.
+- For shopping lists, use 'note_append' (it adds checkboxes automatically).
 
 CRITICAL NOTES:
 - For "Check off", "Mark done", or "Complete" requests with lists, YOU MUST USE 'note_check_off'. DO NOT use 'note_update' to manually rewrite the list.
