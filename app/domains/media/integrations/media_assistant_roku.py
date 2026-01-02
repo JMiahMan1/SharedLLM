@@ -133,12 +133,18 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         elif media_type == "video":
             # Video Logic
             
+            
             # Resolve Query if needed (same as StandardIntegration)
             if not query.startswith(("http", "www", "spotify", "app")):
                 from app.domains.media.integrations.standard import StandardIntegration
                 std_integration = StandardIntegration()
+                
+                # Extract friendly_name from metadata for query cleaning
+                device_name = kwargs.get("friendly_name")  # Metadata is unpacked into kwargs
+                log.info(f"[RokuMA] Extracting device_name for query cleaning: {device_name}")
+                
                 # Clean query using same logic as standard
-                cleaned_query = std_integration._clean_query(query, media_type, entity_id, kwargs.get("device_name"))
+                cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
                 resolved_url = await std_integration._search_video_url(cleaned_query)
                 if resolved_url:
                     query = resolved_url
