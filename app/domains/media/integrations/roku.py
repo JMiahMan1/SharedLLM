@@ -143,9 +143,17 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                 std_integration = StandardIntegration()
                 
                 # Extract friendly_name from metadata for query cleaning
+                log.info(f"[Roku] kwargs keys: {list(kwargs.keys())}")
+                log.info(f"[Roku] metadata in kwargs: {kwargs.get('metadata')}")
+                log.info(f"[Roku] friendly_name directly: {kwargs.get('friendly_name')}")
+                
                 device_name = None
                 if kwargs.get("metadata"):
                     device_name = kwargs["metadata"].get("friendly_name")
+                elif kwargs.get("friendly_name"):
+                    device_name = kwargs.get("friendly_name")
+                
+                log.info(f"[Roku] Extracted device_name: {device_name}")
                 
                 cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
                 resolved_url = await std_integration._search_video_url(cleaned_query)
