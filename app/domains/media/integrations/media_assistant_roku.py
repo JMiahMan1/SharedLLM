@@ -129,11 +129,8 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             params["u"] = cleaned_query  # Use cleaned query instead of raw
             
             # Extract Metadata from kwargs (passed from MA or inferred)
-            if kwargs.get("media_title"):
-                params["songName"] = kwargs.get("media_title")
-            else:
-                # Default to cleaned query if no media_title
-                params["songName"] = cleaned_query
+            # Always use cleaned_query for songName to ensure it's clean
+            params["songName"] = cleaned_query
             if kwargs.get("media_artist"):
                 params["artistName"] = kwargs.get("media_artist")
             if kwargs.get("media_album_name"):
