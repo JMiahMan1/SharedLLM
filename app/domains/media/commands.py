@@ -102,7 +102,20 @@ async def _execute_transport_command(
             # Pass metadata to handler so it can decide on delegation (Source of Truth)
             # We unpack metadata as kwargs for the handler, but also pass raw metadata if needed
             call_kwargs = {**kwargs} # Copy
-            if metadata: call_kwargs.update(metadata)
+            if metadata: 
+                call_kwargs.update(metadata)
+                # Extract REAL friendly_name from attributes for query cleaning
+                try:
+                    import json
+                    attrs = metadata.get("attributes", {})
+                    if isinstance(attrs, str):
+                        attrs = json.loads(attrs)
+                    if isinstance(attrs, dict) and "friendly_name" in attrs:
+                        # Override with the REAL friendly_name from attributes
+                        call_kwargs["friendly_name"] = attrs["friendly_name"]
+                        log.info(f"[Media] Extracted real friendly_name: '{attrs['friendly_name']}'")
+                except Exception as e:
+                    log.warning(f"[Media] Failed to extract friendly_name from attributes: {e}")
             if "entity_id" in call_kwargs: del call_kwargs["entity_id"]
             
             return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata, redis_client=redis_client, **call_kwargs)
