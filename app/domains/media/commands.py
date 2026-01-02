@@ -103,11 +103,17 @@ async def _execute_transport_command(
             # We unpack metadata as kwargs for the handler, but also pass raw metadata if needed
             call_kwargs = {**kwargs} # Copy
             if metadata: 
-                call_kwargs.update(metadata)
-                # Use the top-level friendly_name from metadata (not from attributes JSON)
+                # FIRST: Fix the friendly_name in metadata before unpacking
+                # Use the top-level friendly_name from metadata (not from attributes JSON which may have extra text)
                 if "friendly_name" in metadata:
-                    call_kwargs["friendly_name"] = metadata["friendly_name"]
-                    log.info(f"[Media] Using friendly_name from metadata: '{metadata['friendly_name']}'")
+                    clean_friendly_name = metadata["friendly_name"]
+                    log.info(f"[Media] Using friendly_name from metadata: '{clean_friendly_name}'")
+                    # Create a copy of metadata with the clean friendly_name to avoid mutation
+                    metadata_copy = {**metadata}
+                    metadata_copy["friendly_name"] = clean_friendly_name
+                    call_kwargs.update(metadata_copy)
+                else:
+                    call_kwargs.update(metadata)
             if "entity_id" in call_kwargs: del call_kwargs["entity_id"]
             
             return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata, redis_client=redis_client, **call_kwargs)
