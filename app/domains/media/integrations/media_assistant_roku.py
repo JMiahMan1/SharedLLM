@@ -122,18 +122,31 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             log.info(f"[RokuMA Music] Cleaning query. device_name: {device_name}")
             
             # Clean the query to remove device names and action words
-            # Revert to simple "Search by Query" logic
-            # User confirmed original issue was just full query string.
-            # Clean query is "brandon lake". Sending that in 'u'.
-            params["t"] = "a"
-            params["u"] = cleaned_query 
+            # Resolve Music Query to a STREAMABLE URL (e.g. proxy/local file)
+            # Documentation confirms Channel 782875 requires a direct media URL in 'contentId'/'u'.
+            # YouTube Page URLs (from simple search) will fail. We must extract the stream.
             
-            # If metadata is explicitly provided (not inferred from query), pass it?
-            # User said "forcing SongName will cause it to fail". So safer to omit it.
-            # Only pass artist if explicitly known from HA metadata
-            if kwargs.get("media_artist"):
-                 params["artistName"] = kwargs.get("media_artist")
+            from app.domains.media.integrations.standard import StandardIntegration
+            std_integration = StandardIntegration()
 
+            if not query.startswith(("http", "www", "spotify", "app")):
+                 # Search and proxy the stream (standard behavior for this system)
+                 # checks cache or downloads via yt-dlp
+                 resolved_url = await std_integration._download_and_serve_video(cleaned_query)
+                 log.info(f"[RokuMA Music] Resolved '{cleaned_query}' to Stream URL: {resolved_url}")
+            else:
+                 resolved_url = query
+
+            params["t"] = "a" # Audio mode
+            
+            if resolved_url:
+                params["u"] = resolved_url
+                params["contentId"] = resolved_url # Standard Deep Link param
+            
+            # Metadata for display
+            params["artistName"] = cleaned_query 
+            params["songName"] = "Loading..." # Temporary title while loading
+            
             log.info(f"[RokuMA] Music Params: {params}")
 
         elif media_type == "video":
