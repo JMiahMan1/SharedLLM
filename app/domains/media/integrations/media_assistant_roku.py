@@ -126,17 +126,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
             params["t"] = "a"
-            params["u"] = cleaned_query  # Use cleaned query instead of raw
-            
-            # Extract Metadata from kwargs (passed from MA or inferred)
-            # Always use cleaned_query for songName to ensure it's clean
-            params["songName"] = cleaned_query
-            if kwargs.get("media_artist"):
-                params["artistName"] = kwargs.get("media_artist")
-            if kwargs.get("media_album_name"):
-                params["albumName"] = kwargs.get("media_album_name")
-            if kwargs.get("image_url"):
-                params["albumArt"] = kwargs.get("image_url")
+            params["u"] = cleaned_query  # Music Assistant will search for best match
                 
             log.info(f"[RokuMA] Music Params: {params}")
 
