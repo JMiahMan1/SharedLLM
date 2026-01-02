@@ -131,16 +131,20 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             
             # Extract Metadata from kwargs (passed from MA or inferred)
             # MA usually passes metadata in kwargs or we can fetch if needed
+            # Extract Metadata from kwargs (passed from MA or inferred)
+            # MA usually passes metadata in kwargs or we can fetch if needed
             
-            # FORCE SongName to be the Cleaned Query
-            # This avoids "Unknown song" error (missing metadata) AND "Full Query" error (dirty metadata from Intent)
-            params["songName"] = cleaned_query
-            
+            # Clean metadata if present to avoid "Listen to..." showing up in songName
+            if kwargs.get("media_title"):
+                raw_title = kwargs.get("media_title")
+                # Apply same cleaning logic to title as query to strip intent words
+                clean_title = std_integration._clean_query(raw_title, media_type, entity_id, device_name)
+                # Ensure we don't end up with empty string if title WAS just "Listen to"
+                if clean_title:
+                    params["songName"] = clean_title
+
             if kwargs.get("media_artist"):
                 params["artistName"] = kwargs.get("media_artist")
-            else:
-                 # Fallback: Put query in artist too if missing
-                 params["artistName"] = cleaned_query
             if kwargs.get("media_album_name"):
                 params["albumName"] = kwargs.get("media_album_name")
             if kwargs.get("image_url"):
