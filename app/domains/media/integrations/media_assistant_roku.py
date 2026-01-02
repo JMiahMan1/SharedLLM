@@ -113,12 +113,22 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
 
         # 5. Handle Types
         if media_type == "music":
-            # Music Logic
+            # Music Logic - Clean query first
+            from app.domains.media.integrations.standard import StandardIntegration
+            std_integration = StandardIntegration()
+            
+            # Extract friendly_name from metadata for query cleaning
+            device_name = kwargs.get("friendly_name")
+            log.info(f"[RokuMA Music] Cleaning query. device_name: {device_name}")
+            
+            # Clean the query to remove device names and action words
+            cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
+            log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
+            
             params["t"] = "a"
-            params["u"] = query 
+            params["u"] = cleaned_query  # Use cleaned query instead of raw
             
             # Extract Metadata from kwargs (passed from MA or inferred)
-            # MA usually passes metadata in kwargs or we can fetch if needed
             if kwargs.get("media_title"):
                 params["songName"] = kwargs.get("media_title")
             if kwargs.get("media_artist"):
