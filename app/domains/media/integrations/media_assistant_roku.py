@@ -126,9 +126,13 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
             params["t"] = "a"
-            params["u"] = cleaned_query
+            # params["u"] = cleaned_query # Removing 'u' as it likely expects strict URL, causing "Unknown"
             
-            # Add fallback parameters in case 'u' is treated as strict URL
+            # Use metadata fields for search hints
+            params["artistName"] = cleaned_query 
+            params["songName"] = cleaned_query # Some apps use songName as generic query if artist not found
+            
+            # Fallback search parameters 
             params["q"] = cleaned_query
             params["s"] = cleaned_query
             params["search"] = cleaned_query
