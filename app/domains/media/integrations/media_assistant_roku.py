@@ -120,9 +120,20 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # Extract friendly_name from metadata for query cleaning
             device_name = kwargs.get("friendly_name")
             
+            # [Robustness] If friendly_name is missing, fetch it from state
+            # This is critical for _clean_query to strip "on {device}" suffix
+            if not device_name:
+                try:
+                    state_obj = await self.get_state(entity_id, user_creds)
+                    if state_obj and state_obj.attributes:
+                        device_name = state_obj.attributes.get("friendly_name")
+                        log.info(f"[RokuMA] Fetched friendly_name from state: '{device_name}'")
+                except Exception as e:
+                    log.warning(f"[RokuMA] Failed to fetch friendly_name for cleaning: {e}")
+
             # Clean the query to remove device names and action words
             cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
-            log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
+            log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}') with device '{device_name}'")
             
             # "Listen" intent requires Audio mode (t=a)
             # App expects query in 'u'.
