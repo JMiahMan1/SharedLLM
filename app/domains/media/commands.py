@@ -53,14 +53,19 @@ async def _execute_transport_command(
 
         # Route command based on intent
         if intent == "play_media" or intent == "watch_media" or intent == "view_content":
-            # Determine media type (music vs video) based on query/context
-            # Simple heuristic: "watch" -> video, "listen" -> music.
-            # Default to "video" for now if ambiguous, or "music" if integration is music-focused.
-            media_type = "video"
+            # Determine media type (music vs video) based on INTENT
+            # play_media -> music (Music Assistant)
+            # watch_media/view_content -> video (Cast/Roku video)
+            if intent == "play_media":
+                media_type = "music"
+            elif intent == "watch_media" or intent == "view_content":
+                media_type = "video"
+            else:
+                # Fallback for edge cases
+                media_type = "video"
             
-            # [Media Type Inference]
-            # Use Metadata (Source of Truth) to default "Play" -> Music for Speakers/MA devices.
-            # We do NOT switch the integration here (User Request), only the Intent (media_type).
+            # [Media Type Inference from Metadata]
+            # Override to music if device is a speaker/MA device (unless explicitly watching)
             if media_type == "video" and metadata:
                  try:
                      attrs = metadata.get("attributes", {})
@@ -89,10 +94,10 @@ async def _execute_transport_command(
             # [Fix] Roku + Music Assistant Routing
             # If we are on Roku but intent is music (explicit or inferred), trigger delegation
             # Note: RokuIntegration must handle this delegation now.
-            if integration == "roku" and ("music" in query.lower() or "prob_music" in query):
+            if integration == "roku" and (media_type == "music" or "music" in query.lower() or "prob_music" in query):
                  media_type = "music"
 
-            log.info(f"[Media Type] Set by intent '{intent}': {media_type}")
+            log.info(f"[Media Type] Set to '{media_type}' for intent '{intent}'. Entity: {entity_id}")
             
             # Pass metadata to handler so it can decide on delegation (Source of Truth)
             # We unpack metadata as kwargs for the handler, but also pass raw metadata if needed
