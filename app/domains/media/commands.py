@@ -97,29 +97,17 @@ async def _execute_transport_command(
             if integration == "roku" and (media_type == "music" or "music" in query.lower() or "prob_music" in query):
                  media_type = "music"
 
-log.info(f"[Media Type] Set to '{media_type}' for intent '{intent}'. Entity: {entity_id}")
+            log.info(f"[Media Type] Set to '{media_type}' for intent '{intent}'. Entity: {entity_id}")
             
             # Pass metadata to handler so it can decide on delegation (Source of Truth)
             # We unpack metadata as kwargs for the handler, but also pass raw metadata if needed
             call_kwargs = {**kwargs} # Copy
             if metadata: 
                 call_kwargs.update(metadata)
-                # Extract REAL friendly_name from attributes for query cleaning
-                try:
-                    import json
-                    import re
-                    attrs = metadata.get("attributes", {})
-                    if isinstance(attrs, str):
-                        attrs = json.loads(attrs)
-                    if isinstance(attrs, dict) and "friendly_name" in attrs:
-                        friendly = attrs["friendly_name"]
-                        # Strip capability text like " Supports AirPlay", " Remote", etc.
-                        friendly = re.sub(r'\s+(Supports|Remote|Controller|Switch)\b.*$', '', friendly, flags=re.IGNORECASE)
-                        # Override with the cleaned friendly_name
-                        call_kwargs["friendly_name"] = friendly
-                        log.info(f"[Media] Extracted clean friendly_name: '{friendly}' (from '{attrs['friendly_name']}')")
-                except Exception as e:
-                    log.warning(f"[Media] Failed to extract friendly_name from attributes: {e}")
+                # Use the top-level friendly_name from metadata (not from attributes JSON)
+                if "friendly_name" in metadata:
+                    call_kwargs["friendly_name"] = metadata["friendly_name"]
+                    log.info(f"[Media] Using friendly_name from metadata: '{metadata['friendly_name']}'")
             if "entity_id" in call_kwargs: del call_kwargs["entity_id"]
             
             return await handler.play_media(entity_id, query, media_type, user_creds=user_creds, metadata=metadata, redis_client=redis_client, **call_kwargs)
