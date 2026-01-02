@@ -450,29 +450,43 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         return result
     
     async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
-        """Get Roku IP address using SSDP network discovery"""
+        """Get Roku IP address using SSDP network discovery with robust retries"""
         import requests
+        import asyncio
         from app.settings import HA_URL
         from app.utils.network_discovery import discover_roku_ip
         
-        try:
-            headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
-            resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
-            if resp.status_code == 200:
-                entity_data = resp.json()
-                attributes = entity_data.get("attributes", {})
-                
-                # Attempt SSDP/Scan discovery
-                ip = await discover_roku_ip(attributes)
-                if ip:
-                    log.info(f"[Roku] Discovered IP: {ip}")
-                    return ip
+        # Retry parameters
+        max_retries = 6 
+        delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
+                resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
+                if resp.status_code == 200:
+                    entity_data = resp.json()
+                    attributes = entity_data.get("attributes", {})
+                    
+                    # Attempt SSDP/Scan discovery
+                    ip = await discover_roku_ip(attributes)
+                    if ip:
+                        log.info(f"[Roku] Discovered IP: {ip}")
+                        return ip
+                    
+                    if attempt < max_retries - 1:
+                        log.info(f"[Roku] IP not found (Attempt {attempt+1}/{max_retries}). Device might be booming. Waiting {delay}s...")
+                        await asyncio.sleep(delay)
+                    else:
+                        log.error(f"[Roku] SSDP discovery found no Roku devices for {entity_id} after {max_retries} attempts.")
+                        return None
+            except Exception as e:
+                log.error(f"[Roku] Discovery error: {e}")
+                if attempt < max_retries - 1:
+                     await asyncio.sleep(delay)
                 else:
-                    log.error(f"[Roku] SSDP discovery found no Roku devices for {entity_id}")
                     return None
-        except Exception as e:
-            log.error(f"[Roku] Discovery error: {e}")
-            return None
+        return None
 
 
 
