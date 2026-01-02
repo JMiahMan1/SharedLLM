@@ -125,14 +125,27 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
+            # Resolve Music Query to a streamable URL
+            # The Roku App likely requires a valid 'u' (URL) to play, otherwise it drops to Setup/Home.
+            if not query.startswith(("http", "www", "spotify", "app")):
+                from app.domains.media.integrations.standard import StandardIntegration
+                std_integration = StandardIntegration()
+                
+                # Use standard search (likely yt-dlp) to get a stream URL
+                resolved_url = await std_integration._search_video_url(cleaned_query)
+                log.info(f"[RokuMA Music] Resolved '{cleaned_query}' to URL: {resolved_url}")
+            else:
+                resolved_url = query
+
             params["t"] = "a"
-            # params["u"] = cleaned_query # Removing 'u' as it likely expects strict URL, causing "Unknown"
+            if resolved_url:
+                params["u"] = resolved_url
             
-            # Use metadata fields for search hints
+            # Use metadata fields for display
             params["artistName"] = cleaned_query 
-            params["songName"] = cleaned_query # Some apps use songName as generic query if artist not found
+            # params["songName"] = cleaned_query 
             
-            # Fallback search parameters 
+            # Fallback search parameters (keep them just in case)
             params["q"] = cleaned_query
             params["s"] = cleaned_query
             params["search"] = cleaned_query
