@@ -101,7 +101,7 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
              # _search_video_url takes raw query? checking standard.py... 
              # standard.py calls _clean_query inside play_media, but _search_video_url takes 'search_query'.
              # Let's clean it here to match behavior.
-             cleaned = self._clean_query(query, media_type, entity_id, kwargs.get("device_name"))
+             cleaned = self._clean_query(query, media_type, entity_id, kwargs.get("friendly_name"))
              found_url = await self._search_video_url(cleaned)
              if found_url:
                  query = found_url # effective update
