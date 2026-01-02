@@ -132,6 +132,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # Clean query is "brandon lake". Sending that in 'u'.
             params["t"] = "a"
             params["u"] = cleaned_query 
+            params["contentId"] = cleaned_query # Standard Roku Deep Link param
             
             # If metadata is explicitly provided (not inferred from query), pass it?
             # User said "forcing SongName will cause it to fail". So safer to omit it.
