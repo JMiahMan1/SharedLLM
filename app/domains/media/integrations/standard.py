@@ -277,7 +277,13 @@ class StandardIntegration(MediaIntegration):
         
         # ONLY remove the actual device name from metadata, nothing generic
         if device_name:
-            device_lower = device_name.lower()
+            # Strip capability/feature suffixes like " Supports AirPlay", " Remote", etc.
+            # These are added by HA but users don't say them in queries
+            core_name = re.sub(r'\s+(Supports|Remote|Controller|Switch|Sensor)\b.*$', '', device_name, flags=re.IGNORECASE).strip()
+            device_lower = core_name.lower()
+            
+            log.info(f"[QueryCleaning] Core device name: '{core_name}' (from '{device_name}')")
+            
             # Remove "on [device_name]", "to [device_name]", etc.
             cleaned = re.sub(f"\\b(on|in|at|to)\\s+{re.escape(device_lower)}\\b", " ", cleaned, flags=re.IGNORECASE)
             # Also remove standalone device name
