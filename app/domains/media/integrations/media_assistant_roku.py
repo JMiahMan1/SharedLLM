@@ -122,34 +122,18 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             log.info(f"[RokuMA Music] Cleaning query. device_name: {device_name}")
             
             # Clean the query to remove device names and action words
-            cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
-            log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
-            
-            # Resolve Music Query to a streamable URL
-            # The Roku App likely requires a valid 'u' (URL) to play, otherwise it drops to Setup/Home.
-            if not query.startswith(("http", "www", "spotify", "app")):
-                from app.domains.media.integrations.standard import StandardIntegration
-                std_integration = StandardIntegration()
-                
-                # Use standard search (likely yt-dlp) to get a stream URL
-                resolved_url = await std_integration._search_video_url(cleaned_query)
-                log.info(f"[RokuMA Music] Resolved '{cleaned_query}' to URL: {resolved_url}")
-            else:
-                resolved_url = query
-
+            # Revert to simple "Search by Query" logic
+            # User confirmed original issue was just full query string.
+            # Clean query is "brandon lake". Sending that in 'u'.
             params["t"] = "a"
-            if resolved_url:
-                params["u"] = resolved_url
+            params["u"] = cleaned_query 
             
-            # Use metadata fields for display
-            params["artistName"] = cleaned_query 
-            # params["songName"] = cleaned_query 
-            
-            # Fallback search parameters (keep them just in case)
-            params["q"] = cleaned_query
-            params["s"] = cleaned_query
-            params["search"] = cleaned_query
-                
+            # If metadata is explicitly provided (not inferred from query), pass it?
+            # User said "forcing SongName will cause it to fail". So safer to omit it.
+            # Only pass artist if explicitly known from HA metadata
+            if kwargs.get("media_artist"):
+                 params["artistName"] = kwargs.get("media_artist")
+
             log.info(f"[RokuMA] Music Params: {params}")
 
         elif media_type == "video":
