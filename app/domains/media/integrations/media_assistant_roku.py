@@ -112,6 +112,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             return {"status": "FAILURE", "message": "Roku IP address not found"}
 
         # 5. Handle Types
+        # 5. Handle Types
         if media_type == "music":
             # Music Logic - Clean query first
             from app.domains.media.integrations.standard import StandardIntegration
@@ -121,39 +122,41 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             device_name = kwargs.get("friendly_name")
             
             # [Robustness] If friendly_name is missing, fetch it from state
-            # This is critical for _clean_query to strip "on {device}" suffix
             if not device_name:
                 try:
                     state_obj = await self.get_state(entity_id, user_creds)
                     if state_obj and state_obj.attributes:
                         device_name = state_obj.attributes.get("friendly_name")
-                        log.info(f"[RokuMA] Fetched friendly_name from state: '{device_name}'")
                 except Exception as e:
-                    log.warning(f"[RokuMA] Failed to fetch friendly_name for cleaning: {e}")
+                    log.warning(f"[RokuMA] Failed to fetch friendly_name: {e}")
 
-            # Clean the query to remove device names and action words
+            # Clean the query
             cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
-            log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}') with device '{device_name}'")
+            log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
-            # "Listen" intent requires Audio mode (t=a)
-            # App expects query in 'u'.
+            # [Delegation] If query is NOT a URL, delegate to Music Assistant (Server) to resolve/play
+            # This aligns with the architecture: User -> HA -> Roku Integration -> Music Assistant (Resolution) -> Stream URL -> Roku Integration -> App
+            if not cleaned_query.startswith(("http", "https", "spotify")):
+                log.info(f"[RokuMA] Query is text, delegating to Music Assistant for resolution: '{cleaned_query}'")
+                try:
+                    from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
+                    ma_integ = MusicAssistantIntegration()
+                    return await ma_integ.play_media(entity_id, cleaned_query, media_type, user_creds, **kwargs)
+                except Exception as e:
+                     log.warning(f"[RokuMA] Music Assistant delegation failed: {e}. Falling back to direct pass parameters.")
+            
+            # If we are here, either query IS a URL (callback from MASS) or delegation failed
+            # App expects URL in 'u' (or we try text search fallback if App supports it, though docs say URL only)
             params["t"] = "a"
             params["u"] = cleaned_query 
             
             # Extract Metadata from kwargs (passed from MA or inferred)
-            # MA usually passes metadata in kwargs or we can fetch if needed
-            # Extract Metadata from kwargs (passed from MA or inferred)
-            
             # Smart Metadata Handling:
-            # If media_title looks like a command ("Listen to Brandon Lake"), treat as generic search (Omit songName).
-            # If media_title is clean ("Landslide"), treat as specific song (Set songName).
             if kwargs.get("media_title"):
                 raw_title = kwargs.get("media_title")
                 clean_title = std_integration._clean_query(raw_title, media_type, entity_id, device_name)
                 
-                # If cleaning changed the string (stripped "Listen to", etc), it was a command in the title slot.
-                # In this case context is fuzzy (Artist? Album?), so DO NOT force songName.
-                # If cleaning did nothing, it's likely a specific song title.
+                # Intelligent SongName Logic: Only set if title is specific (clean)
                 if raw_title.lower().strip() == clean_title.lower().strip():
                     params["songName"] = clean_title
                 else:
