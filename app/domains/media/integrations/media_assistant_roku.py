@@ -120,25 +120,25 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # Extract friendly_name from metadata for query cleaning
             device_name = kwargs.get("friendly_name")
             
-            from app.domains.media.integrations.standard import StandardIntegration
-            std_integration = StandardIntegration()
-            
             # Clean the query to remove device names and action words
             cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
-            # Revert to simple "Search by Query" logic
-            # User confirmed original issue was just full query string.
             # "Listen" intent requires Audio mode (t=a)
             # App expects query in 'u'.
             params["t"] = "a"
             params["u"] = cleaned_query 
             
-            # If metadata is explicitly provided (not inferred from query), pass it?
-            # User said "forcing SongName will cause it to fail". So safer to omit it.
-            # Only pass artist if explicitly known from HA metadata
+            # Extract Metadata from kwargs (passed from MA or inferred)
+            # MA usually passes metadata in kwargs or we can fetch if needed
+            if kwargs.get("media_title"):
+                params["songName"] = kwargs.get("media_title")
             if kwargs.get("media_artist"):
-                 params["artistName"] = kwargs.get("media_artist")
+                params["artistName"] = kwargs.get("media_artist")
+            if kwargs.get("media_album_name"):
+                params["albumName"] = kwargs.get("media_album_name")
+            if kwargs.get("image_url"):
+                params["albumArt"] = kwargs.get("image_url")
 
             log.info(f"[RokuMA] Music Params: {params}")
 
