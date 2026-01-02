@@ -63,7 +63,7 @@ class RokuDiscoveryProtocol(DeviceDiscoveryProtocol):
     def device_type(self) -> str:
         return "roku"
     
-    async def scan_network_for_roku(self, subnet: str = "192.168.2.0/24", timeout: float = 0.5) -> List[str]:
+    async def scan_network_for_roku(self, subnet: str = "192.168.2.0/24", timeout: float = 2.0) -> List[str]:
         """
         Scan network for devices listening on Roku ECP port 8060
         Returns list of IP addresses that respond on port 8060
