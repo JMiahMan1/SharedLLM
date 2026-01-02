@@ -126,7 +126,12 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
             params["t"] = "a"
-            params["u"] = cleaned_query  # Music Assistant will search for best match
+            params["u"] = cleaned_query
+            
+            # Add fallback parameters in case 'u' is treated as strict URL
+            params["q"] = cleaned_query
+            params["s"] = cleaned_query
+            params["search"] = cleaned_query
                 
             log.info(f"[RokuMA] Music Params: {params}")
 
