@@ -130,13 +130,9 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # Revert to simple "Search by Query" logic
             # User confirmed original issue was just full query string.
             # "Listen" intent requires Audio mode (t=a)
-            # 'u' expects URL. For search, we try standard search params.
+            # App expects query in 'u'.
             params["t"] = "a"
-            # params["u"] = cleaned_query # Removed to prevent "Unknown" URL error
-            
-            params["q"] = cleaned_query
-            params["s"] = cleaned_query
-            params["search"] = cleaned_query
+            params["u"] = cleaned_query 
             
             # If metadata is explicitly provided (not inferred from query), pass it?
             # User said "forcing SongName will cause it to fail". So safer to omit it.
