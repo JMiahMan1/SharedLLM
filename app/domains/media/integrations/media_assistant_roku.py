@@ -132,16 +132,21 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # Extract Metadata from kwargs (passed from MA or inferred)
             # MA usually passes metadata in kwargs or we can fetch if needed
             # Extract Metadata from kwargs (passed from MA or inferred)
-            # MA usually passes metadata in kwargs or we can fetch if needed
             
-            # Clean metadata if present to avoid "Listen to..." showing up in songName
+            # Smart Metadata Handling:
+            # If media_title looks like a command ("Listen to Brandon Lake"), treat as generic search (Omit songName).
+            # If media_title is clean ("Landslide"), treat as specific song (Set songName).
             if kwargs.get("media_title"):
                 raw_title = kwargs.get("media_title")
-                # Apply same cleaning logic to title as query to strip intent words
                 clean_title = std_integration._clean_query(raw_title, media_type, entity_id, device_name)
-                # Ensure we don't end up with empty string if title WAS just "Listen to"
-                if clean_title:
+                
+                # If cleaning changed the string (stripped "Listen to", etc), it was a command in the title slot.
+                # In this case context is fuzzy (Artist? Album?), so DO NOT force songName.
+                # If cleaning did nothing, it's likely a specific song title.
+                if raw_title.lower().strip() == clean_title.lower().strip():
                     params["songName"] = clean_title
+                else:
+                    log.info(f"[RokuMA] Omitted songName because title '{raw_title}' contained command words.")
 
             if kwargs.get("media_artist"):
                 params["artistName"] = kwargs.get("media_artist")
