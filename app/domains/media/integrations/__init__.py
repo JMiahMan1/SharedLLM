@@ -43,7 +43,7 @@ REGEX_INTENT_MAP = {
     r"\bturn\s+on\b": "turn_on",  
     r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)": "open_app",
     r"\b(watch|view)\b": "watch_media",  # Video intent (default: cast device)
-    r"\b(play)\b": "play_media",          # Music intent (default: music assistant)
+    r"\b(play|listen)\b": "play_media",          # Music intent (default: music assistant)
     r"\b(stop)\b": "stop_media",
     # Timer control patterns (specific matches before generic ones)
     r"\bpause\s+(the\s+)?(?:timer|alarm)\b": "timer_pause",
