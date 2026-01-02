@@ -852,7 +852,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                  continue
             # NEW: Strict Domain Filtering for Media Intents (User Request)
             # "Lights do not have media play features" - Strictly enforce appropriate domains.
-            media_intents = ["play_media", "stop_media", "media_next", "media_previous", "pause", "resume", "open_app", "volume_up", "volume_down", "volume_set", "volume_mute"]
+            media_intents = ["play_media", "watch_media", "view_content", "stop_media", "media_next", "media_previous", "pause", "resume", "open_app", "volume_up", "volume_down", "volume_set", "volume_mute"]
             if intent in media_intents and domain not in ["media_player", "remote"]:
                  log.info(f"Resolution: Skipping {eid} for intent '{intent}' because domain '{domain}' is not a media player or remote.")
                  continue
