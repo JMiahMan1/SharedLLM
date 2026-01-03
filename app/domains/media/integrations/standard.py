@@ -272,8 +272,8 @@ class StandardIntegration(MediaIntegration):
         return None
 
     def _clean_query(self, query: str, media_type: str, entity_id: str, device_name: str = None) -> str:
-        """Clean the query string by removing the device name and action words."""
-        cleaned = query.lower()
+        """Clean the query string by removing the device name and action words, preserving case."""
+        cleaned = query
         
         log.info(f"[QueryCleaning] Input: '{query}', device_name: '{device_name}'")
         
@@ -282,17 +282,16 @@ class StandardIntegration(MediaIntegration):
             # Strip capability/feature suffixes like " Supports AirPlay", " Remote", etc.
             # These are added by HA but users don't say them in queries
             core_name = re.sub(r'\s+(Supports|Remote|Controller|Switch|Sensor)\b.*$', '', device_name, flags=re.IGNORECASE).strip()
-            device_lower = core_name.lower()
             
             log.info(f"[QueryCleaning] Core device name: '{core_name}' (from '{device_name}')")
             
-            # Remove "on [device_name]", "to [device_name]", etc.
-            cleaned = re.sub(f"\\b(on|in|at|to)\\s+{re.escape(device_lower)}\\b", " ", cleaned, flags=re.IGNORECASE)
+            # Remove "on [device_name]", "to [device_name]", etc. (Case Insensitive)
+            cleaned = re.sub(f"\\b(on|in|at|to)\\s+{re.escape(core_name)}\\b", " ", cleaned, flags=re.IGNORECASE)
             # Also remove standalone device name
-            cleaned = re.sub(f"\\b{re.escape(device_lower)}\\b", " ", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(f"\\b{re.escape(core_name)}\\b", " ", cleaned, flags=re.IGNORECASE)
 
-        # Remove action words
-        cleaned = re.sub(r"\b(play|please|from|listen to|watch|view)\b", "", cleaned).strip()
+        # Remove action words (Case Insensitive)
+        cleaned = re.sub(r"\b(play|please|from|listen to|watch|view)\b", "", cleaned, flags=re.IGNORECASE).strip()
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         
         log.info(f"[QueryCleaning] Output: '{cleaned}'")
