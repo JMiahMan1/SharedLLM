@@ -117,15 +117,10 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # This is the correct approach - MA service handles library URIs and streaming properly
             from app.logic import music_assistant_ops
             
-            # Extract device name for query cleaning
-            device_name = kwargs.get("device_name") or kwargs.get("friendly_name", "")
+            log.info(f"[RokuMA] Delegating to MA service | Entity: {entity_id} | Query: '{query}'")
             
-            # Clean the query
-            cleaned_query = self._clean_query(query, device_name)
-            log.info(f"[RokuMA] Delegating to MA service | Entity: {entity_id} | Query: '{cleaned_query}'")
-            
-            # Call Music Assistant service - it will handle everything properly
-            result = await music_assistant_ops.play_media(entity_id, cleaned_query, "music", user_creds)
+            # Call Music Assistant service - it will handle query cleaning and everything properly
+            result = await music_assistant_ops.play_media(entity_id, query, "music", user_creds)
             
             if result and result.get("status") == "SUCCESS":
                 log.info(f"[RokuMA] MA service call successful for {entity_id}")
