@@ -291,8 +291,21 @@ async def tool_music_search(query: str, user_creds: dict, redis_client=None) -> 
 
 def _format_search_results(query, results):
     if results:
-        # Sort
-        results.sort(key=lambda x: x.get("match_score", 0 if query.lower() in x["title"].lower() else 0), reverse=True)
+        # Sort by score with a small boost for tracks to prioritize specific songs
+        def get_score(r):
+            base_score = r.get("match_score", 0)
+            # If query is exactly in title, base score is at least 0.9
+            if query.lower() in r["title"].lower():
+                base_score = max(base_score, 0.9)
+            
+            # Type boost: Track > Artist/Album > Playlist/Radio
+            boost = 0
+            if r["type"] == "track": boost = 0.05
+            elif r["type"] in ["artist", "album"]: boost = 0.02
+            
+            return base_score + boost
+
+        results.sort(key=get_score, reverse=True)
         
         lines = []
         for r in results[:15]:
