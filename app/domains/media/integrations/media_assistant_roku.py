@@ -184,7 +184,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                     # Using a short timeout for ECP launch
                     requests.post(base_url, params=params, timeout=5)
                     # Important: Give the Roku app a moment to initialize before sending audio
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(3)
                 except Exception as e:
                     log.warning(f"[RokuMA] ECP Launch failed: {e}")
             else:
