@@ -62,7 +62,7 @@ async def run_test():
     
     # 2. Resolve Entity
     log.info(f"Step 0: Resolving '{OFFICE_TV_NAME}'...")
-    entity_id, _ = await smart_resolve_entity(OFFICE_TV_NAME, "turn_on", GlobalResources.ha_collection)
+    entity_id, _, _ = await smart_resolve_entity(OFFICE_TV_NAME, "turn_on", GlobalResources.ha_collection)
     
     if not entity_id:
         raise FunctionalTestFailure(f"Could not resolve '{OFFICE_TV_NAME}'")
