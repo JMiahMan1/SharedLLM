@@ -369,7 +369,23 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
         final_id = media_id
         
         if current_type == "library":
-             final_id = media_type # Argument passed was the URI
+             # media_type usually contains the full URI here when called with library://
+             full_uri = media_id if media_id.startswith("library://") else (kwargs.get("original_query") or media_id)
+             if "library://" in full_uri:
+                 try:
+                     # library://track/233 -> type='track', id='233'
+                     parts = full_uri.replace("library://", "").split("/")
+                     if len(parts) >= 2:
+                         final_type = parts[0]
+                         final_id = parts[1]
+                         log.info(f"[MA PLAY] Parsed library URI: type={final_type}, id={final_id}")
+                     else:
+                         final_id = full_uri
+                 except Exception as e:
+                     log.warning(f"[MA PLAY] Failed to parse library URI {full_uri}: {e}")
+                     final_id = full_uri
+             else:
+                 final_id = full_uri
              
         payload = {
             "entity_id": entity_id,
