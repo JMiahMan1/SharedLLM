@@ -10,7 +10,7 @@ from app.tests.base import BaseTest
 
 # Configuration
 # Load defaults, but allow override from .env
-DEVICE_NAME = "Gracies TV"
+DEVICE_NAME = os.getenv("DEVICE_NAME", "Gracies TV")
 ENTITY_ID = "media_player.gracies_tv" 
 
 def load_env_vars():
