@@ -115,8 +115,6 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         # 5. Handle Types
         if media_type == "music":
             # Music Logic - Clean query first
-            from app.domains.media.integrations.standard import StandardIntegration
-            std_integration = StandardIntegration()
             
             # Extract friendly_name from metadata for query cleaning
             device_name = kwargs.get("friendly_name")
@@ -131,7 +129,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                     log.warning(f"[RokuMA] Failed to fetch friendly_name: {e}")
 
             # Clean the query (Strip "on {device}" and action words)
-            cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
+            cleaned_query = self._clean_query(query, device_name)
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
             # Deep Link Parameters
@@ -146,7 +144,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             raw_artist = kwargs.get("media_artist")
             
             if raw_title:
-                clean_title = std_integration._clean_query(raw_title, media_type, entity_id, device_name)
+                clean_title = self._clean_query(raw_title, device_name)
                 # If the title is just a command (e.g. "Listen to Brandon Lake"), it's not a real song name.
                 # In this case, we omit songName to avoid the "Brandon Lake is not a song" issue.
                 if raw_title.lower().strip() == clean_title.lower().strip():
@@ -155,7 +153,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                     log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted songName")
             
             if raw_artist:
-                clean_artist = std_integration._clean_query(raw_artist, media_type, entity_id, device_name)
+                clean_artist = self._clean_query(raw_artist, device_name)
                 params["artistName"] = clean_artist
             
             if kwargs.get("media_album_name"):
@@ -171,20 +169,20 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             
             # Resolve Query if needed (same as StandardIntegration)
             if not query.startswith(("http", "www", "spotify", "app")):
-                from app.domains.media.integrations.standard import StandardIntegration
-                std_integration = StandardIntegration()
-                
-                # Extract friendly_name from metadata for query cleaning
-                device_name = kwargs.get("friendly_name")  # Metadata is unpacked into kwargs
-                log.info(f"[RokuMA] Extracting device_name for query cleaning: {device_name}")
-                
-                # Clean query using same logic as standard
-                cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
-                resolved_url = await std_integration._search_video_url(cleaned_query)
-                if resolved_url:
-                    query = resolved_url
-                else:
-                     return {"status": "FAILURE", "message": "Could not find a playable video"}
+                 from app.domains.media.integrations.standard import StandardIntegration
+                 std_integration = StandardIntegration()
+                 
+                 # Extract friendly_name from metadata for query cleaning
+                 device_name = kwargs.get("friendly_name")  # Metadata is unpacked into kwargs
+                 log.info(f"[RokuMA] Extracting device_name for query cleaning: {device_name}")
+                 
+                 # Clean query using same logic as standard
+                 cleaned_query = self._clean_query(query, device_name)
+                 resolved_url = await std_integration._search_video_url(cleaned_query)
+                 if resolved_url:
+                     query = resolved_url
+                 else:
+                      return {"status": "FAILURE", "message": "Could not find a playable video"}
 
             # Convert to local stream if needed (yt-dlp)
             # We assume query is now a URL.
