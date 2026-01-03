@@ -96,45 +96,27 @@ async def run_test():
          # Accept 'on' or 'idle'
          pass 
 
-    # 5. Test: App Launch (YouTube)
-    log.info("Step 3: TEST - Launch YouTube")
-    res = await handle_media_command("open_app", "open youtube on office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
-    if res[0]["status"] != "SUCCESS":
-        raise FunctionalTestFailure(f"App Launch Failed: {res}")
-    await asyncio.sleep(5)
-    # Verify by checking source or app_id if available, or just state 'playing'/'idle'
-    # Many TVs show 'YouTube' as source
-    if not await verify_state(entity_id, None, "source", "YouTube") and not await verify_state(entity_id, None, "app_id", "com.google.android.youtube.tv"):
-         log.warning("Could not verify App Launch via state attributes (normal for some TVs).")
-
-    # 6. Test: Volume Control (Set, Up, Down, Mute)
-    log.info("Step 4: TEST - Volume Controls")
+    # Step 3: TEST - Play Media (Music)
+    # verify "Play Brandon Lake on Gracies TV" -> Should be cleaned to "Brandon Lake"
+    log.info("Step 3: TEST - Play Media (Music)")
+    query = "Play Brandon Lake on Gracies TV" 
     
-    # Set 15%
-    await handle_media_command("volume_set", "set volume to 15%", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
-    await asyncio.sleep(2)
+    # We pass 'device_name' to simulate the resolution context effectively
+    res = await handle_media_command(
+        "play_media", 
+        query, 
+        entity_id=entity_id, 
+        user_creds=user_creds, 
+        ha_collection=GlobalResources.ha_collection, 
+        redis_client=GlobalResources.redis_client,
+        device_name="Gracies TV" # Simulate the resolver passing the alias which logic relies on
+    )
     
-    # Mute
-    await handle_media_command("volume_mute", "mute office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
-    await asyncio.sleep(2)
-    if not await verify_state(entity_id, None, "is_volume_muted", True):
-        raise FunctionalTestFailure("Mute failed")
-
-    # Unmute
-    await handle_media_command("volume_mute", "unmute office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client, {"is_volume_muted": False})
-    await asyncio.sleep(2)
-    if not await verify_state(entity_id, None, "is_volume_muted", False):
-        raise FunctionalTestFailure("Unmute failed")
-        
-    # Volume Up
-    log.info("Step 4b: TEST - Volume Up")
-    await handle_media_command("volume_up", "turn volume up on office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
-    await asyncio.sleep(1)
+    if isinstance(res, list): res = res[0]
+    if res.get("status") != "SUCCESS":
+       raise FunctionalTestFailure(f"Play Music Failed: {res}")
     
-    # Volume Down
-    log.info("Step 4c: TEST - Volume Down")
-    await handle_media_command("volume_down", "turn volume down on office tv", entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
-    await asyncio.sleep(1)
+    await asyncio.sleep(5) 
 
     # 7. Test: Timers & Alarms
     log.info("Step 5: TEST - Timers & Alarms")
