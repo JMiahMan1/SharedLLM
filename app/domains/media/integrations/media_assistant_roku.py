@@ -174,6 +174,9 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                     # Overwrite/Augment params from best match
                     if best_match.get("type") == "artist":
                         params["artistName"] = best_match.get("title")
+                        # Media Assistant needs BOTH artistName AND songName to display properly
+                        # For artist queries, use artist name as songName to trigger playback
+                        params["songName"] = best_match.get("title")
                     else:
                         params["songName"] = best_match.get("title")
                         if best_match.get("artist"): params["artistName"] = best_match.get("artist")
