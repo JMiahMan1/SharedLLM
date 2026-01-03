@@ -149,18 +149,55 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # Clean Query before sending to MA
             device_name = kwargs.get("device_name") or kwargs.get("friendly_name", "")
             cleaned_query = self._clean_query(query, device_name)
-            
-            log.info(f"[RokuMA] Delegating to MA service | MA Entity: {ma_player_entity} | Query: '{cleaned_query}' (Cleaned from '{query}')")
-            
-            # Call Music Assistant service with the CORRECT MA player entity
-            result = await music_assistant_ops.play_media(ma_player_entity, cleaned_query, "music", user_creds)
+
+            # 1. Resolve Metadata for Roku Display
+            log.info(f"[RokuMA] Resolving metadata for display: '{cleaned_query}'")
+            search_res = await music_assistant_ops.tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
+            best_match = None
+            if search_res.get("status") == "SUCCESS" and search_res.get("results"):
+                # Use the first result (highest score)
+                best_match = search_res["results"][0]
+                log.info(f"[RokuMA] Found best match: {best_match.get('title')} ({best_match.get('type')})")
+
+            # 2. Populate Params for ECP Launch (Roku UI)
+            params = {"t": "a", "autoplay": "true"} # Audio mode
+            if best_match:
+                params["songName"] = best_match.get("title", "")
+                params["artistName"] = best_match.get("artist") or (best_match.get("title", "") if best_match.get("type") == "artist" else "Multiple Artists" if best_match.get("type") == "playlist" else "")
+                if best_match.get("image_url"):
+                    params["albumArt"] = best_match["image_url"]
+                
+                # Use the specific URI for the MA service call to be precise
+                ma_media_id = best_match.get("media_content_id") or cleaned_query
+                ma_media_type = best_match.get("media_content_type") or "music"
+            else:
+                params["songName"] = cleaned_query
+                ma_media_id = cleaned_query
+                ma_media_type = "music"
+
+            # 3. Launch the Media Assistant channel (Roku UI)
+            # We do this FIRST so the app is open when audio starts
+            if roku_ip:
+                base_url = f"http://{roku_ip}:8060/launch/{self.MEDIA_ASSISTANT_CHANNEL_ID}"
+                try:
+                    log.info(f"[RokuMA] Launching Roku UI via ECP: {base_url} | {params}")
+                    # Using a short timeout for ECP launch
+                    requests.post(base_url, params=params, timeout=5)
+                except Exception as e:
+                    log.warning(f"[RokuMA] ECP Launch failed: {e}")
+            else:
+                 log.warning(f"[RokuMA] No Roku IP found, skipping ECP launch.")
+
+            # 4. Delegate Audio Playback to Music Assistant
+            log.info(f"[RokuMA] Delegating audio to MA service | MA Entity: {ma_player_entity} | Media: {ma_media_id}")
+            result = await music_assistant_ops.play_media(ma_player_entity, ma_media_id, ma_media_type, user_creds)
             
             if result and result.get("status") == "SUCCESS":
                 log.info(f"[RokuMA] MA service call successful for {ma_player_entity}")
                 return result
             else:
                 log.warning(f"[RokuMA] MA service call failed: {result}")
-                return result or {"status": "FAILURE", "message": "MA service call returned empty result"}
+                return result or {"status": "FAILURE", "message": "MA service call failed"}
 
         elif media_type == "video":
             # Video Logic
