@@ -15,6 +15,8 @@ from app.tests.test_timers import TimerTests
 from app.tests.test_search import SearchTests
 from app.tests.test_productivity import ProductivityTests
 from app.tests.test_hardware import HardwareTests
+from app.tests.test_android_tv import AndroidTVTests
+from app.tests.test_advanced import AdvancedTests
 
 # Optional: Add existing logic from test_runner.py here or import it
 # For now, let's keep it modular
@@ -44,15 +46,15 @@ class MasterRunner:
         # 1. Health Check
         import requests
         try:
-            r = requests.get(f"{self.api_url}/health", timeout=5)
+            r = requests.get(f"{self.api_url}/health", timeout=10) # Increased timeout
             if r.status_code == 200:
                 self.logger("Health Check", "PASS", "Service reachable")
             else:
                 self.logger("Health Check", "FAIL", f"HTTP {r.status_code}")
-                return
+                return self._save_report() # Return report even if failed
         except Exception as e:
             self.logger("Health Check", "FAIL", str(e))
-            return
+            return self._save_report() # Return report even if failed
 
         # 2. Run Modular Tests
         try:
@@ -61,6 +63,8 @@ class MasterRunner:
             SearchTests(self.api_url, logger=self.logger).run()
             ProductivityTests(self.api_url, logger=self.logger).run()
             HardwareTests(self.api_url, logger=self.logger).run()
+            AndroidTVTests(self.api_url, logger=self.logger).run()
+            AdvancedTests(self.api_url, logger=self.logger).run()
         except Exception as e:
             self.logger("Runner", "ERROR", f"Suite execution crashed: {e}")
 
@@ -74,6 +78,9 @@ class MasterRunner:
         print(f"Duration: {duration:.2f} seconds")
         print(f"===========================================\n")
 
+        return self._save_report()
+
+    def _save_report(self):
         # Save report
         os.makedirs("data/tests", exist_ok=True)
         report_path = f"data/tests/report_{int(time.time())}.json"
