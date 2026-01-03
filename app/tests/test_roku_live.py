@@ -119,14 +119,14 @@ def main():
     print(f"Initial State: {initial_state}")
     
     # 3. Send Play Command
-    query = f"Play Brandon Lake on {DEVICE_NAME}"
+    query = sys.argv[1] if len(sys.argv) > 1 else f"Play Brandon Lake on {DEVICE_NAME}"
     print(f"\nSending Query: '{query}'...")
     
     payload = {
-        "query": query,
-        "user": "admin", 
-        "model": "gpt-4o-mini"
+        "query": query
     }
+    # Add user if explicitly needed for history, but default to admin
+    payload["user"] = os.getenv("RAG_TEST_USER", "admin")
     
     # POST to /api/chat
     response_text, status = tester.safe_post("/api/chat", payload, "Roku Play Command")
