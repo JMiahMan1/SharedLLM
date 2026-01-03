@@ -132,36 +132,34 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             cleaned_query = self._clean_query(query, device_name)
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
-            # Initialize params with defaults
-            params["t"] = "a"
-            params["u"] = cleaned_query 
+            # Initialize params with correct Media Assistant channel parameters
+            # Documentation: t=title, s=subtitle/artist, i=image, a=audio, albumName=album
+            params = {}
+            params["a"] = "true"  # Audio UI flag
+            params["u"] = cleaned_query  # Default URI
             
-            # [Intelligent Metadata Resolution]
-            # 1. First, try to use what we have
-            raw_title = kwargs.get("media_title")
-            raw_artist = kwargs.get("media_artist")
-            
+            # Map metadata to correct parameter names
             if raw_title:
                 clean_title = self._clean_query(raw_title, device_name)
-                # If title is clean (not an action phrase), use it
                 if raw_title.lower().strip() == clean_title.lower().strip():
-                    params["songName"] = clean_title
+                    params["t"] = clean_title  # t = title
                 else:
-                    log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted from songName (will resolve via search)")
+                    log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted from title (will resolve via search)")
             
             if raw_artist:
-                params["artistName"] = self._clean_query(raw_artist, device_name)
+                params["s"] = self._clean_query(raw_artist, device_name)  # s = subtitle/artist
+            
+            if kwargs.get("image_url"):
+                params["i"] = kwargs.get("image_url")  # i = image URL
             
             if kwargs.get("media_album_name"):
                 params["albumName"] = kwargs.get("media_album_name")
-            if kwargs.get("image_url"):
-                params["albumArt"] = kwargs.get("image_url")
 
-            # 2. If we lack critical metadata (Song OR Artist) or a valid URI, perform search
-            has_sufficient_meta = params.get("songName") and params.get("artistName")
+            # If we lack critical metadata (title OR artist), perform search
+            has_sufficient_meta = params.get("t") and params.get("s")
             
             if not has_sufficient_meta:
-                log.info(f"[RokuMA] Insufficient metadata (Song: {params.get('songName')}, Artist: {params.get('artistName')}). Performing search for '{cleaned_query}'...")
+                log.info(f"[RokuMA] Insufficient metadata (Title: {params.get('t')}, Artist: {params.get('s')}). Performing search for '{cleaned_query}'...")
                 from app.logic.music_assistant_ops import tool_music_search
                 
                 # Perform search (cache + live)
@@ -194,31 +192,28 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                         
                         if artist_track:
                             log.info(f"[RokuMA] Found track by artist: {artist_track.get('title')} by {artist_track.get('artist')}")
-                            params["songName"] = artist_track.get("title")
-                            params["artistName"] = artist_track.get("artist", artist_name)
+                            params["t"] = artist_track.get("title")  # t = song title
+                            params["s"] = artist_track.get("artist", artist_name)  # s = artist
                             if artist_track.get("album"): params["albumName"] = artist_track.get("album")
-                            if artist_track.get("image_url"): params["albumArt"] = artist_track.get("image_url")
+                            if artist_track.get("image_url"): params["i"] = artist_track.get("image_url")  # i = image
                             if artist_track.get("media_content_id"): params["u"] = artist_track.get("media_content_id")
                         else:
                             log.warning(f"[RokuMA] No tracks found by artist '{artist_name}'. Using artist URI as fallback.")
-                            params["artistName"] = artist_name
+                            params["s"] = artist_name  # s = artist
                             params["u"] = artist_uri or cleaned_query
                     else:
                         # Track, album, playlist, radio - use directly
-                        params["songName"] = best_match.get("title")
-                        if best_match.get("artist"): params["artistName"] = best_match.get("artist")
+                        params["t"] = best_match.get("title")  # t = title
+                        if best_match.get("artist"): params["s"] = best_match.get("artist")  # s = artist
                         if best_match.get("album"): params["albumName"] = best_match.get("album")
-                        if best_match.get("image_url"): params["albumArt"] = best_match.get("image_url")
+                        if best_match.get("image_url"): params["i"] = best_match.get("image_url")  # i = image
                         if best_match.get("media_content_id"): params["u"] = best_match.get("media_content_id")
                         
                 else:
                     log.warning(f"[RokuMA] Search returned no results for '{cleaned_query}'. UI might show Unknown.")
-                    # Fallback: If we still don't have a songName, use the query?
-                    if not params.get("songName") and not params.get("artistName"):
-                        params["songName"] = cleaned_query
-
-            # Enable autoplay for music
-            params["autoplay"] = "true"
+                    # Fallback: If we still don't have title/artist, use the query
+                    if not params.get("t") and not params.get("s"):
+                        params["t"] = cleaned_query
             
             log.info(f"[RokuMA] Music Params: {params}")
             
