@@ -1,10 +1,12 @@
 # SharedLLM - Unified RAG Middleware AI
 
-A central intelligence layer that unifies smart home control, personal cloud services, and knowledge systems into a single conversational AI interface.
+A central intelligence layer that unifies smart home control, personal cloud
+services, and knowledge systems into a single conversational AI interface.
 
 ## Purpose
 
-This project implements a Unified RAG Middleware AI, serving as the central intelligence layer between:
+This project implements a Unified RAG Middleware AI, serving as the central
+intelligence layer between:
 
 ### Smart Home
 
@@ -23,7 +25,8 @@ This project implements a Unified RAG Middleware AI, serving as the central inte
 - **Nextcloud Notes** - Create, read, append, delete notes
 - **Nextcloud Files** - Document ingestion and RAG search
 - **Nextcloud Media** - Ebooks, PDFs, MP3 metadata, audiobooks
-- **Audio Bookshelf** - Used as provider in Music Assistant for podcasts and audiobooks
+- **Audio Bookshelf** - Used as provider in Music Assistant for podcasts and
+  audiobooks
 
 ### Knowledge Systems
 
@@ -41,12 +44,12 @@ All interfaces share the same memory, context, and personality:
 - REST API clients
 - Future CLI / mobile clients
 
-## System Documentation
+## Documentation
 
-- [System Architecture](docs/architecture.md) - High-level design, diagram, and
-  intent resolution pipeline.
-- [Integration Architecture](docs/integrations.md) - Media/Device integrations.
-- [Future Roadmap](docs/roadmap.md) - Planned features and TODOs.
+- [Architecture Overview](docs/architecture.md)
+- [Integrations Guide](docs/integrations.md)
+- [Roadmap](docs/roadmap.md)
+- [API Reference](docs/api_reference.md)
 
 ## Current Code Structure
 
@@ -95,7 +98,8 @@ requirements.txt
 - Shared memory via Redis (chat history, context)
 - Intent classification (regex overrides + vector matching)
 - **Multi-intent command parsing** ("turn off lights and play music")
-- **Conversation Context** - Robust handling of follow-up questions using history.
+- **Conversation Context** - Robust handling of follow-up questions using
+  history.
 
 ### ✅ Home Assistant Integration
 
@@ -146,7 +150,8 @@ The system includes a comprehensive automated test suite located in `app/tests/`
 ### Automated Verification
 
 - **Run All Tests**: `python3 -m app.tests.runner --url [API_URL]`
-- **REST API**: Trigger tests via `POST /api/admin/run_tests` (returns JSON report).
+- **REST API**: Trigger tests via `POST /api/admin/run_tests` (returns JSON
+  report).
 
 ### Coverage Areas
 
