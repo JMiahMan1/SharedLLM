@@ -147,7 +147,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 return {"status": "FAILURE", "message": "Could not find Music Assistant player entity for this Roku family"}
             
             # Clean Query before sending to MA
-            device_name = kwargs.get("device_name") or kwargs.get("friendly_name", "")
+            device_name = kwargs.get("device_name", "")
             cleaned_query = self._clean_query(query, device_name)
 
             # If the query is empty after cleaning, it's likely a generic "Play" command (Resume)
@@ -214,8 +214,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 from app.domains.media.integrations.standard import StandardIntegration
                 std_integration = StandardIntegration()
                 # Clean query using same logic as standard
-                clean_device = kwargs.get("device_name") or kwargs.get("friendly_name", "")
-                cleaned_query = self._clean_query(query, clean_device)
+                cleaned_query = self._clean_query(query, kwargs.get("device_name", ""))
                 
                 if not cleaned_query:
                     log.info(f"[RokuMA] Video query empty after cleaning, redirecting to resume")
@@ -477,7 +476,11 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         # 3. Remove common MA keywords and actions
         clean = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast|play|please|from|on|open|launch|playback|listen to|now|watch|view|show|me)\b", " ", clean)
         
-        # 4. Final Cleanup
+        # 4. Generic Prepositional Stripping (e.g., "on the TV", "in the office")
+        # Cleans phrases at the end of the query if device_name wasn't explicitly found
+        clean = re.sub(r"\s+\b(on|in|at|to|from)\b\s+(the\s+)?[\w\s]{2,15}$", "", clean, flags=re.IGNORECASE)
+
+        # 5. Final Cleanup
         clean = re.sub(r"\s+", " ", clean).strip()
         # Remove trailing punctuation
         clean = re.sub(r"[?!.,]$", "", clean)
