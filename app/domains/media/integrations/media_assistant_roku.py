@@ -130,40 +130,34 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 except Exception as e:
                     log.warning(f"[RokuMA] Failed to fetch friendly_name: {e}")
 
-            # Clean the query
+            # Clean the query (Strip "on {device}" and action words)
             cleaned_query = std_integration._clean_query(query, media_type, entity_id, device_name)
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
-            # [Delegation] If query is NOT a URL, delegate to Music Assistant (Server) to resolve/play
-            # This aligns with the architecture: User -> HA -> Roku Integration -> Music Assistant (Resolution) -> Stream URL -> Roku Integration -> App
-            if not cleaned_query.startswith(("http", "https", "spotify")):
-                log.info(f"[RokuMA] Query is text, delegating to Music Assistant for resolution: '{cleaned_query}'")
-                try:
-                    from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
-                    ma_integ = MusicAssistantIntegration()
-                    return await ma_integ.play_media(entity_id, cleaned_query, media_type, user_creds, **kwargs)
-                except Exception as e:
-                     log.warning(f"[RokuMA] Music Assistant delegation failed: {e}. Falling back to direct pass parameters.")
-            
-            # If we are here, either query IS a URL (callback from MASS) or delegation failed
-            # App expects URL in 'u' (or we try text search fallback if App supports it, though docs say URL only)
+            # Deep Link Parameters
             params["t"] = "a"
             params["u"] = cleaned_query 
             
-            # Extract Metadata from kwargs (passed from MA or inferred)
-            # Smart Metadata Handling:
-            if kwargs.get("media_title"):
-                raw_title = kwargs.get("media_title")
+            # [Intelligent Metadata Handling]
+            # We must sanitize metadata passed from MA to avoid "Play X" showing as the song title.
+            # If songName is forced to an artist, the app may show "Unknown".
+            
+            raw_title = kwargs.get("media_title")
+            raw_artist = kwargs.get("media_artist")
+            
+            if raw_title:
                 clean_title = std_integration._clean_query(raw_title, media_type, entity_id, device_name)
-                
-                # Intelligent SongName Logic: Only set if title is specific (clean)
+                # If the title is just a command (e.g. "Listen to Brandon Lake"), it's not a real song name.
+                # In this case, we omit songName to avoid the "Brandon Lake is not a song" issue.
                 if raw_title.lower().strip() == clean_title.lower().strip():
                     params["songName"] = clean_title
                 else:
-                    log.info(f"[RokuMA] Omitted songName because title '{raw_title}' contained command words.")
-
-            if kwargs.get("media_artist"):
-                params["artistName"] = kwargs.get("media_artist")
+                    log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted songName")
+            
+            if raw_artist:
+                clean_artist = std_integration._clean_query(raw_artist, media_type, entity_id, device_name)
+                params["artistName"] = clean_artist
+            
             if kwargs.get("media_album_name"):
                 params["albumName"] = kwargs.get("media_album_name")
             if kwargs.get("image_url"):
