@@ -150,6 +150,11 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             device_name = kwargs.get("device_name") or kwargs.get("friendly_name", "")
             cleaned_query = self._clean_query(query, device_name)
 
+            # If the query is empty after cleaning, it's likely a generic "Play" command (Resume)
+            if not cleaned_query:
+                log.info(f"[RokuMA] Cleaned query is empty, redirecting to resume (play) handler")
+                return await self.play(entity_id, user_creds, **kwargs)
+
             # 1. Resolve Metadata for Roku Display
             log.info(f"[RokuMA] Resolving metadata for display: '{cleaned_query}'")
             search_res = await music_assistant_ops.tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
@@ -209,7 +214,12 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 from app.domains.media.integrations.standard import StandardIntegration
                 std_integration = StandardIntegration()
                 # Clean query using same logic as standard
-                cleaned_query = std_integration._clean_query(query, media_type, entity_id, kwargs.get("device_name"))
+                cleaned_query = self._clean_query(query, kwargs.get("device_name"))
+                
+                if not cleaned_query:
+                    log.info(f"[RokuMA] Video query empty after cleaning, redirecting to resume")
+                    return await self.play(entity_id, user_creds, **kwargs)
+
                 resolved_url = await std_integration._search_video_url(cleaned_query)
                 if resolved_url:
                     query = resolved_url
@@ -464,7 +474,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             clean = self._fuzzy_remove_device(clean, d_clean)
         
         # 3. Remove common MA keywords and actions
-        clean = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast|play|please|from|on|open|launch|playback|listen to)\b", " ", clean)
+        clean = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast|play|please|from|on|open|launch|playback|listen to|now|watch|view|show|me)\b", " ", clean)
         
         # 4. Final Cleanup
         clean = re.sub(r"\s+", " ", clean).strip()
