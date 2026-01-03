@@ -196,8 +196,10 @@ class StandardIntegration(MediaIntegration):
         if remote_sibling:
              log.info(f"[StandardIntegration] Using remote sibling {remote_sibling} for turn_off")
              # Force Stop first (Helps Cast devices release locks)
-             await execute_ha_service(entity_id.split('.')[0], "media_stop", entity_id, user_creds, {}, kwargs.get("redis_client"))
-             await asyncio.sleep(1)
+             # Only if the original entity supports it (media_player)
+             if entity_id.startswith("media_player."):
+                 await execute_ha_service(entity_id.split('.')[0], "media_stop", entity_id, user_creds, {}, kwargs.get("redis_client"))
+                 await asyncio.sleep(1)
              
              # Send HOME to exit app (ensures state clears)
              await execute_ha_service("remote", "send_command", remote_sibling, user_creds, {"command": "HOME"}, kwargs.get("redis_client"))
