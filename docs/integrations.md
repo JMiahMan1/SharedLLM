@@ -1,42 +1,65 @@
 # Integration Architecture Documentation
 
 ## What is an Integration?
-In this system, an **Integration** is a specialized handler class responsible for executing media commands on a specific type of device. 
+
+In this system, an **Integration** is a specialized handler class responsible for
+executing media commands on a specific type of device.
 
 The architecture follows a **Router-Delegate** pattern:
-1.  **Router (`commands.py`)**: Receives the natural language intent (e.g., "Play X on Y"), resolves the target entity, and determines *which* integration handler to use.
-2.  **Factory (`IntegrationFactory`)**: Instantiates the correct handler class based on the device's Home Assistant `integration` attribute (e.g., `cast`, `music_assistant`, `roku`).
-3.  **Handler (The Integration)**: Executes the actual logic, handling device-specific quirks like power management, query formatting, or app launching.
 
-This modularity ensures that adding features for one device type (like turning on a TV before casting) doesn't complicate the logic for others (like playing music on a smart speaker).
+1. **Router (`commands.py`)**: Receives the natural language intent (e.g., "Play
+    X on Y"), resolves the target entity, and determines *which* integration
+    handler to use.
+2. **Factory (`IntegrationFactory`)**: Instantiates the correct handler class
+    based on the device's Home Assistant `integration` attribute (e.g., `cast`,
+    `music_assistant`, `roku`).
+3. **Handler (The Integration)**: Executes the actual logic, handling
+    device-specific quirks like power management, query formatting, or app
+    launching.
+
+This modularity ensures that adding features for one device type (like turning
+on a TV before casting) doesn't complicate the logic for others (like playing
+music on a smart speaker).
 
 ---
 
 ## 1. Cast Integration (`CastIntegration`)
-**Target Devices**: Google Chromecast, Google Home, Nest Hub, Cast-enabled TVs (Vizio, Sony, etc.).
 
-### Features
-*   **SmartPowerSync**: The defining feature of this integration. Cast devices often cannot turn themselves on if they are built into a "dumb" TV or powered by USB.
-    *   **Logic**: Before playing media, the integration looks for a "physical TV sibling" of the Cast device.
-    *   **Discovery**: It searches ChromaDB for other devices in the same physical group (e.g., "Office") that look like a TV. If that fails, it tries name matching (stripping `_cast` or `_chrome` suffixes).
-    *   **Action**: If a sibling TV is found and is `off`, the integration sends a `media_player.turn_on` command to the *TV* and waits 4 seconds before sending the media to the *Cast* device.
-*   **Standard Playback**: Supports standard HASS `media_player.play_media` commands.
+**Target Devices**: Google Chromecast, Google Home, Nest Hub, Cast-enabled TVs
+(Vizio, Sony, etc.).
 
-### User Guide & Voice Commands
+### Cast: Features
+
+* **SmartPowerSync**: The defining feature of this integration. Cast devices
+    often cannot turn themselves on if they are built into a "dumb" TV or powered
+    by USB.
+  * **Logic**: Before playing media, the integration looks for a "physical
+        TV sibling" of the Cast device.
+  * **Discovery**: It searches ChromaDB for other devices in the same
+        physical group (e.g., "Office") that look like a TV. If that fails, it
+        tries name matching (stripping `_cast` or `_chrome` suffixes).
+  * **Action**: If a sibling TV is found and is `off`, the integration sends
+        a `media_player.turn_on` command to the *TV* and waits 4 seconds before
+        sending the media to the *Cast* device.
+* **Standard Playback**: Supports standard HASS `media_player.play_media`
+    commands.
+
+### Cast: User Guide & Voice Commands
 
 | Feature | Natural Speech Example | What Happens |
 | :--- | :--- | :--- |
-| **SmartPowerSync** | "Play Brandon Lake on the Office TV" | 1. System finds `media_player.office_tv_chrome` (Cast).<br>2. Finds sibling `media_player.office_tv_chrome` (TV).<br>3. TV is OFF? **Turns it ON**.<br>4. Waits 4s.<br>5. Plays music. |
+| **SmartPowerSync** | "Play Brandon Lake on the Office TV" | 1. System finds Cast device; 2. Finds sibling TV; 3. Turns TV ON if off; 4. Waits 4s; 5. Plays music. |
 | **Auto-Search Video** | "Watch a fireplace video on the Living Room TV" | **System searches YouTube** for "fireplace video", extracts the first URL, and plays it automatically. No URL needed! |
 | **Power Control** | "Turn on the Chromecast" | Turns on the device (and likely the TV via CEC). |
 
 ---
 
 ## 2. Music Assistant Integration (`MusicAssistantIntegration`)
+
 **Target Devices**: All players controlled via the Music Assistant add-on (Sonos, AirPlay, Cast, etc.).
 **Key Feature**: "Smart Routing" - deeply integrates with the Router to steal "music" commands from hardware devices.
 
-### User Guide & Voice Commands
+### Music Assistant: User Guide & Voice Commands
 
 | Intent | Natural Speech Example | Internal Logic |
 | :--- | :--- | :--- |
@@ -46,14 +69,53 @@ This modularity ensures that adding features for one device type (like turning o
 
 ---
 
-## 3. Standard Integration (`StandardIntegration`)
-**Target Devices**: Roku, WebOS (LG), Samsung (Tizen), Apple TV.
+## 3. Roku Integration (`StandardIntegration` / `RokuIntegration`)
 
-### User Guide & Voice Commands
+**Target Devices**: All Roku TVs and streaming players.
 
-| Intent | Natural Speech Example | Notes |
+### Roku: Features
+
+* **Music Assistant Delegation**: When a music intent is detected for a Roku, the system launches the **Media Assistant Channel (782875)** via ECP to provide a visual UI, while delegating high-quality audio streaming to Music Assistant.
+* **ECP Playback Control**: Standard playback commands (Play, Pause, Stop) are sent via Roku's External Control Protocol.
+* **Intelligent Query Cleaning**: Content searches are cleaned to remove room names and prepositions, ensuring accurate YouTube or Music Assistant searches.
+
+### Roku: User Guide & Voice Commands
+
+| Intent | Natural Speech Example | What Happens |
 | :--- | :--- | :--- |
-| **App Launch** | "Open Netflix on the Bedroom TV" | Uses `media_player.select_source` or specialized app launch service. |
-| **Navigation** | "Go down", "Select", "Go Home" | Sends standard remote control codes. |
-| **Stop/Pause** | "Pause the TV" | Standard media control. |
+| **Play Music** | "Play Brandon Lake on Gracies TV" | Launches MA App on Roku + Starts MA audio stream. |
+| **App Launch** | "Open Netflix on the Bedroom TV" | Sends ECP launch command for specific app ID. |
+| **Navigation** | "Go down", "Select", "Go Home" | Sends standard remote control codes via ECP. |
 
+---
+
+## 4. Android TV Integration (`AndroidTVIntegration`)
+
+**Target Devices**: Nvidia Shield, Chromecast with Google TV, Sony/TCL Android TVs.
+
+### Android TV: Features
+
+* **ADB-Based Remote**: Uses Home Assistant's `androidtv.adb_command` or standard media player services for deep interaction.
+* **App Orchestration**: Launches specific applications via their activity intent or package name.
+
+| Intent | Natural Speech Example | What Happens |
+| :--- | :--- | :--- |
+| **App Launch** | "Launch YouTube on the Shield" | Dispatches `media_player.select_source` for YouTube. |
+| **Navigation** | "Scroll left", "Press OK" | Sends ADB or standard navigation commands. |
+
+---
+
+## 5. Hardware & Lighting (`HardwareIntegration`)
+
+**Target Devices**: All Home Assistant lights, switches, and fans.
+
+### Hardware: Features
+
+* **Advanced Lighting**: Supports setting specific HSL colors and absolute/relative brightness levels.
+* **Capability Routing**: Automatically detects if a device supports `set_color` or `set_brightness` before attempting the call.
+
+| Feature | Natural Speech Example | What Happens |
+| :--- | :--- | :--- |
+| **Color Control** | "Make the office light red" | Sends `light.turn_on` with `color_name: red`. |
+| **Brightness** | "Set light to 50%", "Dim it" | Adjusts `brightness_pct` absolutely or relatively. |
+| **Toggling** | "Toggle the desk lamp" | Inverts the current logical state. |
