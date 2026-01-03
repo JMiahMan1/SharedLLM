@@ -221,6 +221,41 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             
             
             log.info(f"[RokuMA] Music Params: {params}")
+            
+            # If we resolved to a library:// URI, use Music Assistant's play_media service
+            # The Roku Media Assistant app can't play library URIs via ECP - it needs MA service
+            if params.get("u", "").startswith("library://"):
+                from app.logic.music_assistant_ops import play_media as ma_play_media
+                
+                # The Music Assistant integration creates a player entity for Roku
+                # Pattern: media_player.roku_{serial_lowercase}
+                # We need to find this entity - it's in the same group as the HA Roku entity
+                
+                # Try to get it from group members
+                ma_player = None
+                group_members = kwargs.get("group_members", [])
+                for member in group_members:
+                    if member.startswith("media_player.roku_") and member != entity_id:
+                        ma_player = member
+                        break
+                
+                if not ma_player:
+                    # Fallback: we saw media_player.roku_2n0062385487 in logs earlier
+                    # This corresponds to the serial number from device discovery
+                    log.warning(f"[RokuMA] Could not find MA player in group members. Trying HA service directly.")
+                    # Just use the cleaned query as search term for MA
+                    ma_player = entity_id.replace("28_tcl_roku_tv", "roku_2n0062385487")
+                
+                log.info(f"[RokuMA] Using Music Assistant service: entity={ma_player}, uri={params['u']}")
+                
+                result = await ma_play_media(
+                    entity_id=ma_player,
+                    media_id=params["u"],
+                    media_type="library",
+                    user_creds=user_creds
+                )
+                
+                return result
 
         elif media_type == "video":
             # Video Logic
