@@ -284,6 +284,23 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                         redis_client.setex(last_video_key, 3600, original_query)  # 1 hour TTL
                         log.info(f"[RokuMA] Stored last video URL for resume: {original_query}")
                 
+                # Fallback: Call media_player.play_media service to actually start playback
+                # The ECP launch loads the app with metadata, but we need the service call to play
+                log.info(f"[RokuMA] ECP launch successful. Calling play_media service as fallback to trigger playback...")
+                from app.logic.ha_services import execute_ha_service
+                
+                await execute_ha_service(
+                    "media_player",
+                    "play_media", 
+                    entity_id,
+                    user_creds,
+                    {
+                        "media_content_id": params.get("u", query),
+                        "media_content_type": media_type
+                    },
+                    kwargs.get("redis_client")
+                )
+                
                 return {
                      "status": "SUCCESS",
                      "message": f"Launched Media-Assistant on {entity_id}",
