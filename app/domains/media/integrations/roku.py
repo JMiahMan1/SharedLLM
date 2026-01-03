@@ -1,6 +1,8 @@
 from typing import Dict, Any, Optional
 import logging
 import asyncio
+import aiohttp
+import time
 from app.domains.media.integrations.base import MediaIntegration, VideoHelperMixin
 from app.domains.shared import execute_ha_service
 
@@ -23,16 +25,16 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
     
     async def get_state(self, entity_id: str, user_creds: Dict) -> Optional[Any]:
         """Get current state of the entity"""
-        import requests
         from app.settings import HA_URL
         
         try:
             headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
-            resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
-            if resp.status_code == 200:
-                from types import SimpleNamespace
-                data = resp.json()
-                return SimpleNamespace(state=data.get("state"), attributes=data.get("attributes", {}))
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5) as resp:
+                    if resp.status == 200:
+                        from types import SimpleNamespace
+                        data = await resp.json()
+                        return SimpleNamespace(state=data.get("state"), attributes=data.get("attributes", {}))
             return None
         except Exception as e:
             log.warning(f"[Roku] Failed to get state: {e}")
@@ -53,13 +55,12 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             # Check if this entity is a Music Assistant wrapper
             from app.settings import GlobalResources
             try:
-                # [Robust Lookup] Try strict ID first, then fallback to domain-prefixed (ingestion bug workaround)
+                # [Robust Lookup] Try strict ID first
                 search_ids = [entity_id]
-                if entity_id.startswith("media_player."):
-                    search_ids.append(f"media_player.{entity_id}")
                 
                 docs = GlobalResources.ha_collection.get(ids=search_ids, include=["metadatas"])
                 
+                attrs = {}
                 if docs and docs.get("metadatas"):
                     import json
                     attrs_str = docs["metadatas"][0].get("attributes", "{}")
@@ -83,30 +84,6 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                  ma_integration = MusicAssistantIntegration()
                  return await ma_integration.play_media(target_ma, query, media_type, user_creds, **kwargs)
 
-    async def _find_related_ma_entity(self, original_entity_id: str) -> Optional[str]:
-        """Find the corresponding Music Assistant entity for a native device."""
-        try:
-             # 1. Try common MASS naming pattern: media_player.mass_[name]
-             # e.g. media_player.roku_123 -> media_player.mass_roku_123
-             name_part = original_entity_id.split(".")[-1]
-             # Handle cases where name might be 'living_room_tv' -> 'mass_living_room_tv'
-             candidate = f"media_player.mass_{name_part}"
-             
-             # Verify it exists in our DB/Collection
-             from app.settings import GlobalResources
-             if GlobalResources.ha_collection:
-                 # Check if this candidate exists as an entity
-                 docs = GlobalResources.ha_collection.get(ids=[candidate])
-                 if docs and docs.get("ids"):
-                     return candidate
-                     
-             # 2. Similarity Search for integration=music_assistant near this name?
-             # Might be risky/slow. For now, rely on pattern match availability.
-             
-        except Exception as e:
-            log.warning(f"[Roku] MA lookup error: {e}")
-        return None
-        
         # [Video Playback] - Direct casting for video content
         log.info(f"[Roku] Using direct video playback mode")
         
@@ -143,10 +120,6 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                 std_integration = StandardIntegration()
                 
                 # Extract friendly_name from metadata for query cleaning
-                log.info(f"[Roku] kwargs keys: {list(kwargs.keys())}")
-                log.info(f"[Roku] metadata in kwargs: {kwargs.get('metadata')}")
-                log.info(f"[Roku] friendly_name directly: {kwargs.get('friendly_name')}")
-                
                 device_name = None
                 if kwargs.get("metadata"):
                     device_name = kwargs["metadata"].get("friendly_name")
@@ -187,7 +160,6 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      log.warning("[Roku] Direct Play failed, falling back to DLNA (Roku Media Player)...")
 
                      # Strategy 2: Roku Media Player (2213) with Smart Wait
-                     import requests
                      
                      # App ID 2213 = "Roku Media Player"
                      ecp_url = f"http://{roku_ip}:8060/launch/2213"
@@ -199,79 +171,80 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
                      
                      try:
                          log.info(f"[Roku ECP] Using /launch/2213: {ecp_url}")
-                         log.info(f"[Roku ECP] Params: {params}")
-                         response = requests.post(ecp_url, params=params, timeout=20)
-                         if response.status_code == 200:
-                             log.info("[Roku ECP] Successfully sent launch command. Executing navigation macro...")
-                             
-                             # Execute verified macro with Smart Wait:
-                             import time
-                             
-                             log.info("[Roku ECP] Waiting for DLNA Browse signal (Smart Wait)...")
-                             start_wait_time = time.time()
-                             dlna_ready = False
-                             
-                             # Smart Wait Loop (up to 45s)
-                             for _ in range(22):
-                                 try:
-                                     # Check local DLNA server status
-                                     status_resp = requests.get(f"http://127.0.0.1:11435/dlna/status", timeout=2)
-                                     if status_resp.status_code == 200:
-                                         last_browse = status_resp.json().get("last_browse_timestamp", 0)
-                                         if last_browse > start_wait_time:
-                                             log.info(f"[Roku ECP] DLNA Browse detected! (Waited {time.time() - start_wait_time:.1f}s)")
-                                             dlna_ready = True
-                                             break
-                                 except Exception as e:
-                                     log.warning(f"[Roku ECP] Status check error: {e}")
-                                 time.sleep(2)
-                             
-                             if not dlna_ready:
-                                 log.warning("[Roku ECP] DLNA Browse signal TIMEOUT. Proceeding blindly...")
-                             
-                             # Buffer for UI rendering after data load
-                             log.info("[Roku ECP] Buffer wait (4s) for UI rendering...")
-                             time.sleep(4)
-                             
-                             log.info("[Roku ECP] Sending Select (1/2)...")
-                             requests.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20)
-                             time.sleep(2)
-                             
-                             log.info("[Roku ECP] Sending Select (2/2)...")
-                             requests.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20)
-                             time.sleep(2)
-                             
-                             log.info("[Roku ECP] Sending Play...")
-                             requests.post(f"http://{roku_ip}:8060/keypress/Play", timeout=20)
-                             
-                             # Verification: Poll for playback state
-                             log.info("[Roku ECP] Verifying playback state...")
-                             import xml.etree.ElementTree as ET
-                             for _ in range(5):
-                                 try:
-                                     q_resp = requests.get(f"http://{roku_ip}:8060/query/media-player", timeout=5)
-                                     if q_resp.status_code == 200:
-                                         root = ET.fromstring(q_resp.content)
-                                         state = root.get("state")
-                                         log.info(f"[Roku ECP] Player State: {state}")
-                                         if state in ["play", "buffering", "startup"]:
-                                             return {
-                                                 "status": "SUCCESS", 
-                                                 "message": f"Roku launched and playback verified (State: {state})"
-                                             }
-                                 except Exception as e:
-                                     log.warning(f"[Roku ECP] State check failed: {e}")
-                                 time.sleep(2)
-    
-                             log.warning("[Roku ECP] Navigation complete but playback state not confirmed.")
-                             return {
-                                 "status": "SUCCESS",
-                                 "message": f"Playing video on {entity_id}",
-                                 "entity_id": entity_id,
-                                 "service": "roku_ecp_launch"
-                             }
-                         else:
-                             log.warning(f"[Roku ECP] Failed with status {response.status_code}: {response.text}")
+                         async with aiohttp.ClientSession() as session:
+                             async with session.post(ecp_url, params=params, timeout=20) as response:
+                                 if response.status == 200:
+                                     log.info("[Roku ECP] Successfully sent launch command. Executing navigation macro...")
+                                     
+                                     # Execute verified macro with Smart Wait:
+                                     log.info("[Roku ECP] Waiting for DLNA Browse signal (Smart Wait)...")
+                                     start_wait_time = time.time()
+                                     dlna_ready = False
+                                     
+                                     # Smart Wait Loop (up to 45s)
+                                     for _ in range(22):
+                                         try:
+                                             # Check local DLNA server status
+                                             # Note: keeping this checked via aiohttp too
+                                             async with session.get(f"http://127.0.0.1:11435/dlna/status", timeout=2) as status_resp:
+                                                 if status_resp.status == 200:
+                                                     status_data = await status_resp.json()
+                                                     last_browse = status_data.get("last_browse_timestamp", 0)
+                                                     if last_browse > start_wait_time:
+                                                         log.info(f"[Roku ECP] DLNA Browse detected! (Waited {time.time() - start_wait_time:.1f}s)")
+                                                         dlna_ready = True
+                                                         break
+                                         except Exception as e:
+                                             log.warning(f"[Roku ECP] Status check error: {e}")
+                                         await asyncio.sleep(2)
+                                     
+                                     if not dlna_ready:
+                                         log.warning("[Roku ECP] DLNA Browse signal TIMEOUT. Proceeding blindly...")
+                                     
+                                     # Buffer for UI rendering after data load
+                                     log.info("[Roku ECP] Buffer wait (4s) for UI rendering...")
+                                     await asyncio.sleep(4)
+                                     
+                                     log.info("[Roku ECP] Sending Select (1/2)...")
+                                     async with session.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20): pass
+                                     await asyncio.sleep(2)
+                                     
+                                     log.info("[Roku ECP] Sending Select (2/2)...")
+                                     async with session.post(f"http://{roku_ip}:8060/keypress/Select", timeout=20): pass
+                                     await asyncio.sleep(2)
+                                     
+                                     log.info("[Roku ECP] Sending Play...")
+                                     async with session.post(f"http://{roku_ip}:8060/keypress/Play", timeout=20): pass
+                                     
+                                     # Verification: Poll for playback state
+                                     log.info("[Roku ECP] Verifying playback state...")
+                                     import xml.etree.ElementTree as ET
+                                     for _ in range(5):
+                                         try:
+                                             async with session.get(f"http://{roku_ip}:8060/query/media-player", timeout=5) as q_resp:
+                                                 if q_resp.status == 200:
+                                                     content = await q_resp.read()
+                                                     root = ET.fromstring(content)
+                                                     state = root.get("state")
+                                                     log.info(f"[Roku ECP] Player State: {state}")
+                                                     if state in ["play", "buffering", "startup"]:
+                                                         return {
+                                                             "status": "SUCCESS", 
+                                                             "message": f"Roku launched and playback verified (State: {state})"
+                                                         }
+                                         except Exception as e:
+                                             log.warning(f"[Roku ECP] State check failed: {e}")
+                                         await asyncio.sleep(2)
+            
+                                     log.warning("[Roku ECP] Navigation complete but playback state not confirmed.")
+                                     return {
+                                         "status": "SUCCESS",
+                                         "message": f"Playing video on {entity_id}",
+                                         "entity_id": entity_id,
+                                         "service": "roku_ecp_launch"
+                                     }
+                                 else:
+                                     log.warning(f"[Roku ECP] Failed with status {response.status}: {await response.text()}")
                      except Exception as e:
                          log.warning(f"[Roku ECP] Exception: {e}")
                  else:
@@ -451,8 +424,6 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
     
     async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
         """Get Roku IP address using SSDP network discovery with robust retries"""
-        import requests
-        import asyncio
         from app.settings import HA_URL
         from app.utils.network_discovery import discover_roku_ip
         
@@ -463,23 +434,25 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         for attempt in range(max_retries):
             try:
                 headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}"}
-                resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
-                if resp.status_code == 200:
-                    entity_data = resp.json()
-                    attributes = entity_data.get("attributes", {})
-                    
-                    # Attempt SSDP/Scan discovery
-                    ip = await discover_roku_ip(attributes)
-                    if ip:
-                        log.info(f"[Roku] Discovered IP: {ip}")
-                        return ip
-                    
-                    if attempt < max_retries - 1:
-                        log.info(f"[Roku] IP not found (Attempt {attempt+1}/{max_retries}). Device might be booming. Waiting {delay}s...")
-                        await asyncio.sleep(delay)
-                    else:
-                        log.error(f"[Roku] SSDP discovery found no Roku devices for {entity_id} after {max_retries} attempts.")
-                        return None
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5) as resp:
+                        if resp.status == 200:
+                            entity_data = await resp.json()
+                            attributes = entity_data.get("attributes", {})
+                            
+                            # Attempt SSDP/Scan discovery (ensure this is async-compatible if possible, 
+                            # but usually discover_roku_ip is awaited)
+                            ip = await discover_roku_ip(attributes)
+                            if ip:
+                                log.info(f"[Roku] Discovered IP: {ip}")
+                                return ip
+                            
+                            if attempt < max_retries - 1:
+                                log.info(f"[Roku] IP not found (Attempt {attempt+1}/{max_retries}). Device might be booting. Waiting {delay}s...")
+                                await asyncio.sleep(delay)
+                            else:
+                                log.error(f"[Roku] SSDP discovery found no Roku devices for {entity_id} after {max_retries} attempts.")
+                                return None
             except Exception as e:
                 log.error(f"[Roku] Discovery error: {e}")
                 if attempt < max_retries - 1:
@@ -495,8 +468,6 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         Attempt to play media directly using 'Media Assistant' (Channel 782875).
         Returns True if launch command was accepted (200 OK), False otherwise.
         """
-        import requests
-        
         # Channel ID 782875 = Media Assistant (Store Version)
         # Supports: t=v, u=URL, videoName=..., videoFormat=...
         url = f"http://{roku_ip}:8060/launch/782875"
@@ -512,14 +483,14 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             log.info(f"[Roku Direct] Launching Media Assistant: {url}")
             log.info(f"[Roku Direct] Params: {params}")
             
-            resp = requests.post(url, params=params, timeout=10)
-            
-            if resp.status_code == 200:
-                log.info("[Roku Direct] Launch accepted (200 OK).")
-                return True
-            else:
-                log.warning(f"[Roku Direct] Launch failed: {resp.status_code} - {resp.text}")
-                return False
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, params=params, timeout=10) as resp:
+                    if resp.status == 200:
+                        log.info("[Roku Direct] Launch accepted (200 OK).")
+                        return True
+                    else:
+                        log.warning(f"[Roku Direct] Launch failed: {resp.status} - {await resp.text()}")
+                        return False
                 
         except Exception as e:
             log.error(f"[Roku Direct] Exception: {e}")
@@ -546,6 +517,30 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             return await self._try_ma_fallback(entity_id, "media_previous_track", user_creds) or result
             
         return result
+
+    async def _find_related_ma_entity(self, original_entity_id: str) -> Optional[str]:
+        """Find the corresponding Music Assistant entity for a native device."""
+        try:
+             # 1. Try common MASS naming pattern: media_player.mass_[name]
+             # e.g. media_player.roku_123 -> media_player.mass_roku_123
+             name_part = original_entity_id.split(".")[-1]
+             # Handle cases where name might be 'living_room_tv' -> 'mass_living_room_tv'
+             candidate = f"media_player.mass_{name_part}"
+             
+             # Verify it exists in our DB/Collection
+             from app.settings import GlobalResources
+             if GlobalResources.ha_collection:
+                 # Check if this candidate exists as an entity
+                 docs = GlobalResources.ha_collection.get(ids=[candidate])
+                 if docs and docs.get("ids"):
+                     return candidate
+                     
+             # 2. Similarity Search for integration=music_assistant near this name?
+             # Might be risky/slow. For now, rely on pattern match availability.
+             
+        except Exception as e:
+            log.warning(f"[Roku] MA lookup error: {e}")
+        return None
 
     async def _try_ma_fallback(self, original_entity_id: str, service: str, user_creds: Dict) -> Any:
         try:
