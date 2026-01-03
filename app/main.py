@@ -146,6 +146,24 @@ class LearnRequest(BaseModel):
 
 # --- Endpoints ---
 
+@app.post("/api/admin/run_tests")
+async def run_tests_endpoint():
+    """Trigger the comprehensive test suite."""
+    from app.tests.runner import MasterRunner
+    # Use internal URL
+    url = f"http://127.0.0.1:11435"
+    runner = MasterRunner(api_url=url)
+    report_path = await run_blocking(runner.run_all)
+    
+    with open(report_path, "r") as f:
+        results = json.load(f)
+        
+    return {
+        "status": "SUCCESS",
+        "report_path": report_path,
+        "results": results
+    }
+
 @app.post("/v1/chat/completions")
 @app.post("/api/chat")
 @app.post("/chat/completions")
