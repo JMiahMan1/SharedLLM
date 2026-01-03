@@ -132,6 +132,10 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             cleaned_query = self._clean_query(query, device_name)
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
+            # Get metadata from kwargs
+            raw_title = kwargs.get("media_title")
+            raw_artist = kwargs.get("media_artist")
+            
             # Initialize params with correct Media Assistant channel parameters
             # Documentation: t=title, s=subtitle/artist, i=image, a=audio, albumName=album
             params = {}
