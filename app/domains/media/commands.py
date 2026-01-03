@@ -524,4 +524,8 @@ async def handle_media_command(
     if kwargs:
         metadata.update(kwargs)
         
+    # [Fix] Ensure device_name (spoken alias) is passed to integration for proper query cleaning
+    if device_name:
+        kwargs["device_name"] = device_name
+        
     return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query, metadata=metadata, **kwargs)]
