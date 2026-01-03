@@ -214,7 +214,8 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 from app.domains.media.integrations.standard import StandardIntegration
                 std_integration = StandardIntegration()
                 # Clean query using same logic as standard
-                cleaned_query = self._clean_query(query, kwargs.get("device_name"))
+                clean_device = kwargs.get("device_name") or kwargs.get("friendly_name", "")
+                cleaned_query = self._clean_query(query, clean_device)
                 
                 if not cleaned_query:
                     log.info(f"[RokuMA] Video query empty after cleaning, redirecting to resume")
