@@ -217,6 +217,9 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                     if not params.get("songName") and not params.get("artistName"):
                         params["songName"] = cleaned_query
 
+            # Enable autoplay for music
+            params["autoplay"] = "true"
+            
             log.info(f"[RokuMA] Music Params: {params}")
 
         elif media_type == "video":
