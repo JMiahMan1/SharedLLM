@@ -398,25 +398,38 @@ async def handle_media_command(
                     if docs and docs.get("metadatas") and len(docs["metadatas"]) > 0:
                         meta = docs["metadatas"][0]
                         
-                        # Check multiple indicators for Roku devices
-                        manufacturer = meta.get("manufacturer", "").lower()
-                        model = meta.get("model", "").lower()
-                        platform = meta.get("platform", "").lower()
-                        found_int = meta.get("integration", "").lower()
+                        # [Integration Inference]
+                        # If the resolved entity has a generic integration (remote, switch, etc.),
+                        # look for a sibling in the same device group to find the "true" main integration.
+                        # This handles "TCL Roku TV" where the remote entity is just "remote" but the media_player is "roku".
                         
-                        # Roku detection: manufacturer="Roku" OR platform="roku" OR integration starts with "roku"
-                        # Also check entity_id and model for robust detection
-                        if ("roku" in manufacturer or "roku" in platform or 
-                            "roku" in model or "roku" in entity_id.lower() or
-                            (found_int and found_int.startswith("roku"))):
-                            integration = "roku"
-                            log.info(f"[Roku Override] Detected Roku device via metadata/id (id={entity_id}, mfr={manufacturer}, model={model}). Forcing integration='roku'")
-                        # ALWAYS prefer metadata integration over passed-in parameter
-                        # This fixes Office TV being passed as integration='tv' when it's actually 'cast'
-                        elif found_int and found_int != "unknown":
-                            if integration != found_int:
-                                log.info(f"[Integration Override] Correcting integration from '{integration}' to '{found_int}' based on metadata for {entity_id}")
-                                integration = found_int
+                        inferred_integration = found_int
+                        
+                        if deferred_check := (integration == "home_assistant" or integration == "remote" or integration == "unknown" or found_int == "remote"):
+                             log.info(f"[Integration Inference] Entity {entity_id} has generic integration '{found_int}'. Checking group siblings...")
+                             group_id = meta.get("group_id")
+                             if group_id and group_id != "unknown":
+                                  try:
+                                     # Look for siblings
+                                     group_docs = ha_collection._collection.get(
+                                         where={"group_id": group_id},
+                                         include=["metadatas"]
+                                     )
+                                     if group_docs and group_docs.get("metadatas"):
+                                         for sibling in group_docs["metadatas"]:
+                                             sib_int = sibling.get("integration", "").lower()
+                                             if sib_int in ["roku", "androidtv", "webostv", "samsungtv", "esphome", "cast"]:
+                                                 log.info(f"[Integration Inference] Found sibling {sibling.get('entity_id')} with definitive integration '{sib_int}'. Adopting.")
+                                                 inferred_integration = sib_int
+                                                 break
+                                  except Exception as search_err:
+                                     log.warning(f"[Integration Inference] Sibling search failed: {search_err}")
+
+                        # Apply Inferred Integration
+                        if inferred_integration and inferred_integration != "unknown":
+                             if integration != inferred_integration:
+                                 log.info(f"[Integration Override] Correcting integration from '{integration}' to '{inferred_integration}' (Source: Metadata/Sibling)")
+                                 integration = inferred_integration
             except Exception as e:
                 log.warning(f"[Context] Failed to check metadata for {entity_id}: {e}")
 
