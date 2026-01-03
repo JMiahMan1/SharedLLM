@@ -349,13 +349,14 @@ async def handle_brightness(query: str, user_creds: dict, params: dict = None, *
         return await handle_media_command(intent, query, entity_id, user_creds, GlobalResources.ha_collection, GlobalResources.redis_client)
 
 # --- MUSIC ASSISTANT TOOLS ---
+@ActionDispatcher.register("music_list")
 @ActionDispatcher.register("list_playlists")
-async def handle_list_playlists(query: str, user_creds: dict, **kwargs):
-    return await tool_list_playlists(query, user_creds)
-
 @ActionDispatcher.register("list_radio")
-async def handle_list_radio(query: str, user_creds: dict, **kwargs):
-    return await tool_list_radio(query, user_creds)
+async def handle_music_list(query: str, user_creds: dict, **kwargs):
+    """Unified handler for listing radio or playlists"""
+    if "radio" in query.lower() or "station" in query.lower():
+        return await tool_list_radio(query, user_creds)
+    return await tool_list_playlists(query, user_creds)
 
 @ActionDispatcher.register("music_search")
 async def handle_music_search(query: str, user_creds: dict, **kwargs):
