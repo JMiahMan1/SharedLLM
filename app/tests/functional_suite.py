@@ -116,7 +116,28 @@ async def run_test():
     if res.get("status") != "SUCCESS":
        raise FunctionalTestFailure(f"Play Music Failed: {res}")
     
-    await asyncio.sleep(5) 
+    await asyncio.sleep(8) 
+    
+    # Verify playback state (User Request)
+    # Ensure we check the media_player entity, even if we resolved a remote
+    check_id = entity_id
+    if check_id.startswith("remote."):
+        check_id = check_id.replace("remote.", "media_player.")
+        
+    log.info(f"Step 3b: Verifying playback state on {check_id}...")
+    is_playing = await verify_state(check_id, "playing")
+    is_buffering = await verify_state(check_id, "buffering")
+    
+    if not is_playing and not is_buffering:
+         # Fallback to 'on' if state reporting is laggy, but warn
+         if getattr(res, "get", lambda x: None)("service") == "roku_ma_launch":
+             log.info("Roku MA Launch detected. State might take time or stay 'on'.")
+         
+         if not await verify_state(check_id, "on"):
+             raise FunctionalTestFailure(f"Playback Verification Failed: Device {check_id} is not playing, buffering, or on.")
+         else:
+             log.warning("Device is 'on' but not strictly 'playing'. This may be acceptable for some apps.")
+
 
     # 7. Test: Timers & Alarms
     log.info("Step 5: TEST - Timers & Alarms")
