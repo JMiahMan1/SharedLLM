@@ -132,38 +132,36 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             cleaned_query = self._clean_query(query, device_name)
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
-            # Get metadata from kwargs
+            # Initialize params with defaults
+            params["t"] = "a"
+            params["u"] = cleaned_query 
+            
+            # [Intelligent Metadata Resolution]
+            # 1. First, try to use what we have
             raw_title = kwargs.get("media_title")
             raw_artist = kwargs.get("media_artist")
             
-            # Initialize params with correct Media Assistant channel parameters
-            # Documentation: t=title, s=subtitle/artist, i=image, a=audio, albumName=album
-            params = {}
-            params["a"] = "true"  # Audio UI flag
-            params["u"] = cleaned_query  # Default URI
-            
-            # Map metadata to correct parameter names
             if raw_title:
                 clean_title = self._clean_query(raw_title, device_name)
+                # If title is clean (not an action phrase), use it
                 if raw_title.lower().strip() == clean_title.lower().strip():
-                    params["t"] = clean_title  # t = title
+                    params["songName"] = clean_title
                 else:
-                    log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted from title (will resolve via search)")
+                    log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted from songName (will resolve via search)")
             
             if raw_artist:
-                params["s"] = self._clean_query(raw_artist, device_name)  # s = subtitle/artist
-            
-            if kwargs.get("image_url"):
-                params["i"] = kwargs.get("image_url")  # i = image URL
+                params["artistName"] = self._clean_query(raw_artist, device_name)
             
             if kwargs.get("media_album_name"):
                 params["albumName"] = kwargs.get("media_album_name")
+            if kwargs.get("image_url"):
+                params["albumArt"] = kwargs.get("image_url")
 
-            # If we lack critical metadata (title OR artist), perform search
-            has_sufficient_meta = params.get("t") and params.get("s")
+            # 2. If we lack critical metadata (Song OR Artist) or a valid URI, perform search
+            has_sufficient_meta = params.get("songName") and params.get("artistName")
             
             if not has_sufficient_meta:
-                log.info(f"[RokuMA] Insufficient metadata (Title: {params.get('t')}, Artist: {params.get('s')}). Performing search for '{cleaned_query}'...")
+                log.info(f"[RokuMA] Insufficient metadata (Song: {params.get('songName')}, Artist: {params.get('artistName')}). Performing search for '{cleaned_query}'...")
                 from app.logic.music_assistant_ops import tool_music_search
                 
                 # Perform search (cache + live)
@@ -196,66 +194,33 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                         
                         if artist_track:
                             log.info(f"[RokuMA] Found track by artist: {artist_track.get('title')} by {artist_track.get('artist')}")
-                            params["t"] = artist_track.get("title")  # t = song title
-                            params["s"] = artist_track.get("artist", artist_name)  # s = artist
+                            params["songName"] = artist_track.get("title")
+                            params["artistName"] = artist_track.get("artist", artist_name)
                             if artist_track.get("album"): params["albumName"] = artist_track.get("album")
-                            if artist_track.get("image_url"): params["i"] = artist_track.get("image_url")  # i = image
+                            if artist_track.get("image_url"): params["albumArt"] = artist_track.get("image_url")
                             if artist_track.get("media_content_id"): params["u"] = artist_track.get("media_content_id")
                         else:
                             log.warning(f"[RokuMA] No tracks found by artist '{artist_name}'. Using artist URI as fallback.")
-                            params["s"] = artist_name  # s = artist
+                            params["artistName"] = artist_name
                             params["u"] = artist_uri or cleaned_query
                     else:
                         # Track, album, playlist, radio - use directly
-                        params["t"] = best_match.get("title")  # t = title
-                        if best_match.get("artist"): params["s"] = best_match.get("artist")  # s = artist
+                        params["songName"] = best_match.get("title")
+                        if best_match.get("artist"): params["artistName"] = best_match.get("artist")
                         if best_match.get("album"): params["albumName"] = best_match.get("album")
-                        if best_match.get("image_url"): params["i"] = best_match.get("image_url")  # i = image
+                        if best_match.get("image_url"): params["albumArt"] = best_match.get("image_url")
                         if best_match.get("media_content_id"): params["u"] = best_match.get("media_content_id")
                         
                 else:
                     log.warning(f"[RokuMA] Search returned no results for '{cleaned_query}'. UI might show Unknown.")
-                    # Fallback: If we still don't have title/artist, use the query
-                    if not params.get("t") and not params.get("s"):
-                        params["t"] = cleaned_query
-            
+                    # Fallback: If we still don't have a songName, use the query?
+                    if not params.get("songName") and not params.get("artistName"):
+                        params["songName"] = cleaned_query
+
+            # Enable autoplay for music
+            params["autoplay"] = "true"
             
             log.info(f"[RokuMA] Music Params: {params}")
-            
-            # If we resolved to a library:// URI, use Music Assistant's play_media service
-            # The Roku Media Assistant app can't play library URIs via ECP - it needs MA service
-            if params.get("u", "").startswith("library://"):
-                from app.logic.music_assistant_ops import play_media as ma_play_media
-                
-                # The Music Assistant integration creates a player entity for Roku
-                # Pattern: media_player.roku_{serial_lowercase}
-                # We need to find this entity - it's in the same group as the HA Roku entity
-                
-                # Try to get it from group members
-                ma_player = None
-                group_members = kwargs.get("group_members", [])
-                for member in group_members:
-                    if member.startswith("media_player.roku_") and member != entity_id:
-                        ma_player = member
-                        break
-                
-                if not ma_player:
-                    # Fallback: we saw media_player.roku_2n0062385487 in logs earlier
-                    # This corresponds to the serial number from device discovery
-                    log.warning(f"[RokuMA] Could not find MA player in group members. Trying HA service directly.")
-                    # Just use the cleaned query as search term for MA
-                    ma_player = entity_id.replace("28_tcl_roku_tv", "roku_2n0062385487")
-                
-                log.info(f"[RokuMA] Using Music Assistant service: entity={ma_player}, uri={params['u']}")
-                
-                result = await ma_play_media(
-                    entity_id=ma_player,
-                    media_id=params["u"],
-                    media_type="library",
-                    user_creds=user_creds
-                )
-                
-                return result
 
         elif media_type == "video":
             # Video Logic
@@ -308,22 +273,6 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             resp = requests.post(base_url, params=params, timeout=10)
             
             if resp.status_code == 200:
-                # For music: Send Play keypress after app loads to trigger playback
-                if media_type == "music":
-                    log.info(f"[RokuMA] App launched successfully. Waiting 2s then sending Play keypress...")
-                    await asyncio.sleep(2)  # Give app time to load the metadata
-                    
-                    # Send Play keypress
-                    keypress_url = f"http://{roku_ip}:8060/keypress/Play"
-                    try:
-                        play_resp = requests.post(keypress_url, timeout=5)
-                        if play_resp.status_code == 200:
-                            log.info(f"[RokuMA] Play keypress sent successfully")
-                        else:
-                            log.warning(f"[RokuMA] Play keypress failed: {play_resp.status_code}")
-                    except Exception as e:
-                        log.warning(f"[RokuMA] Failed to send Play keypress: {e}")
-                
                 # Store last video URL if this was a video playback
                 if media_type == "video":
                     redis_client = kwargs.get("redis_client")
