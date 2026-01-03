@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD013 -->
 # Integration Architecture Documentation
 
 ## What is an Integration?
@@ -56,8 +57,11 @@ music on a smart speaker).
 
 ## 2. Music Assistant Integration (`MusicAssistantIntegration`)
 
-**Target Devices**: All players controlled via the Music Assistant add-on (Sonos, AirPlay, Cast, etc.).
-**Key Feature**: "Smart Routing" - deeply integrates with the Router to steal "music" commands from hardware devices.
+**Target Devices**: All players controlled via the Music Assistant add-on (Sonos,
+AirPlay, Cast, etc.).
+
+**Key Feature**: "Smart Routing" - deeply integrates with the Router to steal
+"music" commands from hardware devices.
 
 ### Music Assistant: User Guide & Voice Commands
 
@@ -75,9 +79,13 @@ music on a smart speaker).
 
 ### Roku: Features
 
-* **Music Assistant Delegation**: When a music intent is detected for a Roku, the system launches the **Media Assistant Channel (782875)** via ECP to provide a visual UI, while delegating high-quality audio streaming to Music Assistant.
-* **ECP Playback Control**: Standard playback commands (Play, Pause, Stop) are sent via Roku's External Control Protocol.
-* **Intelligent Query Cleaning**: Content searches are cleaned to remove room names and prepositions, ensuring accurate YouTube or Music Assistant searches.
+* **Music Assistant Delegation**: When a music intent is detected for a Roku, the
+  system launches the **Media Assistant Channel (782875)** via ECP to provide a
+  visual UI, while delegating high-quality audio streaming to Music Assistant.
+* **ECP Playback Control**: Standard playback commands (Play, Pause, Stop) are
+  sent via Roku's External Control Protocol.
+* **Intelligent Query Cleaning**: Content searches are cleaned to remove room
+  names and prepositions, ensuring accurate YouTube or Music Assistant searches.
 
 ### Roku: User Guide & Voice Commands
 
@@ -91,12 +99,15 @@ music on a smart speaker).
 
 ## 4. Android TV Integration (`AndroidTVIntegration`)
 
-**Target Devices**: Nvidia Shield, Chromecast with Google TV, Sony/TCL Android TVs.
+**Target Devices**: Nvidia Shield, Chromecast with Google TV, Sony/TCL Android
+TVs.
 
 ### Android TV: Features
 
-* **ADB-Based Remote**: Uses Home Assistant's `androidtv.adb_command` or standard media player services for deep interaction.
-* **App Orchestration**: Launches specific applications via their activity intent or package name.
+* **ADB-Based Remote**: Uses Home Assistant's `androidtv.adb_command` or
+  standard media player services for deep interaction.
+* **App Orchestration**: Launches specific applications via their activity
+  intent or package name.
 
 | Intent | Natural Speech Example | What Happens |
 | :--- | :--- | :--- |
@@ -111,8 +122,10 @@ music on a smart speaker).
 
 ### Hardware: Features
 
-* **Advanced Lighting**: Supports setting specific HSL colors and absolute/relative brightness levels.
-* **Capability Routing**: Automatically detects if a device supports `set_color` or `set_brightness` before attempting the call.
+* **Advanced Lighting**: Supports setting specific HSL colors and
+  absolute/relative brightness levels.
+* **Capability Routing**: Automatically detects if a device supports `set_color`
+  or `set_brightness` before attempting the call.
 
 | Feature | Natural Speech Example | What Happens |
 | :--- | :--- | :--- |

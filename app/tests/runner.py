@@ -17,6 +17,7 @@ from app.tests.test_productivity import ProductivityTests
 from app.tests.test_hardware import HardwareTests
 from app.tests.test_android_tv import AndroidTVTests
 from app.tests.test_advanced import AdvancedTests
+from app.tests.test_context import ContextTests
 
 # Optional: Add existing logic from test_runner.py here or import it
 # For now, let's keep it modular
@@ -63,6 +64,7 @@ class MasterRunner:
             SearchTests(self.api_url, logger=self.logger).run()
             ProductivityTests(self.api_url, logger=self.logger).run()
             HardwareTests(self.api_url, logger=self.logger).run()
+            ContextTests(self.api_url, logger=self.logger).run()
             AndroidTVTests(self.api_url, logger=self.logger).run()
             AdvancedTests(self.api_url, logger=self.logger).run()
         except Exception as e:

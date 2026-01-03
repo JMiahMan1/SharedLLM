@@ -53,13 +53,16 @@ class StreamResponseBuilder:
         self.req_id = f"chatcmpl-{int(time.time())}"
         self.created = int(time.time())
 
-    def chunk(self, content=None, role=None, finish_reason=None):
+    def chunk(self, content=None, role=None, finish_reason=None, tool_results=None):
         if self.format_type == "openai":
             delta = {}
             if role:
                 delta["role"] = role
             if content is not None:
                 delta["content"] = content
+            if tool_results is not None:
+                delta["tool_results"] = tool_results
+                
             data = {
                 "id": self.req_id,
                 "object": "chat.completion.chunk",
@@ -77,6 +80,9 @@ class StreamResponseBuilder:
                 "message": {"role": role or "assistant", "content": content or ""},
                 "done": False,
             }
+            if tool_results is not None:
+                data["tool_results"] = tool_results
+                
         if finish_reason == "stop":
             data["done"] = True
         return json.dumps(data) + "\n"
@@ -489,7 +495,7 @@ async def try_handle_compound_command(
 
 
 async def generate_rag_stream(
-    query, user, model, use_openai, format_type
+    query, user, model, use_openai, format_type, include_tool_results: bool = False
 ) -> AsyncGenerator[str, None]:
     t0 = time.time()
     builder = StreamResponseBuilder(model, format_type)
@@ -529,6 +535,10 @@ async def generate_rag_stream(
         # All actions failed for a no-search intent, return a generic failure message
         log.info(f"[NO LLM] All actions failed for no-search intent '{intent}', returning direct failure")
         yield f"I couldn't perform that action. The device may not support this feature or there might be a connection issue."
+
+    # --- EMIT TOOL RESULTS FOR TESTS/CLIENT ---
+    if action_results and include_tool_results:
+        yield builder.chunk(tool_results=action_results)
 
     action_context = ""
     run_knowledge_retrieval = True
