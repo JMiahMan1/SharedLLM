@@ -146,10 +146,14 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 log.error(f"[RokuMA] Could not find MA player sibling for {entity_id}")
                 return {"status": "FAILURE", "message": "Could not find Music Assistant player entity for this Roku family"}
             
-            log.info(f"[RokuMA] Delegating to MA service | MA Entity: {ma_player_entity} | Query: '{query}'")
+            # Clean Query before sending to MA
+            device_name = kwargs.get("device_name") or kwargs.get("friendly_name", "")
+            cleaned_query = self._clean_query(query, device_name)
+            
+            log.info(f"[RokuMA] Delegating to MA service | MA Entity: {ma_player_entity} | Query: '{cleaned_query}' (Cleaned from '{query}')")
             
             # Call Music Assistant service with the CORRECT MA player entity
-            result = await music_assistant_ops.play_media(ma_player_entity, query, "music", user_creds)
+            result = await music_assistant_ops.play_media(ma_player_entity, cleaned_query, "music", user_creds)
             
             if result and result.get("status") == "SUCCESS":
                 log.info(f"[RokuMA] MA service call successful for {ma_player_entity}")
@@ -406,3 +410,44 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         
         return result
 
+    def _clean_query(self, query: str, device_name: str = "") -> str:
+        """MA specific cleaner."""
+        import re
+        # 1. Normalize
+        clean = query.lower().replace("'", "").replace("’", "")
+        
+        # 2. Remove device name if known
+        if device_name:
+            d_clean = device_name.lower().replace("'", "").replace("’", "").strip()
+            # Try to remove "on [device_name]" first
+            clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?" + re.escape(d_clean) + r"\b", " ", clean)
+            clean = clean.replace(d_clean, " ")
+            clean = self._fuzzy_remove_device(clean, d_clean)
+        
+        # 3. Remove common MA keywords and actions
+        clean = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast|play|please|from|on|open|launch|playback|listen to)\b", " ", clean)
+        
+        # 4. Final Cleanup
+        clean = re.sub(r"\s+", " ", clean).strip()
+        # Remove trailing punctuation
+        clean = re.sub(r"[?!.,]$", "", clean)
+        
+        return clean
+
+    def _fuzzy_remove_device(self, query: str, device_name: str) -> str:
+        """Helper for fuzzy device name removal."""
+        import difflib
+        words = query.split()
+        if not words: return query
+        
+        # Check for fuzzy match of device_name within the query words
+        for i in range(len(words)):
+            # Check single words or pairs (for "living room")
+            for length in [1, 2, 3]:
+                if i + length <= len(words):
+                    candidate = " ".join(words[i : i + length]).lower()
+                    if difflib.SequenceMatcher(None, candidate, device_name.lower()).ratio() > 0.8:
+                        # Match! Remove these words
+                        new_words = words[:i] + words[i + length :]
+                        return " ".join(new_words)
+        return query
