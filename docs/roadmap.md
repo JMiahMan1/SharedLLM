@@ -4,11 +4,11 @@ This document outlines the planned features and architectural improvements for t
 
 ## 🚀 Priority 1: Enriched Media Intelligence
 
-* [ ] **YouTube Video Search Fallback**
+* [x] **YouTube Video Search Fallback**
   * **Goal**: Allow "Play [Video Name]" to automatically find a URL if one
     isn't provided.
-  * **Tech**: Integrate `duckduckgo-search` or `yt-dlp` to fetch top results.
-  * **Status**: *Planned*.
+  * **Tech**: Integrated `duckduckgo-search` and `yt-dlp` to fetch and stream results.
+  * **Status**: *Completed*.
 * [ ] **Multi-Room Audio Groups**
   * **Goal**: "Play music in the whole house" or "Move music to the Kitchen".
   * **Tech**: Leverage Music Assistant's native grouping and valid
@@ -39,6 +39,16 @@ This document outlines the planned features and architectural improvements for t
 
 ## 📋 Backlog / Good to Have
 
+* **Shopping List Analytics**: Log historical check-offs to answer "How often do I
+  buy [Item]?" or "What's my most common purchase?".
+* **Scene Capture & Restore**: "Save the current lights and music as 'Movie
+  Night'" to create on-the-fly HA scenes.
+* **Interactive Diagnostics**: A `check_device` tool to ping, check power, and
+  query HA logs when a device is non-responsive.
+* **Multi-Modal Notifications**: Enhance `ha_notify` to include snapshots from HA
+  cameras or links to Nextcloud files.
+* **Weather & Commute Briefing**: Generate a daily briefing tool that compiles
+  Calendar events, local weather, and traffic data.
 * **Nextcloud Talk Integration**: Send notifications/messages via NC Talk.
 * **Email Summary**: Daily briefing generated from key emails.
 * **Personality Tuning**: Configurable personality profiles via
