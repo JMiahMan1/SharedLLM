@@ -116,35 +116,35 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # Delegate to Music Assistant's play_media service
             # CRITICAL: Must use the Music Assistant player entity (the one with active_queue)
             from app.logic import music_assistant_ops
+            from app.domains.media.devices import find_group_sibling
             
             # Find the Music Assistant player entity for this Roku
-            # MA creates wrapper entities with attributes like "active_queue" or "mass_player_type"
-            # Look for a group member that has these MA-specific attributes
-            ma_player_entity = None
-            group_members = kwargs.get("group_members", [])
-            
-            log.info(f"[RokuMA] Searching for MA player in group members: {group_members}")
-            
-            for member in group_members:
-                if member == entity_id:
-                    continue
-                    
-                # Check if this entity has MA attributes
-                try:
-                    state = await self.get_state(member, user_creds)
-                    if state and state.attributes:
-                        # Check for MA-specific attributes
-                        if "active_queue" in state.attributes or "mass_player_type" in state.attributes:
-                            ma_player_entity = member
-                            log.info(f"[RokuMA] Found MA player entity with queue: {ma_player_entity}")
-                            break
-                except Exception as e:
-                    log.debug(f"[RokuMA] Could not check {member}: {e}")
-                    continue
+            # We look for a sibling in the same group that is a Music Assistant player
+            def is_ma_player(m):
+                integ = str(m.get("integration", "")).lower()
+                attrs = str(m.get("attributes", "")).lower()
+                return "music_assistant" in integ or "active_queue" in attrs or "mass_player_type" in attrs
+
+            log.info(f"[RokuMA] Searching for MA player sibling for {entity_id}...")
+            ma_player_entity = await find_group_sibling(entity_id, is_ma_player)
             
             if not ma_player_entity:
-                log.error(f"[RokuMA] Could not find MA player with active_queue. Group members: {group_members}")
-                return {"status": "FAILURE", "message": "Could not find Music Assistant player entity for this Roku"}
+                # Fallback: check kwargs if find_group_sibling failed (it might if ChromaDB is empty/context missing)
+                log.warning(f"[RokuMA] find_group_sibling failed. Checking kwargs.group_members as fallback.")
+                group_members = kwargs.get("group_members", [])
+                for member in group_members:
+                    if member == entity_id: continue
+                    try:
+                        state = await self.get_state(member, user_creds)
+                        if state and state.attributes:
+                            if "active_queue" in state.attributes or "mass_player_type" in state.attributes:
+                                ma_player_entity = member
+                                break
+                    except: continue
+
+            if not ma_player_entity:
+                log.error(f"[RokuMA] Could not find MA player sibling for {entity_id}")
+                return {"status": "FAILURE", "message": "Could not find Music Assistant player entity for this Roku family"}
             
             log.info(f"[RokuMA] Delegating to MA service | MA Entity: {ma_player_entity} | Query: '{query}'")
             
