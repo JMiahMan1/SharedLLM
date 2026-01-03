@@ -273,6 +273,22 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             resp = requests.post(base_url, params=params, timeout=10)
             
             if resp.status_code == 200:
+                # For music: Send Play keypress after app loads to trigger playback
+                if media_type == "music":
+                    log.info(f"[RokuMA] App launched successfully. Waiting 2s then sending Play keypress...")
+                    await asyncio.sleep(2)  # Give app time to load the metadata
+                    
+                    # Send Play keypress
+                    keypress_url = f"http://{roku_ip}:8060/keypress/Play"
+                    try:
+                        play_resp = requests.post(keypress_url, timeout=5)
+                        if play_resp.status_code == 200:
+                            log.info(f"[RokuMA] Play keypress sent successfully")
+                        else:
+                            log.warning(f"[RokuMA] Play keypress failed: {play_resp.status_code}")
+                    except Exception as e:
+                        log.warning(f"[RokuMA] Failed to send Play keypress: {e}")
+                
                 # Store last video URL if this was a video playback
                 if media_type == "video":
                     redis_client = kwargs.get("redis_client")
