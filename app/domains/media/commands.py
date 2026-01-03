@@ -399,6 +399,12 @@ async def handle_media_command(
                         meta = docs["metadatas"][0]
                         
                         # [Integration Inference]
+                        # Restore variable definitions needed for logic below
+                        manufacturer = meta.get("manufacturer", "").lower()
+                        model = meta.get("model", "").lower()
+                        platform = meta.get("platform", "").lower()
+                        found_int = meta.get("integration", "").lower()
+
                         # If the resolved entity has a generic integration (remote, switch, etc.),
                         # look for a sibling in the same device group to find the "true" main integration.
                         # This handles "TCL Roku TV" where the remote entity is just "remote" but the media_player is "roku".
