@@ -17,8 +17,8 @@ import aiohttp
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
-OFFICE_TV_NAME = "Office TV"
-OFFICE_TV_ENTITY = "media_player.office_tv" # Default expectation, will resolve dynamically
+OFFICE_TV_NAME = "Gracies TV"
+OFFICE_TV_ENTITY = "media_player.28_tcl_roku_tv" # Default expectation, will resolve dynamically
 
 class FunctionalTestFailure(Exception):
     pass
