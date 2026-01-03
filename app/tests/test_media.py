@@ -12,27 +12,58 @@ class MediaTests(BaseTest):
     def test_volume(self):
         # 1. Volume Up/Down/Mute
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn the volume up"}]}, "Media: Volume Up")
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Mute the volume"}]}, "Media: Volume Mute")
-        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Set volume to 50%"}]}, "Media: Volume Set")
-        
-        if msg and ("done" in msg.lower() or "volume" in msg.lower() or "no active" in msg.lower() or "couldn't" in msg.lower()):
-            self.log("Media: Volume Controls", "PASS")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and tr[0].get("status") == "SUCCESS":
+             self.log("Media: Volume Up", "PASS")
         else:
-            self.log("Media: Volume Controls", "FAIL", f"Unexpected response: {msg}")
+             self.log("Media: Volume Up", "FAIL", f"TR: {tr}")
+
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Mute the volume"}]}, "Media: Volume Mute")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and tr[0].get("status") == "SUCCESS":
+             self.log("Media: Volume Mute", "PASS")
+        else:
+             self.log("Media: Volume Mute", "FAIL", f"TR: {tr}")
+
+        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Set volume to 50%"}]}, "Media: Volume Set")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and tr[0].get("status") == "SUCCESS":
+            self.log("Media: Volume Set", "PASS")
+        else:
+            self.log("Media: Volume Set", "FAIL", f"Unexpected response: {msg}")
 
     def test_playback_dry_run(self):
         # 2. Play Media (Dry Run check)
         msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Play the song 'Test Tone' on Office Speaker"}]}, "Media: Play Intent")
-        if msg and ("done" in msg.lower() or "playing" in msg.lower() or "could not find" in msg.lower() or "office speaker" in msg.lower()):
-            self.log("Media: Play Intent", "PASS")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and tr[0].get("status") == "SUCCESS":
+            self.log("Media: Play Intent", "PASS", f"Played: {tr[0].get('message')}")
         else:
              self.log("Media: Play Intent", "FAIL", f"Response: {msg}")
 
     def test_transport_controls(self):
         # 3. Stop/Pause/Resume
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Stop the music"}]}, "Media: Stop")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and tr[0].get("status") == "SUCCESS":
+             self.log("Media: Stop", "PASS")
+        else:
+             self.log("Media: Stop", "FAIL", f"TR: {tr}")
+
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the show"}]}, "Media: Pause")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and tr[0].get("status") == "SUCCESS": # State verification hard without active playback
+             self.log("Media: Pause", "PASS")
+        else:
+             self.log("Media: Pause", "FAIL", f"TR: {tr}")
+
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Resume playback"}]}, "Media: Resume")
+        # Resume might fail if nothing paused, but we check for tool execution attempt
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and (tr[0].get("status") == "SUCCESS" or "no active" in tr[0].get("message", "").lower()):
+             self.log("Media: Resume", "PASS")
+        else:
+             self.log("Media: Resume", "FAIL", f"TR: {tr}")
         
         # 4. Skip/Previous
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Skip this song"}]}, "Media: Skip")
@@ -40,8 +71,9 @@ class MediaTests(BaseTest):
         
         # 5. Turn Off
         msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn off the TV"}]}, "Media: Turn Off")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
         
-        if msg and ("done" in msg.lower() or "off" in msg.lower() or "could" in msg.lower()):
+        if tr and tr[0].get("status") == "SUCCESS":
             self.log("Media: Transport/Power", "PASS")
         else:
             self.log("Media: Transport/Power", "FAIL", str(msg))
@@ -49,13 +81,20 @@ class MediaTests(BaseTest):
     def test_library_browsing(self):
         # 6. List Radio / Playlists
         msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"List my radio stations"}]}, "Media: Radio List")
-        if msg and ("radio" in msg.lower() or "station" in msg.lower() or "done" in msg.lower()):
-            self.log("Media: Radio List", "PASS")
+        # Check tool results for list items
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        
+        if tr and tr[0].get("status") == "SUCCESS" and "items" in tr[0]:
+            count = len(tr[0]["items"])
+            self.log("Media: Radio List", "PASS", f"Found {count} stations")
+        elif msg and ("radio" in msg.lower() or "station" in msg.lower()):
+            self.log("Media: Radio List", "WARN", "Verified via message only")
         else:
             self.log("Media: Radio List", "FAIL", str(msg))
 
         msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"What playlists do I have?"}]}, "Media: Playlist List")
-        if msg and ("playlist" in msg.lower() or "done" in msg.lower()):
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and tr[0].get("status") == "SUCCESS":
             self.log("Media: Playlist List", "PASS")
         else:
             self.log("Media: Playlist List", "FAIL", str(msg))

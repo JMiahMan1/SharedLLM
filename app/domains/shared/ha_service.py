@@ -83,6 +83,9 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
                         pass
 
                 # --- END FIX ---
+                
+                # ChromaDB update is NOT needed here because get_ha_context fetches live state.
+                # Avoid heavy re-indexing on every command.
 
                 verb = service.replace("_", " ")
                 return {

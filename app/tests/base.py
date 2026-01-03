@@ -9,9 +9,11 @@ class BaseTest:
         self.headers = headers or {
             "Content-Type": "application/json",
             "X-RAG-User": "admin",
-            "User-Agent": "SharedLLMTestRunner"
+            "User-Agent": "SharedLLMTestRunner",
+            "X-Include-Tool-Results": "true"
         }
         self.logger = logger  # expects (test_name, status, message)
+        self.last_response_json = None
 
     def log(self, name, status, msg=""):
         if self.logger:
@@ -28,6 +30,8 @@ class BaseTest:
             r = requests.post(f"{self.api_url}{endpoint}", json=payload, headers=self.headers, timeout=120)
             try:
                 data = r.json()
+                self.last_response_json = data # Store for inspection
+                
                 # Try various response formats (Pipeline vs Chat)
                 msg = data.get("response") or \
                       (data.get("message") or {}).get("content") or \
@@ -38,4 +42,14 @@ class BaseTest:
                 return r.text, r.status_code
         except Exception as e:
             self.log(label, "ERROR", f"Req failed: {e}")
-            return None, 0
+    def get_entity_state(self, entity_id):
+        """Fetch the live state of an entity from HA Proxy."""
+        try:
+            r = requests.get(f"{self.api_url}/api/ha/state/{entity_id}", headers=self.headers, timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                return data.get("state")
+            return None
+        except Exception as e:
+            self.log(f"State Check {entity_id}", "ERROR", f"Failed: {e}")
+            return None
