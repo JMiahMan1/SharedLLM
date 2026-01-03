@@ -137,14 +137,31 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             params["u"] = cleaned_query 
             
             # [Intelligent Metadata Resolution]
-            # If metadata is missing (common for simple "play X" commands), we MUST search for it
-            # otherwise the Roku app assumes "Unknown".
-            
+            # 1. First, try to use what we have
             raw_title = kwargs.get("media_title")
             raw_artist = kwargs.get("media_artist")
             
-            if not raw_title and not raw_artist:
-                log.info(f"[RokuMA] Metadata missing. Performing search for '{cleaned_query}' to resolve details...")
+            if raw_title:
+                clean_title = self._clean_query(raw_title, device_name)
+                # If title is clean (not an action phrase), use it
+                if raw_title.lower().strip() == clean_title.lower().strip():
+                    params["songName"] = clean_title
+                else:
+                    log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted from songName (will resolve via search)")
+            
+            if raw_artist:
+                params["artistName"] = self._clean_query(raw_artist, device_name)
+            
+            if kwargs.get("media_album_name"):
+                params["albumName"] = kwargs.get("media_album_name")
+            if kwargs.get("image_url"):
+                params["albumArt"] = kwargs.get("image_url")
+
+            # 2. If we lack critical metadata (Song OR Artist) or a valid URI, perform search
+            has_sufficient_meta = params.get("songName") and params.get("artistName")
+            
+            if not has_sufficient_meta:
+                log.info(f"[RokuMA] Insufficient metadata (Song: {params.get('songName')}, Artist: {params.get('artistName')}). Performing search for '{cleaned_query}'...")
                 from app.logic.music_assistant_ops import tool_music_search
                 
                 # Perform search (cache + live)
@@ -152,42 +169,27 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 
                 if search_res.get("status") == "SUCCESS" and search_res.get("results"):
                     best_match = search_res["results"][0]
-                    log.info(f"[RokuMA] Resolved '{cleaned_query}' to: {best_match.get('title')} by {best_match.get('artist')}")
+                    log.info(f"[RokuMA] Resolved '{cleaned_query}' to: {best_match.get('title')} ({best_match.get('type')})")
                     
-                    # Populate params from best match
-                    params["songName"] = best_match.get("title")
-                    if best_match.get("artist"): params["artistName"] = best_match.get("artist")
+                    # Overwrite/Augment params from best match
+                    if best_match.get("type") == "artist":
+                        params["artistName"] = best_match.get("title")
+                    else:
+                        params["songName"] = best_match.get("title")
+                        if best_match.get("artist"): params["artistName"] = best_match.get("artist")
+                    
                     if best_match.get("album"): params["albumName"] = best_match.get("album")
                     if best_match.get("image_url"): params["albumArt"] = best_match.get("image_url")
                     
-                    # [Optional] Use the specific URI if available?
-                    # valid URIs: library://track/..., spotify://... 
-                    # If we trust the resolved item, using its ID might be more reliable than the raw query
+                    # Crucial: Use the specific URI
                     if best_match.get("media_content_id"):
                         params["u"] = best_match.get("media_content_id")
                         
                 else:
                     log.warning(f"[RokuMA] Search returned no results for '{cleaned_query}'. UI might show Unknown.")
-                    # Fallback: Use cleaned query as title if nothing else
-                    params["songName"] = cleaned_query
-
-            else:
-                # Metadata provided (e.g. from previous steps or NLU slots)
-                if raw_title:
-                    clean_title = self._clean_query(raw_title, device_name)
-                    if raw_title.lower().strip() == clean_title.lower().strip():
-                        params["songName"] = clean_title
-                    else:
-                        log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted songName")
-                
-                if raw_artist:
-                    clean_artist = self._clean_query(raw_artist, device_name)
-                    params["artistName"] = clean_artist
-                
-                if kwargs.get("media_album_name"):
-                    params["albumName"] = kwargs.get("media_album_name")
-                if kwargs.get("image_url"):
-                    params["albumArt"] = kwargs.get("image_url")
+                    # Fallback: If we still don't have a songName, use the query?
+                    if not params.get("songName") and not params.get("artistName"):
+                        params["songName"] = cleaned_query
 
             log.info(f"[RokuMA] Music Params: {params}")
 
