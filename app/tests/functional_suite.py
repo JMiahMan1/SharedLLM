@@ -5,15 +5,12 @@ import sys
 import logging
 from datetime import datetime
 
-# Setup paths
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 # Force log file to avoiding settings.py crash if env missing (though in container it should be fine)
 os.environ["LOG_FILE"] = "/data/functional_test.log"
 
-from settings import load_resources, GlobalResources, HA_URL, HA_ENV_TOKEN as HA_TOKEN, get_user_creds
-from logic.media_ops import handle_media_command, smart_resolve_entity, get_entity_state
-from logic.timer_ops import tool_timer_add
+from app.settings import load_resources, GlobalResources, HA_URL, HA_ENV_TOKEN as HA_TOKEN, get_user_creds
+from app.logic.media_ops import handle_media_command, smart_resolve_entity, get_entity_state
+from app.logic.timer_ops import tool_timer_add
 import aiohttp
 
 # Configure logging
@@ -148,19 +145,19 @@ async def run_test():
         raise FunctionalTestFailure(f"Timer Creation Failed: {timer_res}")
         
     # Alarm
-    from logic.timer_ops import tool_alarm_add
+    from app.logic.timer_ops import tool_alarm_add
     alarm_res = await tool_alarm_add("set an alarm for 8am on office tv", user_creds, "test-model", GlobalResources.redis_client, GlobalResources.ha_collection)
     if alarm_res["status"] != "SUCCESS" or ("office tv" not in alarm_res["message"].lower() and entity_id not in alarm_res.get("message", "")):
          raise FunctionalTestFailure(f"Alarm Creation Failed: {alarm_res}")
 
     # Cleanup Timers
-    from logic.timer_ops import tool_timer_delete
+    from app.logic.timer_ops import tool_timer_delete
     await tool_timer_delete("timer", user_creds, GlobalResources.redis_client)
     await tool_timer_delete("alarm", user_creds, GlobalResources.redis_client)
 
     # 9. Test: Calendar (Add, Verify, Delete)
     log.info("Step 6: TEST - Calendar")
-    from logic.calendar_ops import tool_calendar_add, tool_calendar_delete
+    from app.logic.calendar_ops import tool_calendar_add, tool_calendar_delete
     
     cal_res = await tool_calendar_add("Schedule 'Test Meeting' for tomorrow at 2pm", user_creds, "test-model", GlobalResources.redis_client)
     if "Scheduled" not in cal_res.get("message", ""):
@@ -173,7 +170,7 @@ async def run_test():
 
     # 10. Test: Notes (Add, Verify, Delete)
     log.info("Step 7: TEST - Notes")
-    from logic.note_ops import tool_note_add, tool_note_delete, tool_note_read
+    from app.logic.note_ops import tool_note_add, tool_note_delete, tool_note_read
     
     note_title = "Functional Test Note"
     note_content = "This is a test note."
