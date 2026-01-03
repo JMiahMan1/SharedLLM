@@ -221,6 +221,29 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             params["autoplay"] = "true"
             
             log.info(f"[RokuMA] Music Params: {params}")
+            
+            # If we have a Music Assistant library URI, use MA's play_media service instead of ECP
+            # The Media Assistant Roku channel can't play library:// URIs directly
+            if params.get("u", "").startswith("library://"):
+                from app.logic.music_assistant_ops import play_media as ma_play_media
+                
+                # Get the Roku serial from discovery cache
+                roku_info = self.discovered_rokus.get(roku_ip, {})
+                serial = roku_info.get("serial", "").lower()
+                
+                # Music Assistant creates entities like: media_player.roku_2n0062385487
+                ma_player = f"media_player.roku_{serial}"
+                
+                log.info(f"[RokuMA] Using Music Assistant service call: entity={ma_player}, uri={params['u']}")
+                
+                result = await ma_play_media(
+                    entity_id=ma_player,
+                    media_id=params["u"],
+                    media_type="library",  # Signals it's a library URI
+                    user_creds=user_creds
+                )
+                
+                return result
 
         elif media_type == "video":
             # Video Logic
