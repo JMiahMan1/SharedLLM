@@ -30,7 +30,7 @@ class BaseTest:
                 data = r.json()
                 # Try various response formats (Pipeline vs Chat)
                 msg = data.get("response") or \
-                      data.get("message", {}).get("content") or \
+                      (data.get("message") or {}).get("content") or \
                       data.get("msg") or \
                       str(data)
                 return msg, r.status_code
