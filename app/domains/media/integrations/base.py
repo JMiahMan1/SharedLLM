@@ -61,6 +61,30 @@ class MediaIntegration(ABC):
         """
         from app.domains.shared import execute_ha_service
         return await execute_ha_service("media_player", "media_play_pause", entity_id, user_creds, {}, None)
+    
+    async def volume_set(self, entity_id: str, volume: float, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Set volume level (0.0 to 1.0)."""
+        from app.domains.shared import execute_ha_service
+        domain = entity_id.split(".")[0]
+        return await execute_ha_service(domain, "volume_set", entity_id, user_creds, {"volume_level": volume}, None)
+
+    async def volume_up(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Increase volume."""
+        from app.domains.shared import execute_ha_service
+        domain = entity_id.split(".")[0]
+        return await execute_ha_service(domain, "volume_up", entity_id, user_creds, {}, None)
+
+    async def volume_down(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Decrease volume."""
+        from app.domains.shared import execute_ha_service
+        domain = entity_id.split(".")[0]
+        return await execute_ha_service(domain, "volume_down", entity_id, user_creds, {}, None)
+
+    async def volume_mute(self, entity_id: str, is_volume_muted: bool, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Mute/unmute volume."""
+        from app.domains.shared import execute_ha_service
+        domain = entity_id.split(".")[0]
+        return await execute_ha_service(domain, "volume_mute", entity_id, user_creds, {"is_volume_muted": is_volume_muted}, None)
 
 
 async def unwrap_entity_if_needed(
