@@ -114,7 +114,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         # 5. Handle Types
         # 5. Handle Types
         if media_type == "music":
-            # Music Logic - Clean query first
+            # Music Logic
             
             # Extract friendly_name from metadata for query cleaning
             device_name = kwargs.get("friendly_name")
@@ -132,41 +132,68 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             cleaned_query = self._clean_query(query, device_name)
             log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
             
-            # Deep Link Parameters
+            # Initialize params with defaults
             params["t"] = "a"
             params["u"] = cleaned_query 
             
-            # [Intelligent Metadata Handling]
-            # We must sanitize metadata passed from MA to avoid "Play X" showing as the song title.
-            # If songName is forced to an artist, the app may show "Unknown".
+            # [Intelligent Metadata Resolution]
+            # If metadata is missing (common for simple "play X" commands), we MUST search for it
+            # otherwise the Roku app assumes "Unknown".
             
             raw_title = kwargs.get("media_title")
             raw_artist = kwargs.get("media_artist")
             
-            if raw_title:
-                clean_title = self._clean_query(raw_title, device_name)
-                # If the title is just a command (e.g. "Listen to Brandon Lake"), it's not a real song name.
-                # In this case, we omit songName to avoid the "Brandon Lake is not a song" issue.
-                if raw_title.lower().strip() == clean_title.lower().strip():
-                    params["songName"] = clean_title
+            if not raw_title and not raw_artist:
+                log.info(f"[RokuMA] Metadata missing. Performing search for '{cleaned_query}' to resolve details...")
+                from app.logic.music_assistant_ops import tool_music_search
+                
+                # Perform search (cache + live)
+                search_res = await tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
+                
+                if search_res.get("status") == "SUCCESS" and search_res.get("results"):
+                    best_match = search_res["results"][0]
+                    log.info(f"[RokuMA] Resolved '{cleaned_query}' to: {best_match.get('title')} by {best_match.get('artist')}")
+                    
+                    # Populate params from best match
+                    params["songName"] = best_match.get("title")
+                    if best_match.get("artist"): params["artistName"] = best_match.get("artist")
+                    if best_match.get("album"): params["albumName"] = best_match.get("album")
+                    if best_match.get("image_url"): params["albumArt"] = best_match.get("image_url")
+                    
+                    # [Optional] Use the specific URI if available?
+                    # valid URIs: library://track/..., spotify://... 
+                    # If we trust the resolved item, using its ID might be more reliable than the raw query
+                    if best_match.get("media_content_id"):
+                        params["u"] = best_match.get("media_content_id")
+                        
                 else:
-                    log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted songName")
-            
-            if raw_artist:
-                clean_artist = self._clean_query(raw_artist, device_name)
-                params["artistName"] = clean_artist
-            
-            if kwargs.get("media_album_name"):
-                params["albumName"] = kwargs.get("media_album_name")
-            if kwargs.get("image_url"):
-                params["albumArt"] = kwargs.get("image_url")
+                    log.warning(f"[RokuMA] Search returned no results for '{cleaned_query}'. UI might show Unknown.")
+                    # Fallback: Use cleaned query as title if nothing else
+                    params["songName"] = cleaned_query
+
+            else:
+                # Metadata provided (e.g. from previous steps or NLU slots)
+                if raw_title:
+                    clean_title = self._clean_query(raw_title, device_name)
+                    if raw_title.lower().strip() == clean_title.lower().strip():
+                        params["songName"] = clean_title
+                    else:
+                        log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted songName")
+                
+                if raw_artist:
+                    clean_artist = self._clean_query(raw_artist, device_name)
+                    params["artistName"] = clean_artist
+                
+                if kwargs.get("media_album_name"):
+                    params["albumName"] = kwargs.get("media_album_name")
+                if kwargs.get("image_url"):
+                    params["albumArt"] = kwargs.get("image_url")
 
             log.info(f"[RokuMA] Music Params: {params}")
 
         elif media_type == "video":
             # Video Logic
-            
-            
+             
             # Resolve Query if needed (same as StandardIntegration)
             if not query.startswith(("http", "www", "spotify", "app")):
                  from app.domains.media.integrations.standard import StandardIntegration
@@ -417,3 +444,33 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         
         return result
 
+
+    def _clean_query(self, query: str, device_name: str = None) -> str:
+        """
+        Clean the query string by removing the device name and action words, preserving case.
+        Decoupled from StandardIntegration to ensure Roku-specific reliability.
+        """
+        import re
+        cleaned = query
+        
+        log.info(f"[RokuMA Cleaning] Input: '{query}', device_name: '{device_name}'")
+        
+        # ONLY remove the actual device name from metadata, nothing generic
+        if device_name:
+            # Strip capability/feature suffixes like " Supports AirPlay", " Remote", etc.
+            core_name = re.sub(r'\s+(Supports|Remote|Controller|Switch|Sensor)\b.*$', '', device_name, flags=re.IGNORECASE).strip()
+            
+            log.info(f"[RokuMA Cleaning] Core device name: '{core_name}' (from '{device_name}')")
+            
+            # Remove "on [device_name]", "to [device_name]", etc. (Case Insensitive)
+            cleaned = re.sub(f"\\b(on|in|at|to)\\s+{re.escape(core_name)}\\b", " ", cleaned, flags=re.IGNORECASE)
+            # Also remove standalone device name
+            cleaned = re.sub(f"\\b{re.escape(core_name)}\\b", " ", cleaned, flags=re.IGNORECASE)
+
+        # Remove action words (Case Insensitive)
+        cleaned = re.sub(r"\b(play|please|from|listen to|watch|view)\b", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        
+        log.info(f"[RokuMA Cleaning] Output: '{cleaned}'")
+        
+        return cleaned
