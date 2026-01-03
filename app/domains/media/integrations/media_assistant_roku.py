@@ -114,29 +114,36 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         # 5. Handle Types
         if media_type == "music":
             # Delegate to Music Assistant's play_media service
-            # CRITICAL: Must use the Music Assistant player entity, not the HA Roku entity
+            # CRITICAL: Must use the Music Assistant player entity (the one with active_queue)
             from app.logic import music_assistant_ops
             
             # Find the Music Assistant player entity for this Roku
-            # Pattern: media_player.roku_{serial_lowercase}
-            # It should be in the same group as the HA Roku entity
+            # MA creates wrapper entities with attributes like "active_queue" or "mass_player_type"
+            # Look for a group member that has these MA-specific attributes
             ma_player_entity = None
             group_members = kwargs.get("group_members", [])
             
+            log.info(f"[RokuMA] Searching for MA player in group members: {group_members}")
+            
             for member in group_members:
-                if member.startswith("media_player.roku_") and member != entity_id:
-                    ma_player_entity = member
-                    log.info(f"[RokuMA] Found MA player entity in group: {ma_player_entity}")
-                    break
+                if member == entity_id:
+                    continue
+                    
+                # Check if this entity has MA attributes
+                try:
+                    state = await self.get_state(member, user_creds)
+                    if state and state.attributes:
+                        # Check for MA-specific attributes
+                        if "active_queue" in state.attributes or "mass_player_type" in state.attributes:
+                            ma_player_entity = member
+                            log.info(f"[RokuMA] Found MA player entity with queue: {ma_player_entity}")
+                            break
+                except Exception as e:
+                    log.debug(f"[RokuMA] Could not check {member}: {e}")
+                    continue
             
             if not ma_player_entity:
-                # Fallback: Try to construct from serial number
-                # Discovery cached the serial as 2N0062385487
-                log.warning(f"[RokuMA] MA player not found in group members. Attempting serial-based lookup...")
-                # Get serial from the recently discovered roku_ip data
-                # This is a weak fallback - ideally group_members should have it
-                ma_player_entity = f"media_player.roku_{self.__class__.__name__.lower()}"  # This won't work, just placeholder
-                log.error(f"[RokuMA] Could not find MA player entity. Group members: {group_members}")
+                log.error(f"[RokuMA] Could not find MA player with active_queue. Group members: {group_members}")
                 return {"status": "FAILURE", "message": "Could not find Music Assistant player entity for this Roku"}
             
             log.info(f"[RokuMA] Delegating to MA service | MA Entity: {ma_player_entity} | Query: '{query}'")
