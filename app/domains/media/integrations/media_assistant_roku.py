@@ -167,26 +167,49 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 # Perform search (cache + live)
                 search_res = await tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
                 
-                if search_res.get("status") == "SUCCESS" and search_res.get("results"):
+                 if search_res.get("status") == "SUCCESS" and search_res.get("results"):
                     best_match = search_res["results"][0]
                     log.info(f"[RokuMA] Resolved '{cleaned_query}' to: {best_match.get('title')} ({best_match.get('type')})")
                     
-                    # Overwrite/Augment params from best match
+                    # If we got an artist, we need to get a TRACK by that artist to actually play
                     if best_match.get("type") == "artist":
-                        params["artistName"] = best_match.get("title")
-                        # Media Assistant needs BOTH artistName AND songName to display properly
-                        # For artist queries, use artist name as songName to trigger playback
-                        params["songName"] = best_match.get("title")
+                        artist_name = best_match.get("title")
+                        artist_uri = best_match.get("media_content_id")
+                        log.info(f"[RokuMA] Artist found. Searching for tracks by '{artist_name}'...")
+                        
+                        # Search for tracks by this artist
+                        track_query = f"{artist_name} songs"
+                        track_search = await tool_music_search(track_query, user_creds, kwargs.get("redis_client"))
+                        
+                        # Find first track by this artist
+                        artist_track = None
+                        if track_search.get("status") == "SUCCESS" and track_search.get("results"):
+                            for result in track_search["results"]:
+                                if result.get("type") == "track":
+                                    # Check if this track is by our artist
+                                    track_artist = result.get("artist", "").lower()
+                                    if artist_name.lower() in track_artist or track_artist in artist_name.lower():
+                                        artist_track = result
+                                        break
+                        
+                        if artist_track:
+                            log.info(f"[RokuMA] Found track by artist: {artist_track.get('title')} by {artist_track.get('artist')}")
+                            params["songName"] = artist_track.get("title")
+                            params["artistName"] = artist_track.get("artist", artist_name)
+                            if artist_track.get("album"): params["albumName"] = artist_track.get("album")
+                            if artist_track.get("image_url"): params["albumArt"] = artist_track.get("image_url")
+                            if artist_track.get("media_content_id"): params["u"] = artist_track.get("media_content_id")
+                        else:
+                            log.warning(f"[RokuMA] No tracks found by artist '{artist_name}'. Using artist URI as fallback.")
+                            params["artistName"] = artist_name
+                            params["u"] = artist_uri or cleaned_query
                     else:
+                        # Track, album, playlist, radio - use directly
                         params["songName"] = best_match.get("title")
                         if best_match.get("artist"): params["artistName"] = best_match.get("artist")
-                    
-                    if best_match.get("album"): params["albumName"] = best_match.get("album")
-                    if best_match.get("image_url"): params["albumArt"] = best_match.get("image_url")
-                    
-                    # Crucial: Use the specific URI
-                    if best_match.get("media_content_id"):
-                        params["u"] = best_match.get("media_content_id")
+                        if best_match.get("album"): params["albumName"] = best_match.get("album")
+                        if best_match.get("image_url"): params["albumArt"] = best_match.get("image_url")
+                        if best_match.get("media_content_id"): params["u"] = best_match.get("media_content_id")
                         
                 else:
                     log.warning(f"[RokuMA] Search returned no results for '{cleaned_query}'. UI might show Unknown.")
