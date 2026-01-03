@@ -1,18 +1,51 @@
 # Future Roadmap & TODOs
 
-This document outlines the planned features and architectural improvements for the SharedLLM project.
+This document outlines the planned features and architectural improvements for
+the SharedLLM project.
+
+## 🧠 Database Scalability & Vector Strategy
+
+### Is ChromaDB the best fit?
+
+ChromaDB is excellent for **Semantic Discovery** (finding "the reading lamp"
+when you say "my evening light"), but it is **not suitable for Real-Time State**
+(tracking if the light is ON or OFF).
+
+### Proposed Hybrid Architecture (The "Best Solution")
+
+To update individual entries without major CPU/IO overhead, we should adopt a
+strict separation of concerns:
+
+1. **Static Discovery (ChromaDB)**
+    * Stores: Device Name, ID, Room, Capabilities, Integration Type.
+    * Update Frequency: Low (Only when adding new devices or renaming them).
+    * Optimization: Instead of `refresh_db()` (full wipe), implement
+      `patch_device(entity_id)` which computes the embedding for *one* item and
+      upserts it.
+    * Why: Embeddings are expensive to calculate. We shouldn't re-calculate them
+      just because a light turned on.
+
+2. **Dynamic State (Redis / Live API)**
+    * Stores: State (on/off), Volume, Brightness, Current Song.
+    * Update Frequency: High (Real-time).
+    * Strategy:
+        * **Current**: We use Live API calls (`get_ha_context` -> `requests.get`)
+          which is perfectly accurate.
+        * **Future**: Home Assistant WebSocket stream -> Redis Cache. This enables
+          0ms latency state lookups without hammering the HA API.
 
 ## 🚀 Priority 1: Enriched Media Intelligence
 
 * [x] **YouTube Video Search Fallback**
-  * **Goal**: Allow "Play [Video Name]" to automatically find a URL if one
-    isn't provided.
-  * **Tech**: Integrated `duckduckgo-search` and `yt-dlp` to fetch and stream results.
+  * **Goal**: Allow "Play [Video Name]" to automatically find a URL if one isn't
+    provided.
+  * **Tech**: Integrated `duckduckgo-search` and `yt-dlp` to fetch and stream
+    results.
   * **Status**: *Completed*.
 * [ ] **Multi-Room Audio Groups**
   * **Goal**: "Play music in the whole house" or "Move music to the Kitchen".
   * **Tech**: Leverage Music Assistant's native grouping and valid
-  `media_player.join` services in HA.
+    `media_player.join` services in HA.
 * [ ] **Smart Podcast/Audiobook Routing**
   * **Goal**: Distinguish between "Play Harry Potter" (Audiobook) and "Play Harry
     Potter Soundtrack" (Music).
@@ -39,8 +72,8 @@ This document outlines the planned features and architectural improvements for t
 
 ## 📋 Backlog / Good to Have
 
-* **Shopping List Analytics**: Log historical check-offs to answer "How often do I
-  buy [Item]?" or "What's my most common purchase?".
+* **Shopping List Analytics**: Log historical check-offs to answer "How often
+  do I buy [Item]?" or "What's my most common purchase?".
 * **Scene Capture & Restore**: "Save the current lights and music as 'Movie
   Night'" to create on-the-fly HA scenes.
 * **Interactive Diagnostics**: A `check_device` tool to ping, check power, and

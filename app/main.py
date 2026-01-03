@@ -174,13 +174,16 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
     
     format_type = "openai" if "completions" in request.url.path else "chat"
 
-    generator = generate_rag_stream(query, user, body.model, body.use_openai, format_type)
+    include_tool_results = request.headers.get("X-Include-Tool-Results", "false").lower() == "true"
+    generator = generate_rag_stream(query, user, body.model, body.use_openai, format_type, include_tool_results=include_tool_results)
 
     if body.stream:
         media_type = "text/event-stream" if format_type == "openai" else "application/x-ndjson"
         return StreamingResponse(generator, media_type=media_type)
 
     full_text = ""
+    collected_tool_results = []
+
     try:
         async for chunk in generator:
             try:
@@ -188,24 +191,34 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
                     if "[DONE]" in chunk: continue
                     d = json.loads(chunk.replace("data: ", ""))
                     if "choices" in d:
-                        full_text += d["choices"][0]["delta"].get("content", "")
+                        delta = d["choices"][0]["delta"]
+                        full_text += delta.get("content", "")
+                        if "tool_results" in delta:
+                            collected_tool_results = delta["tool_results"]
                 else:
                     d = json.loads(chunk)
                     if "message" in d:
                         full_text += d["message"].get("content", "")
                     elif "response" in d:
                         full_text += d.get("response", "")
+                    
+                    if "tool_results" in d:
+                        collected_tool_results = d["tool_results"]
             except: pass
     except Exception as e:
         log.error(f"Error accumulating response: {e}")
     
     if format_type == "openai":
+        message_obj = {"role": "assistant", "content": full_text}
+        if include_tool_results and collected_tool_results:
+            message_obj["tool_results"] = collected_tool_results
+            
         response = {
             "id": f"chat-{int(time.time())}",
             "object": "chat.completion",
             "created": int(time.time()),
             "model": body.model,
-            "choices": [{"message": {"role": "assistant", "content": full_text}, "finish_reason": "stop", "index": 0}]
+            "choices": [{"message": message_obj, "finish_reason": "stop", "index": 0}]
         }
         log.debug(f"[RESPONSE] Returning to client: {full_text[:200]}")
         return response
@@ -216,6 +229,9 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
         "message": {"role": "assistant", "content": full_text}, 
         "done": True
     }
+    if include_tool_results and collected_tool_results:
+        response["tool_results"] = collected_tool_results
+        
     log.debug(f"[RESPONSE] Returning to client: {full_text[:200]}")
     return response
 

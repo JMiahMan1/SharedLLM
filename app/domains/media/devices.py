@@ -559,8 +559,14 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
     caps_set = set(str(c).lower().strip() for c in caps)
 
     # --- Scoring Logic (Consolidated from _route_by_intent) ---
-
     score = 0
+    
+    # 0. BASELINE PREFERENCE (Hardware vs Software)
+    # Prefer Hardware TVs (Roku, Android TV, Apple TV, WebOS, Samsung) over Cast/DLNA for most things
+    HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "samsungtv", "apple_tv", "braviatv", "firetv", "tv"]
+    is_hardware_tv = any(x in integ for x in HW_TV_INTEGRATIONS)
+    is_cast = any(x in integ for x in ["cast", "google_cast", "chromecast"])
+    is_ma = "music_assistant" in integ or "mass" in integ
 
     # 1. POWER COMMANDS
     if intent in ["turn_off", "turn_on", "toggle"]:
@@ -570,23 +576,23 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
             return 95 # High priority for "Office TV Remote"
         
         # High priority for Android TV integrations (Control visible as media_player but acts like remote)
-        if integ == "androidtv_remote" or "androidtv" in integ:
+        if integ == "androidtv_remote":
              return 90
         
         # Hardware devices (TVs with remotes) are preferred for power control
-        HW_TV_INTEGRATIONS = ["roku", "webostv", "samsungtv", "apple_tv", "braviatv"]
-        if any(x in integ for x in HW_TV_INTEGRATIONS): 
-            return 20
+        if is_hardware_tv: 
+            return 80
         
         if domain == "switch": 
             return 15 # Smart plug?
             
-        # Deprioritize cast/chrome for power
-        if any(x in integ for x in ["cast", "google_cast", "sonos"]) or "_chrome" in eid: 
+        # Deprioritize cast/chrome for power - User rarely wants to "Turn off Chromecast" (background service)
+        # They usually mean the TV itself.
+        if is_cast or "_chrome" in eid: 
             return -50
             
-        # Music Assistant players are software entities
-        if "music_assistant" in integ or "dlna" in integ: 
+        # Music Assistant players are software entities, rarely power controlled
+        if is_ma or "dlna" in integ: 
             return -10
         
         if "turn_off" in caps_set: return 10
@@ -599,7 +605,7 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
             has_ma_attr = "mass_player_type" in attrs or "music_assistant" in attrs
             is_speaker = "speaker" in integ or "dlna" in integ or "sonos" in integ
             
-            if "music_assistant" in integ: return 200 # Native MA Provider (Best)
+            if is_ma: return 200 # Native MA Provider (Best)
             elif has_ma_attr: return 150 # Wrapper with MA capability
             elif is_speaker: return 50
             elif "play_media" in caps_set: return 10
@@ -607,19 +613,18 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
             # Penalize Cast/Chrome for music if we have other options (prefer MA)
             # But Cast is still better than a TV for audio sometimes? 
             # Actually user wants to prioritize MA heavily.
-            if "cast" in integ or "chrome" in eid: return 5 # Acceptable but low
+            if is_cast: return 5 # Acceptable but low
             
             return 0
 
         elif is_video:
             # STRICT prohibition on Audio-only devices
-            if any(x in integ for x in ["sonos", "music_assistant", "audio", "spotify", "squeeze"]):
+            if any(x in integ for x in ["sonos", "music_assistant", "audio", "spotify", "squeeze", "mass"]):
                 return -100
             
-            HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "braviatv", "samsungtv", "apple_tv", "firetv", "tv"]
-            if any(x in integ for x in HW_TV_INTEGRATIONS):
+            if is_hardware_tv:
                 return 100
-            elif "cast" in integ or "google_cast" in integ:
+            elif is_cast:
                 return 90  # Cast is good for video but prefer native TV
             
             # Generic
@@ -627,23 +632,23 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
 
         else:
             # Ambiguous Intent
-            if "music_assistant" in integ: return 50
-            if any(x in integ for x in ["roku", "androidtv"]): return 20 
+            if is_ma: return 50
+            if is_hardware_tv: return 20 
             if "play_media" in caps_set: return 10
             return 0
 
     # 3. REMOTE CONTROL (Navigation)
     elif intent.startswith("nav_"):
         if domain == "remote": return 100
-        if "androidtv_remote" in integ: return 90
+        if "androidtv_remote" in integ: return 95
         # Media players can sometimes handle nav via services, but remotes are best
-        if any(x in integ for x in ["roku", "androidtv"]): return 50
+        if is_hardware_tv: return 50
         return 0
 
     # 4. APP LAUNCH
     elif intent == "open_app":
         # Prioritize Smart Players that run apps
-        if "cast" in integ or "androidtv" in integ or "roku" in integ or "webos" in integ:
+        if is_hardware_tv or is_cast:
             if domain == "media_player": return 100
         if domain == "remote": return 50
         return 0
@@ -652,10 +657,9 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
     elif intent in ["pause", "resume", "media_pause", "media_play", "media_stop", "stop_media", "media_next_track", "media_previous_track", "media_next", "media_previous"]:
         if domain == "media_player":
             # Prioritize Hardware TVs over Cast (so "Stop" stops the TV app, not just the cast background)
-            HW_TV_INTEGRATIONS = ["androidtv", "webostv", "braviatv", "roku", "apple_tv", "samsungtv"]
-            if any(x in integ for x in HW_TV_INTEGRATIONS):
+            if is_hardware_tv:
                  return 150 # Boost above standard 100
-            elif "cast" in integ: 
+            elif is_cast: 
                  return 110
             return 100
             
@@ -670,7 +674,7 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
          return 0
 
     # Default fallback
-    if any(x in integ for x in ["roku", "androidtv", "webostv"]): 
+    if is_hardware_tv: 
         return 10
     
     return 5
@@ -763,6 +767,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 # Sort using the shared helper
                 def _helper_score(item):
                     # item is (eid, integ, meta)
+                    # We pass the Tuple which is handled by _score_candidate_for_intent_and_media_type normalization
                     return _score_candidate_for_intent_and_media_type(item, intent, is_music, is_video)
                 
                 exact_matches.sort(key=_helper_score, reverse=True)
@@ -783,8 +788,8 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
             if prefix_matches and len(query_lower) >= 6:
                 prefix_matches.sort(key=lambda x: len(x[2]))
                 # [Fix] Return 3-item tuple for prefix match as well
-                # prefix_matches items can be (eid, integ, friendly, meta)
                 match_data = prefix_matches[0]
+                # match_data for prefix is (eid, integ, friendly, meta)
                 if len(match_data) == 4:
                     eid, integ, friendly, meta = match_data
                 else: 
