@@ -113,22 +113,26 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
 
         # 5. Handle Types
         if media_type == "music":
-            # Music Logic
-            params["t"] = "a"
-            params["u"] = query 
+            # Delegate to Music Assistant's play_media service
+            # This is the correct approach - MA service handles library URIs and streaming properly
+            from app.logic import music_assistant_ops
             
-            # Extract Metadata from kwargs (passed from MA or inferred)
-            # MA usually passes metadata in kwargs or we can fetch if needed
-            if kwargs.get("media_title"):
-                params["songName"] = kwargs.get("media_title")
-            if kwargs.get("media_artist"):
-                params["artistName"] = kwargs.get("media_artist")
-            if kwargs.get("media_album_name"):
-                params["albumName"] = kwargs.get("media_album_name")
-            if kwargs.get("image_url"):
-                params["albumArt"] = kwargs.get("image_url")
-                
-            log.info(f"[RokuMA] Music Params: {params}")
+            # Extract device name for query cleaning
+            device_name = kwargs.get("device_name") or kwargs.get("friendly_name", "")
+            
+            # Clean the query
+            cleaned_query = self._clean_query(query, device_name)
+            log.info(f"[RokuMA] Delegating to MA service | Entity: {entity_id} | Query: '{cleaned_query}'")
+            
+            # Call Music Assistant service - it will handle everything properly
+            result = await music_assistant_ops.play_media(entity_id, cleaned_query, "music", user_creds)
+            
+            if result and result.get("status") == "SUCCESS":
+                log.info(f"[RokuMA] MA service call successful for {entity_id}")
+                return result
+            else:
+                log.warning(f"[RokuMA] MA service call failed: {result}")
+                return result or {"status": "FAILURE", "message": "MA service call returned empty result"}
 
         elif media_type == "video":
             # Video Logic
