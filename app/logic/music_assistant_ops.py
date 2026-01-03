@@ -339,13 +339,19 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
     if media_id.startswith(("music:", "search:")):
         media_id = media_id.split(":", 1)[1]
 
-    # Determine types to try
-    # If generic request, try robust sequence. If specific URI, use as is.
-    types_to_try = []
-    
-    if media_type.startswith("library://"):
-        types_to_try = ["library"]
-    elif media_type in ["music", "search"]:
+    # Handle library:// URIs universally
+    if media_id.startswith("library://"):
+        try:
+            # library://track/233 -> type='track', id='233'
+            parts = media_id.replace("library://", "").split("/")
+            if len(parts) >= 2:
+                media_type = parts[0]
+                media_id = parts[1]
+                log.info(f"[MA PLAY] Globally parsed library URI: type={media_type}, id={media_id}")
+        except Exception as e:
+            log.warning(f"[MA PLAY] Failed to parse library URI {media_id}: {e}")
+
+    if media_type in ["music", "search"]:
         # Priority: Artist > Track > Playlist (Radio removed by user request)
         types_to_try = ["artist", "track", "playlist"]
         # Only add radio if the query explicitly mentions it or as a last resort if enabled?
@@ -353,9 +359,10 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
         if "radio" in media_id.lower():
              types_to_try.append("radio")
     else:
-        # Explicit type passed? Try that, then fallback if it looks like a search
+        # Explicit type passed (or parsed from library://)
         types_to_try = [media_type]
-        if media_type == "artist":
+        # If it was an artist match, maybe fallback to tracks?
+        if media_type == "artist" and not media_id.isdigit():
              types_to_try.extend(["track", "playlist"])
     
     log.info(f"[MA PLAY] Strategy: Trying types {types_to_try} for '{media_id}' on {entity_id}")
@@ -369,23 +376,9 @@ async def play_media(entity_id: str, media_id: str, media_type: str, user_creds:
         final_id = media_id
         
         if current_type == "library":
-             # media_type usually contains the full URI here when called with library://
-             full_uri = media_id if media_id.startswith("library://") else (kwargs.get("original_query") or media_id)
-             if "library://" in full_uri:
-                 try:
-                     # library://track/233 -> type='track', id='233'
-                     parts = full_uri.replace("library://", "").split("/")
-                     if len(parts) >= 2:
-                         final_type = parts[0]
-                         final_id = parts[1]
-                         log.info(f"[MA PLAY] Parsed library URI: type={final_type}, id={final_id}")
-                     else:
-                         final_id = full_uri
-                 except Exception as e:
-                     log.warning(f"[MA PLAY] Failed to parse library URI {full_uri}: {e}")
-                     final_id = full_uri
-             else:
-                 final_id = full_uri
+             # This block is now mostly redundant due to global parsing above,
+             # but kept as safety for any direct callers passing library type.
+             final_id = media_id
              
         payload = {
             "entity_id": entity_id,
