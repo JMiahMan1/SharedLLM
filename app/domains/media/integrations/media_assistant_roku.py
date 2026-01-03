@@ -112,135 +112,38 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             return {"status": "FAILURE", "message": "Roku IP address not found"}
 
         # 5. Handle Types
-        # 5. Handle Types
         if media_type == "music":
             # Music Logic
-            
-            # Extract friendly_name from metadata for query cleaning
-            device_name = kwargs.get("friendly_name")
-            
-            # [Robustness] If friendly_name is missing, fetch it from state
-            if not device_name:
-                try:
-                    state_obj = await self.get_state(entity_id, user_creds)
-                    if state_obj and state_obj.attributes:
-                        device_name = state_obj.attributes.get("friendly_name")
-                except Exception as e:
-                    log.warning(f"[RokuMA] Failed to fetch friendly_name: {e}")
-
-            # Clean the query (Strip "on {device}" and action words)
-            cleaned_query = self._clean_query(query, device_name)
-            log.info(f"[RokuMA Music] Cleaned query: '{cleaned_query}' (from '{query}')")
-            
-            # Initialize params with defaults
             params["t"] = "a"
-            params["u"] = cleaned_query 
+            params["u"] = query 
             
-            # [Intelligent Metadata Resolution]
-            # 1. First, try to use what we have
-            raw_title = kwargs.get("media_title")
-            raw_artist = kwargs.get("media_artist")
-            
-            if raw_title:
-                clean_title = self._clean_query(raw_title, device_name)
-                # If title is clean (not an action phrase), use it
-                if raw_title.lower().strip() == clean_title.lower().strip():
-                    params["songName"] = clean_title
-                else:
-                    log.info(f"[RokuMA] Sanitized dirty title: '{raw_title}' -> Omitted from songName (will resolve via search)")
-            
-            if raw_artist:
-                params["artistName"] = self._clean_query(raw_artist, device_name)
-            
+            # Extract Metadata from kwargs (passed from MA or inferred)
+            # MA usually passes metadata in kwargs or we can fetch if needed
+            if kwargs.get("media_title"):
+                params["songName"] = kwargs.get("media_title")
+            if kwargs.get("media_artist"):
+                params["artistName"] = kwargs.get("media_artist")
             if kwargs.get("media_album_name"):
                 params["albumName"] = kwargs.get("media_album_name")
             if kwargs.get("image_url"):
                 params["albumArt"] = kwargs.get("image_url")
-
-            # 2. If we lack critical metadata (Song OR Artist) or a valid URI, perform search
-            has_sufficient_meta = params.get("songName") and params.get("artistName")
-            
-            if not has_sufficient_meta:
-                log.info(f"[RokuMA] Insufficient metadata (Song: {params.get('songName')}, Artist: {params.get('artistName')}). Performing search for '{cleaned_query}'...")
-                from app.logic.music_assistant_ops import tool_music_search
                 
-                # Perform search (cache + live)
-                search_res = await tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
-                
-                if search_res.get("status") == "SUCCESS" and search_res.get("results"):
-                    best_match = search_res["results"][0]
-                    log.info(f"[RokuMA] Resolved '{cleaned_query}' to: {best_match.get('title')} ({best_match.get('type')})")
-                    
-                    # If we got an artist, we need to get a TRACK by that artist to actually play
-                    if best_match.get("type") == "artist":
-                        artist_name = best_match.get("title")
-                        artist_uri = best_match.get("media_content_id")
-                        log.info(f"[RokuMA] Artist found. Searching for tracks by '{artist_name}'...")
-                        
-                        # Search for tracks by this artist
-                        track_query = f"{artist_name} songs"
-                        track_search = await tool_music_search(track_query, user_creds, kwargs.get("redis_client"))
-                        
-                        # Find first track by this artist
-                        artist_track = None
-                        if track_search.get("status") == "SUCCESS" and track_search.get("results"):
-                            for result in track_search["results"]:
-                                if result.get("type") == "track":
-                                    # Check if this track is by our artist
-                                    track_artist = result.get("artist", "").lower()
-                                    if artist_name.lower() in track_artist or track_artist in artist_name.lower():
-                                        artist_track = result
-                                        break
-                        
-                        if artist_track:
-                            log.info(f"[RokuMA] Found track by artist: {artist_track.get('title')} by {artist_track.get('artist')}")
-                            params["songName"] = artist_track.get("title")
-                            params["artistName"] = artist_track.get("artist", artist_name)
-                            if artist_track.get("album"): params["albumName"] = artist_track.get("album")
-                            if artist_track.get("image_url"): params["albumArt"] = artist_track.get("image_url")
-                            if artist_track.get("media_content_id"): params["u"] = artist_track.get("media_content_id")
-                        else:
-                            log.warning(f"[RokuMA] No tracks found by artist '{artist_name}'. Using artist URI as fallback.")
-                            params["artistName"] = artist_name
-                            params["u"] = artist_uri or cleaned_query
-                    else:
-                        # Track, album, playlist, radio - use directly
-                        params["songName"] = best_match.get("title")
-                        if best_match.get("artist"): params["artistName"] = best_match.get("artist")
-                        if best_match.get("album"): params["albumName"] = best_match.get("album")
-                        if best_match.get("image_url"): params["albumArt"] = best_match.get("image_url")
-                        if best_match.get("media_content_id"): params["u"] = best_match.get("media_content_id")
-                        
-                else:
-                    log.warning(f"[RokuMA] Search returned no results for '{cleaned_query}'. UI might show Unknown.")
-                    # Fallback: If we still don't have a songName, use the query?
-                    if not params.get("songName") and not params.get("artistName"):
-                        params["songName"] = cleaned_query
-
-            # Enable autoplay for music
-            params["autoplay"] = "true"
-            
             log.info(f"[RokuMA] Music Params: {params}")
 
         elif media_type == "video":
             # Video Logic
-             
+            
             # Resolve Query if needed (same as StandardIntegration)
             if not query.startswith(("http", "www", "spotify", "app")):
-                 from app.domains.media.integrations.standard import StandardIntegration
-                 std_integration = StandardIntegration()
-                 
-                 # Extract friendly_name from metadata for query cleaning
-                 device_name = kwargs.get("friendly_name")  # Metadata is unpacked into kwargs
-                 log.info(f"[RokuMA] Extracting device_name for query cleaning: {device_name}")
-                 
-                 # Clean query using same logic as standard
-                 cleaned_query = self._clean_query(query, device_name)
-                 resolved_url = await std_integration._search_video_url(cleaned_query)
-                 if resolved_url:
-                     query = resolved_url
-                 else:
-                      return {"status": "FAILURE", "message": "Could not find a playable video"}
+                from app.domains.media.integrations.standard import StandardIntegration
+                std_integration = StandardIntegration()
+                # Clean query using same logic as standard
+                cleaned_query = std_integration._clean_query(query, media_type, entity_id, kwargs.get("device_name"))
+                resolved_url = await std_integration._search_video_url(cleaned_query)
+                if resolved_url:
+                    query = resolved_url
+                else:
+                     return {"status": "FAILURE", "message": "Could not find a playable video"}
 
             # Convert to local stream if needed (yt-dlp)
             # We assume query is now a URL.
@@ -283,23 +186,6 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                         original_query = kwargs.get("original_query", query)
                         redis_client.setex(last_video_key, 3600, original_query)  # 1 hour TTL
                         log.info(f"[RokuMA] Stored last video URL for resume: {original_query}")
-                
-                # Fallback: Call media_player.play_media service to actually start playback
-                # The ECP launch loads the app with metadata, but we need the service call to play
-                log.info(f"[RokuMA] ECP launch successful. Calling play_media service as fallback to trigger playback...")
-                from app.logic.ha_services import execute_ha_service
-                
-                await execute_ha_service(
-                    "media_player",
-                    "play_media", 
-                    entity_id,
-                    user_creds,
-                    {
-                        "media_content_id": params.get("u", query),
-                        "media_content_type": media_type
-                    },
-                    kwargs.get("redis_client")
-                )
                 
                 return {
                      "status": "SUCCESS",
@@ -492,33 +378,3 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         
         return result
 
-
-    def _clean_query(self, query: str, device_name: str = None) -> str:
-        """
-        Clean the query string by removing the device name and action words, preserving case.
-        Decoupled from StandardIntegration to ensure Roku-specific reliability.
-        """
-        import re
-        cleaned = query
-        
-        log.info(f"[RokuMA Cleaning] Input: '{query}', device_name: '{device_name}'")
-        
-        # ONLY remove the actual device name from metadata, nothing generic
-        if device_name:
-            # Strip capability/feature suffixes like " Supports AirPlay", " Remote", etc.
-            core_name = re.sub(r'\s+(Supports|Remote|Controller|Switch|Sensor)\b.*$', '', device_name, flags=re.IGNORECASE).strip()
-            
-            log.info(f"[RokuMA Cleaning] Core device name: '{core_name}' (from '{device_name}')")
-            
-            # Remove "on [device_name]", "to [device_name]", etc. (Case Insensitive)
-            cleaned = re.sub(f"\\b(on|in|at|to)\\s+{re.escape(core_name)}\\b", " ", cleaned, flags=re.IGNORECASE)
-            # Also remove standalone device name
-            cleaned = re.sub(f"\\b{re.escape(core_name)}\\b", " ", cleaned, flags=re.IGNORECASE)
-
-        # Remove action words (Case Insensitive)
-        cleaned = re.sub(r"\b(play|please|from|listen to|watch|view)\b", "", cleaned, flags=re.IGNORECASE).strip()
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-        
-        log.info(f"[RokuMA Cleaning] Output: '{cleaned}'")
-        
-        return cleaned
