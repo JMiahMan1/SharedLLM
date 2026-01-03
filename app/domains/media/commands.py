@@ -405,10 +405,12 @@ async def handle_media_command(
                         found_int = meta.get("integration", "").lower()
                         
                         # Roku detection: manufacturer="Roku" OR platform="roku" OR integration starts with "roku"
+                        # Also check entity_id and model for robust detection
                         if ("roku" in manufacturer or "roku" in platform or 
+                            "roku" in model or "roku" in entity_id.lower() or
                             (found_int and found_int.startswith("roku"))):
                             integration = "roku"
-                            log.info(f"[Roku Override] Detected Roku device via metadata (mfr={manufacturer}, model={model}, platform={platform}). Forcing integration='roku' for {entity_id}")
+                            log.info(f"[Roku Override] Detected Roku device via metadata/id (id={entity_id}, mfr={manufacturer}, model={model}). Forcing integration='roku'")
                         # ALWAYS prefer metadata integration over passed-in parameter
                         # This fixes Office TV being passed as integration='tv' when it's actually 'cast'
                         elif found_int and found_int != "unknown":
