@@ -167,7 +167,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 # Perform search (cache + live)
                 search_res = await tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
                 
-                 if search_res.get("status") == "SUCCESS" and search_res.get("results"):
+                if search_res.get("status") == "SUCCESS" and search_res.get("results"):
                     best_match = search_res["results"][0]
                     log.info(f"[RokuMA] Resolved '{cleaned_query}' to: {best_match.get('title')} ({best_match.get('type')})")
                     
