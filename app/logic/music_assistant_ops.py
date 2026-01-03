@@ -112,7 +112,10 @@ async def browse_music_library(entity_id: str, user_creds: dict, media_type: str
                 "title": title,
                 "media_content_id": uri,
                 "media_content_type": media_type,
-                "can_play": True # items in library are playable
+                "can_play": True,
+                "artist": item.get("artist", {}).get("name") if isinstance(item.get("artist"), dict) else (item.get("artists", [{}])[0].get("name") if item.get("artists") else None),
+                "album": item.get("album", {}).get("name") if isinstance(item.get("album"), dict) else None,
+                "image_url": item.get("image", {}).get("path") if isinstance(item.get("image"), dict) else item.get("image")
             })
         
         log.info(f"[MA BROWSE] Found {len(items)} {media_type}s")

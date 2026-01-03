@@ -272,28 +272,44 @@ class StandardIntegration(MediaIntegration):
         return None
 
     def _clean_query(self, query: str, media_type: str, entity_id: str, device_name: str = None) -> str:
-        """Clean the query string by removing the device name and action words, preserving case."""
-        cleaned = query
+        """
+        Clean the query string by removing the device name and action words.
+        """
+        import re
+        
+        # 1. Normalize: Lowercase and strip apostrophes early to match entity names
+        clean = query.lower().replace("'", "").replace("’", "")
         
         log.info(f"[QueryCleaning] Input: '{query}', device_name: '{device_name}'")
         
-        # ONLY remove the actual device name from metadata, nothing generic
+        # 2. Remove device name if known
         if device_name:
+            # Normalize device name too
+            d_clean = device_name.lower().replace("'", "").replace("’", "").strip()
+            
             # Strip capability/feature suffixes like " Supports AirPlay", " Remote", etc.
-            # These are added by HA but users don't say them in queries
-            core_name = re.sub(r'\s+(Supports|Remote|Controller|Switch|Sensor)\b.*$', '', device_name, flags=re.IGNORECASE).strip()
+            d_clean = re.sub(r'\s+(supports|remote|controller|switch|sensor)\b.*$', '', d_clean).strip()
             
-            log.info(f"[QueryCleaning] Core device name: '{core_name}' (from '{device_name}')")
-            
-            # Remove "on [device_name]", "to [device_name]", etc. (Case Insensitive)
-            cleaned = re.sub(f"\\b(on|in|at|to)\\s+{re.escape(core_name)}\\b", " ", cleaned, flags=re.IGNORECASE)
-            # Also remove standalone device name
-            cleaned = re.sub(f"\\b{re.escape(core_name)}\\b", " ", cleaned, flags=re.IGNORECASE)
+            log.info(f"[QueryCleaning] Core device name to remove: '{d_clean}'")
 
-        # Remove action words (Case Insensitive)
-        cleaned = re.sub(r"\b(play|please|from|listen to|watch|view)\b", "", cleaned, flags=re.IGNORECASE).strip()
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            # Try to remove "on [device_name]" first
+            clean = re.sub(r"\b(on|in|at|to|from)\b\s+(the\s+)?" + re.escape(d_clean) + r"\b", " ", clean)
+            # Remove just the device name
+            clean = clean.replace(d_clean, " ")
+            
+        # 3. Remove action words
+        clean = re.sub(r"\b(play|please|from|listen to|watch|view|on|open|launch)\b", " ", clean)
         
+        # 4. Remove common media keywords
+        if media_type == "music":
+             clean = re.sub(r"\b(music|song|album|track|playlist|artist|radio|podcast)\b", " ", clean)
+        elif media_type == "video":
+             clean = re.sub(r"\b(video|movie|show|series|clip|season|episode)\b", " ", clean)
+
+        # 5. Remove remaining punctuation
+        clean = re.sub(r"[^\w\s]", "", clean)
+        
+        cleaned = re.sub(r'\s+', ' ', clean).strip()
         log.info(f"[QueryCleaning] Output: '{cleaned}'")
         
         return cleaned

@@ -49,40 +49,16 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         """
         log.info(f"[Roku] Playing Media: {query} (Entity: {entity_id}) - Type: {media_type}")
         
-        # [Music Delegation] If this is a music request AND the entity is an MA wrapper,
-        # delegate to MusicAssistantIntegration instead of trying to play music directly
         if media_type == "music":
-            # Check if this entity is a Music Assistant wrapper
-            from app.settings import GlobalResources
-            try:
-                # [Robust Lookup] Try strict ID first
-                search_ids = [entity_id]
-                
-                docs = GlobalResources.ha_collection.get(ids=search_ids, include=["metadatas"])
-                
-                attrs = {}
-                if docs and docs.get("metadatas"):
-                    import json
-                    attrs_str = docs["metadatas"][0].get("attributes", "{}")
-                    attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
-                    
-                if attrs.get("mass_player_type"):
-                        log.info(f"[Roku] Music request on MA wrapper, delegating to MusicAssistantIntegration")
-                        from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
-                        ma_integration = MusicAssistantIntegration()
-                        return await ma_integration.play_media(entity_id, query, media_type, user_creds, **kwargs)
-            except Exception as e:
-                log.warning(f"[Roku] Failed to check MA wrapper status: {e}, continuing with direct play")
-
-            # [Enhanced MA Delegation] If we are here, strict wrapper check failed.
-            # But if it's a music request on a Roku, we REALLY want to use MA if possible.
-            # Try to find a related mass_ entity.
-            target_ma = await self._find_related_ma_entity(entity_id)
-            if target_ma:
-                 log.info(f"[Roku] Found related MA entity '{target_ma}' for music delegation.")
-                 from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
-                 ma_integration = MusicAssistantIntegration()
-                 return await ma_integration.play_media(target_ma, query, media_type, user_creds, **kwargs)
+            # [Media Assistant Delegation]
+            # User Requirement: "play intent is ONLY Music Assistant, by way of Media Assistant on the Roku"
+            # Delegate directly to the RokuMediaAssistantIntegration which handles the specific Roku channel (782875)
+            # and arguments (t=a) for the rich Music UI.
+            
+            log.info(f"[Roku] Delegating Music request to RokuMediaAssistantIntegration for Rich UI")
+            from app.domains.media.integrations.media_assistant_roku import RokuMediaAssistantIntegration
+            ma_roku = RokuMediaAssistantIntegration()
+            return await ma_roku.play_media(entity_id, query, media_type, user_creds, **kwargs)
 
         # [Video Playback] - Direct casting for video content
         log.info(f"[Roku] Using direct video playback mode")
