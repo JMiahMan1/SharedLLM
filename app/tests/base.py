@@ -27,6 +27,11 @@ class BaseTest:
             if "user" not in payload and endpoint == "/api/chat":
                 payload["user"] = "admin"
                 
+            # [Visibility Improvement] Show what we are asking
+            if endpoint == "/api/chat" and "messages" in payload:
+                last_msg = payload["messages"][-1].get("content", "")
+                print(f"[TEST INPUT] '{last_msg}'")
+
             r = requests.post(f"{self.api_url}{endpoint}", json=payload, headers=self.headers, timeout=120)
             try:
                 data = r.json()
