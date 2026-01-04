@@ -92,16 +92,10 @@ async def play_video(entity_id: str, video_url: str, user_creds: dict, redis_cli
     log.info(f"[Android TV] play_media failed. Retrying with ADB deep link...")
 
     # Attempt 2: ADB AM Start (YouTube specific optimization)
-    # This is highly specific to YouTube but that's the primary use case requested.
-    if "youtube.com" in video_url or "youtu.be" in video_url:
-         adb_cmd = f"am start -a android.intent.action.VIEW -d \"{video_url}\" -n com.google.android.youtube.tv/com.google.android.apps.youtube.tv.activity.ShellActivity"
-         return await execute_ha_service(
-            "androidtv", "adb_command", entity_id, user_creds,
-            {"command": adb_cmd},
-            redis_client
-        )
+    # REMOVED per user request - do not open external apps automatically.
+    # if "youtube.com" in video_url or "youtu.be" in video_url: ...
     
-    return result # Return original failure if not YouTube
+    return result # Return original failure
 
 async def search_and_play(entity_id: str, query: str, user_creds: dict, redis_client=None) -> dict:
     """

@@ -144,27 +144,10 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                              kwargs.get("redis_client")
                          )
 
-                 # [Strategy 2: Cast App (Fallback/Default)]
-                 log.info(f"[CastIntegration] Launching YouTube App for Video ID: {video_id}")
-                 
-                 # Prepare "Cast" payload
-                 # Using 'app_name': 'youtube' triggers HA's internal YouTube controller
-                 cast_payload = {
-                     "app_name": "youtube",
-                     "media_id": video_id
-                 }
-                 
-                 return await execute_ha_service(
-                     "media_player", 
-                     "play_media", 
-                     entity_id, 
-                     user_creds, 
-                     {
-                         "media_content_id": json.dumps(cast_payload),
-                         "media_content_type": "cast"
-                     }, 
-                     kwargs.get("redis_client")
-                 )
+                     return {
+                             "status": "FAILURE", 
+                             "message": "Failed to download video for casting. YouTube app fallback is disabled."
+                         }
 
         # Proceed with Standard Playback
         # If we updated 'query' to a URL, super() will skip search and just play it.
