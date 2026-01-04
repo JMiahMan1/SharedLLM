@@ -21,7 +21,7 @@ class AdvancedTests(BaseTest):
             self.log("Advanced: Compound Commands", "FAIL", str(msg))
             
         # Cleanup timer
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Delete the timer {unique_timer}"}]})
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Delete the timer {unique_timer}"}]}, "Advanced: Cleanup Timer")
 
     def test_conversation_context(self):
         # 2. History / Contextualization
