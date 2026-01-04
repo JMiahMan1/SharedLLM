@@ -63,15 +63,17 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                  
                  if local_url:
                      log.info(f"[AndroidTV] Video ready for streaming at: {local_url}")
+                     payload = {
+                         "media_content_id": local_url,
+                         "media_content_type": "video/mp4"  # Use specific mime type for better compatibility
+                     }
+                     log.info(f"[AndroidTV] Sending payload: {payload} to {entity_id}")
                      return await execute_ha_service(
                          "media_player", 
                          "play_media", 
                          entity_id, 
                          user_creds, 
-                         {
-                             "media_content_id": local_url,
-                             "media_content_type": "video"  # "video" or "url" usually works for generic http streams
-                         }, 
+                         payload, 
                          redis_client
                      )
                  else:
