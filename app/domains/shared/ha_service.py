@@ -66,6 +66,7 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
                             state_data = r_state.json()
                             friendly_name = state_data.get("attributes", {}).get("friendly_name", entity_id)
                             current_state = state_data.get("state", "unknown")
+                            attrs = state_data.get("attributes", {})
 
                             # Check for expected state change
                             expected_change = False
@@ -73,13 +74,49 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
                                 expected_change = True
                             elif service.startswith("turn_on") and current_state not in ["off", "unavailable"]:
                                 expected_change = True
-                            elif service.startswith("media_play") and current_state in ["playing", "paused", "buffering"]:
-                                expected_change = True
+                            elif service.startswith("media_play") or service == "play_media":
+                                if current_state in ["playing", "paused", "buffering"]:
+                                    # [Verification Fix] Ensure it's the *correct* media
+                                    # If we sent a specific content_id (URL/URI), check if it's reflected
+                                    req_content = (service_data or {}).get("media_content_id", "")
+                                    
+                                    # Relaxed matching check
+                                    match = True
+                                    if req_content and len(req_content) > 5:
+                                        # attributes can vary: media_content_id, media_title, app_id
+                                        curr_content_id = str(attrs.get("media_content_id", ""))
+                                        curr_title = str(attrs.get("media_title", "")).lower()
+                                        
+                                        # Simple substring match (since URLs might get processed/shortened)
+                                        # If requested content is in the attributes, we are good.
+                                        # Check valid logic: if req is URL, look for it in content_id.
+                                        # If req is a title (music), look for it in media_title.
+                                        
+                                        # Case 1: URL/File match (Video/Cast)
+                                        if "http" in req_content:
+                                            # Often cast sends just the filename or full URL
+                                            match = req_content in curr_content_id or curr_content_id in req_content
+                                        
+                                        # Case 2: Title match (Music/Search)
+                                        else:
+                                           # If media_title is present, check similarity
+                                           if curr_title and req_content.lower() not in curr_title and len(curr_title) > 2:
+                                               # Only mark false if we strictly mismatch on a title that is clearly different
+                                               # But be careful of partial matches or radio stations.
+                                               # For now, let's assume if it is playing, it is likely the right thing 
+                                               # unless we have strong evidence otherwise.
+                                               pass
+
+                                    if match:
+                                        expected_change = True
+                                    else:
+                                        log.info(f"[State Verify] Playing but content mismatch? Req: {req_content[:20]}... vs Act: {curr_content_id[:20]}...")
 
                             if expected_change or state_attempt == 4:
                                 new_state = current_state
                                 break
-                    except:
+                    except Exception as e:
+                        log.warning(f"[State Verify] Error: {e}") 
                         pass
 
                 # --- END FIX ---
