@@ -41,6 +41,13 @@ class MediaTests(BaseTest):
         else:
              self.log("Media: Play Intent", "FAIL", f"Response: {msg}")
 
+        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Play Tim Timmons on Office TV"}]}, "Media: Play Tim Timmons")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        if tr and tr[0].get("status") == "SUCCESS":
+            self.log("Media: Play Tim Timmons", "PASS", f"Played: {tr[0].get('message')}")
+        else:
+             self.log("Media: Play Tim Timmons", "FAIL", f"Response: {msg}")
+
     def test_transport_controls(self):
         # 3. Stop/Pause/Resume
         # 3. Stop/Pause/Resume - Explicitly target known device
