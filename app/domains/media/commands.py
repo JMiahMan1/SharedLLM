@@ -140,6 +140,13 @@ async def _execute_transport_command(
         elif intent == "volume_down":
             return await handler.volume_down(entity_id, step=0.1, user_creds=user_creds)
             
+        elif intent == "volume_down":
+            return await handler.volume_down(entity_id, step=0.1, user_creds=user_creds)
+            
+        elif intent == "volume_mute" or intent == "mute_volume":
+            # Toggle mute (or set True if supported, but typically toggle)
+            return await handler.volume_mute(entity_id, True, user_creds=user_creds)
+
         elif intent == "volume_set":
             # Extract volume level from query via simple regex (e.g. "volume 50")
             # This logic should ideally be passed in as a parameter, but extracting here for now.

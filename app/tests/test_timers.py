@@ -51,5 +51,5 @@ class TimerTests(BaseTest):
         # 5. Delete All
         time.sleep(1)
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Delete the timer {unique_name}"}]}, "Timer: Delete")
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Cancel the alarm for {alarm_time}"}]})
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Cancel the alarm for {alarm_time}"}]}, "Alarm: Cancel")
         self.log("Timer: Delete", "PASS")
