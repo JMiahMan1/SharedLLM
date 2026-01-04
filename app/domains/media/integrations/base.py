@@ -137,6 +137,9 @@ async def unwrap_entity_if_needed(
                     underlying_device = attributes.get(underlying_attr)
                     
                     if underlying_device:
+                        if "." not in underlying_device:
+                            log.warning(f"[Generic Unwrap] Unwrapped ID '{underlying_device}' is not a valid Entity ID (no domain). Ignoring.")
+                            continue
                         log.info(f"[Generic Unwrap] {integration_class.__name__}: {entity_id} → {underlying_device} (request_type={request_type})")
                         return underlying_device
                     else:
