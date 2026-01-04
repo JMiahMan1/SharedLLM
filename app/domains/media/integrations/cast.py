@@ -139,7 +139,7 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                              user_creds, 
                              {
                                  "media_content_id": local_url,
-                                 "media_content_type": "video" 
+                                 "media_content_type": "video/mp4" 
                              }, 
                              kwargs.get("redis_client")
                          )
