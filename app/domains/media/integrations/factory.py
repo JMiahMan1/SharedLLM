@@ -5,6 +5,7 @@ from app.domains.media.integrations.music_assistant import MusicAssistantIntegra
 from app.domains.media.integrations.cast import CastIntegration
 from app.domains.media.integrations.roku import RokuIntegration
 from app.domains.media.integrations.media_assistant_roku import RokuMediaAssistantIntegration
+from app.domains.media.integrations.androidtv import AndroidTVIntegration
 from app.domains.media.integrations.standard import StandardIntegration
 from app.settings import ROKU_USE_MEDIA_ASSISTANT
 
@@ -18,7 +19,7 @@ class IntegrationFactory:
         "cast": CastIntegration,
         "standard": StandardIntegration,
         # Map other integrations to standard for now, or implement specific ones
-        "androidtv": StandardIntegration, 
+        "androidtv": AndroidTVIntegration, 
         "roku": RokuIntegration, 
         "roku_media_assistant": RokuMediaAssistantIntegration,
         "webostv": StandardIntegration,
