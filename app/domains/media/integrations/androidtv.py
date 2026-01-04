@@ -25,7 +25,9 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
         """
         # [Generic Wrapper Unwrap]
         from app.domains.media.integrations.base import unwrap_entity_if_needed
+        log.info(f"[AndroidTV] Initial entity_id: {entity_id}")
         entity_id = await unwrap_entity_if_needed(entity_id, media_type, user_creds)
+        log.info(f"[AndroidTV] Resolved entity_id: {entity_id}")
         
         # [Music Delegation]
         if media_type == "music":
