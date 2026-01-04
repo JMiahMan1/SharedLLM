@@ -42,6 +42,7 @@ class BaseTest:
                 return r.text, r.status_code
         except Exception as e:
             self.log(label, "ERROR", f"Req failed: {e}")
+            return None, 0
     def get_entity_state(self, entity_id):
         """Fetch the live state of an entity from HA Proxy."""
         try:
