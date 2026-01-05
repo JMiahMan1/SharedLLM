@@ -697,12 +697,36 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
     # Simple heuristic: If it has sibling that IS hardware, switch.
     
     def is_better_volume_handler(meta: dict) -> bool:
-        """Returns True if this sibling metadata represents a better volume handler (Hardware TV)."""
+        """
+        Returns True if this sibling metadata represents a better volume handler (Hardware TV)
+        AND supports the specific volume capability required.
+        """
         integ = meta.get("integration", "").lower()
-        if any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv", "remote"]):
-            # Check if it actually supports volume?
-            # Ideally yes, but 'androidtv' usually implies it does.
-            return True
+        
+        # 0. Sibling MUST be Hardware/TV
+        if not any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv", "remote"]):
+            return False
+            
+        # 1. Parse Capabilities
+        # Home Assistant Media Player Supported Features Bitmask
+        # SUPPORT_VOLUME_SET = 4
+        # SUPPORT_VOLUME_MUTE = 8
+        # SUPPORT_VOLUME_STEP = 1024
+        
+        features = int(meta.get("supported_features", 0))
+        
+        # 2. Check Intent-Specific Support
+        if intent == "volume_set":
+             # Only redirect Volume Set if hardware explicitly supports it (Many Android TVs don't)
+             return bool(features & 4)
+             
+        elif intent in ["volume_mute", "volume_unmute"]:
+             return bool(features & 8)
+             
+        elif intent in ["volume_up", "volume_down"]:
+             # Hardware handles Step (1024) OR Set (4) well for Up/Down
+             return bool((features & 1024) or (features & 4))
+             
         return False
 
     sibling = await find_group_sibling(entity_id, is_better_volume_handler)
