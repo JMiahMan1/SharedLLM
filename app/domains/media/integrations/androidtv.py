@@ -233,8 +233,8 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
             # If vol is None (unknown), we might default to 0.15 just in case, or skip.
             # User said "under 10%".
             if vol is not None and isinstance(vol, (int, float)):
-                 if vol < 0.1:
-                      log.info(f"[Volume Safeguard] Volume {vol} is too low. Setting to 0.10 on {entity_id}")
-                      await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.1}, redis_client)
+                 if vol < 0.2:
+                      log.info(f"[Volume Safeguard] Volume {vol} is too low. Setting to 0.20 on {entity_id}")
+                      await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.2}, redis_client)
         except Exception as e:
             log.warning(f"[Volume Safeguard] Failed to check/set volume for {entity_id}: {e}")
