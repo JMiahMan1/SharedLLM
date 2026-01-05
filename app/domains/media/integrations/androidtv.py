@@ -73,15 +73,29 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                      try:
                          from app.domains.media.devices import find_group_sibling
                          def is_cast(meta):
-                             # Must be 'cast' integration
-                             if "cast" not in meta.get("integration", "").lower():
+                             # [Strengthened Filter]
+                             integ = meta.get("integration", "").lower()
+                             eid = meta.get("entity_id", "").lower()
+                             
+                             # 1. Must be 'cast' integration
+                             if "cast" not in integ:
                                  return False
                              
-                             # Must NOT be Music Assistant (MA often wraps Cast devices)
-                             # Check attributes for 'mass_player_type' or 'music_assistant'
+                             # 2. explicit MA exclusion by Integration Name
+                             if "music_assistant" in integ or "mass" in integ:
+                                 return False
+
+                             # 3. Check attributes for known MA signatures
                              attrs = meta.get("attributes", {})
-                             attrs_str = str(attrs)
+                             attrs_str = str(attrs).lower()
                              if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
+                                 return False
+                             
+                             # 4. Check Entity ID naming conventions for MA
+                             # MA often appends _2, _3 or uses 'mass_' prefix (though usually hidden)
+                             # If we have a choice, we prefer the one strictly named 'cast' or '_chrome'
+                             # But for exclusion:
+                             if "mass_" in eid:
                                  return False
                                  
                              return True
