@@ -44,6 +44,17 @@ REGEX_INTENT_MAP = {
     r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)": "open_app",
     r"\b(watch|view)\b": "watch_media",  # Video intent (default: cast device)
     r"\b(play|listen)\b": "play_media",          # Music intent (default: music assistant)
+    # Volume Controls (Explicit before generic stop/play)
+    r"\b(turn|set|change)\s+(the\s+)?volume\s+(to|at)\b": "volume_set", 
+    r"\b(volume)\s+(set|to|at)\b": "volume_set",
+    r"\b(turn|move)\s+(the\s+)?volume\s+up\b": "volume_up",
+    r"\b(turn|move)\s+(the\s+)?volume\s+down\b": "volume_down",
+    r"\bvolume\s+up\b": "volume_up",
+    r"\bvolume\s+down\b": "volume_down",
+    r"\b(mute|unmute|silence|quiet)\b": "volume_mute",
+    r"\bturn\s+up\s+(the\s+)?volume\b": "volume_up",
+    r"\bturn\s+down\s+(the\s+)?volume\b": "volume_down",
+    
     r"\b(stop)\b": "stop_media",
     # Timer control patterns (specific matches before generic ones)
     r"\bpause\s+(the\s+)?(?:timer|alarm)\b": "timer_pause",
