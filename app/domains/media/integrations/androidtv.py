@@ -115,7 +115,9 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                      }
                      
                      # Ensure volume is audible on the target
-                     await self._ensure_volume_safe(target_entity, user_creds, redis_client)
+                     await self._ensure_volume_safe(entity_id, user_creds, redis_client)
+                     if entity_id != target_entity:
+                         await self._ensure_volume_safe(target_entity, user_creds, redis_client)
                      # Explicitly stop the target first to clear any MA session overlay
                      try:
                          # 1. Trigger HOME on Android TV (Source) to ensure visual takeover
