@@ -73,11 +73,22 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                      try:
                          from app.domains.media.devices import find_group_sibling
                          def is_cast(meta):
-                             return "cast" in meta.get("integration", "").lower()
+                             # Must be 'cast' integration
+                             if "cast" not in meta.get("integration", "").lower():
+                                 return False
+                             
+                             # Must NOT be Music Assistant (MA often wraps Cast devices)
+                             # Check attributes for 'mass_player_type' or 'music_assistant'
+                             attrs = meta.get("attributes", {})
+                             attrs_str = str(attrs)
+                             if "mass_player_type" in attrs_str or "music_assistant" in attrs_str:
+                                 return False
+                                 
+                             return True
                          
                          sibling = await find_group_sibling(entity_id, is_cast)
                          if sibling:
-                             log.info(f"[AndroidTV] Delegating video playback to Cast sibling: {sibling}")
+                             log.info(f"[AndroidTV] Delegating video playback to Cast sibling (Raw/Non-MA): {sibling}")
                              target_entity = sibling
                      except Exception as e:
                          log.warning(f"[AndroidTV] Failed to find cast sibling: {e}")
@@ -86,6 +97,12 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                          "media_content_id": local_url,
                          "media_content_type": "video/mp4"  # Use specific mime type for better compatibility
                      }
+                     # Explicitly stop the target first to clear any MA session overlay
+                     try:
+                         await execute_ha_service("media_player", "media_stop", target_entity, user_creds, {}, redis_client)
+                         await asyncio.sleep(1)
+                     except: pass
+
                      log.info(f"[AndroidTV] Sending payload: {payload} to {target_entity}")
                      return await execute_ha_service(
                          "media_player", 
