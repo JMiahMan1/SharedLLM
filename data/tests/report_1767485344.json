@@ -1,0 +1,104 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T17:05:22.859665"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Volume Set not supported: Current volume unknown.'}] | Msg: {'model': 'qwen3:latest', 'created_at': '2026-01-04T00:05:35Z', 'message': {'role': 'assistant', 'content': 'The Office TV cannot be set to thirty via this method. The Roku device may require manual adjustment using the remote or physical buttons. Psalm 37:7 says, Be still, and know that I am God. Trust that even small adjustments align with His perfect plan. Would you like to try another command or check the device manually?'}, 'done': True, 'tool_results': [{'status': 'FAILURE', 'message': 'Volume Set not supported: Current volume unknown.'}]}",
+    "timestamp": "2026-01-03T17:05:35.080358"
+  },
+  {
+    "test": "Media: Volume Up",
+    "status": "PASS",
+    "message": "Volume Up command successful",
+    "timestamp": "2026-01-03T17:05:40.900461"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "PASS",
+    "message": "State: off",
+    "timestamp": "2026-01-03T17:05:46.879113"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Device state invalid: unknown",
+    "timestamp": "2026-01-03T17:05:52.349799"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T17:05:57.775078"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T17:06:24.931021"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T17:06:47.428344"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "PASS",
+    "message": "Final State: off",
+    "timestamp": "2026-01-03T17:06:55.590182"
+  },
+  {
+    "test": "Media: Radio List",
+    "status": "PASS",
+    "message": "Found 1 stations",
+    "timestamp": "2026-01-03T17:07:17.434110"
+  },
+  {
+    "test": "Media: Playlist List",
+    "status": "FAIL",
+    "message": "I currently do not have access to a list of playlists in your home setup. You may need to check your devices manually or ensure the relevant hardware (e.g., a music player or streaming service) is configured in Home Assistant. Psalm 131:3 reminds us to be still and know that the Lord is God, trust that your setup will align with His perfect plan. Would you like assistance with something else?",
+    "timestamp": "2026-01-03T17:07:30.803850"
+  },
+  {
+    "test": "Timer: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T17:07:41.934154"
+  },
+  {
+    "test": "Timer: Pause",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T17:07:52.471934"
+  },
+  {
+    "test": "Timer: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T17:08:27.407825"
+  },
+  {
+    "test": "Alarm: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T17:08:41.096295"
+  },
+  {
+    "test": "Timer: List",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T17:09:03.841401"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: BaseTest.safe_post() missing 1 required positional argument: 'label'",
+    "timestamp": "2026-01-03T17:09:04.979575"
+  }
+]
