@@ -91,6 +91,11 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         
         # [SmartPowerSync]
         await self._ensure_tv_on(entity_id, user_creds)
+        
+        # [Volume Safety] Ensure TV audio is unmuted/safe
+        tv_sibling = await self._get_tv_sibling(entity_id, user_creds)
+        if tv_sibling:
+             await self._ensure_volume_safe(tv_sibling, user_creds, kwargs.get("redis_client"))
 
         # [Auto-Search for Cast]
         # We must resolve the URL *here* so we can check if it's YouTube.
@@ -271,4 +276,52 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
              
         return None
 
-    # Removed _find_group_sibling as it is now shared in app.domains.media.devices
+    async def _ensure_volume_safe(self, entity_id: str, user_creds: Dict, redis_client=None):
+        """Ensure the device is not muted and volume is at least 20%. Matches AndroidTV logic."""
+        try:
+             # Use requests via run_blocking to be safe and simple like AndroidTV
+             from app.logic.pipeline import run_blocking
+             from app.domains.media import HA_URL
+             import requests
+             
+             if not HA_URL: 
+                 return
+
+             # 1. Fetch current state safely
+             url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
+             headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
+             
+             def _fetch():
+                 return requests.get(url, headers=headers, timeout=2.0)
+             
+             r = await run_blocking(_fetch)
+             if r.status_code != 200:
+                 return
+
+             state_data = r.json()
+             attrs = state_data.get("attributes", {})
+             
+             # 2. Check & Fix Mute / Volume
+             is_muted = attrs.get("is_volume_muted")
+             vol = attrs.get("volume_level")
+
+             if is_muted:
+                 log.info(f"[Volume Safeguard - Cast] Device {entity_id} is MUTED. Initiating Unmute Sequence...")
+                 
+                 # 1. Unmute
+                 res_unmute = await execute_ha_service("media_player", "volume_mute", entity_id, user_creds, {"is_volume_muted": False}, redis_client)
+                 log.info(f"[Volume Safeguard - Cast] Unmute Result: {res_unmute}")
+                 await asyncio.sleep(1) # Wait for processing
+                 
+                 # 2. Set Volume to 20%
+                 log.info(f"[Volume Safeguard - Cast] Setting volume to 20%...")
+                 res_vol = await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.2}, redis_client)
+                 await asyncio.sleep(1) 
+                 
+             elif vol is not None and isinstance(vol, (int, float)):
+                  # Not muted, check for blasting levels
+                  if vol >= 0.9:
+                       log.info(f"[Volume Safeguard - Cast] Volume {vol} is too high (>90%). Reducing to 60% on {entity_id}")
+                       await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.6}, redis_client)
+        except Exception as e:
+            log.warning(f"[Volume Safeguard - Cast] Failed: {e}")
