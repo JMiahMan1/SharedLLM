@@ -5,6 +5,7 @@ from .base import BaseTest
 class MediaTests(BaseTest):
     def run(self):
         self.test_playback_dry_run() # Start playback first so volume/transport controls work
+        self.test_watch_intent() # Verify Video/Watch Intent specifically
         self.test_volume()
         self.test_transport_controls()
         self.test_library_browsing()
@@ -151,6 +152,31 @@ class MediaTests(BaseTest):
                 self.log("Media: Transport/Power", "FAIL", f"Command SUCCESS but state is {state}")
         else:
             self.log("Media: Transport/Power", "FAIL", f"Command failed: {msg}")
+
+    def test_watch_intent(self):
+        # 1. Watch Video
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Watch the video Big Buck Bunny on Office TV"}]}, "Media: Watch Video")
+        tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
+        
+        if tr and tr[0].get("status") == "SUCCESS":
+             # Verify state becomes playing
+             entity = "media_player.office_tv_chrome_2"
+             state = None
+             title = None
+             for i in range(15): # Give 15 seconds for YouTube app to launch and start
+                 data = self.get_entity_full(entity)
+                 state = data.get("state")
+                 title = data.get("attributes", {}).get("media_title")
+                 if state in ["playing", "buffering"]: 
+                     break
+                 time.sleep(1)
+                 
+             if state in ["playing", "buffering"]:
+                 self.log("Media: Watch Video", "PASS", f"State: {state} | Title: {title}")
+             else:
+                 self.log("Media: Watch Video", "FAIL", f"Command SUCCESS but state is {state} (Timeout)")
+        else:
+             self.log("Media: Watch Video", "FAIL", f"TR: {tr}")
 
     def test_library_browsing(self):
         # 6. List Radio / Playlists
