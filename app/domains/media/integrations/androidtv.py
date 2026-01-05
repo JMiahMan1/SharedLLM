@@ -108,7 +108,7 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
         log.info(f"[AndroidTV] Launching app {package} on {entity_id}")
         
         # Use play_media with "app" type for better compatibility
-        return await execute_ha_service(
+        res = await execute_ha_service(
              "media_player", 
              "play_media", 
              entity_id, 
@@ -119,3 +119,19 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
              }, 
              kwargs.get("redis_client")
         )
+
+        # [Fallback] If play_media might not work (some TVs ignore it for apps), try direct ADB command
+        # using the 'monkey' trick which works on almost all Android devices to launch a package
+        if res.get("status") != "FAILURE": # Even if success, it might have failed efficiently silently
+             log.info(f"[AndroidTV] Sending ADB backup command to ensure launch of {package}")
+             await asyncio.sleep(2)
+             await execute_ha_service(
+                 "androidtv",
+                 "adb_command",
+                 entity_id,
+                 user_creds,
+                 {"command": f"monkey -p {package} -c android.intent.category.LAUNCHER 1"},
+                 kwargs.get("redis_client")
+             )
+        
+        return res
