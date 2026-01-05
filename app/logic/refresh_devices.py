@@ -138,7 +138,7 @@ async def refresh_db():
                 "integration": integration,
                 "group_name": fname,
                 "group_id": group_key,
-                # "state": REMOVED - Fetch live via API in Utils
+                "supported_features": int(attrs.get("supported_features", 0)),
                 "capabilities": ",".join(caps),
                 "attributes": json.dumps(attrs), # Store attributes for smart capability parsing
                 "manufacturer": reg_data.get("manufacturer") or "",
