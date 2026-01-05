@@ -137,6 +137,7 @@ class AndroidTVTests(BaseTest):
         # [Visual Verification]
         # Ensure the previous app (YouTube) is NOT the active app on the main TV entity.
         # If it is, the Cast session is likely playing in the background (hidden audio).
+        time.sleep(3) # Give Android TV a moment to report the new app_id after switching
         tv_full = self.get_entity_full(self.primary_entity)
         current_app = tv_full.get("attributes", {}).get("app_id")
         
