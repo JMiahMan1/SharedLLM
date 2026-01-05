@@ -682,60 +682,68 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
 
 async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=None) -> str:
     """
-    If the target is a Cast/Software player, checks if a Hardware Sibling (TV/Remote)
-    should handle the volume command instead.
+    Bidirectional volume targeting:
+    - For volume_up/down/mute: Prefer Android TV (hardware controls)
+    - For volume_set: Prefer Cast (percentage support)
     """
     try:
         if not intent.startswith("volume_"):
             return entity_id
 
-        def is_better_volume_handler(meta: dict) -> bool:
-            """
-            Returns True if this sibling metadata represents a better volume handler (Hardware TV)
-            AND supports the specific volume capability required.
-            """
+        # Check current entity capabilities
+        from app.domains.media.devices import get_device_capabilities
+        from app.settings import GlobalResources
+        
+        # Get current entity metadata
+        current_caps = None
+        current_integration = None
+        try:
+            if GlobalResources.ha_collection:
+                docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                if docs and docs.get("metadatas"):
+                    meta = docs["metadatas"][0]
+                    current_integration = meta.get("integration", "").lower()
+                    current_caps = int(meta.get("supported_features", 0))
+        except Exception as e:
+            log.warning(f"[Volume Optimization] Could not get current entity caps: {e}")
+
+        def find_appropriate_sibling(meta: dict) -> bool:
+            """Find sibling that supports the specific volume operation."""
             try:
                 integ = meta.get("integration", "").lower()
-                
-                # 0. Sibling MUST be Hardware/TV
-                if not any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv", "remote"]):
-                    return False
-                    
-                # 1. Parse Capabilities
-                # Home Assistant Media Player Supported Features Bitmask
-                # SUPPORT_VOLUME_SET = 4
-                # SUPPORT_VOLUME_MUTE = 8
-                # SUPPORT_VOLUME_STEP = 1024
-                
                 features = int(meta.get("supported_features", 0))
                 
-                # 2. Check Intent-Specific Support
+                # For volume_set: Look for Cast/software that supports bit 4
                 if intent == "volume_set":
-                     # Only redirect Volume Set if hardware explicitly supports it (Many Android TVs don't)
-                     return bool(features & 4)
-                     
-                elif intent in ["volume_mute", "volume_unmute"]:
-                     return bool(features & 8)
-                     
-                elif intent in ["volume_up", "volume_down"]:
-                     # Hardware handles Step (1024) OR Set (4) well for Up/Down
-                     return bool((features & 1024) or (features & 4))
-                     
+                    is_cast = any(x in integ for x in ["cast", "google_cast", "chromecast", "music_assistant"])
+                    return is_cast and bool(features & 4)
+                
+                # For volume_up/down/mute: Look for hardware TV that supports step/mute
+                else:
+                    is_hardware = any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv", "remote"])
+                    if not is_hardware:
+                        return False
+                    
+                    if intent in ["volume_mute", "volume_unmute"]:
+                        return bool(features & 8)
+                    elif intent in ["volume_up", "volume_down"]:
+                        return bool((features & 1024) or (features & 4))
+                
                 return False
             except Exception as e:
-                log.warning(f"[Volume Optimization] Error checking sibling capabilities: {e}")
+                log.warning(f"[Volume Optimization] Error checking sibling: {e}")
                 return False
 
-        sibling = await find_group_sibling(entity_id, is_better_volume_handler)
+        sibling = await find_group_sibling(entity_id, find_appropriate_sibling)
         
         if sibling:
-            log.info(f"[Volume Optimization] Switching target {entity_id} -> {sibling} (Hardware Sibling)")
+            log.info(f"[Volume Optimization] Switching {entity_id} -> {sibling} for {intent}")
             return sibling
         
         return entity_id
     except Exception as e:
-        log.error(f"[Volume Optimization] Error in _refine_target_for_volume: {e}")
-        return entity_id  # Fallback to original entity on error
+        log.error(f"[Volume Optimization] Error: {e}")
+        return entity_id
     
 
 async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False, is_video: bool = False, allow_multiple: bool = False) -> list:
