@@ -158,7 +158,7 @@ async def _execute_transport_command(
                 if val > 1: volume_level = val / 100.0
                 else: volume_level = float(val)
             
-            return await handler.set_volume(entity_id, volume_level, user_creds=user_creds)
+            return await handler.volume_set(entity_id, volume_level, user_creds=user_creds)
             
         elif intent == "turn_on":
             return await handler.turn_on(entity_id, user_creds=user_creds)
