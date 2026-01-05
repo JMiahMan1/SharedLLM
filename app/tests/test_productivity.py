@@ -78,7 +78,7 @@ class ProductivityTests(BaseTest):
         # Check Off
         time.sleep(1)
         list_note = f"ListNote_{int(time.time())}"
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Create note {list_note} with content '- [ ] milk\n- [ ] eggs'"}]})
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Create note {list_note} with content '- [ ] milk\n- [ ] eggs'"}]}, "Note: Create List")
         time.sleep(1)
         msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Check off milk from {list_note}"}]}, "Note: Check Off")
         if msg and ("done" in msg.lower() or "checked" in msg.lower() or "marked" in msg.lower()):
@@ -89,5 +89,5 @@ class ProductivityTests(BaseTest):
         # Delete originals
         time.sleep(1)
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Delete the note {title}"}]}, "Note: Delete")
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Delete the note {list_note}"}]})
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Delete the note {list_note}"}]}, "Note: Delete List")
         self.log("Note: Delete", "PASS")

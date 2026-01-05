@@ -1,0 +1,62 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T14:42:45.425562"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "PASS",
+    "message": "Verified known limitation: Volume Set not supported on Roku",
+    "timestamp": "2026-01-03T14:42:54.540685"
+  },
+  {
+    "test": "Media: Volume Up",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Volume Up failed: Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble'}]",
+    "timestamp": "2026-01-03T14:43:02.852276"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Volume Mute failed: Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble'}]",
+    "timestamp": "2026-01-03T14:43:10.475706"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Device state invalid: unknown",
+    "timestamp": "2026-01-03T14:43:16.352351"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:43:21.722464"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:43:33.610204"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:43:45.044323"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "ERROR",
+    "message": "Req failed: None",
+    "timestamp": "2026-01-03T14:43:57.254904"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: cannot unpack non-iterable NoneType object",
+    "timestamp": "2026-01-03T14:43:57.255009"
+  }
+]

@@ -1,0 +1,298 @@
+Fetched 1000 log lines.
+--- ERROR CONTEXT ---
+2026-01-04 19:37:36,532 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 19:37:36,556 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 565
+2026-01-04 19:37:36,557 [INFO] EXEC HA: media_player.volume_set on media_player.office_tv | Data: {'volume_level': 0.5}
+2026-01-04 19:37:36,558 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 19:37:36,612 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/volume_set HTTP/1.1" 500 55
+2026-01-04 19:37:36,613 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}], type: <class 'list'>
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 19:37:36,558 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 19:37:36,612 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/volume_set HTTP/1.1" 500 55
+2026-01-04 19:37:36,613 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}], type: <class 'list'>
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+---------------------
+--- ERROR CONTEXT ---
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}], type: <class 'list'>
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+---------------------
+--- ERROR CONTEXT ---
+Server got itself in trouble
+2026-01-04 19:37:36,613 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}], type: <class 'list'>
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX CHECK] Checking query: 'stop the music on the office tv'
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 19:37:36,613 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}], type: <class 'list'>
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX CHECK] Checking query: 'stop the music on the office tv'
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 36 patterns
+---------------------
+--- ERROR CONTEXT ---
+
+Server got itself in trouble
+2026-01-04 19:37:36,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}], type: <class 'list'>
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX CHECK] Checking query: 'stop the music on the office tv'
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 36 patterns
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+---------------------
+--- ERROR CONTEXT ---
+Server got itself in trouble
+2026-01-04 19:37:36,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}], type: <class 'list'>
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX CHECK] Checking query: 'stop the music on the office tv'
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 36 patterns
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+on\b -> turn_on
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 19:37:36,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}], type: <class 'list'>
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX CHECK] Checking query: 'stop the music on the office tv'
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 36 patterns
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+on\b -> turn_on
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]
+2026-01-04 19:37:36,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.volume_set' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX CHECK] Checking query: 'stop the music on the office tv'
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 36 patterns
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+on\b -> turn_on
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(watch|view)\b -> watch_media
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(play|listen)\b -> play_media
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(turn|set|change)\s+(the\s+)?volume\s+(to|at)\b -> volume_set
+---------------------
+--- ERROR CONTEXT ---
+
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX CHECK] Checking query: 'stop the music on the office tv'
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 36 patterns
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+on\b -> turn_on
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(watch|view)\b -> watch_media
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(play|listen)\b -> play_media
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(turn|set|change)\s+(the\s+)?volume\s+(to|at)\b -> volume_set
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(volume)\s+(set|to|at)\b -> volume_set
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(turn|move)\s+(the\s+)?volume\s+up\b -> volume_up
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(turn|move)\s+(the\s+)?volume\s+down\b -> volume_down
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bvolume\s+up\b -> volume_up
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bvolume\s+down\b -> volume_down
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(mute|unmute|silence|quiet)\b -> volume_mute
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+up\s+(the\s+)?volume\b -> volume_up
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+down\s+(the\s+)?volume\b -> volume_down
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 19:37:36,614 [INFO] DEBUG: Checking Simple Intent 'volume_set' for silent mode. Results: 1
+2026-01-04 19:37:36,614 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=6272
+2026-01-04 19:37:36,616 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 19:37:37,608 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Final response to user (483 chars): Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use the TV's physical remote or ensure another device (e.g., a soundbar or streaming box) is managing t
+2026-01-04 19:37:50,207 [DEBUG] [RESPONSE] Returning to client: Adjusting the volume on the Office TV to 50 percent is currently unavailable due to a server error. The system encountered an internal issue (HTTP 500) when attempting the command. You may need to use
+2026-01-04 19:37:50,226 [INFO] [INTENT] get_intent called with query: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX START] apply_regex_override called with: 'Stop the music on the Office TV'
+2026-01-04 19:37:50,226 [INFO] [REGEX CHECK] Checking query: 'stop the music on the office tv'
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 36 patterns
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+on\b -> turn_on
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(watch|view)\b -> watch_media
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(play|listen)\b -> play_media
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(turn|set|change)\s+(the\s+)?volume\s+(to|at)\b -> volume_set
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(volume)\s+(set|to|at)\b -> volume_set
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(turn|move)\s+(the\s+)?volume\s+up\b -> volume_up
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(turn|move)\s+(the\s+)?volume\s+down\b -> volume_down
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bvolume\s+up\b -> volume_up
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bvolume\s+down\b -> volume_down
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(mute|unmute|silence|quiet)\b -> volume_mute
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+up\s+(the\s+)?volume\b -> volume_up
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+down\s+(the\s+)?volume\b -> volume_down
+2026-01-04 19:37:50,227 [INFO] [REGEX CHECK] Testing pattern: \b(stop)\b -> stop_media
+---------------------
