@@ -7,7 +7,7 @@ import json
 import logging
 import requests
 import asyncio
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from app.settings import run_blocking, HA_URL, GlobalResources
 
 log = logging.getLogger(__name__)
