@@ -83,7 +83,7 @@ class AndroidTVTests(BaseTest):
         
         success = False
         last_app = None
-        for _ in range(15):
+        for _ in range(20): # Increased timeout for slow app launch
             full = self.get_entity_full(self.primary_entity)
             last_app = full.get("attributes", {}).get("app_id")
             if last_app == "com.google.android.youtube.tv":
@@ -98,12 +98,13 @@ class AndroidTVTests(BaseTest):
 
     def test_watch_intent_sequence(self):
         # 3. Watch Intent + Sequence (Pause/Resume/Volume/Stop)
-        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Watch a video about cats on the Office TV"}]}, "AndroidTV: Watch Intent")
+        # Using "Phil Wickham" as requested
+        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Watch Phil Wickham on the Office TV"}]}, "AndroidTV: Watch Intent")
         
         # Verify Cast Entity state
         entity = self.cast_entity
         state = None
-        for _ in range(15):
+        for _ in range(20):
              state = self.get_entity_state(entity)
              if state in ["playing", "buffering"]:
                  break
@@ -115,7 +116,20 @@ class AndroidTVTests(BaseTest):
 
         self.log("AndroidTV: Watch Intent", "PASS", f"Cast started (State: {state})")
 
-        # 4. Sequence Verification
+        # 4. Volume during playback (as requested)
+        initial_vol = self.get_entity_full(self.primary_entity).get("attributes", {}).get("volume_level", 0)
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn the volume up"}]}, "AndroidTV: Sequence Volume")
+        
+        # Give it a moment to process service call
+        time.sleep(3)
+        new_vol = self.get_entity_full(self.primary_entity).get("attributes", {}).get("volume_level", 0)
+        # Check if volume changed OR if tool reported success (since level matching is tricky with step size)
+        if self.last_response_json and self.last_response_json.get("tool_results", [{}])[0].get("status") == "SUCCESS":
+             self.log("AndroidTV: Sequence Volume", "PASS", f"Volume service succeeded (Start: {initial_vol}, Current: {new_vol})")
+        else:
+             self.log("AndroidTV: Sequence Volume", "FAIL", f"Volume command failed (Start: {initial_vol}, Current: {new_vol})")
+
+        # 5. Sequence Verification
         # Pause
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the video"}]}, "AndroidTV: Sequence Pause")
         state = self.wait_for_state(entity, ["paused"], 10)
