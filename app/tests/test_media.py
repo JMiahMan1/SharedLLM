@@ -76,8 +76,15 @@ class MediaTests(BaseTest):
         # Let's skip strict state check for Pause if we just stopped it, OR run play first.
         # For robustness, we'll try to Play then Pause.
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Play Tim Timmons on Office TV"}]}, "Media: Play (Pre-Pause)")
-        time.sleep(2) # Buffer
+        time.sleep(5) # Buffer for title to appear
         
+        # Capture title before pause
+        import requests
+        from app.settings import HA_URL
+        headers = {"Authorization": f"Bearer {self.ha_token}", "Content-Type": "application/json"}
+        res = requests.get(f"{HA_URL}/api/states/{entity}", headers=headers)
+        title_before = res.json().get("attributes", {}).get("media_title")
+
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the show on the Office TV"}]}, "Media: Pause")
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
         if tr and tr[0].get("status") == "SUCCESS":
@@ -88,7 +95,7 @@ class MediaTests(BaseTest):
                      break
                  time.sleep(1)
              if state == "paused":
-                 self.log("Media: Pause", "PASS", f"State: {state}")
+                 self.log("Media: Pause", "PASS", f"State: {state} | Title: {title_before}")
              else:
                  self.log("Media: Pause", "WARN", f"State: {state}")
         else:
@@ -99,13 +106,20 @@ class MediaTests(BaseTest):
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
         if tr and (tr[0].get("status") == "SUCCESS" or "no active" in tr[0].get("message", "").lower()):
               state = None
+              title_after = None
               for _ in range(5):
-                 state = self.get_entity_state(entity)
+                 res = requests.get(f"{HA_URL}/api/states/{entity}", headers=headers)
+                 state = res.json().get("state")
+                 title_after = res.json().get("attributes", {}).get("media_title")
                  if state in ["playing", "buffering"]:
                      break
                  time.sleep(1)
+              
               if state in ["playing", "buffering"]:
-                  self.log("Media: Resume", "PASS", f"State: {state}")
+                  if title_before == title_after:
+                      self.log("Media: Resume", "PASS", f"State: {state} | Title Confirmed: {title_after}")
+                  else:
+                      self.log("Media: Resume", "WARN", f"State: {state} | Title Mismatch: {title_before} vs {title_after}")
               else:
                    self.log("Media: Resume", "WARN", f"State: {state}")
         else:
