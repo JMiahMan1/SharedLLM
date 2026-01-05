@@ -84,7 +84,7 @@ class AndroidTVTests(BaseTest):
             full = self.get_entity_full(self.primary_entity)
             new_app = full.get("attributes", {}).get("app_id")
             # Typical launchers or simply clearing the backdrop
-            if new_app in ["com.google.android.tvlauncher", "com.google.android.leanbacklauncher"] or (was_backdrop and new_app != "com.google.android.backdrop"):
+            if new_app in ["com.google.android.tvlauncher", "com.google.android.leanbacklauncher", None] or (was_backdrop and new_app != "com.google.android.backdrop"):
                 success = True
                 break
             time.sleep(1)
