@@ -755,15 +755,16 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
                 
                 # For volume_up/down/mute: Look for hardware TV that supports step/mute
                 # This INCLUDES Roku as a valid hardware target
+                # EXCLUDES 'remote' to avoid targeting non-media_player entities for volume
                 else:
-                    is_hardware = any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv", "remote"])
+                    is_hardware = any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv"])
                     if not is_hardware:
                         return False
                     
                     if intent in ["volume_mute", "volume_unmute"]:
                         return bool(features & 8)
                     elif intent in ["volume_up", "volume_down"]:
-                        return bool((features & 1024) or (features & 4))
+                        return bool(features & 1024)
                 
                 return False
             except Exception as e:

@@ -55,9 +55,13 @@ class IsolatedRunner:
         try:
             r = requests.get(f"{self.api_url}/health", timeout=5)
             if r.status_code != 200:
-                print(f"[WARN ] Health check returned {r.status_code}")
+                print(f"[FAIL ] Health check returned {r.status_code}")
+                return
+            else:
+                print(f"[OK   ] Health check passed")
         except Exception as e:
-            print(f"[WARN ] Health check failed: {e}")
+            print(f"[FAIL ] Health check failed: {e}")
+            return
 
         # Run Test
         test_class = TEST_MAP.get(self.test_name)
