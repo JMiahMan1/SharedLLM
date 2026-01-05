@@ -42,6 +42,7 @@ REGEX_INTENT_MAP = {
     r"\bturn\s+off\b": "turn_off",
     r"\bturn\s+on\b": "turn_on",  
     r"\b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify)": "open_app",
+    r"\b(play|watch|view).+(video|movie|show|film|clip|episode)": "watch_media",  # Video context
     r"\b(watch|view)\b": "watch_media",  # Video intent (default: cast device)
     r"\b(play|listen)\b": "play_media",          # Music intent (default: music assistant)
     # Volume Controls (Explicit before generic stop/play)
