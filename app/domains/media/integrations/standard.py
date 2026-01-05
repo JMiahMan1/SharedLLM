@@ -93,9 +93,6 @@ class StandardIntegration(MediaIntegration):
                      "service": "play_media"
                  }
 
-        if media_type == "video" and ("youtube.com" in cleaned_query or "youtu.be" in cleaned_query):
-            media_type = "youtube"
-            log.info(f"[StandardIntegration] Detected YouTube URL. Switched type to 'youtube' for Cast compatibility.")
 
         service_data = {
             "media_content_id": cleaned_query,
