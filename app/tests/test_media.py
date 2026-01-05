@@ -76,7 +76,7 @@ class MediaTests(BaseTest):
         # Let's skip strict state check for Pause if we just stopped it, OR run play first.
         # For robustness, we'll try to Play then Pause.
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Play Tim Timmons on Office TV"}]}, "Media: Play (Pre-Pause)")
-        time.sleep(5) # Buffer for title to appear
+        time.sleep(10) # Buffer for title to appear (increased from 5s)
         
         # Capture title before pause
         data_before = self.get_entity_full(entity)
