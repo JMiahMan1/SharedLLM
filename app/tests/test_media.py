@@ -79,11 +79,8 @@ class MediaTests(BaseTest):
         time.sleep(5) # Buffer for title to appear
         
         # Capture title before pause
-        import requests
-        from app.settings import HA_URL
-        headers = {"Authorization": f"Bearer {self.ha_token}", "Content-Type": "application/json"}
-        res = requests.get(f"{HA_URL}/api/states/{entity}", headers=headers)
-        title_before = res.json().get("attributes", {}).get("media_title")
+        data_before = self.get_entity_full(entity)
+        title_before = data_before.get("attributes", {}).get("media_title")
 
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the show on the Office TV"}]}, "Media: Pause")
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
@@ -108,9 +105,9 @@ class MediaTests(BaseTest):
               state = None
               title_after = None
               for _ in range(5):
-                 res = requests.get(f"{HA_URL}/api/states/{entity}", headers=headers)
-                 state = res.json().get("state")
-                 title_after = res.json().get("attributes", {}).get("media_title")
+                 data_after = self.get_entity_full(entity)
+                 state = data_after.get("state")
+                 title_after = data_after.get("attributes", {}).get("media_title")
                  if state in ["playing", "buffering"]:
                      break
                  time.sleep(1)
