@@ -28,7 +28,7 @@ APP_PACKAGES = {
 # Media intent definitions used by pipeline.py for routing
 MEDIA_INTENTS = [
     "turn_on", "turn_off", "toggle",
-    "stop_media", "play_media", "open_app",
+    "stop_media", "play_media", "open_app", "media_play", "pause_media",
     "media_next", "media_previous",
     "volume_up", "volume_down", "volume_set", "volume_mute",  # Volume controls
     "nav_up", "nav_down", "nav_left", "nav_right",
