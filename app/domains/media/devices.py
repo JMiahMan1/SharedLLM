@@ -168,28 +168,31 @@ async def smart_power_sync(entity_id: str, user_creds: Dict[str, Any]):
             integ = metadata.get("integration", "").lower()
             fname = metadata.get("friendly_name", "").lower()
             caps = metadata.get("capabilities", "").lower()
+            attrs_str = metadata.get("attributes", "{}").lower()
             
-            # Skip known pure-software wrappers
-            if integ in ["music_assistant", "spotify"]:
+            # Skip known pure-software wrappers / Queues
+            # Music Assistant often mirrors the TV name but is NOT the power control.
+            if integ in ["music_assistant", "spotify"] or "mass_player_type" in attrs_str or "music assistant" in fname:
                 return False
                 
-            # Signal 1: Native TV integrations
+            # Signal 1: Native TV integrations (Strongest Signal)
             if integ in ["androidtv", "webostv", "samsungtv", "braviatv", "roku", "esphome"]:
                 return True
                 
-            # Signal 2: Metadata/Class check
+            # Signal 2: Hardware Traits (Explicit Volume Steps or Remote Control)
             features = int(metadata.get("supported_features", 0))
             has_step = bool(features & 1024)
             has_set = bool(features & 4)
-            if (has_step and not has_set): # Classical Android TV hardware pattern
+            # Classical Android TV/Hardware hardware pattern or explicit remote
+            if (has_step and not has_set) or "remote_control" in caps: 
                 return True
             
-            attrs_str = metadata.get("attributes", "{}")
+            # Signal 3: device_class metadata
             if '"device_class": "tv"' in attrs_str:
                 return True
                 
-            # Signal 3: Name + Capability (The "Office TV Remote" case)
-            if "tv" in fname and ("remote_control" in caps or "turn_on" in caps):
+            # Signal 4: Name Fallback (Only if it looks like a controller)
+            if "tv" in fname and ("remote" in fname or "turn_on" in caps):
                 return True
                 
             return False
@@ -202,21 +205,28 @@ async def smart_power_sync(entity_id: str, user_creds: Dict[str, Any]):
         tv_id, tv_meta = res
         tv_state = await get_entity_state(tv_id, user_creds)
         
-        if tv_state in ["off", "standby", "unavailable", "unknown"]:
+        # [Decision] Power on if completely OFF
+        should_turn_on = tv_state in ["off", "standby", "unavailable", "unknown"]
+        
+        if should_turn_on:
             log.info(f"[SmartPowerSync] Powering ON physical TV sibling: {tv_id} (State: {tv_state})")
             await execute_ha_service("media_player", "turn_on", tv_id, user_creds, {}, None)
-            await asyncio.sleep(1.5) # Allow HA to register command
+            await asyncio.sleep(2) # Wait for command acceptance
             
-            # [Pulse] For Android TV, send a Home pulse to wake from deep sleep
-            if tv_meta.get("integration") == "androidtv" or "remote" in tv_id:
-                log.info(f"[SmartPowerSync] Sending wake-up pulse to {tv_id}")
-                try:
-                    await execute_ha_service("media_player", "play_media", tv_id, user_creds, {"media_content_id": "home", "media_content_type": "nav"}, None)
-                except: pass
+        # [Wake Pulse] ALWAYS pulse if it's an Android TV/Remote and not currently playing.
+        # This fixes the "Fake On" / Deep Sleep issue common with Android/Askey TVs.
+        is_atv = tv_meta.get("integration") == "androidtv" or "remote" in tv_id or "remote" in tv_meta.get("friendly_name", "").lower()
+        if is_atv and tv_state != "playing":
+            log.info(f"[SmartPowerSync] Waking up hardware {tv_id} via 'Home' pulse.")
+            try:
+                # Home pulse is the most reliable wake-up trigger for Android TV hardware.
+                await execute_ha_service("media_player", "play_media", tv_id, user_creds, {"media_content_id": "home", "media_content_type": "nav"}, None)
+            except: pass
             
-            await asyncio.sleep(2) # Give TV time to boot/init
+        if should_turn_on:
+            await asyncio.sleep(2) # Additional boot time if we just turned it on
         else:
-            log.info(f"[SmartPowerSync] Physical TV sibling {tv_id} is already {tv_state}")
+            log.info(f"[SmartPowerSync] Physical TV sibling {tv_id} is already {tv_state} (Pulsed if ATV)")
 
     except Exception as e:
         log.warning(f"[SmartPowerSync] Failed for {entity_id}: {e}")
