@@ -1,4 +1,5 @@
 import time
+from .base import BaseTest
 
 class AndroidTVTests(BaseTest):
     def __init__(self, api_url, headers=None, logger=None):
