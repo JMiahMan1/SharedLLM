@@ -472,13 +472,9 @@ async def handle_media_command(
         if domain in ["script", "scene", "automation", "switch", "light", "input_boolean"]:
              return [await _execute_transport_command(intent, entity_id, domain, user_creds, integration, redis_client, query)]
 
-    # [Patch] Force Roku integration if entity appears to be a Roku but was resolved as generic HA
-    # This ensures specialized handlers (like stop_media -> Home key) are used.
-    # Added 'tv' to this check to handle generic TV integrations that mask Roku.
-    if entity_id and (integration in ["home_assistant", "unknown", "tv", "remote"]) and "roku" in entity_id.lower():
-        integration = "roku"
-        log.info(f"[Context] Forced integration 'roku' for {entity_id} based on name override")
-
+    # [Patch Removed] Roku integration is now handled via Metadata Inference above.
+    # This prevents hardcoding behavior based on entity ID strings.
+    
     if not entity_id:
          return [{"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}]
 
