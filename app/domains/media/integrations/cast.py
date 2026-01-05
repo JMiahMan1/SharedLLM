@@ -98,68 +98,48 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         volume_entity = await _refine_target_for_volume(entity_id, "volume_set", kwargs.get("redis_client"))
         await self._ensure_volume_safe(volume_entity, user_creds, kwargs.get("redis_client"))
 
-        # [Auto-Search for Cast]
-        # We must resolve the URL *here* so we can check if it's YouTube.
-        # Otherwise StandardIntegration does it too late.
-        if media_type == "video" and not query.startswith(("http", "www", "spotify", "app")):
-             # Use the search logic from base class (we can call it directly)
-             # Note: We need to clean query locally first or rely on _search_video_url internal behavior?
-             # _search_video_url takes raw query? checking standard.py... 
-             # standard.py calls _clean_query inside play_media, but _search_video_url takes 'search_query'.
-             # Let's clean it here to match behavior.
-             cleaned = self._clean_query(query, media_type, entity_id, kwargs.get("friendly_name"))
-             found_url = await self._search_video_url(cleaned)
-             if found_url:
-                 query = found_url # effective update
-                 log.info(f"[CastIntegration] Pre-resolved video query to: {query}")
-        
-        # [YouTube Handling for Cast]
-        # Chromecast typically cannot play raw YouTube URLs via 'video' type.
-        # We must invoke the YouTube App (AppID: 233637DE) with the Video ID.
-        if media_type == "video" and ("youtube.com" in query or "youtu.be" in query):
-             video_id = self._extract_youtube_id(query)
-             
-             # If no video ID found but it's a playlist, resolve it
-             if not video_id and "list=" in query:
-                 log.info("[CastIntegration] Detected playlist, resolving first video...")
-                 video_id = await self._resolve_playlist_to_video(query)
-                 
-             if video_id:
-                 import json
-                 
-                 # Toggle Strategy: Set True to use yt-dlp (Bypass), False to use App (Login)
-                 # True: Direct URL casting (no app launch, but may have extraction issues)
-                 # False: YouTube App launch (stable but shows login prompts)
-                 BYPASS_YOUTUBE_APP = True
-                 
-                 # [Strategy 1: Direct Stream Extraction (Bypass App/Login)]
-                 if BYPASS_YOUTUBE_APP:
-                     # Download video locally and serve via HTTP for stable Cast streaming
-                     local_url = await self._download_and_serve_video(query)
-                     if local_url:
-                         log.info(f"[CastIntegration] Video ready for streaming at: {local_url}")
-                         return await execute_ha_service(
-                             "media_player", 
-                             "play_media", 
-                             entity_id, 
-                             user_creds, 
-                             {
-                                 "media_content_id": local_url,
-                                 "media_content_type": "video/mp4" 
-                             }, 
-                             kwargs.get("redis_client")
-                         )
+         # [Auto-Search for Cast]
+         # We must resolve the URL *here* so we can check if it's YouTube.
+         # Otherwise StandardIntegration does it too late.
+         if media_type == "video" and not query.startswith(("http", "www", "spotify", "app")):
+              # Extract spoken device name for cleaning
+              alias = kwargs.get("device_name") or kwargs.get("friendly_name")
+              cleaned = self._clean_query(query, media_type, entity_id, alias)
+              found_url = await self._search_video_url(cleaned)
+              if found_url:
+                  query = found_url # effective update
+                  log.info(f"[CastIntegration] Pre-resolved video query to: {query}")
+         
+         # [YouTube Handling for Cast] - DIRECT STREAM ONLY
+         # User Requirement: No YouTube App due to auth issues.
+         if media_type == "video" and ("youtube.com" in query or "youtu.be" in query):
+              log.info(f"[CastIntegration] YouTube detected. Intercepting for local extraction & stream.")
+              
+              # Download video locally and serve via HTTP for stable Cast streaming
+              # This bypasses the YouTube App and its auth requirements.
+              local_url = await self._download_and_serve_video(query)
+              if local_url:
+                  log.info(f"[CastIntegration] Video ready for streaming at: {local_url}")
+                  return await execute_ha_service(
+                      "media_player", 
+                      "play_media", 
+                      entity_id, 
+                      user_creds, 
+                      {
+                          "media_content_id": local_url,
+                          "media_content_type": "video/mp4" 
+                      }, 
+                      kwargs.get("redis_client")
+                  )
+              else:
+                  return {
+                      "status": "FAILURE", 
+                      "message": "Failed to extract/stream YouTube video for casting."
+                  }
 
-                     return {
-                             "status": "FAILURE", 
-                             "message": "Failed to download video for casting. YouTube app fallback is disabled."
-                         }
-
-        # Proceed with Standard Playback
-        # If we updated 'query' to a URL, super() will skip search and just play it.
-        return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
-
-        return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
+         # Proceed with Standard Playback
+         # If we updated 'query' to a URL, super() will skip search and just play it.
+         return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
