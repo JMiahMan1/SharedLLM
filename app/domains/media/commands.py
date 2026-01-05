@@ -166,7 +166,7 @@ async def _execute_transport_command(
         elif intent == "turn_off":
             return await handler.turn_off(entity_id, user_creds=user_creds)
             
-        elif intent == "nav_home":
+        elif intent == "nav_home" or intent == "navhome":
             return await handler.nav_home(entity_id, user_creds=user_creds)
             
         else:
@@ -295,7 +295,7 @@ async def handle_media_command(
     # Detect if this is a music or video request based on query analysis
     # This helps in smart resolution and integration routing
     is_music_request = "music" in query.lower() or "listen" in query.lower() or "song" in query.lower()
-    is_video_request = "watch" in query.lower() or "video" in query.lower() or "movie" in query.lower() or "show" in query.lower()
+    is_video_request = any(x in query.lower() for x in ["watch", "video", "movie", "show", "youtube", "netflix", "disney", "hulu", "plex"]) or intent in ["open_app", "watch_media", "view_content"]
 
     # Special handling for "play x" without "on y"
     # If parameters has no device_name BUT query implies a specific media type
