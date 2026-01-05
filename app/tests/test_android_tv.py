@@ -25,7 +25,7 @@ class AndroidTVTests(BaseTest):
         """Helper to fail fast if a condition is not met."""
         if not condition:
             self.log(label, "FAIL", fail_msg)
-            raise Exception(f"[{label}] {message}")
+            raise Exception(f"[{label}] {fail_msg}")
         self.log(label, "PASS", success_msg)
 
     def capture_initial_state(self):
