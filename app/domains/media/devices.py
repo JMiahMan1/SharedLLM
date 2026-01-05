@@ -680,6 +680,40 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
     return 5
 
 
+async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=None) -> str:
+    """
+    If the target is a Cast/Software player, checks if a Hardware Sibling (TV/Remote)
+    should handle the volume command instead.
+    """
+    if not intent.startswith("volume_"):
+        return entity_id
+
+    # Check capabilities of current entity
+    # We only redirect if current is arguably "Software" (Cast, DLNA, MA) and Sibling is "Hardware"
+    # Or if we just broadly prefer Hardware for volume.
+    
+    # 1. Identify current integration type
+    # We need metadata. Since we just have entity_id here, we might need to fetch it or rely on valid sibling lookup.
+    # Simple heuristic: If it has sibling that IS hardware, switch.
+    
+    def is_better_volume_handler(meta: dict) -> bool:
+        """Returns True if this sibling metadata represents a better volume handler (Hardware TV)."""
+        integ = meta.get("integration", "").lower()
+        if any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv", "remote"]):
+            # Check if it actually supports volume?
+            # Ideally yes, but 'androidtv' usually implies it does.
+            return True
+        return False
+
+    sibling = await find_group_sibling(entity_id, is_better_volume_handler)
+    
+    if sibling:
+        log.info(f"[Volume Optimization] Switching target {entity_id} -> {sibling} (Hardware Sibling)")
+        return sibling
+    
+    return entity_id
+    
+
 async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_music: bool = False, is_video: bool = False, allow_multiple: bool = False) -> list:
     """
     Resolves the best entity (or entities) based on query and intent.
@@ -782,6 +816,15 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 best = exact_matches[0]
                 log.info(f"Using prioritized exact name match for '{query_name}': {best} (Entity: {best[0]}, Score: {_helper_score(best)})")
                 
+                # [Volume Optimization] Check for better hardware sibling
+                if intent.startswith("volume_"):
+                    refined_id = await _refine_target_for_volume(best[0], intent)
+                    if refined_id != best[0]:
+                         # Look for the refined entity in docs to get full metadata tuple
+                         # Or just return simple tuple if strictly internal usage
+                         # Better to search docs for metadata continuity
+                         return await smart_resolve_entity(refined_id, intent, ha_collection, is_music, is_video, allow_multiple)
+
                 return [best] if allow_multiple else best
 
             # Return best prefix match
