@@ -113,11 +113,11 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                      }
                      # Explicitly stop the target first to clear any MA session overlay
                      try:
-                         # 1. Stop the Android TV app (Source Entity) to ensure visual takeover
+                         # 1. Trigger HOME on Android TV (Source) to ensure visual takeover
                          if entity_id != target_entity:
+                              log.info(f"[AndroidTV] Calling nav_home on source {entity_id}")
                               try:
-                                  await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, redis_client)
-                                  await asyncio.sleep(1)
+                                  await self.nav_home(entity_id, user_creds, **kwargs)
                               except Exception: pass
 
                          # 2. Stop the Cast entity
