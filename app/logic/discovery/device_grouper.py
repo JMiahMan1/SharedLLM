@@ -4,20 +4,24 @@ import difflib
 from collections import defaultdict
 from app.settings import log
 
+# Suffixes that indicate a 'wrapper' or 'sub-component' of a physical device.
+# We clean these to find the 'base' device name.
 SUFFIX_CLEANERS = [
-    r"\s+remote", r"\s+tv", r"\s+chrome", r"\s+chromecast", r"\s+cast", 
-    r"\s+speaker", r"\s+media\s+player", r"\s+assistant", r"\s+device"
+    r"\s+remote", r"\s+chrome", r"\s+chromecast", r"\s+cast", 
+    r"\s+media\s+player", r"\s+assistant", r"\s+device"
 ]
+# Note: "TV" and "Speaker" are REMOVED from generic cleaners to prevent
+# "Office TV" and "Office Speaker" from merging into "Office".
 
 def normalize_name(name: str) -> str:
     """
     Reduces names to their 'base' form for grouping.
-    e.g. "Office TV Chrome" -> "office" (or "office tv" if strict)
+    e.g. "Office TV Chrome" -> "office tv"
     """
     n = name.lower().strip()
     # Remove parens
     n = re.sub(r"\(.*?\)", "", n)
-    # Remove common suffixes
+    # Remove common 'wrapper' suffixes
     for suffix in SUFFIX_CLEANERS:
         n = re.sub(suffix, "", n)
     return n.strip()
@@ -49,27 +53,32 @@ def group_entities(entities: list, device_map: dict = None) -> dict:
         # Determine Group Key (Unification Strategy)
         group_key = None
         
-        clean_name = normalize_name(attrs.get("friendly_name", eid))
+        friendly_name = attrs.get("friendly_name", eid)
+        clean_name = normalize_name(friendly_name)
         if not clean_name: clean_name = "unknown"
         
-        # Strategy 0: Super Unification (Man + Mod + Name Match)
-        # This merges distinct HA Devices (e.g. Cast vs Remote) that share
-        # the same hardware signature and same logical name (e.g. "Office").
-        if man and mod and clean_name != "unknown":
-             # "askey:sti6140d360:office"
-             group_key = f"{man}:{mod}:{clean_name}".lower()
+        # Strategy 1: Hardware Identity (Manufacturer + Model + Optional Name)
+        # This is the STRONGEST signal. e.g. "Askey + STI6140D360 + Office"
+        # If Man/Mod matches, it's likely the same physical board/device.
+        if man and mod:
+             # Include clean_name to distinguish multiple TVs of same model (e.g. "Living Room TV" vs "Bed TV")
+             group_key = f"hw:{man}:{mod}:{clean_name}".lower()
         
-        # Strategy 1: Device ID (Strong - native HA grouping)
+        # Strategy 2: Native HA Device ID (Strongest Native link)
         elif did:
-            group_key = f"device_id:{did}"
+            group_key = f"did:{did}"
             
-        # Strategy 2: Man/Model Only (Generic hardware grouping?)
-        # Risky without name if user has multiple devices of same model.
-        # Fallback to Name.
-        
-        # Strategy 3: Name Normalization (Legacy/Fallback)
-        if not group_key:
-            group_key = f"name:{clean_name}"
+        # Strategy 3: Name-Based Sibling Relationship
+        # Only as a last resort, and we check if it looks like a wrapper (contains "Chrome", "Remote", etc.)
+        # If it's JUST 'Office', we DON'T merge.
+        else:
+            is_wrapper = any(s.strip() in friendly_name.lower() for s in SUFFIX_CLEANERS)
+            if is_wrapper:
+                 group_key = f"name:{clean_name}"
+            else:
+                 # It's a distinct device (e.g. "Office Jarvis") without hardware IDs or wrapper suffixes.
+                 # Give it a unique group to prevent room-wide merge.
+                 group_key = f"entity:{eid}"
         
         # Add to Group
         # Infer Integration (Tentative - updated properly in refresh_devices, but good for local context)
