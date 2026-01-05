@@ -65,15 +65,32 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                  
                  if local_url:
                      log.info(f"[AndroidTV] Video ready for streaming at: {local_url}")
+                     
+                     # [Cast Delegation]
+                     # Android TV entities often struggle with raw URL playback via ADB/HA.
+                     # We should delegate this to the Cast sibling (e.g. _chrome) if available.
+                     target_entity = entity_id
+                     try:
+                         from app.domains.media.devices import find_group_sibling
+                         def is_cast(meta):
+                             return "cast" in meta.get("integration", "").lower()
+                         
+                         sibling = await find_group_sibling(entity_id, is_cast)
+                         if sibling:
+                             log.info(f"[AndroidTV] Delegating video playback to Cast sibling: {sibling}")
+                             target_entity = sibling
+                     except Exception as e:
+                         log.warning(f"[AndroidTV] Failed to find cast sibling: {e}")
+
                      payload = {
                          "media_content_id": local_url,
                          "media_content_type": "video/mp4"  # Use specific mime type for better compatibility
                      }
-                     log.info(f"[AndroidTV] Sending payload: {payload} to {entity_id}")
+                     log.info(f"[AndroidTV] Sending payload: {payload} to {target_entity}")
                      return await execute_ha_service(
                          "media_player", 
                          "play_media", 
-                         entity_id, 
+                         target_entity, 
                          user_creds, 
                          payload, 
                          redis_client
