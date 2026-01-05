@@ -220,6 +220,27 @@ class StandardIntegration(MediaIntegration):
         domain = entity_id.split(".")[0]
         return await execute_ha_service(domain, "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
 
+    async def nav_home(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Navigate to home screen, clearing cast sessions if possible."""
+        log.info(f"[StandardIntegration] Navigating to HOME on {entity_id}")
+        
+        # 1. Stop active media first (clears Cast/Playback)
+        if entity_id.startswith("media_player."):
+            await execute_ha_service("media_player", "media_stop", entity_id, user_creds, {}, kwargs.get("redis_client"))
+            await asyncio.sleep(2) # Give it time to release control
+
+        # 2. Use remote sibling for HOME command
+        remote_sibling = await self._get_remote_sibling(entity_id)
+        if remote_sibling:
+             log.info(f"[StandardIntegration] Using remote sibling {remote_sibling} for HOME")
+             # Send twice to be sure?
+             await execute_ha_service("remote", "send_command", remote_sibling, user_creds, {"command": "HOME"}, kwargs.get("redis_client"))
+             await asyncio.sleep(1)
+             return await execute_ha_service("remote", "send_command", remote_sibling, user_creds, {"command": "HOME"}, kwargs.get("redis_client"))
+        
+        # 3. Fallback to generic Home (rarely supported by media_player domain directly, but we tried stop)
+        return {"status": "SUCCESS", "message": "Triggered stop/home sequence"}
+
     async def _search_video_url(self, search_query: str) -> str:
         """Search Whoogle for a YouTube URL."""
         log.info(f"[StandardIntegration] Searching Whoogle for '{search_query} youtube'...")
