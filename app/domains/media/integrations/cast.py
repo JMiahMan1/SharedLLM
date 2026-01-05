@@ -139,7 +139,7 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
 
         # Proceed with Standard Playback
         # If we updated 'query' to a URL, super() will skip search and just play it.
-         return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
+        return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
