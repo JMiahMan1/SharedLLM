@@ -64,7 +64,7 @@ class StandardIntegration(MediaIntegration):
         
         # AUTO POWER-ON: Common sense - if device is off, turn it on before playing
         try:
-            from app.domains.shared import get_entity_state
+            from app.domains.media.devices import get_entity_state
             state = await get_entity_state(entity_id, user_creds)
             
             if state in ["off", "standby", "idle"]:
