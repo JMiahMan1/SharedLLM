@@ -468,7 +468,9 @@ async def handle_media_command(
     
     # [Volume Optimization] Refine entity target for volume commands
     # This ensures the right device handles each volume operation regardless of resolution path
+    log.info(f"[VOLUME CHECK] intent={intent}, entity_id={entity_id}")
     if intent.startswith("volume_"):
+        log.info(f"[VOLUME CHECK] Calling _refine_target_for_volume")
         from app.domains.media.devices import _refine_target_for_volume
         refined_entity = await _refine_target_for_volume(entity_id, intent, redis_client)
         if refined_entity != entity_id:
