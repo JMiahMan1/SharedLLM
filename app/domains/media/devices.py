@@ -686,8 +686,10 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
     - For volume_up/down/mute: Prefer Android TV (hardware controls)
     - For volume_set: Prefer Cast (percentage support)
     """
+    log.info(f"[Volume Optimization] ENTRY: entity={entity_id}, intent={intent}")
     try:
         if not intent.startswith("volume_"):
+            log.info(f"[Volume Optimization] Not a volume intent, returning {entity_id}")
             return entity_id
 
         # Check current entity capabilities
@@ -704,6 +706,7 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
                     meta = docs["metadatas"][0]
                     current_integration = meta.get("integration", "").lower()
                     current_caps = int(meta.get("supported_features", 0))
+                    log.info(f"[Volume Optimization] Current entity: integration={current_integration}, caps={current_caps}")
         except Exception as e:
             log.warning(f"[Volume Optimization] Could not get current entity caps: {e}")
 
@@ -712,11 +715,17 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
             try:
                 integ = meta.get("integration", "").lower()
                 features = int(meta.get("supported_features", 0))
+                sibling_id = meta.get("entity_id", "unknown")
+                
+                log.info(f"[Volume Optimization] Checking sibling {sibling_id}: integration={integ}, features={features}")
                 
                 # For volume_set: Look for Cast/software that supports bit 4
                 if intent == "volume_set":
                     is_cast = any(x in integ for x in ["cast", "google_cast", "chromecast", "music_assistant"])
-                    return is_cast and bool(features & 4)
+                    supports_set = bool(features & 4)
+                    result = is_cast and supports_set
+                    log.info(f"[Volume Optimization] volume_set check: is_cast={is_cast}, supports_set={supports_set}, result={result}")
+                    return result
                 
                 # For volume_up/down/mute: Look for hardware TV that supports step/mute
                 else:
@@ -737,12 +746,14 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
         sibling = await find_group_sibling(entity_id, find_appropriate_sibling)
         
         if sibling:
-            log.info(f"[Volume Optimization] Switching {entity_id} -> {sibling} for {intent}")
+            log.info(f"[Volume Optimization] SUCCESS: Switching {entity_id} -> {sibling} for {intent}")
             return sibling
+        else:
+            log.info(f"[Volume Optimization] No appropriate sibling found, keeping {entity_id}")
         
         return entity_id
     except Exception as e:
-        log.error(f"[Volume Optimization] Error: {e}")
+        log.error(f"[Volume Optimization] Error: {e}", exc_info=True)
         return entity_id
     
 
