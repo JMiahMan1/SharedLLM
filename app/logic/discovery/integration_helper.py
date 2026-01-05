@@ -54,7 +54,7 @@ def infer_integration(entity_id: str, attributes: dict, manufacturer: str = None
         has_step = bool(features & 1024)
         has_set = bool(features & 4)
         
-        if has_step and not has_set and device_class == "tv":
+        if has_step and not has_set:
             return "androidtv"
             
         # Priority 1: Check for Roku BEFORE Cast (Roku devices have app_id but are native integrations)
