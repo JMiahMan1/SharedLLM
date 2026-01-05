@@ -141,7 +141,7 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
         
         log.info(f"[AndroidTV] Launching app {package} on {entity_id}")
         
-        # Use play_media with "app" type for better compatibility
+        # Try standard HA method first
         res = await execute_ha_service(
              "media_player", 
              "play_media", 
@@ -154,18 +154,18 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
              kwargs.get("redis_client")
         )
 
-        # [Fallback] If play_media might not work (some TVs ignore it for apps), try direct ADB command
-        # using the 'monkey' trick which works on almost all Android devices to launch a package
-        if res.get("status") != "FAILURE": # Even if success, it might have failed efficiently silently
-             log.info(f"[AndroidTV] Sending ADB backup command to ensure launch of {package}")
-             await asyncio.sleep(2)
-             await execute_ha_service(
-                 "androidtv",
-                 "adb_command",
-                 entity_id,
-                 user_creds,
-                 {"command": f"monkey -p {package} -c android.intent.category.LAUNCHER 1"},
-                 kwargs.get("redis_client")
-             )
+        # [Double Tap] Always send ADB command as backup for Android TV
+        # reliability. 'play_media' intent is often ignored if device is sleepy.
+        # Wait a moment for the first command to potentially wake it up.
+        await asyncio.sleep(2)
         
+        log.info(f"[AndroidTV] Sending Backup ADB Launch Command for {package}")
+        try:
+             # monkey -p <package> -c android.intent.category.LAUNCHER 1
+             domain = entity_id.split(".")[0]
+             cmd = f"monkey -p {package} -c android.intent.category.LAUNCHER 1"
+             await execute_ha_service(domain, "adb_command", entity_id, user_creds, {"command": cmd}, kwargs.get("redis_client"))
+        except Exception as e:
+             log.warning(f"[AndroidTV] ADB fallback failed: {e}")
+
         return res
