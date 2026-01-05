@@ -70,7 +70,9 @@ REGEX_INTENT_MAP = {
     r"\b(scroll|move|go)\s+left\b": "nav_left",
     r"\b(scroll|move|go)\s+right\b": "nav_right",
     r"\bgo back\b|\bback\b": "nav_back",
-    r"\bgo\s+home\b|^home$": "nav_home",
+    r"\b(go|back|return)\s+(to\s+)?(the\s+)?home\b": "nav_home",
+    r"\bhome\s+screen\b": "nav_home",
+    r"^home$": "nav_home",
     r"\bselect\b|\benter\b|\bok\b": "nav_enter",
     # Color control: matches "set/change/make X color" OR "turn X to color"
     r"\b(set|change|make).+(color|colour|red|blue|green|purple|orange|yellow|pink|white|warm|cool)": "set_color",
