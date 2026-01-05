@@ -422,6 +422,10 @@ async def handle_media_command(
                         if "androidtv" in platform or "androidtv" in found_int or "shield" in model:
                              log.info(f"[Integration Inference] Detected Android TV via metadata. Forcing 'androidtv'.")
                              integration = "androidtv"
+                        # Explicit platform check for Roku
+                        elif "roku" in platform or "roku" in found_int or "roku" in manufacturer:
+                             log.info(f"[Integration Inference] Detected Roku via metadata. Forcing 'roku'.")
+                             integration = "roku"
 
                         # If the resolved entity has a generic integration (remote, switch, etc.),
                         # look for a sibling in the same device group to find the "true" main integration.
@@ -429,6 +433,7 @@ async def handle_media_command(
                         
                         inferred_integration = found_int
                         if integration == "androidtv": inferred_integration = "androidtv"
+                        if integration == "roku": inferred_integration = "roku"
                         
                         if deferred_check := (integration in ["home_assistant", "remote", "unknown", "tv"] or found_int in ["remote", "tv"]):
                              log.info(f"[Integration Inference] Entity {entity_id} has generic integration '{found_int}'. Checking group siblings...")
