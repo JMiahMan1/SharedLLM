@@ -144,7 +144,7 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
         # 1. Try launching by Package ID (Standard Android TV Remote method)
         # Type: app, ID: com.package.name
         log.info(f"[AndroidTV] Attempting Launch via Package ID: {package}")
-        res = await execute_ha_service(
+        await execute_ha_service(
              "media_player", 
              "play_media", 
              entity_id, 
@@ -156,44 +156,22 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
              kwargs.get("redis_client")
         )
 
-        # 2. [Deep Link Fallback] 
-        # If the integration is 'androidtv_remote', it supports deep links via 'url' type.
-        # This is often more reliable than 'app' type on some Google TV versions.
-        # We try this blindly after a short delay to ensure the command takes effect.
-        await asyncio.sleep(2)
-        
-        deep_link = None
-        if "youtube" in package:
-            deep_link = "vnd.youtube.launch://"
-        elif "netflix" in package:
-            deep_link = "netflix://"
-        elif "spotify" in package:
-            deep_link = "spotify://"
-        elif "twitch" in package:
-            deep_link = "twitch://home"
-        
-        if deep_link:
-             log.info(f"[AndroidTV] Sending Deep Link Fallback: {deep_link}")
-             await execute_ha_service(
-                 "media_player",
-                 "play_media",
-                 entity_id,
-                 user_creds,
-                 {"media_content_id": deep_link, "media_content_type": "url"},
-                 kwargs.get("redis_client")
-             )
-        
-        # 3. [ADB Fallback] (Only if ADB service exists)
-        # Try ADB as a last resort "Nuclear Option"
-        try:
-             domain = entity_id.split(".")[0]
-             # Only try if we suspect it might be an adb-capable entity
-             cmd = f"monkey -p {package} -c android.intent.category.LAUNCHER 1"
-             # We use a broad try/except because 'adb_command' might not exist for androidtv_remote
-             await execute_ha_service("androidtv", "adb_command", entity_id, user_creds, {"command": cmd}, kwargs.get("redis_client"))
-             log.info(f"[AndroidTV] Sent ADB fallback command")
-        except Exception:
-             # Likely not an ADB entity or service missing. Ignore.
-             pass
+        # 2. [Robustness Retry]
+        # Android TV Remote can be flaky if the device is waking up.
+        # Send the "Launch App" command AGAIN after a short delay to ensure it registers.
+        # This is strictly complying with "Just launch the app" (no links).
+        await asyncio.sleep(3)
+        log.info(f"[AndroidTV] Resending Launch Command for reliability: {package}")
+        res = await execute_ha_service(
+             "media_player", 
+             "play_media", 
+             entity_id, 
+             user_creds, 
+             {
+                 "media_content_id": package, 
+                 "media_content_type": "app"
+             }, 
+             kwargs.get("redis_client")
+        )
 
         return res
