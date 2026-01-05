@@ -95,6 +95,20 @@ class MediaIntegration(ABC):
         
         if not package:
             return {"status": "FAILURE", "message": f"Could not determine app from: {query}"}
+        
+        # Ensure device is ON before selecting source (important for Android TV)
+        try:
+             # Just like play_media, we might need to wake it up
+             # We can't call self.turn_on directly if it's not implemented, but we can try service call
+             # or rely on subclass implementation if available.
+             # Safest bet: call turn_on from this class or let HA handle it.
+             # But base turn_on raises NotImplementedError.
+             # Let's try sending "turn_on" service first.
+             domain = entity_id.split(".")[0]
+             await execute_ha_service(domain, "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+             await asyncio.sleep(2) # Wait for wake
+        except Exception as e:
+             log.warning(f"[open_app] Auto-turn-on failed: {e}")
 
         return await execute_ha_service("media_player", "select_source", entity_id, user_creds, {"source": package}, kwargs.get("redis_client"))
 
