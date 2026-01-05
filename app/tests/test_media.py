@@ -10,7 +10,11 @@ class MediaTests(BaseTest):
         self.test_library_browsing()
 
     def test_volume(self):
+        # 0. Initial set to safe level (40%)
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Set volume to 40% on the Office TV"}]}, "Media: Volume Init")
+        
         # 1. Volume Up/Down/Mute
+        # Volume Up from 40% should be around 50%, safe within 65% limit
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn the volume up on the Office TV"}]}, "Media: Volume Up")
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
         if tr and tr[0].get("status") == "SUCCESS":
@@ -25,6 +29,7 @@ class MediaTests(BaseTest):
         else:
              self.log("Media: Volume Mute", "FAIL", f"TR: {tr}")
 
+        # Set to 50% (between 20% and 65%)
         msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Set volume to 50% on the Office TV"}]}, "Media: Volume Set")
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
         if tr and tr[0].get("status") == "SUCCESS":
