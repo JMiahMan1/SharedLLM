@@ -734,7 +734,7 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
                 if current_docs and current_docs.get("metadatas"):
                     meta = current_docs["metadatas"][0]
                     group_id = meta.get("group_id")
-                    current_state = meta.get("state", "unknown")
+                    current_state = meta.get("state", "off")
                     
                     if group_id and group_id != "unknown":
                         # 2. Get all members
@@ -751,32 +751,23 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
                                 eid = m.get("entity_id")
                                 state = m.get("state", "off")
                                 
-                                attrs_json = m.get("attributes", "{}")
-                                try:
-                                    if isinstance(attrs_json, str):
-                                        attrs = json.loads(attrs_json)
-                                        feats = int(attrs.get("supported_features", 0))
-                                    else:
-                                        feats = 0
-                                except:
-                                    feats = 0
+                                # Use promoted metadata
+                                feats = int(m.get("supported_features", 0))
+                                
+                                is_cast = any(x in integ for x in ["cast", "google_cast", "chromecast", "music_assistant"])
+                                is_hardware = any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv"])
                                 
                                 # Compatibility Check
-                                msg = ""
                                 compatible = False
                                 if intent == "volume_set":
-                                    is_cast = any(x in integ for x in ["cast", "google_cast", "chromecast", "music_assistant"])
-                                    supports_set = bool(feats & 4)
-                                    compatible = is_cast and supports_set
-                                    msg = f"is_cast={is_cast}, supports_set={supports_set}"
+                                    # volume_set REQUIRES bits (usually bit 4)
+                                    compatible = bool(feats & 4)
                                 else:
-                                    is_hardware = any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv"])
-                                    if is_hardware:
-                                        if intent in ["volume_mute", "volume_unmute"]:
-                                            compatible = bool(feats & 8)
-                                        elif intent in ["volume_up", "volume_down"]:
-                                            compatible = bool(feats & 1024)
-                                    msg = f"is_hardware={is_hardware}"
+                                    # volume_up/down/mute
+                                    if intent in ["volume_mute", "volume_unmute"]:
+                                        compatible = bool(feats & 8)
+                                    elif intent in ["volume_up", "volume_down"]:
+                                        compatible = bool(feats & 1024)
                                 
                                 if compatible:
                                     # Score based on state (Playing > Paused > On > Off)
@@ -786,42 +777,38 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
                                     elif state == "on" or state == "buffering": state_score = 50
                                     elif state in ["idle", "standby"]: state_score = 10
                                     
-                                    # Integration bonus (keep hardware pref for step, soft pref for set)
-                                    integ_bonus = 0
-                                    if intent == "volume_set" and "music_assistant" in integ:
-                                        integ_bonus = 5 # Prefer the MA wrapper if it's there
+                                    # Preference Bonus
+                                    pref_bonus = 0
+                                    if intent == "volume_set":
+                                        if is_cast: pref_bonus = 20 # Prefer Cast for Set
+                                        if "music_assistant" in integ: pref_bonus += 10 # Extra pref for MA
+                                    else:
+                                        if is_hardware: pref_bonus = 20 # Prefer Hardware for Steps
                                     
-                                    total_score = state_score + integ_bonus
+                                    total_score = state_score + pref_bonus
                                     candidates.append((eid, total_score, state))
-                                    log.info(f"[Volume Optimization] Found candidate {eid}: score={total_score} ({state}), {msg}")
+                                    log.info(f"[Volume Optimization] Found candidate {eid}: score={total_score} ({state}), integ={integ}")
 
         except Exception as e:
             log.warning(f"[Volume Optimization] Error collecting siblings: {e}")
 
         # [Final Decision]
         if candidates:
+            # Add self to candidates to evaluate against siblings
+            # We need to get current entity's integration info again
+            self_score = 0
+            # Rough estimate of self score
+            if current_state == "playing": self_score = 100
+            elif current_state == "paused": self_score = 80
+            elif current_state == "on": self_score = 50
+            
+            candidates.append((entity_id, self_score, current_state))
+            
             # Sort by score descending
             candidates.sort(key=lambda x: x[1], reverse=True)
             best_eid, best_score, best_state = candidates[0]
             
-            # 1. State check logic
-            # If current target is 'playing' or 'paused', ONLY switch if sibling is ALSO active OR much better.
-            # But the primary goal is: Don't switch to an 'off' device if something ELSE is playing.
-            
-            # Get current entity state (approx)
-            current_state = "off"
-            try:
-                # We already fetched it in the loop header but let's be safe
-                from app.domains.media.devices import get_entity_state
-                # NOTE: ChromatDB state might be stale, but we use it for sibling scoring too.
-                # Actually GlobalResources.ha_collection.get above has it.
-            except: pass
-
-            # If best candidate is 'off' but current is 'on', maybe don't switch?
-            # Actually, let's just use the score. A 'playing' Cast will beat an 'off' TV.
-            # An 'off' TV will only be picked if no better 'on' devices exist in group.
-            
-            log.info(f"[Volume Optimization] BEST candidate: {best_eid} (Score: {best_score}, State: {best_state})")
+            log.info(f"[Volume Optimization] BEST candidate for {intent}: {best_eid} (Score: {best_score}, State: {best_state})")
             return best_eid
         
         log.info(f"[Volume Optimization] No appropriate siblings available, sticking to {entity_id}")
