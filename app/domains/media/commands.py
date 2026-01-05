@@ -447,7 +447,9 @@ async def handle_media_command(
                                   log.info(f"[Integration Inference] Hardware TV detected via capabilities (Features: {features}). Mapping to 'androidtv'.")
                                   integration = "androidtv"
 
-                        if (integration in ["home_assistant", "remote", "unknown", "tv"] or found_int in ["remote", "tv"]):
+                        # 2. Sibling Inference - Only if still generic
+                        inferred_integration = integration
+                        if (integration in ["home_assistant", "remote", "unknown", "tv"]):
                              log.info(f"[Integration Inference] Entity {entity_id} still has generic integration '{integration}'. Checking group siblings...")
                              group_id = meta.get("group_id")
                              if group_id and group_id != "unknown":
