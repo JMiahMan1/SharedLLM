@@ -166,6 +166,9 @@ async def _execute_transport_command(
         elif intent == "turn_off":
             return await handler.turn_off(entity_id, user_creds=user_creds)
             
+        elif intent == "nav_home":
+            return await handler.nav_home(entity_id, user_creds=user_creds)
+            
         else:
             log.warning(f"Unknown intent '{intent}' for media domain.")
             return {"status": "FAILURE", "message": f"Unknown media command: {intent}", "entity_id": entity_id}
@@ -484,10 +487,10 @@ async def handle_media_command(
     # [**UNIVERSAL** MASS INTELLIGENCE SWAP] - Run for ALL music requests
     # MASS swap logic removed - now handled per-integration in RokuIntegration and CastIntegration
 
-    # [**TV INTELLIGENCE SWAP**] - For VIDEO requests, swap speaker/cast to actual TV
-    # If we have a video request but resolved to a speaker/cast, find the TV in the same group
-    if intent in ["play_media", "open_app", "watch_video", "view_content"]:
-        if is_video_request and integration in ["cast", "music_assistant"]:
+    # [**TV INTELLIGENCE SWAP**] - For VIDEO or NAVIGATION requests, swap speaker/cast to actual TV
+    # If we have a video/nav request but resolved to a speaker/cast, find the TV in the same group
+    if intent in ["play_media", "open_app", "watch_video", "view_content", "nav_home", "nav_back", "nav_up", "nav_down", "nav_left", "nav_right", "nav_enter"]:
+        if (is_video_request or intent.startswith("nav_")) and integration in ["cast", "music_assistant"]:
             try:
                 # Get the current device's group_id from ChromaDB
                 # GlobalResources is already imported at module level
