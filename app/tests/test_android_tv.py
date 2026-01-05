@@ -109,11 +109,9 @@ class AndroidTVTests(BaseTest):
             time.sleep(1)
 
         current_app = last_app
-        if not success:
-            self.log("AndroidTV: Launch App", "WARN", f"YouTube ({youtube_package}) not active (Current: {current_app}) - Continuing suite")
-            # Soft assertion: Don't fail the suite, just warn. App launching is flaky on some HW.
-        else:
-            self.log("AndroidTV: Launch App", "PASS", "App launched successfully")
+        self.assert_state("AndroidTV: Launch App", success, 
+                          f"YouTube ({youtube_package}) not active (Current: {current_app})",
+                          "App launched successfully")
             
         # Ensure we are in a clean state for the next step regardless
         # (The next step "Watch Intent" handles its own setup/casting)
