@@ -185,23 +185,14 @@ class StandardIntegration(MediaIntegration):
         return result
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
-        """
-        Turn off the media player device.
-        Prioritizes Remote entity for reliable power control.
-        """
+        """Turn off the device, optionally using the remote sibling."""
         log.info(f"[StandardIntegration] Turning off {entity_id}")
         
-        # 0. Check for Remote Sibling
+        # [Android TV/Roku Optimization] 
+        # Better to send "HOME" before "OFF" to ensure clean state on next power on
         remote_sibling = await self._get_remote_sibling(entity_id)
         if remote_sibling:
-             log.info(f"[StandardIntegration] Using remote sibling {remote_sibling} for turn_off")
-             # Force Stop first (Helps Cast devices release locks)
-             # Only if the original entity supports it (media_player)
-             if entity_id.startswith("media_player."):
-                 await execute_ha_service(entity_id.split('.')[0], "media_stop", entity_id, user_creds, {}, kwargs.get("redis_client"))
-                 await asyncio.sleep(1)
-             
-             # Send HOME to exit app (ensures state clears)
+             log.info(f"[StandardIntegration] Sending HOME to {remote_sibling} before OFF")
              await execute_ha_service("remote", "send_command", remote_sibling, user_creds, {"command": "HOME"}, kwargs.get("redis_client"))
              await asyncio.sleep(1)
 
