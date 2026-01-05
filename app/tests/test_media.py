@@ -132,13 +132,25 @@ class MediaTests(BaseTest):
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Go back a song"}]}, "Media: Previous")
         
         # 5. Turn Off
-        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn off the TV"}]}, "Media: Turn Off")
+        entity = "media_player.office_tv" # Target the hardware entity for power
+        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn off the Office TV"}]}, "Media: Turn Off")
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
         
         if tr and tr[0].get("status") == "SUCCESS":
-            self.log("Media: Transport/Power", "PASS")
+            # State Verification
+            state = None
+            for _ in range(10): # Give it time to update state
+                state = self.get_entity_state(entity)
+                if state in ["off", "standby", "unavailable"]:
+                    break
+                time.sleep(1)
+            
+            if state in ["off", "standby", "unavailable"]:
+                self.log("Media: Transport/Power", "PASS", f"Final State: {state}")
+            else:
+                self.log("Media: Transport/Power", "FAIL", f"Command SUCCESS but state is {state}")
         else:
-            self.log("Media: Transport/Power", "FAIL", str(msg))
+            self.log("Media: Transport/Power", "FAIL", f"Command failed: {msg}")
 
     def test_library_browsing(self):
         # 6. List Radio / Playlists
