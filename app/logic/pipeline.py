@@ -369,6 +369,12 @@ async def _handle_single_command(
                 "tool_name": "media_command",
                 "parameters": {"intent": intent, "device_name": query, "media": query}
              }
+        elif intent in ["nav_home", "navhome"]:
+             action_plan = {
+                "action": "tool_call",
+                "tool_name": "media_command",
+                "parameters": {"intent": intent, "device_name": query}
+             }
         elif intent in ["set_brightness", "dim", "brighten", "set_color"]:
             log.info(f"[FAST PATH] Matched lighting intent: {intent}")
             action_plan = {
