@@ -35,7 +35,20 @@ class AndroidTVTests(BaseTest):
         
         # We expect SUCCESS from the tool, and potentially a message about playing/buffering
         if tr and tr[0].get("status") == "SUCCESS":
-             self.log("AndroidTV: Watch Intent", "PASS", f"Result: {tr[0].get('message')}")
+             # [State Verification] Wait for playing state
+             import time
+             entity = "media_player.office_tv_chrome_2" # Confirmed from logs
+             state = None
+             for _ in range(10):
+                 state = self.get_entity_state(entity)
+                 if state in ["playing", "buffering"]:
+                     break
+                 time.sleep(1)
+             
+             if state in ["playing", "buffering"]:
+                 self.log("AndroidTV: Watch Intent", "PASS", f"Result: {tr[0].get('message')} | State: {state}")
+             else:
+                 self.log("AndroidTV: Watch Intent", "WARN", f"Command success but state verification failed (State: {state})")
         elif msg and ("playing" in msg.lower() or "buffering" in msg.lower()):
              self.log("AndroidTV: Watch Intent", "PASS", "Verified via message")
         else:
