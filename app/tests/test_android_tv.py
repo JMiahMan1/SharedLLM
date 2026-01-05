@@ -93,6 +93,31 @@ class AndroidTVTests(BaseTest):
                           f"App ID did not change to launcher (Current: {new_app})", 
                           f"Home verified (App: {new_app})")
 
+        # 2. Volume Controls (Explicit Test)
+        # Mute
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Mute the Office TV"}]}, "AndroidTV: Mute")
+        time.sleep(2)
+        full = self.get_entity_full(self.primary_entity)
+        is_muted = full.get("attributes", {}).get("is_volume_muted")
+        self.assert_state("AndroidTV: Mute", is_muted is True, f"Failed to mute (Muted: {is_muted})", "Mute verified")
+
+        # Unmute
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Unmute the Office TV"}]}, "AndroidTV: Unmute")
+        time.sleep(2)
+        full = self.get_entity_full(self.primary_entity)
+        is_muted = full.get("attributes", {}).get("is_volume_muted")
+        self.assert_state("AndroidTV: Unmute", is_muted is False, f"Failed to unmute (Muted: {is_muted})", "Unmute verified")
+        
+        # Set Volume
+        target_vol = 0.25
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Set volume to 25% on the Office TV"}]}, "AndroidTV: Set Volume")
+        time.sleep(3)
+        full = self.get_entity_full(self.primary_entity)
+        curr_vol = full.get("attributes", {}).get("volume_level")
+        # Allow small float variance
+        match = abs(curr_vol - target_vol) < 0.02 if curr_vol else False
+        self.assert_state("AndroidTV: Set Volume", match, f"Volume mismatch (Got: {curr_vol}, Expected: {target_vol})", f"Volume set verified ({curr_vol})")
+
     def test_app_launch(self):
         # 2. Launch YouTube
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Launch YouTube on the Office TV"}]}, "AndroidTV: Launch App")
