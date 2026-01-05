@@ -465,6 +465,17 @@ async def handle_media_command(
          return [{"status": "FAILURE", "message": "Could not determine which device you mean.", "entity_id": "N/A", "service": "media_command"}]
 
     domain = entity_id.split('.')[0]
+    
+    # [Volume Optimization] Refine entity target for volume commands
+    # This ensures the right device handles each volume operation regardless of resolution path
+    if intent.startswith("volume_"):
+        from app.domains.media.devices import _refine_target_for_volume
+        refined_entity = await _refine_target_for_volume(entity_id, intent, redis_client)
+        if refined_entity != entity_id:
+            log.info(f"[VOLUME REFINEMENT] Switched {entity_id} -> {refined_entity} for {intent}")
+            entity_id = refined_entity
+            domain = entity_id.split('.')[0]
+    
     service = intent
     service_data = {}
 
