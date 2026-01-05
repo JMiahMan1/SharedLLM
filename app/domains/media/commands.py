@@ -421,54 +421,58 @@ async def handle_media_command(
                         platform = meta.get("platform", "").lower()
                         found_int = meta.get("integration", "").lower()
 
+                        # Capability-based detection (Robust Hardware vs Software differentiator)
+                        features = 0
+                        try:
+                            import json
+                            attrs = json.loads(meta.get("attributes", "{}")) if isinstance(meta.get("attributes"), str) else meta.get("attributes", {})
+                            features = int(attrs.get("supported_features", 0))
+                        except: pass
+                        
+                        # SUPPORT_VOLUME_STEP = 1024, SUPPORT_VOLUME_SET = 4
+                        has_vol_step = bool(features & 1024)
+                        has_vol_set = bool(features & 4)
+
                         # Explicit platform check for Android TV
-                        if "androidtv" in platform or "androidtv" in found_int or "shield" in model or "sti614" in model:
-                             log.info(f"[Integration Inference] Detected Android TV via metadata (Model: {model}). Forcing 'androidtv'.")
+                        if "androidtv" in platform or "androidtv" in found_int or "shield" in model:
+                             log.info(f"[Integration Inference] Detected Android TV via platform/metadata.")
                              integration = "androidtv"
                         # Explicit platform check for Roku
                         elif "roku" in platform or "roku" in found_int or "roku" in manufacturer:
-                             log.info(f"[Integration Inference] Detected Roku via metadata. Forcing 'roku'.")
+                             log.info(f"[Integration Inference] Detected Roku via metadata.")
                              integration = "roku"
+                        # Capability-based fallback for Generic TV/Remote
+                        elif (integration in ["tv", "remote", "unknown"] or found_int in ["tv", "remote"]):
+                             if has_vol_step and not has_vol_set:
+                                  log.info(f"[Integration Inference] Hardware TV detected via capabilities (Features: {features}). Mapping to 'androidtv'.")
+                                  integration = "androidtv"
 
-                        # If the resolved entity has a generic integration (remote, switch, etc.),
-                        # look for a sibling in the same device group to find the "true" main integration.
-                        # This handles "TCL Roku TV" where the remote entity is just "remote" but the media_player is "roku".
-                        
-                        inferred_integration = found_int
-                        if integration == "androidtv": inferred_integration = "androidtv"
-                        if integration == "roku": inferred_integration = "roku"
-                        
-                        if deferred_check := (integration in ["home_assistant", "remote", "unknown", "tv"] or found_int in ["remote", "tv"]):
-                             log.info(f"[Integration Inference] Entity {entity_id} has generic integration '{found_int}'. Checking group siblings...")
+                        if (integration in ["home_assistant", "remote", "unknown", "tv"] or found_int in ["remote", "tv"]):
+                             log.info(f"[Integration Inference] Entity {entity_id} still has generic integration '{integration}'. Checking group siblings...")
                              group_id = meta.get("group_id")
                              if group_id and group_id != "unknown":
                                   try:
-                                     # Look for siblings
-                                     group_docs = ha_collection._collection.get(
-                                         where={"group_id": group_id},
-                                         include=["metadatas"]
-                                     )
-                                     if group_docs and group_docs.get("metadatas"):
-                                         for sibling in group_docs["metadatas"]:
-                                             sib_int = sibling.get("integration", "").lower()
-                                             if sib_int in ["androidtv", "roku", "webostv", "samsungtv", "cast", "esphome"]:
-                                                 # [Fix] Only adopt sibling if we are NOT currently active
-                                                 # If we are Cast and playing/paused, don't switch to AndroidTV sibling
-                                                 is_active = False
-                                                 try:
-                                                      if meta.get("state") in ["playing", "paused", "buffering"]:
-                                                           is_active = True
-                                                 except: pass
-
-                                                 if not is_active:
-                                                      log.info(f"[Integration Inference] Found sibling {sibling.get('entity_id')} with definitive integration '{sib_int}'. Adopting.")
-                                                      inferred_integration = sib_int
-                                                      break
-                                                 else:
-                                                      log.info(f"[Integration Inference] Found sibling {sibling.get('entity_id')} ({sib_int}) but current device is ACTIVE/PAUSED. Staying put.")
+                                      group_docs = ha_collection._collection.get(where={"group_id": group_id}, include=["metadatas"])
+                                      if group_docs and group_docs.get("metadatas"):
+                                          # Strategy: Prioritize native hardware integrations (Roku, AndroidTV) over software wrappers (Cast)
+                                          best_sib = None
+                                          for sibling in group_docs["metadatas"]:
+                                              sib_int = sibling.get("integration", "").lower()
+                                              if sib_int in ["androidtv", "roku", "webostv", "samsungtv"]:
+                                                  best_sib = sib_int
+                                                  break
+                                              elif sib_int in ["cast", "music_assistant", "esphome"] and not best_sib:
+                                                  best_sib = sib_int
+                                          
+                                          if best_sib:
+                                              # Only adopt if NOT currently active (don't break Cast sessions)
+                                              is_active = meta.get("state") in ["playing", "paused", "buffering"]
+                                              if not is_active:
+                                                  log.info(f"[Integration Inference] Adopting sibling integration '{best_sib}'.")
+                                                  inferred_integration = best_sib
                                   except Exception as search_err:
-                                     log.warning(f"[Integration Inference] Sibling search failed: {search_err}")
-
+                                      log.warning(f"[Integration Inference] Sibling search failed: {search_err}")
+                        # Sibling inference summarized above
                         # Apply Inferred Integration
                         if inferred_integration and inferred_integration != "unknown":
                              if integration != inferred_integration:
