@@ -199,6 +199,16 @@ class AndroidTVTests(BaseTest):
             
         self.assert_state("AndroidTV: Sequence Pause", state in ["paused", "idle"], f"State: {state}", f"Paused (State: {state})")
 
+        # Play (Explicit "Play" command validation) -> separate from Resume intent?
+        # User requested to test "Play" intent specifically.
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Play the video on the Office TV"}]}, "AndroidTV: Sequence Play")
+        state = self.wait_for_state(entity, ["playing"], 15)
+        self.assert_state("AndroidTV: Sequence Play", state == "playing", f"Failed to Play (State: {state})", f"Played (State: {state})")
+
+        # Pause again to test "Resume" specifically
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the video on the Office TV"}]}, "AndroidTV: Sequence Pause 2")
+        time.sleep(3)
+
         # Resume
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Resume the video on the Office TV"}]}, "AndroidTV: Sequence Resume")
         state = self.wait_for_state(entity, ["playing"], 15)
