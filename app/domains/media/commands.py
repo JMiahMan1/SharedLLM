@@ -452,9 +452,20 @@ async def handle_media_command(
                                          for sibling in group_docs["metadatas"]:
                                              sib_int = sibling.get("integration", "").lower()
                                              if sib_int in ["roku", "androidtv", "webostv", "samsungtv", "esphome", "cast"]:
-                                                 log.info(f"[Integration Inference] Found sibling {sibling.get('entity_id')} with definitive integration '{sib_int}'. Adopting.")
-                                                 inferred_integration = sib_int
-                                                 break
+                                                 # [Fix] Only adopt sibling if we are NOT currently active
+                                                 # If we are Cast and playing/paused, don't switch to AndroidTV sibling
+                                                 is_active = False
+                                                 try:
+                                                      if meta.get("state") in ["playing", "paused", "buffering"]:
+                                                           is_active = True
+                                                 except: pass
+
+                                                 if not is_active:
+                                                      log.info(f"[Integration Inference] Found sibling {sibling.get('entity_id')} with definitive integration '{sib_int}'. Adopting.")
+                                                      inferred_integration = sib_int
+                                                      break
+                                                 else:
+                                                      log.info(f"[Integration Inference] Found sibling {sibling.get('entity_id')} ({sib_int}) but current device is ACTIVE/PAUSED. Staying put.")
                                   except Exception as search_err:
                                      log.warning(f"[Integration Inference] Sibling search failed: {search_err}")
 
