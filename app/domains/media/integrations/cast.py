@@ -92,10 +92,10 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         # [SmartPowerSync]
         await self._ensure_tv_on(entity_id, user_creds)
         
-        # [Volume Safety] Ensure TV audio is unmuted/safe
-        tv_sibling = await self._get_tv_sibling(entity_id, user_creds)
-        if tv_sibling:
-             await self._ensure_volume_safe(tv_sibling, user_creds, kwargs.get("redis_client"))
+        # [Volume Safety] Ensure Cast device audio is unmuted/safe
+        # Note: We set volume on the Cast entity (entity_id), not the TV sibling,
+        # because AndroidTV entities don't support volume_set service.
+        await self._ensure_volume_safe(entity_id, user_creds, kwargs.get("redis_client"))
 
         # [Auto-Search for Cast]
         # We must resolve the URL *here* so we can check if it's YouTube.
