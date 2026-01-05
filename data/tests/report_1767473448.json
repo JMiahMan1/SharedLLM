@@ -1,0 +1,98 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T13:46:08.075584"
+  },
+  {
+    "test": "Media: Volume Up",
+    "status": "PASS",
+    "message": "New State/Vol: unavailable",
+    "timestamp": "2026-01-03T13:46:55.990323"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: []",
+    "timestamp": "2026-01-03T13:48:13.122339"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "PASS",
+    "message": "Played: Sent command to play media the Office Speaker. | State: idle",
+    "timestamp": "2026-01-03T13:48:18.342181"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble', 'entity_id': 'media_player.master_bedroom_tv', 'friendly_name': 'Master Bedroom Tv', 'service': 'media_player.media_stop'}]",
+    "timestamp": "2026-01-03T13:48:25.174768"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble', 'entity_id': 'media_player.master_bedroom_tv', 'friendly_name': 'Master Bedroom Tv', 'service': 'media_player.media_pause'}]",
+    "timestamp": "2026-01-03T13:48:35.078215"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble', 'entity_id': 'media_player.master_bedroom_tv', 'friendly_name': 'Master Bedroom Tv', 'service': 'media_player.media_play_pause'}]",
+    "timestamp": "2026-01-03T13:48:44.557524"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "PASS",
+    "message": "Final State: off",
+    "timestamp": "2026-01-03T13:48:48.842605"
+  },
+  {
+    "test": "Media: Radio List",
+    "status": "PASS",
+    "message": "Found 1 stations",
+    "timestamp": "2026-01-03T13:49:02.952561"
+  },
+  {
+    "test": "Media: Playlist List",
+    "status": "FAIL",
+    "message": "I don't have access to a list of playlists in your Home Assistant setup or Nextcloud documents. The available devices (media players) are currently unavailable, and no playlist data was found in your notes or files. Would you like me to check your device apps or settings for playlist details? Isaiah 40:31 reminds us that those who wait on the Lord will renew their strength, trust that even small steps in seeking answers align with His perfect plan!",
+    "timestamp": "2026-01-03T13:49:09.525752"
+  },
+  {
+    "test": "Timer: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T13:49:37.224950"
+  },
+  {
+    "test": "Timer: Pause",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T13:49:44.874159"
+  },
+  {
+    "test": "Timer: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T13:49:58.377531"
+  },
+  {
+    "test": "Alarm: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T13:50:33.668037"
+  },
+  {
+    "test": "Timer: List",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T13:50:47.095822"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: BaseTest.safe_post() missing 1 required positional argument: 'label'",
+    "timestamp": "2026-01-03T13:50:48.143301"
+  }
+]
