@@ -451,7 +451,7 @@ async def handle_media_command(
                                      if group_docs and group_docs.get("metadatas"):
                                          for sibling in group_docs["metadatas"]:
                                              sib_int = sibling.get("integration", "").lower()
-                                             if sib_int in ["roku", "androidtv", "webostv", "samsungtv", "esphome", "cast"]:
+                                             if sib_int in ["androidtv", "roku", "webostv", "samsungtv", "cast", "esphome"]:
                                                  # [Fix] Only adopt sibling if we are NOT currently active
                                                  # If we are Cast and playing/paused, don't switch to AndroidTV sibling
                                                  is_active = False
