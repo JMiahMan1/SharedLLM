@@ -516,35 +516,48 @@ async def handle_media_command(
                     if current_group_id:
                         log.info(f"[TV Swap] Video request on {integration} device. group_id={current_group_id}, searching for TV...")
                         
-                        # Find other devices in the same group
-                        group_docs = GlobalResources.ha_collection._collection.get(
-                            where={"group_id": current_group_id},
-                            include=["metadatas"]
-                        )
-                        
-                        found_tv = None
-                        
-                        if group_docs and group_docs.get("metadatas"):
-                            for metadata in group_docs["metadatas"]:
-                                # Look for devices that are likely TVs ( Roku, Android TV, WebOS, etc)
-                                # Hint: integration name or device_class might help, but let's check integration list
-                                other_integration = metadata.get("integration", "").lower()
-                                other_entity = metadata.get("entity_id")
-                                
-                                # Skip self
-                                if other_entity == entity_id: continue
-                                
-                                if other_integration in ["roku", "androidtv", "webostv", "samsungtv", "braviatv", "esphome"]:
-                                     found_tv = other_entity
-                                     found_integration = other_integration
-                                     log.info(f"[TV Swap] Found TV кандидат: {found_tv} ({found_integration})")
-                                     break
-                                     
-                        if found_tv:
-                            log.info(f"[TV Swap] SUCCESS! Swapping {entity_id} -> {found_tv} for video playback.")
-                            entity_id = found_tv
-                            integration = found_integration
-                            domain = entity_id.split('.')[0]
+                        # [Optimization] If the current Cast/MA device is actively playing or paused, 
+                        # we likely want to Control THAT session, not swap to the TV (which might be idle).
+                        # This fixes "Resume" failing because it swapped to the TV which had no active media.
+                        should_swap = True
+                        if intent in ["play_media", "media_play", "media_pause", "media_stop", "media_next_track", "media_previous_track"]:
+                             try:
+                                 cur_state = current_docs["metadatas"][0].get("state")
+                                 if cur_state in ["playing", "paused", "buffering"]:
+                                     log.info(f"[TV Swap] Aborting swap. Current device {entity_id} is {cur_state} - assuming session control.")
+                                     should_swap = False
+                             except: pass
+
+                        if should_swap:
+                            # Find other devices in the same group
+                            group_docs = GlobalResources.ha_collection._collection.get(
+                                where={"group_id": current_group_id},
+                                include=["metadatas"]
+                            )
+                            
+                            found_tv = None
+                            
+                            if group_docs and group_docs.get("metadatas"):
+                                for metadata in group_docs["metadatas"]:
+                                    # Look for devices that are likely TVs ( Roku, Android TV, WebOS, etc)
+                                    # Hint: integration name or device_class might help, but let's check integration list
+                                    other_integration = metadata.get("integration", "").lower()
+                                    other_entity = metadata.get("entity_id")
+                                    
+                                    # Skip self
+                                    if other_entity == entity_id: continue
+                                    
+                                    if other_integration in ["roku", "androidtv", "webostv", "samsungtv", "braviatv", "esphome"]:
+                                         found_tv = other_entity
+                                         found_integration = other_integration
+                                         log.info(f"[TV Swap] Found TV кандидат: {found_tv} ({found_integration})")
+                                         break
+                                         
+                            if found_tv:
+                                log.info(f"[TV Swap] SUCCESS! Swapping {entity_id} -> {found_tv} for video playback.")
+                                entity_id = found_tv
+                                integration = found_integration
+                                domain = entity_id.split('.')[0]
                             
             except Exception as e:
                 log.warning(f"[TV Swap] Error: {e}")
