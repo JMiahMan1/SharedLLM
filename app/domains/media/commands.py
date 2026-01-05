@@ -12,7 +12,8 @@ from app.domains.media.devices import (
     get_last_media_entity, 
     _set_last_media_entity,
     get_last_entity, 
-    _set_last_entity
+    _set_last_entity,
+    smart_power_sync
 )
 
 log = logging.getLogger("MediaCommands")
@@ -35,6 +36,11 @@ async def _execute_transport_command(
     """
     Executes a single media command on a specific entity using the appropriate MediaIntegration.
     """
+    # [SmartPowerSync] Trigger TV wake-up for all interaction intents
+    # This ensures sibling TVs are ON before we send play/pause/vol commands.
+    if intent in ["play_media", "watch_media", "view_content", "media_play", "open_app"]:
+        await smart_power_sync(entity_id, user_creds)
+
     try:
         # Get the correct integration handler
         handler = IntegrationFactory.get_handler(integration)
