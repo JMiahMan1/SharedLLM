@@ -281,7 +281,7 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         try:
              # Use requests via run_blocking to be safe and simple like AndroidTV
              from app.logic.pipeline import run_blocking
-             from app.domains.media import HA_URL
+             from app.settings import HA_URL
              import requests
              
              if not HA_URL: 
