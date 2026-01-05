@@ -21,12 +21,12 @@ class AndroidTVTests(BaseTest):
         finally:
             self.restore_state()
 
-    def assert_state(self, label, condition, message):
+    def assert_state(self, label, condition, fail_msg, success_msg="OK"):
         """Helper to fail fast if a condition is not met."""
         if not condition:
-            self.log(label, "FAIL", message)
+            self.log(label, "FAIL", fail_msg)
             raise Exception(f"[{label}] {message}")
-        self.log(label, "PASS", message)
+        self.log(label, "PASS", success_msg)
 
     def capture_initial_state(self):
         """Capture the current state of the TV for restoration later."""
@@ -89,7 +89,9 @@ class AndroidTVTests(BaseTest):
                 break
             time.sleep(1)
 
-        self.assert_state("AndroidTV: Home Command", success, f"App ID did not change to launcher (Current: {new_app})")
+        self.assert_state("AndroidTV: Home Command", success, 
+                          f"App ID did not change to launcher (Current: {new_app})", 
+                          f"Home verified (App: {new_app})")
 
     def test_app_launch(self):
         # 2. Launch YouTube
@@ -130,7 +132,9 @@ class AndroidTVTests(BaseTest):
                  break
              time.sleep(1)
         
-        self.assert_state("AndroidTV: Watch Intent", state in ["playing", "buffering"], f"Playback did not start on {entity} (State: {state})")
+        self.assert_state("AndroidTV: Watch Intent", state in ["playing", "buffering"], 
+                          f"Playback did not start on {entity} (State: {state})",
+                          f"Playback started on {entity} (State: {state})")
 
         # 4. Volume during playback (explicitly requested)
         # We check volume ON THE PRIMARY TV while casting is active
@@ -143,18 +147,20 @@ class AndroidTVTests(BaseTest):
         
         # Verification: Tool should report success, and we check for ANY change or success message
         service_success = self.last_response_json and self.last_response_json.get("tool_results", [{}])[0].get("status") == "SUCCESS"
-        self.assert_state("AndroidTV: Sequence Volume", service_success, f"Volume command failed (Start: {initial_vol}, Current: {new_vol})")
+        self.assert_state("AndroidTV: Sequence Volume", service_success, 
+                          f"Volume command failed (Start: {initial_vol}, Current: {new_vol})",
+                          f"Volume command success (Start: {initial_vol}, Current: {new_vol})")
 
         # 5. Sequence Verification
         # Pause
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the video on the Office TV"}]}, "AndroidTV: Sequence Pause")
         state = self.wait_for_state(entity, ["paused", "idle"], 15) # Accepting idle as some cast apps drop on pause
-        self.assert_state("AndroidTV: Sequence Pause", state in ["paused", "idle"], f"State: {state}")
+        self.assert_state("AndroidTV: Sequence Pause", state in ["paused", "idle"], f"State: {state}", f"Paused (State: {state})")
 
         # Resume
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Resume the video on the Office TV"}]}, "AndroidTV: Sequence Resume")
         state = self.wait_for_state(entity, ["playing"], 15)
-        self.assert_state("AndroidTV: Sequence Resume", state == "playing", f"State: {state}")
+        self.assert_state("AndroidTV: Sequence Resume", state == "playing", f"State: {state}", f"Resumed (State: {state})")
 
         # Stop -> Should return to HOME
         # Explicitly stop first to clear Cast session (mediashell)
@@ -173,7 +179,9 @@ class AndroidTVTests(BaseTest):
                  break
              time.sleep(1)
 
-        self.assert_state("AndroidTV: Sequence Stop", success, f"Did not return home (App: {app_id})")
+        self.assert_state("AndroidTV: Sequence Stop", success, 
+                          f"Did not return home (App: {app_id})",
+                          f"Returned to Home/Backdrop (App: {app_id})")
 
     def wait_for_state(self, entity, target_states, timeout=10):
         for _ in range(timeout):
