@@ -247,6 +247,11 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                  if vol >= 0.9:
                       log.info(f"[Volume Safeguard] Volume {vol} is too high (>90%). Reducing to 60% on {entity_id}")
                       await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.6}, redis_client)
+                      await asyncio.sleep(1)
+                 elif vol < 0.1:
+                      log.info(f"[Volume Safeguard] Volume {vol} is too low (<10%). Boosting to 20% on {entity_id}")
+                      await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.2}, redis_client)
+                      await asyncio.sleep(1)
         except Exception as e:
             log.warning(f"[Volume Safeguard] Failed to check/set volume for {entity_id}: {e}")
     async def media_play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
