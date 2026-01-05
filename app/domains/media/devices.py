@@ -669,14 +669,8 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
 
     # 6. VOLUME CONTROLS
     elif intent in ["volume_up", "volume_down", "volume_mute", "volume_set"]:
-         if domain == "remote": return 50
-         
-         # Prioritize Hardware TVs (Android TV, Roku, etc) over Cast for volume
-         # Cast devices often don't support volume set/mute reliably via HA
-         if is_hardware_tv: return 150 
-         if is_cast: return 80 
-         
          if domain == "media_player": return 100
+         if domain == "remote": return 50
          return 0
 
     # Default fallback
