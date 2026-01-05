@@ -108,14 +108,13 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
         log.info(f"[AndroidTV] Launching app {package} on {entity_id}")
         
         # Use play_media with "app" type for better compatibility
-        # Or "app://{package}" as content_id
         return await execute_ha_service(
              "media_player", 
              "play_media", 
              entity_id, 
              user_creds, 
              {
-                 "media_content_id": f"app://{package}", 
+                 "media_content_id": package, 
                  "media_content_type": "app"
              }, 
              kwargs.get("redis_client")
