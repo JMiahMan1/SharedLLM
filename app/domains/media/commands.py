@@ -169,6 +169,9 @@ async def _execute_transport_command(
         elif intent == "nav_home" or intent == "navhome":
             return await handler.nav_home(entity_id, user_creds=user_creds)
             
+        elif intent == "open_app":
+            return await handler.open_app(entity_id, query, user_creds=user_creds)
+            
         else:
             log.warning(f"Unknown intent '{intent}' for media domain.")
             return {"status": "FAILURE", "message": f"Unknown media command: {intent}", "entity_id": entity_id}
