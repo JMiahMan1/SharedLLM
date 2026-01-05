@@ -153,9 +153,9 @@ class AndroidTVTests(BaseTest):
         full = self.get_entity_full(self.primary_entity)
         is_muted = full.get("attributes", {}).get("is_volume_muted")
         vol = full.get("attributes", {}).get("volume_level")
-        safe = (is_muted is False) and (vol is None or vol >= 0.2)
+        safe = (is_muted is False) and (vol is None or vol < 0.9)
         self.assert_state("AndroidTV: Audio Safety", safe, 
-                          f"Audio not safe! Muted: {is_muted}, Vol: {vol}",
+                          f"Audio not safe! Muted: {is_muted}, Vol: {vol} (Should be unmuted and < 0.9)",
                           f"Audio verified (Muted: {is_muted}, Vol: {vol})")
 
         # Test Transport Controls: Volume -> Pause -> Play -> Pause -> Resume -> Stop
