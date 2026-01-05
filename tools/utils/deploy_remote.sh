@@ -61,7 +61,7 @@ ssh "$HOST" << EOF
     
     # Check logs until success message or timeout
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
-        if docker logs --tail 20 unified_rag_api 2>&1 | grep -q "Application startup complete"; then
+        if docker logs --tail 200 unified_rag_api 2>&1 | grep -q "Application startup complete"; then
             echo "[OK] Application started successfully!"
             SUCCESS=1
             break
