@@ -422,8 +422,8 @@ async def handle_media_command(
                         found_int = meta.get("integration", "").lower()
 
                         # Explicit platform check for Android TV
-                        if "androidtv" in platform or "androidtv" in found_int or "shield" in model:
-                             log.info(f"[Integration Inference] Detected Android TV via metadata. Forcing 'androidtv'.")
+                        if "androidtv" in platform or "androidtv" in found_int or "shield" in model or "sti614" in model:
+                             log.info(f"[Integration Inference] Detected Android TV via metadata (Model: {model}). Forcing 'androidtv'.")
                              integration = "androidtv"
                         # Explicit platform check for Roku
                         elif "roku" in platform or "roku" in found_int or "roku" in manufacturer:
