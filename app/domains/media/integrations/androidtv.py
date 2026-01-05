@@ -222,20 +222,20 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
             state_data = r.json()
             attrs = state_data.get("attributes", {})
             
-            # 2. Check & Fix Mute
+            # 2. Check & Fix Mute / Volume
             is_muted = attrs.get("is_volume_muted")
-            if is_muted:
-                log.info(f"[Volume Safeguard] Unmuting {entity_id}")
-                await execute_ha_service("media_player", "volume_mute", entity_id, user_creds, {"is_volume_muted": False}, redis_client)
-                
-            # 3. Check & Fix Volume Level
             vol = attrs.get("volume_level")
-            # If vol is None (unknown), we might default to 0.15 just in case, or skip.
-            # User said "under 10%".
-            if vol is not None and isinstance(vol, (int, float)):
-                 if vol < 0.2:
-                      log.info(f"[Volume Safeguard] Volume {vol} is too low. Setting to 0.20 on {entity_id}")
-                      await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.2}, redis_client)
+
+            if is_muted:
+                log.info(f"[Volume Safeguard] Device is muted. Unmuting and setting to 20% on {entity_id}")
+                await execute_ha_service("media_player", "volume_mute", entity_id, user_creds, {"is_volume_muted": False}, redis_client)
+                await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.2}, redis_client)
+                
+            elif vol is not None and isinstance(vol, (int, float)):
+                 # Not muted, check for blasting levels
+                 if vol >= 0.9:
+                      log.info(f"[Volume Safeguard] Volume {vol} is too high (>90%). Reducing to 60% on {entity_id}")
+                      await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.6}, redis_client)
     async def media_play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """Resume playback, ensuring explicit volume safety (e.g. unmuted, >=20%)."""
         log.info(f"[AndroidTV] Play/Resume requested for {entity_id}. Enforcing volume safety.")
