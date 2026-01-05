@@ -257,4 +257,18 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         from app.domains.media.devices import find_group_sibling
         return await find_group_sibling(entity_id, lambda m: m.get("integration") == "music_assistant" or m.get("app_id") == "music_assistant")
 
+    def _extract_youtube_id(self, query: str) -> Optional[str]:
+        """Extract YouTube Video ID from URL or Query."""
+        # Standard URL
+        match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', query)
+        if match:
+            return match.group(1)
+        
+        # Short URL (youtu.be)
+        match = re.search(r'youtu\.be\/([0-9A-Za-z_-]{11})', query)
+        if match:
+             return match.group(1)
+             
+        return None
+
     # Removed _find_group_sibling as it is now shared in app.domains.media.devices
