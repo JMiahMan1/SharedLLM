@@ -1,9 +1,11 @@
 from typing import Dict, Any
 import logging
 import asyncio
+import requests
 from app.domains.media.integrations.standard import StandardIntegration
 from app.domains.media.integrations.base import VideoHelperMixin
 from app.domains.shared import execute_ha_service
+from app.settings import run_blocking, HA_URL
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +113,9 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                          "media_content_id": local_url,
                          "media_content_type": "video/mp4"  # Use specific mime type for better compatibility
                      }
+                     
+                     # Ensure volume is audible on the target
+                     await self._ensure_volume_safe(target_entity, user_creds, redis_client)
                      # Explicitly stop the target first to clear any MA session overlay
                      try:
                          # 1. Trigger HOME on Android TV (Source) to ensure visual takeover
@@ -197,3 +202,39 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
         )
 
         return res
+
+    async def _ensure_volume_safe(self, entity_id: str, user_creds: Dict, redis_client=None):
+        """Ensure the device is not muted and volume is at least 10% (0.1)."""
+        if not HA_URL: return
+        
+        try:
+            # 1. Fetch current state safely (Live API)
+            url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
+            headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
+            
+            def _fetch():
+                return requests.get(url, headers=headers, timeout=2.0)
+            
+            r = await run_blocking(_fetch)
+            if r.status_code != 200:
+                return
+
+            state_data = r.json()
+            attrs = state_data.get("attributes", {})
+            
+            # 2. Check & Fix Mute
+            is_muted = attrs.get("is_volume_muted")
+            if is_muted:
+                log.info(f"[Volume Safeguard] Unmuting {entity_id}")
+                await execute_ha_service("media_player", "volume_mute", entity_id, user_creds, {"is_volume_muted": False}, redis_client)
+                
+            # 3. Check & Fix Volume Level
+            vol = attrs.get("volume_level")
+            # If vol is None (unknown), we might default to 0.15 just in case, or skip.
+            # User said "under 10%".
+            if vol is not None and isinstance(vol, (int, float)):
+                 if vol < 0.1:
+                      log.info(f"[Volume Safeguard] Volume {vol} is too low. Setting to 0.10 on {entity_id}")
+                      await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.1}, redis_client)
+        except Exception as e:
+            log.warning(f"[Volume Safeguard] Failed to check/set volume for {entity_id}: {e}")
