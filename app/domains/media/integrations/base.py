@@ -106,7 +106,7 @@ class MediaIntegration(ABC):
              # Let's try sending "turn_on" service first.
              domain = entity_id.split(".")[0]
              await execute_ha_service(domain, "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
-             await asyncio.sleep(2) # Wait for wake
+             await asyncio.sleep(6) # Wait for wake (increased for slow Android TVs)
         except Exception as e:
              log.warning(f"[open_app] Auto-turn-on failed: {e}")
 
