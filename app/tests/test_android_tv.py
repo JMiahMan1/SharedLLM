@@ -148,30 +148,49 @@ class AndroidTVTests(BaseTest):
                           f"Visual verified: YouTube app is no longer active (Current: {current_app})")
 
     def _step_intent_play(self):
+        # 0. Verify Audio Safety (Post-Watch Pre-Condition)
+        # Ensure integration unmuted and set volume >= 10%
+        full = self.get_entity_full(self.primary_entity)
+        is_muted = full.get("attributes", {}).get("is_volume_muted")
+        vol = full.get("attributes", {}).get("volume_level")
+        safe = (is_muted is False) and (vol is None or vol >= 0.2)
+        self.assert_state("AndroidTV: Audio Safety", safe, 
+                          f"Audio not safe! Muted: {is_muted}, Vol: {vol}",
+                          f"Audio verified (Muted: {is_muted}, Vol: {vol})")
+
         # Test Transport Controls: Volume -> Pause -> Play -> Pause -> Resume -> Stop
         entity = self.cast_entity
 
         # 1. Volume Controls (during playback)
         # Mute
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Mute the Office TV"}]}, "AndroidTV: Mute")
-        time.sleep(2)
-        full = self.get_entity_full(self.primary_entity)
-        is_muted = full.get("attributes", {}).get("is_volume_muted")
+        is_muted = None
+        for _ in range(5):
+             time.sleep(2)
+             full = self.get_entity_full(self.primary_entity)
+             is_muted = full.get("attributes", {}).get("is_volume_muted")
+             if is_muted is True: break
         self.assert_state("AndroidTV: Mute", is_muted is True, f"Failed to mute (Muted: {is_muted})", "Mute verified")
 
         # Unmute
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Unmute the Office TV"}]}, "AndroidTV: Unmute")
-        time.sleep(2)
-        full = self.get_entity_full(self.primary_entity)
-        is_muted = full.get("attributes", {}).get("is_volume_muted")
+        for _ in range(5):
+             time.sleep(2)
+             full = self.get_entity_full(self.primary_entity)
+             is_muted = full.get("attributes", {}).get("is_volume_muted")
+             if is_muted is False: break
         self.assert_state("AndroidTV: Unmute", is_muted is False, f"Failed to unmute (Muted: {is_muted})", "Unmute verified")
         
         # Set Volume
         target_vol = 0.25
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Set volume to 25% on the Office TV"}]}, "AndroidTV: Set Volume")
-        time.sleep(3)
-        full = self.get_entity_full(self.primary_entity)
-        curr_vol = full.get("attributes", {}).get("volume_level")
+        curr_vol = None
+        for _ in range(5):
+             time.sleep(2)
+             full = self.get_entity_full(self.primary_entity)
+             curr_vol = full.get("attributes", {}).get("volume_level")
+             if curr_vol and abs(curr_vol - target_vol) < 0.02: break
+        
         match = abs(curr_vol - target_vol) < 0.02 if curr_vol else False
         self.assert_state("AndroidTV: Set Volume", match, f"Volume mismatch (Got: {curr_vol}, Expected: {target_vol})", f"Volume set verified ({curr_vol})")
 
