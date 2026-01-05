@@ -134,6 +134,18 @@ class AndroidTVTests(BaseTest):
                           f"Playback did not start on {entity} (State: {state})",
                           f"Playback started on {entity} (State: {state})")
 
+        # [Visual Verification]
+        # Ensure the previous app (YouTube) is NOT the active app on the main TV entity.
+        # If it is, the Cast session is likely playing in the background (hidden audio).
+        tv_full = self.get_entity_full(self.primary_entity)
+        current_app = tv_full.get("attributes", {}).get("app_id")
+        
+        # We expect the app to be the Cast Shell (com.google.android.gms.cast.shell) or at least NOT YouTube
+        youtube_pkg = "com.google.android.youtube.tv"
+        self.assert_state("AndroidTV: Visual Check", current_app != youtube_pkg,
+                          f"YouTube app ({current_app}) is still active! Video is likely hidden in background.",
+                          f"Visual verified: YouTube app is no longer active (Current: {current_app})")
+
         # 4. Volume during playback (explicitly requested)
         # We check volume ON THE PRIMARY TV while casting is active
         initial_vol = self.get_entity_full(self.primary_entity).get("attributes", {}).get("volume_level", 0)
