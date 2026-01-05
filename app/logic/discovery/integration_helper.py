@@ -42,11 +42,21 @@ def infer_integration(entity_id: str, attributes: dict, manufacturer: str = None
         if "mass" in eid or attributes.get("integration") == "music_assistant":
             return "music_assistant"
         
-        # Check for Cast / Android TV via attributes
         app_id = attributes.get("app_id")
         device_class = attributes.get("device_class")
         fname = attributes.get("friendly_name", "").lower()
         
+        # [FEATURE-BASED INFERENCE]
+        features = int(attributes.get("supported_features", 0))
+        
+        # Priority 0: supported_features bits
+        # Android TV (via ADB/Remote) typically supports VOLUME_STEP (1024) but NOT VOLUME_SET (4)
+        has_step = bool(features & 1024)
+        has_set = bool(features & 4)
+        
+        if has_step and not has_set and device_class == "tv":
+            return "androidtv"
+            
         # Priority 1: Check for Roku BEFORE Cast (Roku devices have app_id but are native integrations)
         if manufacturer and "roku" in str(manufacturer).lower():
             return "roku"
