@@ -236,5 +236,16 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
                  if vol < 0.2:
                       log.info(f"[Volume Safeguard] Volume {vol} is too low. Setting to 0.20 on {entity_id}")
                       await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.2}, redis_client)
-        except Exception as e:
-            log.warning(f"[Volume Safeguard] Failed to check/set volume for {entity_id}: {e}")
+    async def media_play(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Resume playback, ensuring explicit volume safety (e.g. unmuted, >=20%)."""
+        log.info(f"[AndroidTV] Play/Resume requested for {entity_id}. Enforcing volume safety.")
+        # User requested: "Anytime we go to play audio... move volume up to .20 if muted"
+        # We assume entity_id here is the primary Android TV entity or the delegated Cast sibling.
+        # Since 'media_play' often targets the entity tracked by HA, verify if it's the cast sibling first?
+        # Actually, standard media_play just passes entity_id.
+        # We'll run safety check on the target entity.
+        
+        await self._ensure_volume_safe(entity_id, user_creds, kwargs.get("redis_client"))
+        
+        # Proceed with standard resume
+        return await super().media_play(entity_id, user_creds, **kwargs)
