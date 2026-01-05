@@ -98,47 +98,47 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         volume_entity = await _refine_target_for_volume(entity_id, "volume_set", kwargs.get("redis_client"))
         await self._ensure_volume_safe(volume_entity, user_creds, kwargs.get("redis_client"))
 
-         # [Auto-Search for Cast]
-         # We must resolve the URL *here* so we can check if it's YouTube.
-         # Otherwise StandardIntegration does it too late.
-         if media_type == "video" and not query.startswith(("http", "www", "spotify", "app")):
-              # Extract spoken device name for cleaning
-              alias = kwargs.get("device_name") or kwargs.get("friendly_name")
-              cleaned = self._clean_query(query, media_type, entity_id, alias)
-              found_url = await self._search_video_url(cleaned)
-              if found_url:
-                  query = found_url # effective update
-                  log.info(f"[CastIntegration] Pre-resolved video query to: {query}")
-         
-         # [YouTube Handling for Cast] - DIRECT STREAM ONLY
-         # User Requirement: No YouTube App due to auth issues.
-         if media_type == "video" and ("youtube.com" in query or "youtu.be" in query):
-              log.info(f"[CastIntegration] YouTube detected. Intercepting for local extraction & stream.")
-              
-              # Download video locally and serve via HTTP for stable Cast streaming
-              # This bypasses the YouTube App and its auth requirements.
-              local_url = await self._download_and_serve_video(query)
-              if local_url:
-                  log.info(f"[CastIntegration] Video ready for streaming at: {local_url}")
-                  return await execute_ha_service(
-                      "media_player", 
-                      "play_media", 
-                      entity_id, 
-                      user_creds, 
-                      {
-                          "media_content_id": local_url,
-                          "media_content_type": "video/mp4" 
-                      }, 
-                      kwargs.get("redis_client")
-                  )
-              else:
-                  return {
-                      "status": "FAILURE", 
-                      "message": "Failed to extract/stream YouTube video for casting."
-                  }
+        # [Auto-Search for Cast]
+        # We must resolve the URL *here* so we can check if it's YouTube.
+        # Otherwise StandardIntegration does it too late.
+        if media_type == "video" and not query.startswith(("http", "www", "spotify", "app")):
+             # Extract spoken device name for cleaning
+             alias = kwargs.get("device_name") or kwargs.get("friendly_name")
+             cleaned = self._clean_query(query, media_type, entity_id, alias)
+             found_url = await self._search_video_url(cleaned)
+             if found_url:
+                 query = found_url # effective update
+                 log.info(f"[CastIntegration] Pre-resolved video query to: {query}")
+        
+        # [YouTube Handling for Cast] - DIRECT STREAM ONLY
+        # User Requirement: No YouTube App due to auth issues.
+        if media_type == "video" and ("youtube.com" in query or "youtu.be" in query):
+             log.info(f"[CastIntegration] YouTube detected. Intercepting for local extraction & stream.")
+             
+             # Download video locally and serve via HTTP for stable Cast streaming
+             # This bypasses the YouTube App and its auth requirements.
+             local_url = await self._download_and_serve_video(query)
+             if local_url:
+                 log.info(f"[CastIntegration] Video ready for streaming at: {local_url}")
+                 return await execute_ha_service(
+                     "media_player", 
+                     "play_media", 
+                     entity_id, 
+                     user_creds, 
+                     {
+                         "media_content_id": local_url,
+                         "media_content_type": "video/mp4" 
+                     }, 
+                     kwargs.get("redis_client")
+                 )
+             else:
+                 return {
+                     "status": "FAILURE", 
+                     "message": "Failed to extract/stream YouTube video for casting."
+                 }
 
-         # Proceed with Standard Playback
-         # If we updated 'query' to a URL, super() will skip search and just play it.
+        # Proceed with Standard Playback
+        # If we updated 'query' to a URL, super() will skip search and just play it.
          return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
