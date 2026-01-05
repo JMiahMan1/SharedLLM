@@ -229,9 +229,18 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
             vol = attrs.get("volume_level")
 
             if is_muted:
-                log.info(f"[Volume Safeguard] Device is muted. Unmuting and setting to 20% on {entity_id}")
-                await execute_ha_service("media_player", "volume_mute", entity_id, user_creds, {"is_volume_muted": False}, redis_client)
-                await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.2}, redis_client)
+                log.info(f"[Volume Safeguard] Device {entity_id} is MUTED. Initiating Unmute Sequence...")
+                
+                # 1. Unmute
+                res_unmute = await execute_ha_service("media_player", "volume_mute", entity_id, user_creds, {"is_volume_muted": False}, redis_client)
+                log.info(f"[Volume Safeguard] Unmute Result: {res_unmute}")
+                await asyncio.sleep(1) # Wait for processing
+                
+                # 2. Set Volume to 20%
+                log.info(f"[Volume Safeguard] Setting volume to 20%...")
+                res_vol = await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.2}, redis_client)
+                log.info(f"[Volume Safeguard] Volume Set Result: {res_vol}")
+                await asyncio.sleep(1) # Wait for propagation
                 
             elif vol is not None and isinstance(vol, (int, float)):
                  # Not muted, check for blasting levels
