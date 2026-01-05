@@ -54,8 +54,8 @@ ssh "$HOST" << EOF
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure
-    # Timeout after 60 seconds
-    TIMEOUT=60
+    # Timeout after 120 seconds
+    TIMEOUT=120
     ELAPSED=0
     SUCCESS=0
     
