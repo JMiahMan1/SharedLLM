@@ -85,3 +85,38 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
 
         # Fallback to Standard Playback (e.g. non-YouTube video, or music)
         return await super().play_media(entity_id, query, media_type, user_creds, **kwargs)
+
+    async def open_app(self, entity_id: str, query: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Open a specific app on Android TV."""
+        from app.domains.media.integrations import APP_PACKAGES
+        
+        # Resolve package name
+        package = None
+        for name, pkg in APP_PACKAGES.items():
+             if name in query.lower():
+                 package = pkg
+                 break
+        
+        if not package:
+             return {"status": "FAILURE", "message": f"Could not determine app from: {query}"}
+
+        # Auto-Power On
+        await self.turn_on(entity_id, user_creds, **kwargs)
+        # Wait for boot
+        await asyncio.sleep(6) 
+        
+        log.info(f"[AndroidTV] Launching app {package} on {entity_id}")
+        
+        # Use play_media with "app" type for better compatibility
+        # Or "app://{package}" as content_id
+        return await execute_ha_service(
+             "media_player", 
+             "play_media", 
+             entity_id, 
+             user_creds, 
+             {
+                 "media_content_id": f"app://{package}", 
+                 "media_content_type": "app"
+             }, 
+             kwargs.get("redis_client")
+        )
