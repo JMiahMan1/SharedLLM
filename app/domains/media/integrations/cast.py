@@ -193,15 +193,26 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
         try:
             from app.domains.media.devices import get_entity_state
             
-            tv_sibling = await self._get_tv_sibling(entity_id, user_creds)
+            # 1. Resolve sibling with metadata
+            find_res = await self._get_tv_sibling_full(entity_id, user_creds)
             
-            if tv_sibling:
+            if find_res:
+                tv_sibling, tv_sibling_meta = find_res
                 try:
                     tv_state = await get_entity_state(tv_sibling, user_creds)
                     if tv_state in ["off", "standby", "unavailable", "unknown"]:
                         log.info(f"[SmartPowerSync] TV {tv_sibling} is {tv_state}. Turning ON.")
                         await execute_ha_service("media_player", "turn_on", tv_sibling, user_creds, {}, None)
-                        await asyncio.sleep(4)  # Wait for TV boot
+                        await asyncio.sleep(2)  # Short wait for power acceptance
+                        
+                        # [Robustness] For Android TV, a 'Home' command is much more reliable for waking from deep sleep.
+                        if tv_sibling_meta.get("integration") == "androidtv":
+                             log.info(f"[SmartPowerSync] Sibling is AndroidTV. Sending 'Home' pulse for wake-up.")
+                             try:
+                                 await execute_ha_service("media_player", "play_media", tv_sibling, user_creds, {"media_content_id": "home", "media_content_type": "nav"}, None)
+                             except: pass
+                        
+                        await asyncio.sleep(3)  # Wait for TV boot
                     else:
                         log.info(f"[SmartPowerSync] TV {tv_sibling} is already {tv_state}")
                 except Exception as e:
@@ -213,28 +224,54 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
             log.warning(f"[SmartPowerSync] Error: {e}")
 
     async def _get_tv_sibling(self, entity_id: str, user_creds: Dict) -> Optional[str]:
+        """Backward compatibility for _get_tv_sibling"""
+        res = await self._get_tv_sibling_full(entity_id, user_creds)
+        return res[0] if res else None
+
+    async def _get_tv_sibling_full(self, entity_id: str, user_creds: Dict) -> Optional[tuple]:
         """
         Find physical TV sibling using group capability lookup.
+        Returns (entity_id, metadata_dict)
         """
         from app.domains.media.devices import find_group_sibling
         
         # Define capability matcher for TV
         def is_tv(metadata):
-            integ = metadata.get("integration", "")
-            # Check device_class from attributes
+            integ = metadata.get("integration", "").lower()
+            
+            # Skip self and known software wrappers
+            if "music_assistant" in integ or "spotify" in integ:
+                 return False
+            
+            # Signal 1: Explicit integration match
+            if integ in ["androidtv", "webostv", "samsungtv", "braviatv", "roku", "esphome"]:
+                 return True
+            
+            # Signal 2: Promotion metadata check (Robust)
+            features = int(metadata.get("supported_features", 0))
+            has_step = bool(features & 1024)
+            has_set = bool(features & 4)
+            if has_step and not has_set:
+                 return True
+                 
+            # Signal 3: Capabilities list check
+            caps = metadata.get("capabilities", "").lower()
+            if "remote_control" in caps and "turn_on" in caps:
+                 return True
+            
+            # Signal 4: Attributes check (Fallback)
             attrs_str = metadata.get("attributes", "{}")
-            device_class = None
             try:
                 import json
                 attrs = json.loads(attrs_str) if isinstance(attrs_str, str) else attrs_str
-                device_class = attrs.get("device_class")
+                if attrs.get("device_class") == "tv":
+                     return True
             except: pass
             
-            # Match
-            return (integ in ["androidtv", "webostv", "samsungtv", "braviatv", "roku", "esphome"] or 
-                    device_class == "tv") and integ != "music_assistant"
+            return False
 
-        return await find_group_sibling(entity_id, is_tv)
+        # find_group_sibling with return_meta=True
+        return await find_group_sibling(entity_id, is_tv, return_meta=True)
 
     async def _get_ma_wrapper(self, entity_id: str) -> Optional[str]:
         """

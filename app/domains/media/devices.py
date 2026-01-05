@@ -114,7 +114,7 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
     return "unknown"
 
 
-async def find_group_sibling(entity_id: str, match_func) -> Optional[str]:
+async def find_group_sibling(entity_id: str, match_func, return_meta: bool = False) -> Optional[Any]:
     """
     Generic helper to find a sibling in the same group that matches criteria.
     Uses ChromaDB for group_id lookup.
@@ -122,9 +122,10 @@ async def find_group_sibling(entity_id: str, match_func) -> Optional[str]:
     Args:
         entity_id: The reference entity ID
         match_func: Function taking metadata dict and returning bool
+        return_meta: If True, returns (entity_id, metadata)
         
     Returns:
-        entity_id of matching sibling or None
+        entity_id (str) or (entity_id, metadata) or None
     """
     try:
         if GlobalResources.ha_collection:
@@ -147,7 +148,7 @@ async def find_group_sibling(entity_id: str, match_func) -> Optional[str]:
                             
                             if match_func(metadata):
                                 log.info(f"[Group Lookup] Found sibling for {entity_id}: {candidate_id}")
-                                return candidate_id
+                                return (candidate_id, metadata) if return_meta else candidate_id
     except Exception as e:
         log.warning(f"[Group Lookup] Error resolving group for {entity_id}: {e}")
         
