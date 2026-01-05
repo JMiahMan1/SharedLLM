@@ -6,7 +6,7 @@ class AndroidTVTests(BaseTest):
     def __init__(self, api_url, headers=None, logger=None):
         super().__init__(api_url, headers, logger)
         self.primary_entity = "media_player.office_tv"
-        self.cast_entity = "media_player.office_tv_chrome_2"
+        self.cast_entity = "media_player.office_tv_chrome"
         self.initial_state = {}
 
     def run(self):
