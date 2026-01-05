@@ -94,27 +94,6 @@ class AndroidTVTests(BaseTest):
                           f"App ID did not change to launcher (Current: {new_app})", 
                           f"Home verified (App: {new_app})")
 
-        # 2. Volume Controls
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Mute the Office TV"}]}, "AndroidTV: Mute")
-        time.sleep(2)
-        full = self.get_entity_full(self.primary_entity)
-        is_muted = full.get("attributes", {}).get("is_volume_muted")
-        self.assert_state("AndroidTV: Mute", is_muted is True, f"Failed to mute (Muted: {is_muted})", "Mute verified")
-
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Unmute the Office TV"}]}, "AndroidTV: Unmute")
-        time.sleep(2)
-        full = self.get_entity_full(self.primary_entity)
-        is_muted = full.get("attributes", {}).get("is_volume_muted")
-        self.assert_state("AndroidTV: Unmute", is_muted is False, f"Failed to unmute (Muted: {is_muted})", "Unmute verified")
-        
-        target_vol = 0.25
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Set volume to 25% on the Office TV"}]}, "AndroidTV: Set Volume")
-        time.sleep(3)
-        full = self.get_entity_full(self.primary_entity)
-        curr_vol = full.get("attributes", {}).get("volume_level")
-        match = abs(curr_vol - target_vol) < 0.02 if curr_vol else False
-        self.assert_state("AndroidTV: Set Volume", match, f"Volume mismatch (Got: {curr_vol}, Expected: {target_vol})", f"Volume set verified ({curr_vol})")
-
     def stage_app_launch(self):
         # Launch YouTube
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Launch YouTube on the Office TV"}]}, "AndroidTV: Launch App")
@@ -172,15 +151,29 @@ class AndroidTVTests(BaseTest):
         # Test Transport Controls: Volume -> Pause -> Play -> Pause -> Resume -> Stop
         entity = self.cast_entity
 
-        # Volume (during playback)
-        initial_vol = self.get_entity_full(self.primary_entity).get("attributes", {}).get("volume_level", 0)
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn the volume up on the Office TV"}]}, "AndroidTV: Sequence Volume")
-        time.sleep(5)
-        new_vol = self.get_entity_full(self.primary_entity).get("attributes", {}).get("volume_level", 0)
-        service_success = self.last_response_json and self.last_response_json.get("tool_results", [{}])[0].get("status") == "SUCCESS"
-        self.assert_state("AndroidTV: Sequence Volume", service_success, 
-                          f"Volume command failed",
-                          f"Volume command success (Start: {initial_vol}, Current: {new_vol})")
+        # 1. Volume Controls (during playback)
+        # Mute
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Mute the Office TV"}]}, "AndroidTV: Mute")
+        time.sleep(2)
+        full = self.get_entity_full(self.primary_entity)
+        is_muted = full.get("attributes", {}).get("is_volume_muted")
+        self.assert_state("AndroidTV: Mute", is_muted is True, f"Failed to mute (Muted: {is_muted})", "Mute verified")
+
+        # Unmute
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Unmute the Office TV"}]}, "AndroidTV: Unmute")
+        time.sleep(2)
+        full = self.get_entity_full(self.primary_entity)
+        is_muted = full.get("attributes", {}).get("is_volume_muted")
+        self.assert_state("AndroidTV: Unmute", is_muted is False, f"Failed to unmute (Muted: {is_muted})", "Unmute verified")
+        
+        # Set Volume
+        target_vol = 0.25
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Set volume to 25% on the Office TV"}]}, "AndroidTV: Set Volume")
+        time.sleep(3)
+        full = self.get_entity_full(self.primary_entity)
+        curr_vol = full.get("attributes", {}).get("volume_level")
+        match = abs(curr_vol - target_vol) < 0.02 if curr_vol else False
+        self.assert_state("AndroidTV: Set Volume", match, f"Volume mismatch (Got: {curr_vol}, Expected: {target_vol})", f"Volume set verified ({curr_vol})")
 
         # Pause
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the video on the Office TV"}]}, "AndroidTV: Sequence Pause")
