@@ -698,6 +698,7 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
         # Check current entity capabilities
         from app.domains.media.devices import get_device_capabilities
         from app.settings import GlobalResources
+        import json
         
         # Get current entity metadata
         current_caps = None
@@ -708,7 +709,18 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
                 if docs and docs.get("metadatas"):
                     meta = docs["metadatas"][0]
                     current_integration = meta.get("integration", "").lower()
-                    current_caps = int(meta.get("supported_features", 0))
+                    
+                    # Try to get supported_features from attributes JSON
+                    attrs_json = meta.get("attributes", "{}")
+                    try:
+                        if isinstance(attrs_json, str):
+                            attrs = json.loads(attrs_json)
+                            current_caps = int(attrs.get("supported_features", 0))
+                        else:
+                            current_caps = 0
+                    except:
+                        current_caps = 0
+                    
                     log.info(f"[Volume Optimization] Current entity: integration={current_integration}, caps={current_caps}")
         except Exception as e:
             log.warning(f"[Volume Optimization] Could not get current entity caps: {e}")
@@ -717,8 +729,18 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
             """Find sibling that supports the specific volume operation."""
             try:
                 integ = meta.get("integration", "").lower()
-                features = int(meta.get("supported_features", 0))
                 sibling_id = meta.get("entity_id", "unknown")
+                
+                # Extract supported_features from attributes JSON
+                attrs_json = meta.get("attributes", "{}")
+                try:
+                    if isinstance(attrs_json, str):
+                        attrs = json.loads(attrs_json)
+                        features = int(attrs.get("supported_features", 0))
+                    else:
+                        features = 0
+                except:
+                    features = 0
                 
                 log.info(f"[Volume Optimization] Checking sibling {sibling_id}: integration={integ}, features={features}")
                 
