@@ -98,15 +98,24 @@ class MediaIntegration(ABC):
         
         # Ensure device is ON before selecting source (important for Android TV)
         try:
-             # Just like play_media, we might need to wake it up
-             # We can't call self.turn_on directly if it's not implemented, but we can try service call
-             # or rely on subclass implementation if available.
-             # Safest bet: call turn_on from this class or let HA handle it.
-             # But base turn_on raises NotImplementedError.
-             # Let's try sending "turn_on" service first.
+             from app.domains.media.devices import get_entity_state
              domain = entity_id.split(".")[0]
+             
+             # Try turning on the device
              await execute_ha_service(domain, "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
-             await asyncio.sleep(6) # Wait for wake (increased for slow Android TVs)
+             log.info(f"[open_app] Sent turn_on to {entity_id}, verifying device is responsive...")
+             
+             # Wait and verify device actually turned on (up to 15 seconds)
+             for attempt in range(5):
+                 await asyncio.sleep(3)
+                 state = await get_entity_state(entity_id, user_creds)
+                 log.info(f"[open_app] Attempt {attempt + 1}/5: Device state = {state}")
+                 
+                 if state not in ["off", "standby", "unavailable"]:
+                     log.info(f"[open_app] Device {entity_id} is responsive (state: {state})")
+                     break
+             else:
+                 log.warning(f"[open_app] Device {entity_id} may not be fully responsive after turn_on")
         except Exception as e:
              log.warning(f"[open_app] Auto-turn-on failed: {e}")
 
