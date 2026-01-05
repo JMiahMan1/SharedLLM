@@ -1,0 +1,74 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T14:07:24.013586"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': \"Error executing command: 'RokuMediaAssistantIntegration' object has no attribute 'set_volume'\", 'entity_id': 'media_player.office_tv'}] | Msg: {'model': 'qwen3:latest', 'created_at': '2026-01-03T21:07:30Z', 'message': {'role': 'assistant', 'content': 'I encountered an issue setting the volume for the Office TV. The media player continues to experience an internal server error (HTTP 500), preventing the command from executing. Would you like me to attempt the command again, or would you prefer to check the device manually? Isaiah 40:31 reminds us that those who wait on the Lord will renew their strength, trust that even small adjustments align with His perfect plan.'}, 'done': True, 'tool_results': [{'status': 'FAILURE', 'message': \"Error executing command: 'RokuMediaAssistantIntegration' object has no attribute 'set_volume'\", 'entity_id': 'media_player.office_tv'}]}",
+    "timestamp": "2026-01-03T14:07:30.982224"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Unknown media command: volume_mute', 'entity_id': 'media_player.office_tv'}]",
+    "timestamp": "2026-01-03T14:07:37.768777"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Device state invalid: unknown",
+    "timestamp": "2026-01-03T14:07:45.736527"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:07:51.371483"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:08:05.369201"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:08:15.676662"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "PASS",
+    "message": "Final State: off",
+    "timestamp": "2026-01-03T14:08:24.354384"
+  },
+  {
+    "test": "Media: Radio List",
+    "status": "PASS",
+    "message": "Found 1 stations",
+    "timestamp": "2026-01-03T14:08:35.915361"
+  },
+  {
+    "test": "Media: Playlist List",
+    "status": "FAIL",
+    "message": "I currently do not have access to information about playlists in the provided context data. The Office TV and other media players remain unavailable due to the ongoing internal server error (HTTP 500). Would you like me to attempt to refresh the device status, or would you prefer to check the hardware manually?",
+    "timestamp": "2026-01-03T14:08:42.940972"
+  },
+  {
+    "test": "Timer: Add",
+    "status": "ERROR",
+    "message": "Req failed: None",
+    "timestamp": "2026-01-03T14:08:55.403997"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: cannot unpack non-iterable NoneType object",
+    "timestamp": "2026-01-03T14:08:55.404086"
+  }
+]

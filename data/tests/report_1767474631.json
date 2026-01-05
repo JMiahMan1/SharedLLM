@@ -1,0 +1,56 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T14:09:30.857083"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}] | Msg: {'model': 'qwen3:latest', 'created_at': '2026-01-03T21:09:36Z', 'message': {'role': 'assistant', 'content': 'I encountered an issue setting the volume for the Office TV. The media player continues to experience an internal server error (HTTP 500), preventing the command from executing. Would you like me to attempt the command again, or would you prefer to check the device manually? Isaiah 40:31 reminds us that those who wait on the Lord will renew their strength, trust that even small adjustments align with His perfect plan.'}, 'done': True, 'tool_results': [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.volume_set'}]}",
+    "timestamp": "2026-01-03T14:09:36.300851"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Unknown media command: volume_mute', 'entity_id': 'media_player.office_tv'}]",
+    "timestamp": "2026-01-03T14:09:42.672816"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Device state invalid: unknown",
+    "timestamp": "2026-01-03T14:09:48.211459"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:09:53.846310"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:10:09.844962"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:10:20.253488"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "ERROR",
+    "message": "Req failed: None",
+    "timestamp": "2026-01-03T14:10:31.009552"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: cannot unpack non-iterable NoneType object",
+    "timestamp": "2026-01-03T14:10:31.009632"
+  }
+]
