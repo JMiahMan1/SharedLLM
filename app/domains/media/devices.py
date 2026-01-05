@@ -683,8 +683,11 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
 async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=None) -> str:
     """
     Bidirectional volume targeting:
-    - For volume_up/down/mute: Prefer Android TV (hardware controls)
+    - For volume_up/down/mute: Prefer Android TV/Roku (hardware controls)
     - For volume_set: Prefer Cast (percentage support)
+    
+    IMPORTANT: This function is integration-safe and will NOT incorrectly swap
+    Roku devices. Roku is treated as a valid hardware target for step commands.
     """
     log.info(f"[Volume Optimization] ENTRY: entity={entity_id}, intent={intent}")
     try:
@@ -720,6 +723,7 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
                 log.info(f"[Volume Optimization] Checking sibling {sibling_id}: integration={integ}, features={features}")
                 
                 # For volume_set: Look for Cast/software that supports bit 4
+                # This will NOT match Roku (Roku is not Cast)
                 if intent == "volume_set":
                     is_cast = any(x in integ for x in ["cast", "google_cast", "chromecast", "music_assistant"])
                     supports_set = bool(features & 4)
@@ -728,6 +732,7 @@ async def _refine_target_for_volume(entity_id: str, intent: str, redis_client=No
                     return result
                 
                 # For volume_up/down/mute: Look for hardware TV that supports step/mute
+                # This INCLUDES Roku as a valid hardware target
                 else:
                     is_hardware = any(x in integ for x in ["androidtv", "roku", "webostv", "braviatv", "samsungtv", "tv", "remote"])
                     if not is_hardware:
