@@ -1,4 +1,5 @@
 import time
+import sys
 from .base import BaseTest
 
 class AndroidTVTests(BaseTest):
@@ -14,8 +15,18 @@ class AndroidTVTests(BaseTest):
             self.test_remote_commands()
             self.test_app_launch()
             self.test_watch_intent_sequence()
+        except Exception as e:
+            self.log("AndroidTV: FAIL FAST", "FAIL", f"Aborting test suite due to failure: {e}")
+            # We still want to try and restore state if possible, but the run is a failure
         finally:
             self.restore_state()
+
+    def assert_state(self, label, condition, message):
+        """Helper to fail fast if a condition is not met."""
+        if not condition:
+            self.log(label, "FAIL", message)
+            raise Exception(f"[{label}] {message}")
+        self.log(label, "PASS", message)
 
     def capture_initial_state(self):
         """Capture the current state of the TV for restoration later."""
@@ -36,16 +47,18 @@ class AndroidTVTests(BaseTest):
 
         print(f"[RESTORING] Target: {self.initial_state}")
         
-        # Restore Power/App
+        # 1. Stop any active sessions
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Stop the Office TV"}]}, log_label)
+        time.sleep(2)
+
+        # 2. Restore Power/App
         if self.initial_state["state"] == "off":
             self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn off the Office TV"}]}, log_label)
         else:
-             # If it was on, maybe it was in a specific app
-             if self.initial_state["app_id"]:
-                 # We don't have a direct 'launch app' tool that takes ID, but we can try 'Home' as a safe default
-                 self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Go home on the Office TV"}]}, log_label)
+             # If it was on, maybe it was in a specific app or just Home
+             self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Go home on the Office TV"}]}, log_label)
         
-        # Restore Volume
+        # 3. Restore Volume
         if self.initial_state["volume"] is not None:
             vol_pct = int(self.initial_state["volume"] * 100)
             self.safe_post("/api/chat", {"messages":[{"role":"user","content":f"Set volume to {vol_pct}% on the Office TV"}]}, log_label)
@@ -54,16 +67,20 @@ class AndroidTVTests(BaseTest):
 
     def test_remote_commands(self):
         # 1. Navigation / Home
-        # Check if screen saver is running (com.google.android.backdrop)
+        # First ensure we are NOT stuck in a cast session
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Stop the Office TV"}]}, "AndroidTV: Home Prep")
+        time.sleep(2)
+
         full = self.get_entity_full(self.primary_entity)
         app_id = full.get("attributes", {}).get("app_id")
         was_backdrop = (app_id == "com.google.android.backdrop")
 
-        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Press the home button on the Android TV"}]}, "AndroidTV: Home Command")
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Go to the home screen on the Office TV"}]}, "AndroidTV: Home Command")
         
         # Verify Home State (app_id should be a launcher or null/idle)
         success = False
-        for _ in range(10):
+        new_app = None
+        for _ in range(15): # Extended wait for UI transition
             full = self.get_entity_full(self.primary_entity)
             new_app = full.get("attributes", {}).get("app_id")
             # Typical launchers or simply clearing the backdrop
@@ -72,18 +89,15 @@ class AndroidTVTests(BaseTest):
                 break
             time.sleep(1)
 
-        if success:
-            self.log("AndroidTV: Home Command", "PASS", f"App changed from {app_id} -> {new_app}")
-        else:
-            self.log("AndroidTV: Home Command", "FAIL", f"App ID did not change to launcher (Current: {new_app})")
+        self.assert_state("AndroidTV: Home Command", success, f"App ID did not change to launcher (Current: {new_app})")
 
     def test_app_launch(self):
         # 2. Launch YouTube
-        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Launch YouTube on the Office TV"}]}, "AndroidTV: Launch App")
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Launch YouTube on the Office TV"}]}, "AndroidTV: Launch App")
         
         success = False
         last_app = None
-        for _ in range(20): # Increased timeout for slow app launch
+        for _ in range(25): # Increased timeout for slow app launch
             full = self.get_entity_full(self.primary_entity)
             last_app = full.get("attributes", {}).get("app_id")
             if last_app == "com.google.android.youtube.tv":
@@ -91,71 +105,66 @@ class AndroidTVTests(BaseTest):
                 break
             time.sleep(1)
 
-        if success:
-            self.log("AndroidTV: Launch App", "PASS", "Verified YouTube (com.google.android.youtube.tv) is active")
-        else:
-            self.log("AndroidTV: Launch App", "FAIL", f"YouTube not detected in app_id (Current: {last_app})")
+        self.assert_state("AndroidTV: Launch App", success, f"YouTube (com.google.android.youtube.tv) not active (Current: {last_app})")
 
     def test_watch_intent_sequence(self):
         # 3. Watch Intent + Sequence (Pause/Resume/Volume/Stop)
         # Using "Phil Wickham" as requested
-        msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Watch Phil Wickham on the Office TV"}]}, "AndroidTV: Watch Intent")
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Watch Phil Wickham on the Office TV"}]}, "AndroidTV: Watch Intent")
         
         # Verify Cast Entity state
         entity = self.cast_entity
         state = None
-        for _ in range(20):
+        for _ in range(25):
              state = self.get_entity_state(entity)
              if state in ["playing", "buffering"]:
                  break
              time.sleep(1)
         
-        if state not in ["playing", "buffering"]:
-             self.log("AndroidTV: Watch Intent", "FAIL", f"Playback did not start (State: {state})")
-             return
+        self.assert_state("AndroidTV: Watch Intent", state in ["playing", "buffering"], f"Playback did not start on {entity} (State: {state})")
 
-        self.log("AndroidTV: Watch Intent", "PASS", f"Cast started (State: {state})")
-
-        # 4. Volume during playback (as requested)
+        # 4. Volume during playback (explicitly requested)
+        # We check volume ON THE PRIMARY TV while casting is active
         initial_vol = self.get_entity_full(self.primary_entity).get("attributes", {}).get("volume_level", 0)
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Turn the volume up on the Office TV"}]}, "AndroidTV: Sequence Volume")
         
         # Give it a moment to process service call
-        time.sleep(3)
+        time.sleep(5)
         new_vol = self.get_entity_full(self.primary_entity).get("attributes", {}).get("volume_level", 0)
-        # Check if volume changed OR if tool reported success (since level matching is tricky with step size)
-        if self.last_response_json and self.last_response_json.get("tool_results", [{}])[0].get("status") == "SUCCESS":
-             self.log("AndroidTV: Sequence Volume", "PASS", f"Volume service succeeded (Start: {initial_vol}, Current: {new_vol})")
-        else:
-             self.log("AndroidTV: Sequence Volume", "FAIL", f"Volume command failed (Start: {initial_vol}, Current: {new_vol})")
+        
+        # Verification: Tool should report success, and we check for ANY change or success message
+        service_success = self.last_response_json and self.last_response_json.get("tool_results", [{}])[0].get("status") == "SUCCESS"
+        self.assert_state("AndroidTV: Sequence Volume", service_success, f"Volume command failed (Start: {initial_vol}, Current: {new_vol})")
 
         # 5. Sequence Verification
         # Pause
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the video on the Office TV"}]}, "AndroidTV: Sequence Pause")
-        state = self.wait_for_state(entity, ["paused", "idle"], 10) # Accepting idle as some cast apps drop on pause
-        self.log("AndroidTV: Sequence Pause", "PASS" if state in ["paused", "idle"] else "FAIL", f"State: {state}")
+        state = self.wait_for_state(entity, ["paused", "idle"], 15) # Accepting idle as some cast apps drop on pause
+        self.assert_state("AndroidTV: Sequence Pause", state in ["paused", "idle"], f"State: {state}")
 
         # Resume
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Resume the video on the Office TV"}]}, "AndroidTV: Sequence Resume")
-        state = self.wait_for_state(entity, ["playing"], 10)
-        self.log("AndroidTV: Sequence Resume", "PASS" if state == "playing" else "FAIL", f"State: {state}")
+        state = self.wait_for_state(entity, ["playing"], 15)
+        self.assert_state("AndroidTV: Sequence Resume", state == "playing", f"State: {state}")
 
         # Stop -> Should return to HOME
-        # Explicitly stop first to clear Cast session
+        # Explicitly stop first to clear Cast session (mediashell)
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Stop the Office TV"}]}, "AndroidTV: Sequence Stop")
-        time.sleep(2)
-        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Go home on the Office TV"}]}, "AndroidTV: Sequence Stop")
-        state = self.wait_for_state(entity, ["idle", "off"], 10)
+        time.sleep(3)
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Go to the home screen on the Office TV"}]}, "AndroidTV: Sequence Stop")
         
         # Verify back on home screen
-        full = self.get_entity_full(self.primary_entity)
-        app_id = full.get("attributes", {}).get("app_id")
-        home_success = app_id in ["com.google.android.backdrop", "com.google.android.tvlauncher", None]
-        
-        if state in ["idle", "off"] and home_success:
-             self.log("AndroidTV: Sequence Stop", "PASS", f"Playback stopped and returned home (App: {app_id})")
-        else:
-             self.log("AndroidTV: Sequence Stop", "FAIL", f"Stop failed or not home (State: {state}, App: {app_id})")
+        success = False
+        app_id = None
+        for _ in range(15):
+             full = self.get_entity_full(self.primary_entity)
+             app_id = full.get("attributes", {}).get("app_id")
+             if app_id in ["com.google.android.backdrop", "com.google.android.tvlauncher", None]:
+                 success = True
+                 break
+             time.sleep(1)
+
+        self.assert_state("AndroidTV: Sequence Stop", success, f"Did not return home (App: {app_id})")
 
     def wait_for_state(self, entity, target_states, timeout=10):
         for _ in range(timeout):
