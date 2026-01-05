@@ -77,7 +77,26 @@ class MediaIntegration(ABC):
         """Navigate to Home screen."""
         from app.domains.shared import execute_ha_service
         domain = entity_id.split(".")[0]
-        return await execute_ha_service(domain, "media_stop", entity_id, user_creds, {}, None)
+        # For many TVs, stopping media or sending Home command via remote is best.
+        # Base implementation does stop. Subclasses can use remote siblings.
+        return await execute_ha_service(domain, "media_stop", entity_id, user_creds, {}, kwargs.get("redis_client"))
+
+    async def open_app(self, entity_id: str, query: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """Open a specific app."""
+        from app.domains.shared import execute_ha_service
+        from app.domains.media.integrations import APP_PACKAGES
+        
+        # Resolve package name
+        package = None
+        for name, pkg in APP_PACKAGES.items():
+            if name in query.lower():
+                package = pkg
+                break
+        
+        if not package:
+            return {"status": "FAILURE", "message": f"Could not determine app from: {query}"}
+
+        return await execute_ha_service("media_player", "select_source", entity_id, user_creds, {"source": package}, kwargs.get("redis_client"))
 
 
 async def unwrap_entity_if_needed(entity_id: str, request_type: str, user_creds: dict) -> str:
