@@ -51,25 +51,63 @@ class MediaTests(BaseTest):
     def test_transport_controls(self):
         # 3. Stop/Pause/Resume
         # 3. Stop/Pause/Resume - Explicitly target known device
+        entity = "media_player.office_tv_chrome_2"
+
+        # STOP
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Stop the music on the Office TV"}]}, "Media: Stop")
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
         if tr and tr[0].get("status") == "SUCCESS":
-             self.log("Media: Stop", "PASS")
+             # Verify state becomes idle or off
+             state = None
+             for _ in range(5):
+                 state = self.get_entity_state(entity)
+                 if state in ["idle", "off", "paused"]: 
+                     break
+                 time.sleep(1)
+             if state in ["idle", "off", "paused"]:
+                 self.log("Media: Stop", "PASS", f"State: {state}")
+             else:
+                 self.log("Media: Stop", "WARN", f"Command SUCCESS but state is {state}")
         else:
              self.log("Media: Stop", "FAIL", f"TR: {tr}")
 
+        # Pause
+        # Need to ensure something is playing first? We might have stopped it above.
+        # Let's skip strict state check for Pause if we just stopped it, OR run play first.
+        # For robustness, we'll try to Play then Pause.
+        self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Play Tim Timmons on Office TV"}]}, "Media: Play (Pre-Pause)")
+        time.sleep(2) # Buffer
+        
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Pause the show on the Office TV"}]}, "Media: Pause")
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
-        if tr and tr[0].get("status") == "SUCCESS": # State verification hard without active playback
-             self.log("Media: Pause", "PASS")
+        if tr and tr[0].get("status") == "SUCCESS":
+             state = None
+             for _ in range(5):
+                 state = self.get_entity_state(entity)
+                 if state == "paused":
+                     break
+                 time.sleep(1)
+             if state == "paused":
+                 self.log("Media: Pause", "PASS", f"State: {state}")
+             else:
+                 self.log("Media: Pause", "WARN", f"State: {state}")
         else:
              self.log("Media: Pause", "FAIL", f"TR: {tr}")
 
+        # Resume
         self.safe_post("/api/chat", {"messages":[{"role":"user","content":"Resume playback on the Office TV"}]}, "Media: Resume")
-        # Resume might fail if nothing paused, but we check for tool execution attempt
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
         if tr and (tr[0].get("status") == "SUCCESS" or "no active" in tr[0].get("message", "").lower()):
-             self.log("Media: Resume", "PASS")
+              state = None
+              for _ in range(5):
+                 state = self.get_entity_state(entity)
+                 if state in ["playing", "buffering"]:
+                     break
+                 time.sleep(1)
+              if state in ["playing", "buffering"]:
+                  self.log("Media: Resume", "PASS", f"State: {state}")
+              else:
+                   self.log("Media: Resume", "WARN", f"State: {state}")
         else:
              self.log("Media: Resume", "FAIL", f"TR: {tr}")
         
