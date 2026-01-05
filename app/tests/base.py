@@ -59,3 +59,13 @@ class BaseTest:
         except Exception as e:
             self.log(f"State Check {entity_id}", "ERROR", f"Failed: {e}")
             return None
+
+    def get_entity_full(self, entity_id):
+         """Fetch full entity state object."""
+         try:
+            r = requests.get(f"{self.api_url}/api/ha/state/{entity_id}", headers=self.headers, timeout=5)
+            if r.status_code == 200:
+                return r.json()
+            return {}
+         except Exception as e:
+            return {}
