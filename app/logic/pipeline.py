@@ -383,6 +383,14 @@ async def _handle_single_command(
                 "parameters": {}
             }
             log.info(f"[FAST PATH] action_plan set: {action_plan}")
+        elif intent in ["list_playlists", "music_list", "list_radio"]:
+            log.info(f"[FAST PATH] Matched music list intent: {intent}")
+            action_plan = {
+                "action": "tool_call",
+                "tool_name": intent, # This matches the registered ActionDispatcher names
+                "parameters": {}
+            }
+            log.info(f"[FAST PATH] action_plan set: {action_plan}")
         
         if action_plan:
             log.info(f"[FAST ORCHESTRA] Bypassing LLM for {intent}")

@@ -89,4 +89,8 @@ REGEX_INTENT_MAP = {
     # Note Check-off (High Priority Deterministic Match)
     r"\b(check|tick|mark)\s+(off|done|complete)\b": "note_check_off",
     r"\b(check|mark)\s+.+\s+(off|done|complete)\b": "note_check_off",
+
+    # Music Assistant Browsing
+    r"\b(list|show|what)\s+(are|my)?\s*(playlists)": "list_playlists",
+    r"\b(list|show|what)\s+(are|my)?\s*(radio|stations)": "list_radio",
 }
