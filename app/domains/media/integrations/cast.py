@@ -218,7 +218,7 @@ class CastIntegration(StandardIntegration, VideoHelperMixin):
                 except Exception as e:
                      log.warning(f"[SmartPowerSync] Failed to power on {tv_sibling}: {e}")
             else:
-                log.warning(f"[SmartPowerSync] No TV sibling found for {entity_id}")
+                log.debug(f"[SmartPowerSync] No TV sibling found for {entity_id} (Normal for audio-only devices)")
                 
         except Exception as e:
             log.warning(f"[SmartPowerSync] Error: {e}")

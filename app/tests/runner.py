@@ -37,36 +37,51 @@ class MasterRunner:
         })
         print(f"[{status:5}] {name:30} | {message}")
 
-    def run_all(self):
+    def run_tests(self, target_test=None):
         self.start_time = time.time()
         print(f"\n=== SharedLLM Comprehensive Test Suite ===")
         print(f"Target API: {self.api_url}")
         print(f"Timestamp:  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        if target_test:
+            print(f"Filter:     {target_test}")
         print("-" * 60)
 
         # 1. Health Check
         import requests
         try:
-            r = requests.get(f"{self.api_url}/health", timeout=10) # Increased timeout
+            r = requests.get(f"{self.api_url}/health", timeout=10)
             if r.status_code == 200:
                 self.logger("Health Check", "PASS", "Service reachable")
             else:
                 self.logger("Health Check", "FAIL", f"HTTP {r.status_code}")
-                return self._save_report() # Return report even if failed
+                return self._save_report()
         except Exception as e:
             self.logger("Health Check", "FAIL", str(e))
-            return self._save_report() # Return report even if failed
+            return self._save_report()
 
         # 2. Run Modular Tests
         try:
-            MediaTests(self.api_url, logger=self.logger).run()
-            TimerTests(self.api_url, logger=self.logger).run()
-            SearchTests(self.api_url, logger=self.logger).run()
-            ProductivityTests(self.api_url, logger=self.logger).run()
-            HardwareTests(self.api_url, logger=self.logger).run()
-            ContextTests(self.api_url, logger=self.logger).run()
-            AndroidTVTests(self.api_url, logger=self.logger).run()
-            AdvancedTests(self.api_url, logger=self.logger).run()
+            test_map = {
+                "MediaTests": MediaTests,
+                "TimerTests": TimerTests,
+                "SearchTests": SearchTests,
+                "ProductivityTests": ProductivityTests,
+                "HardwareTests": HardwareTests,
+                "ContextTests": ContextTests,
+                "AndroidTVTests": AndroidTVTests,
+                "AdvancedTests": AdvancedTests
+            }
+
+            if target_test:
+                if target_test in test_map:
+                    test_map[target_test](self.api_url, logger=self.logger).run()
+                else:
+                    print(f"Error: Test suite '{target_test}' not found.")
+                    print(f"Available suites: {', '.join(test_map.keys())}")
+            else:
+                for name, test_class in test_map.items():
+                    test_class(self.api_url, logger=self.logger).run()
+
         except Exception as e:
             self.logger("Runner", "ERROR", f"Suite execution crashed: {e}")
 
@@ -94,7 +109,8 @@ class MasterRunner:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:11435", help="API URL to test")
+    parser.add_argument("--test", default=None, help="Specific test suite to run (e.g. MediaTests)")
     args = parser.parse_args()
     
     runner = MasterRunner(args.url)
-    runner.run_all()
+    runner.run_tests(args.test)
