@@ -39,9 +39,9 @@ ssh "$HOST" << EOF
     if [ -d "app" ]; then
         docker run --rm -v "$(pwd)/app:/app" -w /app alpine find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
     fi
-    # Prune root-owned test reports that block git reset
+    # Prune root-owned test reports/directory that block git reset
     echo "Pruning root-owned test reports..."
-    docker run --rm -v "$(pwd)/data:/data" alpine sh -c "rm -rf /data/tests/*.json" 2>/dev/null
+    docker run --rm -v "$(pwd)/data:/data" alpine sh -c "rm -rf /data/tests" 2>/dev/null
 
     echo "Fetching latest code..."
     git fetch origin
