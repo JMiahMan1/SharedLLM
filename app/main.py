@@ -508,12 +508,7 @@ async def admin_logs(lines: int = 100):
     except Exception as e:
         return {"error": str(e)}
 
-@app.post("/api/admin/run_tests")
-async def admin_run_tests(background_tasks: BackgroundTasks):
-    """Run the system verification suite."""
-    from app.logic.test_runner import runner
-    # We run it synchronously in a thread pool to avoid blocking the loop
-    return await run_blocking(runner.run_all)
+# Duplicate endpoint removed. See run_tests_endpoint above.
 
 @app.get("/api/device/capabilities/{entity_id:path}")
 async def get_device_capabilities(entity_id: str):
