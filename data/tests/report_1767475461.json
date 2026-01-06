@@ -1,0 +1,68 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T14:23:18.441128"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "PASS",
+    "message": "Verified known limitation: Volume Set not supported on Roku",
+    "timestamp": "2026-01-03T14:23:23.965228"
+  },
+  {
+    "test": "Media: Volume Up",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble', 'entity_id': 'remote.office_tv_remote', 'friendly_name': 'Office Tv Remote', 'service': 'remote.send_command'}]",
+    "timestamp": "2026-01-03T14:23:30.733789"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble', 'entity_id': 'remote.office_tv_remote', 'friendly_name': 'Office Tv Remote', 'service': 'remote.send_command'}]",
+    "timestamp": "2026-01-03T14:23:37.900231"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Device state invalid: unknown",
+    "timestamp": "2026-01-03T14:23:43.388358"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:23:48.697925"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:24:00.070859"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:24:13.643236"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "PASS",
+    "message": "Final State: off",
+    "timestamp": "2026-01-03T14:24:21.462275"
+  },
+  {
+    "test": "Media: Radio List",
+    "status": "ERROR",
+    "message": "Req failed: None",
+    "timestamp": "2026-01-03T14:24:21.593575"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: cannot unpack non-iterable NoneType object",
+    "timestamp": "2026-01-03T14:24:21.593663"
+  }
+]

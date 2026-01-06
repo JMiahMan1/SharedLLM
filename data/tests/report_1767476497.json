@@ -1,0 +1,104 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T14:39:00.678003"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "PASS",
+    "message": "Verified known limitation: Volume Set not supported on Roku",
+    "timestamp": "2026-01-03T14:39:22.370680"
+  },
+  {
+    "test": "Media: Volume Up",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Volume Up failed: Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble'}]",
+    "timestamp": "2026-01-03T14:39:28.653985"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Volume Mute failed: Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble'}]",
+    "timestamp": "2026-01-03T14:39:37.830691"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Device state invalid: unknown",
+    "timestamp": "2026-01-03T14:39:44.325090"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:39:49.731795"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:40:04.819677"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:40:14.548641"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "PASS",
+    "message": "Final State: off",
+    "timestamp": "2026-01-03T14:40:22.417812"
+  },
+  {
+    "test": "Media: Radio List",
+    "status": "PASS",
+    "message": "Found 1 stations",
+    "timestamp": "2026-01-03T14:40:35.418117"
+  },
+  {
+    "test": "Media: Playlist List",
+    "status": "FAIL",
+    "message": "The system does not currently have access to a list of playlists through Home Assistant or Nextcloud. Please check your streaming service or device settings manually for available playlists. Ecclesiastes 3:11 reminds us that God has set the time for every purpose under heaven, trust that even small adjustments align with His perfect plan. Would you like to try another command or investigate the device directly?",
+    "timestamp": "2026-01-03T14:40:40.736419"
+  },
+  {
+    "test": "Timer: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:40:49.735301"
+  },
+  {
+    "test": "Timer: Pause",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:41:04.276620"
+  },
+  {
+    "test": "Timer: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:41:11.508158"
+  },
+  {
+    "test": "Alarm: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:41:18.672765"
+  },
+  {
+    "test": "Timer: List",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:41:36.489573"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: BaseTest.safe_post() missing 1 required positional argument: 'label'",
+    "timestamp": "2026-01-03T14:41:37.544497"
+  }
+]
