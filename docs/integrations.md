@@ -40,9 +40,9 @@ music on a smart speaker).
         physical group (e.g., "Office") that look like a TV. If that fails, it
         tries name matching (stripping `_cast` or `_chrome` suffixes).
   * **Action**:
-        * If TV is **OFF**: Sends `media_player.turn_on`, waits 2-4s for boot, then plays.
-        * If TV is **ON**: Skips power commands to avoid interrupting active sessions (e.g., typically avoids "Home" pulses for video intents).
-        * If TV is **Android/Deep Sleep**: Uses a specialized "Home" pulse to wake the ADB connection without power toggling, unless a video session is imminent.
+    * If TV is **OFF**: Sends `media_player.turn_on`, waits 2-4s for boot, then plays.
+    * If TV is **ON**: Skips power commands to avoid interrupting active sessions (e.g., typically avoids "Home" pulses for video intents).
+    * If TV is **Android/Deep Sleep**: Uses a specialized "Home" pulse to wake the ADB connection without power toggling, unless a video session is imminent.
 * **Standard Playback**: Supports standard HASS `media_player.play_media`
     commands.
 
