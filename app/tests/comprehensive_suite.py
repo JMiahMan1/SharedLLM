@@ -12,16 +12,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("ComprehensiveSuite")
 
 # Add app directory to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+# Add project root to path (one level up from app/)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from logic.execution.registry import ActionDispatcher
-from logic.execution.handlers import *
-from logic.media_ops import handle_media_command
-from logic.timer_ops import tool_timer_add, tool_timer_list, tool_timer_delete, tool_alarm_add, tool_timer_pause, tool_timer_resume
-from logic.calendar_ops import tool_calendar_list, tool_calendar_add, tool_calendar_delete
-from logic.note_ops import tool_note_add, tool_note_delete, tool_note_read, tool_note_append
-from logic.web_search import tool_web_search
-from settings import HA_URL, HA_ENV_TOKEN, REDIS_HOST, REDIS_PORT, REDIS_DB
+from app.logic.execution.registry import ActionDispatcher
+from app.logic.execution.handlers import *
+from app.logic.media_ops import handle_media_command
+from app.logic.timer_ops import tool_timer_add, tool_timer_list, tool_timer_delete, tool_alarm_add, tool_timer_pause, tool_timer_resume
+from app.logic.calendar_ops import tool_calendar_list, tool_calendar_add, tool_calendar_delete
+from app.logic.note_ops import tool_note_add, tool_note_delete, tool_note_read, tool_note_append
+from app.logic.web_search import tool_web_search
+from app.settings import HA_URL, HA_ENV_TOKEN, REDIS_HOST, REDIS_PORT, REDIS_DB
 
 # Alias for compatibility
 HA_TOKEN = HA_ENV_TOKEN
@@ -32,7 +33,7 @@ class GlobalResources:
 
 async def load_resources():
     import redis.asyncio as redis
-    from logic.db.ha_collection import HACollection
+    from app.logic.db.ha_collection import HACollection
     
     log.info("Loading Global Resources...")
     GlobalResources.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)

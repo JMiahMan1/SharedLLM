@@ -213,10 +213,16 @@ async def smart_power_sync(entity_id: str, user_creds: Dict[str, Any]):
             await execute_ha_service("media_player", "turn_on", tv_id, user_creds, {}, None)
             await asyncio.sleep(2) # Wait for command acceptance
             
-        # [Wake Pulse] ALWAYS pulse if it's an Android TV/Remote and not currently playing.
-        # This fixes the "Fake On" / Deep Sleep issue common with Android/Askey TVs.
+        # [Wake Pulse] Only pulse if we just turned it ON or if it's an Android TV in a deep sleep state (idle but unresponsive).
+        # CRITICAL: Do NOT pulse for video/app intents if the TV is already ON, as it interrupts the session start.
         is_atv = tv_meta.get("integration") == "androidtv" or "remote" in tv_id or "remote" in tv_meta.get("friendly_name", "").lower()
-        if is_atv and tv_state != "playing":
+        
+        # Skip pulse if already ON/IDLE for video/app requests to prevent navigation interruptions
+        skip_pulse = False
+        if not should_turn_on and any(x in (str(tv_meta.get("intent", "")) + str(tv_meta.get("query", ""))).lower() for x in ["watch", "video", "youtube", "netflix", "app"]):
+             skip_pulse = True
+
+        if is_atv and tv_state != "playing" and not skip_pulse:
             log.info(f"[SmartPowerSync] Waking up hardware {tv_id} via 'Home' pulse.")
             try:
                 # Home pulse is the most reliable wake-up trigger for Android TV hardware.
@@ -226,7 +232,7 @@ async def smart_power_sync(entity_id: str, user_creds: Dict[str, Any]):
         if should_turn_on:
             await asyncio.sleep(2) # Additional boot time if we just turned it on
         else:
-            log.info(f"[SmartPowerSync] Physical TV sibling {tv_id} is already {tv_state} (Pulsed if ATV)")
+            log.info(f"[SmartPowerSync] Physical TV sibling {tv_id} is already {tv_state} (Pulse skipped: {skip_pulse})")
 
     except Exception as e:
         log.warning(f"[SmartPowerSync] Failed for {entity_id}: {e}")
