@@ -194,7 +194,8 @@ class MediaTests(BaseTest):
 
         msg, status = self.safe_post("/api/chat", {"messages":[{"role":"user","content":"What playlists do I have?"}]}, "Media: Playlist List")
         tr = self.last_response_json.get("tool_results", []) if self.last_response_json else []
-        if tr and tr[0].get("status") == "SUCCESS":
-            self.log("Media: Playlist List", "PASS")
+        if tr and tr[0].get("status") == "SUCCESS" and "items" in tr[0]:
+            count = len(tr[0]["items"])
+            self.log("Media: Playlist List", "PASS", f"Found {count} playlists")
         else:
             self.log("Media: Playlist List", "FAIL", str(msg))
