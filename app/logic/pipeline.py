@@ -598,6 +598,9 @@ async def generate_rag_stream(
                     "calendar_read",
                     "note_read",
                     "note_list",
+                    "list_playlists",
+                    "list_radio",
+                    "music_list",
                 ]:
                     action_context += f"TOOL OUTPUT:\n{msg}\n"
             else:
