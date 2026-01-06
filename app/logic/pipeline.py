@@ -463,16 +463,18 @@ async def try_handle_compound_command(
     if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
         return None
     if re.match(r"^(what|who|when|how|why)\b", query.lower().strip()):
-        if " and " not in query.lower():
-            if "what time" in query.lower() or "current time" in query.lower():
-                now = datetime.now()
-                return [
-                    {
-                        "status": "SUCCESS",
-                        "message": f"It is currently {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d')}.",
-                    }
-                ]
-            return None
+        # If intent is locked (regex match) or high-confidence, don't assume it's a general question
+        if not intent_locked and not (is_high_confidence and intent):
+            if " and " not in query.lower():
+                if "what time" in query.lower() or "current time" in query.lower():
+                    now = datetime.now()
+                    return [
+                        {
+                            "status": "SUCCESS",
+                            "message": f"It is currently {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d')}.",
+                        }
+                    ]
+                return None
     cmds = await decompose_command_query(query, model)
     tasks = []
     if len(cmds) > 1:
