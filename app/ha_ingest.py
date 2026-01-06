@@ -1,11 +1,13 @@
-# ha_ingest.py
+# app/ha_ingest.py
 import os
 import requests
 import json
 import logging
 import sys
-import asyncio
-from typing import Dict, Any, List, Tuple
+import shutil
+import argparse
+from typing import Dict, Any, Tuple, List
+from datetime import datetime, timedelta, timezone
 
 # LangChain and Chroma Imports
 try:
@@ -16,27 +18,20 @@ except ImportError as e:
     print(f"CRITICAL: Missing AI dependencies: {e}")
     sys.exit(1)
 
-# --- Configuration (using settings module conventions) ---
-try:
-    # Assuming these are available via settings.py in the running environment
-    from settings import (
-        HA_URL, HA_ENV_TOKEN, CHROMA_DIR, EMB_MODEL, get_user_creds, run_blocking
-    )
-except ImportError:
-    # Fallback/Placeholder definitions for non-integrated testing
-    HA_URL = os.getenv("HA_URL")
-    HA_ENV_TOKEN = os.getenv("HA_TOKEN")
-    CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
-    EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-    
-    def get_user_creds(user=None, token=None):
-        return {"user": user or "Admin", "ha_token": token or HA_ENV_TOKEN}
-    
-    # Simple synchronous run_blocking for non-integrated execution
-    def run_blocking(fn, *args, **kwargs):
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(fn, *args, **kwargs).result()
+# Import shared fetch logic
+from app.utils.ha_fetch import fetch_ha_data, get_device_info, HA_URL, HA_TOKEN
+
+# --- Configuration ---
+# We use os.getenv directly to ensure we use the Docker container's environment
+# HA_URL and HA_TOKEN are imported from ha_fetch
+CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
+EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+
+# CRITICAL: This must match GlobalResources.ha_collection in settings.py
+COLLECTION_NAME = "home_assistant" 
+
+# API URL for reloading resources after ingestion
+API_RELOAD_URL = "http://localhost:11435/api/system/reload"
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -48,169 +43,219 @@ logging.basicConfig(
 logger = logging.getLogger("HA_Ingest")
 
 # ----------------------
-# Core HA Data Fetching
-# ----------------------
-
-def fetch_ha_data() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-    """Fetches all states, device registry, and entity registry info from Home Assistant."""
-    creds = get_user_creds()
-    token = creds.get("ha_token")
-
-    if not HA_URL or not token:
-        logger.error("HA_URL or HA_TOKEN not configured.")
-        return {}, {}, {}
-    
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    
-    def fetch_endpoint(endpoint):
-        url = f"{HA_URL.rstrip('/')}/api/{endpoint}"
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            return resp.json()
-        logger.warning(f"Failed to fetch {endpoint}: HTTP {resp.status_code}")
-        return None
-
-    states = fetch_endpoint("states") or []
-    device_registry_list = fetch_endpoint("config/device_registry/list") or []
-    entity_registry_list = fetch_endpoint("config/entity_registry/list") or []
-
-    device_registry = {dev["id"]: dev for dev in device_registry_list if "id" in dev}
-    entity_registry = {ent["entity_id"]: ent for ent in entity_registry_list if "entity_id" in ent}
-
-    return states, device_registry, entity_registry
-
-def get_device_info(entity_id: str, device_registry: Dict[str, Any], entity_registry: Dict[str, Any]) -> Tuple[str, str]:
-    """Retrieves device name and integration from registry data."""
-    
-    registry_entry = entity_registry.get(entity_id, {})
-    device_id = registry_entry.get("device_id")
-    platform = registry_entry.get("platform", "unknown")
-
-    integration = platform
-    device_name = ""
-    
-    if device_id and device_id in device_registry:
-        device = device_registry[device_id]
-        # Use a combination of identifiers for robust integration name
-        integration = device.get("manufacturer", "") + " " + device.get("model", "")
-        device_name = device.get("name_by_user") or device.get("name") or ""
-        
-        # Override integration if the platform name is more specific (like music_assistant)
-        if platform and "integration" not in integration.lower():
-             integration = platform
-
-    # If integration is still a simple platform (e.g., 'template'), keep it.
-    if not integration.strip():
-        integration = platform
-        
-    return device_name, integration.strip()
-
-# ----------------------
 # Ingestion Main
 # ----------------------
 
-def ingest_ha_metadata():
-    logger.info("--- Starting Home Assistant Metadata Ingestion ---")
+def ingest_ha_metadata(ha_url: str = None, ha_token: str = None):
+    logger.info(f"--- Starting Home Assistant Ingestion to '{COLLECTION_NAME}' ---")
 
-    # 1. Initialize DB and Embeddings
+    # 1. Initialize Embeddings
     embeddings = HuggingFaceEmbeddings(model_name=EMB_MODEL)
     
-    # TARGET COLLECTION: ha_sensors (Explicitly separate)
-    vectordb = Chroma(
-        collection_name="ha_sensors", 
-        embedding_function=embeddings, 
-        persist_directory=CHROMA_DIR
-    )
-    
-    # 2. Fetch HA Data
-    states, device_registry, entity_registry = fetch_ha_data()
-    
+    # 2. Force Clean State (Clear old data to prevent stale entities)
+    try:
+        temp_db = Chroma(
+            collection_name=COLLECTION_NAME,
+            embedding_function=embeddings,
+            persist_directory=CHROMA_DIR
+        )
+        if temp_db._collection.count() > 0:
+            logger.info("Clearing existing Home Assistant data...")
+            temp_db.delete_collection()
+    except Exception:
+        pass
+
+    # 3. Fetch HA Data
+    states, device_registry, entity_registry, area_registry = fetch_ha_data(ha_url, ha_token)
     if not states:
-        logger.error("Skipping ingestion due to missing HA state data.")
+        logger.error("No states received from HA. Aborting.")
         return
 
-    # 3. Process and Chunk Documents
+    # Filter Logic Setup
     docs_to_add = []
-    
-    # Clear existing data
-    try:
-        vectordb._collection.delete(where={})
-        logger.info(f"Cleared existing data from ha_sensors collection.")
-    except Exception as e:
-        logger.warning(f"Failed to clear collection: {e}")
-
-    # Counter for entities processed
     skipped_count = 0
-    ingested_count = 0
+    stale_count = 0
+    
+    # Create a lookup dict for easy entity access
+    states_dict = {s['entity_id']: s for s in states}
+    
+    # Cutoff for 'Active' Devices (30 Days)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(days=30)
+    # Cutoff for 'Active' Devices (30 Days)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(days=30)
+    logger.info(f"Checking for entities older than: {cutoff_time.isoformat()}")
+
+    # Domains to index (controllable or useful info)
+    # Strictly physical/actionable domains. Removed 'automation', 'timer', 'person'.
+    ALLOWED_DOMAINS = [
+        "light", "switch", "media_player", "climate", 
+        "fan", "cover", "lock", "script", "scene"
+    ]
 
     for state_obj in states:
         entity_id = state_obj["entity_id"]
         attributes = state_obj.get("attributes", {})
         current_state = state_obj.get("state", "unknown")
+        last_updated_str = state_obj.get("last_updated")
         
-        # Filter 1: Skip based on unwanted entity types (like groups/zones)
-        if entity_id.startswith(("group.", "zone.", "person.", "sun.")):
+        # Filter 1: Activity Check (30 Days) - RELAXED: Log only
+        if last_updated_str:
+            try:
+                # Handle Z or +00:00. Python 3.11 fromisoformat generally handles it.
+                last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
+                if last_updated < cutoff_time:
+                    stale_count += 1
+                    continue
+            except Exception:
+                pass
+
+        # Filter 2: Strict "No Synthetic/Logical Entities" Rule
+        # We strictly skip legacy groups, zones, and system entities.
+        # "group." domains are filtered unless they are valid media_player groups (which appear as media_player.X).
+        if entity_id.startswith(("group.", "zone.", "sun.", "update.", "sensor.", "binary_sensor.", "person.", "timer.", "automation.")):
             skipped_count += 1
             continue
+
+        domain = entity_id.split('.')[0]
         
-        # Filter 2: Skip inactive/unhelpful states
-        if current_state in ["unavailable", "unknown", "none", "uninitialized"]:
-            skipped_count += 1
+        # Filter 3: Domain & State
+        if domain not in ALLOWED_DOMAINS:
+            # Check for specific mass entities if domain differs, but usually they are media_player
             continue
+            
+        # RELAXED: Don't skip unavailable/unknown. We want static catalog.
+        # if current_state in ["unavailable", "unknown", "none"]:
+        #     skipped_count += 1
+        #     continue
             
         # Get enriched metadata
-        device_name, integration = get_device_info(entity_id, device_registry, entity_registry)
+        device_name, integration, area_name = get_device_info(entity_id, device_registry, entity_registry, area_registry)
         
-        # --- MUSIC ASSISTANT SELF-CORRECTION (CRITICAL FIX) ---
-        # If the integration is unknown but the entity has MA attributes, force the integration name.
-        if "music_assistant" not in integration.lower() and (
-            "mass_player_type" in attributes or "active_queue" in attributes
-        ):
-            logger.info(f"Self-Correcting: {entity_id} detected as Music Assistant player via attributes.")
-            integration = "music_assistant"
+        # Get platform and device_id for self-correction logic
+        registry_entry = entity_registry.get(entity_id, {})
+        platform = registry_entry.get("platform", "unknown")
+        device_id = registry_entry.get("device_id")
+        
+        # --- INTEGRATION SPECIFIC ENHANCEMENTS ---
+        # Prioritize hardware integration over Music Assistant for general features
+        # but keep MA as a secondary 'capability' in the description.
+        is_mass = "music_assistant" in integration.lower() or "mass_" in str(attributes) or "active_queue" in attributes
+        
+        # Mapping: Domain -> Friendly Integration Name
+        DOMAIN_MAP = {
+            "androidtv_remote": "android_tv",
+            "google_cast": "chromecast",
+            "cast": "chromecast",
+            "roku": "roku",
+            "smartthings": "smartthings",
+            "webostv": "webos_tv",
+            "braviatv": "bravia_tv"
+        }
+        
+        if integration.lower() in DOMAIN_MAP:
+            integration = DOMAIN_MAP[integration.lower()]
+        
+        # Use attributes as secondary refinement if still unknown
+        if integration == "unknown" or integration == "chromecast":
+             if "com.google.android" in str(attributes.get("app_id", "")):
+                  integration = "android_tv"
+             elif "cast" in str(attributes.get("app_id", "")) or "cast" in platform.lower():
+                  integration = "chromecast"
+        
+        # If it's Music Assistant, try to find the linked hardware integration in the description
+        if is_mass and (integration == "music_assistant" or integration == "unknown"):
+             # Look at active_queue or mass_player_id
+             mass_target = attributes.get("active_queue") or attributes.get("mass_player_id")
+             if mass_target and mass_target in states_dict:
+                 target_info = get_device_info(mass_target, device_registry, entity_registry, area_registry)
+                 if target_info[1] and target_info[1] != "unknown":
+                      integration = target_info[1]
+                      if integration.lower() in DOMAIN_MAP:
+                           integration = DOMAIN_MAP[integration.lower()]
+        
+        # Build Friendly Name
 
-        # Build document content for similarity search
+
+        # Build Friendly Name
         friendly_name = attributes.get("friendly_name", device_name or entity_id.split('.')[1])
         
-        # Content = all terms a user might use to reference the entity.
+        # Build Content (The text the LLM actually searches against)
+        # We explicitly mention "is a X device" to help vector matching.
         content = f"{friendly_name} ({entity_id}) is a {integration} device."
+        if area_name:
+             content += f" Located in {area_name}."
         if device_name and device_name not in friendly_name:
-             content += f" Associated with device: {device_name}."
-
-        # Filter out MA-specific attributes from the general searchable list to keep content clean
-        searchable_attrs = [
-            f"{k}: {v}" for k, v in attributes.items() 
-            if k not in ["friendly_name", "icon", "supported_features", "unit_of_measurement", "mass_player_type", "active_queue"] and v is not None and len(str(v)) < 50
-        ]
+             content += f" Part of device: {device_name}."
+        
+        # Add key attributes to content for searchability
+        # e.g., if user asks "Which light is red?", we need attributes.
+        searchable_attrs = []
+        for k, v in attributes.items():
+            # Skip noise attributes (but keep supported_features and supported_color_modes for metadata)
+            if k not in ["friendly_name", "icon", "mass_player_type", "entity_picture", "supported_features", "supported_color_modes"] and v and len(str(v)) < 50:
+                searchable_attrs.append(f"{k}: {v}")
+        
         if searchable_attrs:
-            content += " Key attributes: " + ", ".join(searchable_attrs)
+            content += " Attributes: " + ", ".join(searchable_attrs)
 
-        # Build Metadata payload
+        # Build Metadata payload (Used by the API for tool calls)
         metadata = {
             "entity_id": entity_id,
-            "domain": entity_id.split('.')[0],
+            "domain": domain,
             "friendly_name": friendly_name,
-            "integration": integration, # CRITICAL for Music Assistant logic
+            "integration": integration, 
             "device_name": device_name,
-            "state": current_state
+            "area_name": area_name or "",
+            "state": current_state,
+            "source": "home_assistant"
         }
+        
+        # Include supported_features and supported_color_modes for capability detection
+        if "supported_features" in attributes:
+            metadata["supported_features"] = str(attributes["supported_features"])
+        if "supported_color_modes" in attributes:
+            # Store as JSON string for compatibility
+            import json
+            metadata["supported_color_modes"] = json.dumps(attributes["supported_color_modes"])
 
         docs_to_add.append(Document(page_content=content, metadata=metadata))
-        ingested_count += 1
 
-    # 4. Add Documents to Chroma
+    # 5. Ingest to Chroma
     if docs_to_add:
         try:
-            vectordb.add_documents(docs_to_add)
-            logger.info(f"Successfully ingested {ingested_count} ACTIVE Home Assistant entities.")
-            logger.info(f"Skipped {skipped_count} inactive entities.")
-            
-            # 5. Persist
+            vectordb = Chroma.from_documents(
+                documents=docs_to_add,
+                embedding=embeddings,
+                collection_name=COLLECTION_NAME, 
+                persist_directory=CHROMA_DIR
+            )
+            # Force persist to disk
             if hasattr(vectordb, 'persist'):
                 vectordb.persist()
-                logger.info("Chroma database persisted.")
+            
+            logger.info(f"✅ Successfully ingested {len(docs_to_add)} ACTIVE entities into '{COLLECTION_NAME}'.")
+            logger.info(f"Skipped {skipped_count} inactive/filtered entities.")
+            logger.info(f"Skipped {stale_count} STALE entities (Older than 30 days).")
+            logger.info(f"Post-ingest DB Count: {vectordb._collection.count()}")
+            
+            # 6. Trigger API Reload
+            # This ensures the running API picks up the new database state immediately
+            try:
+                logger.info("Triggering API resource reload...")
+                requests.post(API_RELOAD_URL, timeout=2)
+            except Exception:
+                logger.warning("Could not trigger API reload (API might be down or busy). Data is saved to disk though.")
+                
         except Exception as e:
             logger.critical(f"CRITICAL: Failed to add documents to Chroma: {e}")
+    else:
+        logger.warning("No valid entities found to ingest.")
 
 if __name__ == "__main__":
-    ingest_ha_metadata()
+    parser = argparse.ArgumentParser(description="Ingest Home Assistant metadata into ChromaDB.")
+    parser.add_argument("--url", type=str, help="Home Assistant URL (overrides HA_URL env var)")
+    parser.add_argument("--token", type=str, help="Home Assistant Long-Lived Access Token (overrides HA_TOKEN env var)")
+    
+    args = parser.parse_args()
+    
+    ingest_ha_metadata(ha_url=args.url, ha_token=args.token)

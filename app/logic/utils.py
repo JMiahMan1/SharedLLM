@@ -7,8 +7,8 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Union
 
-from settings import (
-    log, run_blocking, get_user_creds, ha_cache_get, ha_cache_set,
+from app.settings import (
+    log, run_blocking, get_user_creds,
     OLLAMA_URL, HA_URL, NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS,
     WHOOGLE_URL, OPENAI_MODEL, DEFAULT_MODEL, OLLAMA_TIMEOUT, OLLAMA_RETRY,
     GlobalResources, openai_client, EMB_MODEL, CHAT_HISTORY_TTL,
@@ -16,7 +16,7 @@ from settings import (
 )
 
 # Import The New Intent Engine
-from intent_engine import engine as intent_engine
+from app.intent_engine import engine as intent_engine
 
 try:
     from pydantic import ValidationError
@@ -133,6 +133,7 @@ async def call_ollama_generate(prompt: str, model: str = DEFAULT_MODEL, stream: 
     payload = {"model": model, "prompt": prompt, "stream": stream, "options": {"temperature": 0.0}}
     for attempt in range(max(1, OLLAMA_RETRY)):
         try:
+            log.info(f"DEBUG: OLLAMA REQ URL={url} MODEL={model} PROMPT_LEN={len(prompt)}")
             def _post(): return requests.post(url, json=payload, timeout=OLLAMA_TIMEOUT, stream=stream)
             resp = await run_blocking(_post)
             resp.raise_for_status()
@@ -146,6 +147,11 @@ async def call_ollama_generate(prompt: str, model: str = DEFAULT_MODEL, stream: 
                 return {"iterable": async_iter}
             else:
                 return {"text": resp.json().get("response", "")}
+        except requests.exceptions.ConnectTimeout:
+            log.error(f"Ollama Connection Timed Out (Attempt {attempt+1}/{OLLAMA_RETRY}) - Host unreachable?")
+            if attempt == OLLAMA_RETRY - 1: return {"error": f"Ollama Unreachable ({OLLAMA_URL})"}
+        except requests.exceptions.ReadTimeout:
+            log.warning(f"Ollama Generation Timed Out (Attempt {attempt+1}) - Model too slow?")
         except Exception as e:
             log.warning(f"Ollama attempt {attempt+1} failed: {e}")
             await asyncio.sleep(0.5)

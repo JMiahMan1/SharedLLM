@@ -1,0 +1,56 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T14:00:41.960708"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Unknown media command: set_volume', 'entity_id': 'media_player.office_tv_chrome_2'}]",
+    "timestamp": "2026-01-03T14:01:19.240344"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\\n\\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]",
+    "timestamp": "2026-01-03T14:01:27.557459"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Device state invalid: unknown",
+    "timestamp": "2026-01-03T14:01:32.794725"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:01:38.216612"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:01:48.924867"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:01:59.805701"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "ERROR",
+    "message": "Req failed: None",
+    "timestamp": "2026-01-03T14:02:09.486406"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: cannot unpack non-iterable NoneType object",
+    "timestamp": "2026-01-03T14:02:09.486518"
+  }
+]

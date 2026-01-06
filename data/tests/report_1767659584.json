@@ -1,0 +1,320 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-05T17:09:23.489952"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "PASS",
+    "message": "Played: Playing The Stone (track) on media_player.office_tv_chrome_2",
+    "timestamp": "2026-01-05T17:09:31.816033"
+  },
+  {
+    "test": "Media: Play Tim Timmons",
+    "status": "PASS",
+    "message": "Played: Playing tim timmons (artist) on media_player.office_tv_chrome_2",
+    "timestamp": "2026-01-05T17:09:36.115599"
+  },
+  {
+    "test": "Media: Watch Video",
+    "status": "PASS",
+    "message": "State: playing | Title: Let's Be Beautiful",
+    "timestamp": "2026-01-05T17:10:23.728367"
+  },
+  {
+    "test": "Media: Volume Up",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:10:37.740905"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:10:43.221109"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:10:48.820897"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-05T17:10:54.179973"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "WARN",
+    "message": "State: idle",
+    "timestamp": "2026-01-05T17:11:49.195893"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "WARN",
+    "message": "State: idle",
+    "timestamp": "2026-01-05T17:12:54.753317"
+  },
+  {
+    "test": "Media: Transport/Power",
+    "status": "PASS",
+    "message": "Final State: off",
+    "timestamp": "2026-01-05T17:13:13.654218"
+  },
+  {
+    "test": "Media: Radio List",
+    "status": "PASS",
+    "message": "Found 1 stations",
+    "timestamp": "2026-01-05T17:13:46.425867"
+  },
+  {
+    "test": "Media: Playlist List",
+    "status": "FAIL",
+    "message": "I currently don't have access to your playlist library through the available systems. Would you like me to help you create a new playlist, manage existing ones through the media player interface, or explore streaming services for curated playlists? (Current time: five thirteen P M)",
+    "timestamp": "2026-01-05T17:14:16.510028"
+  },
+  {
+    "test": "Timer: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:14:46.349871"
+  },
+  {
+    "test": "Timer: Pause",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:15:09.657023"
+  },
+  {
+    "test": "Timer: Resume",
+    "status": "FAIL",
+    "message": "The command to resume the timer TestTimer1767658456 has been sent. The timer is now running. Would you like to adjust anything else? (Current time: five fifteen P M)",
+    "timestamp": "2026-01-05T17:15:48.166335"
+  },
+  {
+    "test": "Alarm: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:16:27.040743"
+  },
+  {
+    "test": "Timer: List",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:17:02.248118"
+  },
+  {
+    "test": "Timer: Delete",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:17:03.385826"
+  },
+  {
+    "test": "Search: Web Query",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:17:29.535383"
+  },
+  {
+    "test": "Search: Music/Artist",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:18:02.860019"
+  },
+  {
+    "test": "Calendar: Add",
+    "status": "FAIL",
+    "message": "The command to schedule TestEvent1767658682 for tomorrow at 10:00 AM has been sent. The event is now",
+    "timestamp": "2026-01-05T17:18:27.784652"
+  },
+  {
+    "test": "Note: Create",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:19:23.797752"
+  },
+  {
+    "test": "Note: Append",
+    "status": "FAIL",
+    "message": "The note TestNote1767658707 now contains: Line 1 Line 2 Would you like to add another line, edit the",
+    "timestamp": "2026-01-05T17:19:49.149376"
+  },
+  {
+    "test": "Note: Update",
+    "status": "FAIL",
+    "message": "The note TestNote1767658707 now contains: New Content. Would you like to make any other changes or p",
+    "timestamp": "2026-01-05T17:21:18.138794"
+  },
+  {
+    "test": "Note: Read",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:23:13.352941"
+  },
+  {
+    "test": "Note: Check Off",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:24:27.136142"
+  },
+  {
+    "test": "Note: Delete",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:25:35.256622"
+  },
+  {
+    "test": "Hardware: Light On (Live State)",
+    "status": "PASS",
+    "message": "State verified: on",
+    "timestamp": "2026-01-05T17:25:36.357920"
+  },
+  {
+    "test": "Hardware: Light Off (Live State)",
+    "status": "PASS",
+    "message": "State verified: off",
+    "timestamp": "2026-01-05T17:25:37.646376"
+  },
+  {
+    "test": "Hardware: Light Toggle",
+    "status": "PASS",
+    "message": "Resulting state: on",
+    "timestamp": "2026-01-05T17:25:44.671894"
+  },
+  {
+    "test": "Hardware: Set Color",
+    "status": "FAIL",
+    "message": "The office light cannot be set to a specific color like red. It appears to be a standard white light. Would you like me to adjust its brightness instead, or is there something else I can help with? (Current time: five twenty-five P M)",
+    "timestamp": "2026-01-05T17:25:57.065609"
+  },
+  {
+    "test": "Hardware: Brightness",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:26:20.959861"
+  },
+  {
+    "test": "Context: Setup",
+    "status": "INFO",
+    "message": "Turning on Office TV to set context",
+    "timestamp": "2026-01-05T17:26:20.959943"
+  },
+  {
+    "test": "Context: Pronoun Resolution",
+    "status": "FAIL",
+    "message": "Resolved to wrong entity: media_player.living_room_tv",
+    "timestamp": "2026-01-05T17:26:23.217308"
+  },
+  {
+    "test": "Context: Implicit Entity",
+    "status": "FAIL",
+    "message": "Targeted: media_player.upstairs_lights",
+    "timestamp": "2026-01-05T17:26:51.372119"
+  },
+  {
+    "test": "AndroidTV: Capture State",
+    "status": "PASS",
+    "message": "Initial: {'state': 'on', 'app_id': 'com.google.android.tvlauncher', 'volume': 0.52}",
+    "timestamp": "2026-01-05T17:26:51.415699"
+  },
+  {
+    "test": "AndroidTV: Home Command",
+    "status": "PASS",
+    "message": "Home verified (App: com.google.android.tvlauncher)",
+    "timestamp": "2026-01-05T17:27:23.744197"
+  },
+  {
+    "test": "AndroidTV: Launch App",
+    "status": "PASS",
+    "message": "App launched successfully",
+    "timestamp": "2026-01-05T17:27:50.991723"
+  },
+  {
+    "test": "AndroidTV: Watch Intent",
+    "status": "PASS",
+    "message": "Playback started on media_player.office_tv_chrome (State: playing)",
+    "timestamp": "2026-01-05T17:28:17.624326"
+  },
+  {
+    "test": "AndroidTV: Visual Check",
+    "status": "PASS",
+    "message": "Visual verified: YouTube app is no longer active (Current: com.google.android.apps.mediashell)",
+    "timestamp": "2026-01-05T17:28:20.755366"
+  },
+  {
+    "test": "AndroidTV: Audio Safety",
+    "status": "PASS",
+    "message": "Audio verified (Muted: False, Vol: 0.52)",
+    "timestamp": "2026-01-05T17:28:20.785624"
+  },
+  {
+    "test": "AndroidTV: Mute",
+    "status": "PASS",
+    "message": "Mute verified",
+    "timestamp": "2026-01-05T17:28:28.355413"
+  },
+  {
+    "test": "AndroidTV: Unmute",
+    "status": "PASS",
+    "message": "Unmute verified",
+    "timestamp": "2026-01-05T17:28:35.903716"
+  },
+  {
+    "test": "AndroidTV: Set Volume",
+    "status": "PASS",
+    "message": "Volume set verified (0.24)",
+    "timestamp": "2026-01-05T17:28:43.228820"
+  },
+  {
+    "test": "AndroidTV: Sequence Pause",
+    "status": "PASS",
+    "message": "Paused (State: paused)",
+    "timestamp": "2026-01-05T17:29:01.321422"
+  },
+  {
+    "test": "AndroidTV: Sequence Play",
+    "status": "PASS",
+    "message": "Played (State: playing)",
+    "timestamp": "2026-01-05T17:29:31.325527"
+  },
+  {
+    "test": "AndroidTV: Sequence Resume",
+    "status": "PASS",
+    "message": "Resumed (State: playing)",
+    "timestamp": "2026-01-05T17:30:17.241885"
+  },
+  {
+    "test": "AndroidTV: Sequence Stop",
+    "status": "PASS",
+    "message": "Returned to Home/Backdrop (App: com.google.android.apps.mediashell)",
+    "timestamp": "2026-01-05T17:30:25.805773"
+  },
+  {
+    "test": "AndroidTV: Restore State",
+    "status": "PASS",
+    "message": "Restoration triggered",
+    "timestamp": "2026-01-05T17:31:05.815775"
+  },
+  {
+    "test": "Advanced: Compound Commands",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:31:20.791906"
+  },
+  {
+    "test": "Advanced: Conversation Context",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:32:33.506967"
+  },
+  {
+    "test": "Advanced: HA Notification",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-05T17:33:04.110870"
+  }
+]

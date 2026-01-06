@@ -4,39 +4,46 @@ import time
 import re
 import asyncio
 from datetime import datetime
-# FIX: Explicitly import necessary type hints for the execution layer
-from typing import AsyncGenerator, List, Union, Dict, Optional, Any 
+from typing import AsyncGenerator, List, Union, Dict, Optional, Any
 
 # Import Settings
-from settings import (
-    log, run_blocking, get_user_creds, GlobalResources, 
-    DEFAULT_MODEL, load_system_prompt,
-    CONTEXT_REWRITE_PROMPT, RAG_TEMPLATE, ORCHESTRATOR_PROMPT, 
-    SIMPLE_RAG_TEMPLATE, # Imported New Template
-    ACTION_TOOL_CONFIDENCE_THRESHOLD, INFORMATIONAL_INTENTS 
+from app.settings import (
+    log,
+    run_blocking,
+    get_user_creds,
+    GlobalResources,
+    DEFAULT_MODEL,
+    load_system_prompt,
+    CONTEXT_REWRITE_PROMPT,
+    RAG_TEMPLATE,
+    ORCHESTRATOR_PROMPT,
+    SIMPLE_RAG_TEMPLATE,
+    ACTION_TOOL_CONFIDENCE_THRESHOLD,
+    INFORMATIONAL_INTENTS,
 )
-from intent_engine import engine as intent_engine
 
-# --- Import Split Modules ---
+SILENT_SUCCESS_TOKEN = "Done."
+
 from .utils import (
-    clean_llm_output, update_history, get_history_context, 
-    call_ollama_generate, call_openai_chat, 
-    get_ha_context, get_rag_context, safe_similarity_search
+    clean_llm_output,
+    update_history,
+    get_history_context,
+    call_ollama_generate,
+    call_openai_chat,
+    get_ha_context,
+    get_rag_context,
+    safe_similarity_search,
 )
-from .media_ops import (
-    handle_media_command, 
-    execute_ha_service, 
-    get_entity_state,
-    get_last_entity
-)
-from .calendar_ops import (
-    tool_calendar_list, tool_calendar_add, 
-    tool_calendar_delete, tool_calendar_update, tool_calendar_read
-)
-from .alarm_ops import (
-    tool_alarm_set, tool_alarm_list, tool_alarm_delete
-)
+
+# --- ARCHITECTURE REFACTOR IMPORTS ---
+from .execution.registry import ActionDispatcher
+from .execution.fast_path import FastPathExecutor
+from .intents.classifier import IntentClassifier
 from .web_search import tool_web_search
+
+# Ensure handlers are registered
+import app.logic.execution.handlers
+from app.logic.calendar_ops import tool_calendar_read
 
 
 class StreamResponseBuilder:
@@ -46,17 +53,24 @@ class StreamResponseBuilder:
         self.req_id = f"chatcmpl-{int(time.time())}"
         self.created = int(time.time())
 
-    def chunk(self, content=None, role=None, finish_reason=None):
+    def chunk(self, content=None, role=None, finish_reason=None, tool_results=None):
         if self.format_type == "openai":
             delta = {}
-            if role: delta["role"] = role
-            if content is not None: delta["content"] = content
+            if role:
+                delta["role"] = role
+            if content is not None:
+                delta["content"] = content
+            if tool_results is not None:
+                delta["tool_results"] = tool_results
+                
             data = {
                 "id": self.req_id,
                 "object": "chat.completion.chunk",
                 "created": self.created,
                 "model": self.model,
-                "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]
+                "choices": [
+                    {"index": 0, "delta": delta, "finish_reason": finish_reason}
+                ],
             }
             return f"data: {json.dumps(data)}\n\n"
         else:
@@ -64,581 +78,740 @@ class StreamResponseBuilder:
                 "model": self.model,
                 "created_at": datetime.utcnow().isoformat() + "Z",
                 "message": {"role": role or "assistant", "content": content or ""},
-                "done": False
+                "done": False,
             }
-            if finish_reason == "stop": data["done"] = True
-            return json.dumps(data) + "\n"
+            if tool_results is not None:
+                data["tool_results"] = tool_results
+                
+        if finish_reason == "stop":
+            data["done"] = True
+        return json.dumps(data) + "\n"
 
     def done(self):
         return "data: [DONE]\n\n" if self.format_type == "openai" else ""
 
+
 async def decompose_command_query(query: str, model: str) -> List[str]:
     """
-    Splits compound commands using Regex (Fast).
-    Example: "Turn on lights and play music" -> ["Turn on lights", "play music"]
+    Splits compound commands using Regex, but respects quotes to avoid
+    breaking titles like "Middy and Ensign".
     """
-    # Optimization: Skip decomposition if no conjunction
-    if " and " not in query.lower(): return [query]
-    
-    # Regex Fast Split
-    parts = re.split(r'\s+(?:and|then)\s+|,\s+', query, flags=re.IGNORECASE)
+    # 1. Quick check: If no "and"/"then", return immediately
+    if " and " not in query.lower() and " then " not in query.lower():
+        return [query]
+
+    # 2. Smart Split: Split on 'and'/'then' ONLY if NOT inside quotes
+    split_pattern = r'\s+(?:and|then)\s+(?=(?:[^\'"]*[\'"][^\'"]*[\'"])*[^\'"]*$)'
+
+    try:
+        parts = re.split(split_pattern, query, flags=re.IGNORECASE)
+    except:
+        parts = re.split(r"\s+(?:and|then)\s+", query, flags=re.IGNORECASE)
+
     if len(parts) > 1:
         clean_parts = []
-        # Verb Carryover logic (if second part has no verb, use first part's verb)
         first_verb = None
-        
         for i, part in enumerate(parts):
             p = part.strip()
-            if not p: continue
-            
-            # Identify Verb using Regex
-            verb_match = re.match(r"^(turn on|turn off|toggle|play|stop|schedule|list|open|launch|scroll|move|set|wake|cancel|delete)\b", p.lower())
+            if not p:
+                continue
+
+            # Detect verb carryover
+            verb_match = re.match(
+                r"^(turn on|turn off|toggle|play|stop|schedule|list|open|launch|scroll|move|set|start)\b",
+                p.lower(),
+            )
             if verb_match:
                 first_verb = verb_match.group(1)
             elif first_verb and i > 0:
-                # If no verb found, prepend the last known verb
-                p = f"{first_verb} {p}"
-            
+                if not re.match(r"^(what|who|how|when|where|is|are)\b", p.lower()):
+                    p = f"{first_verb} {p}"
+
             clean_parts.append(p)
-            
         return clean_parts
-        
+
     return [query]
+
 
 async def contextualize_query(query, user, model):
     """
-    Rewrites query based on history using externalized prompt.
+    Contextualizes query and returns both refined query and intent.
+    Returns: (refined_query, intent, score, is_high_confidence, intent_locked)
     """
-    # Optimization: If intent engine is confident, skip contextualization
-    # NOTE: Updated to match new intent_engine.classify return signature
-    intent, score, is_high_confidence = await intent_engine.classify(query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD)
-    
+    # Use Modular Classifier
+    intent, score, is_high_confidence, intent_locked = await IntentClassifier.get_intent(query)
+
     stateless_intents = [
-        "turn_on", "turn_off", "toggle", "play_media", "stop_media",
-        "calendar_add", "calendar_delete", "calendar_list", "calendar_update",
-        "time_query", "intent_learn", "open_app", "media_next", "media_previous",
-        "alarm_set", "alarm_list", "alarm_delete"
+        "turn_on",
+        "turn_off",
+        "toggle",
+        "play_media",
+        "stop_media",
+        "calendar_add",
+        "calendar_delete",
+        "calendar_list",
+        "calendar_update",
+        "timer_add",
+        "alarm_add",
+        "timer_delete",
+        "timer_list",
+        "timer_pause",
+        "timer_resume",
+        "time_query",
+        "intent_learn",
+        "open_app",
+        "media_next",
+        "media_previous",
+        "volume_up",
+        "volume_down",
+        "volume_set",
+        "volume_mute",
     ]
-    
-    # Use the new is_high_confidence flag
     if is_high_confidence and intent in stateless_intents:
-        return query
-
-    verbs = ["turn", "play", "stop", "toggle", "schedule", "add", "delete", "remove", "cancel", "remind", "list", "learn", "teach", "map"]
-    if any(query.lower().lstrip().startswith(v) for v in verbs): return query
-    
+        return query, intent, score, is_high_confidence, intent_locked
+    verbs = [
+        "turn",
+        "play",
+        "stop",
+        "toggle",
+        "schedule",
+        "add",
+        "delete",
+        "remove",
+        "cancel",
+        "remind",
+        "list",
+        "learn",
+        "teach",
+        "map",
+        "set",
+        "start",
+        "wake",
+    ]
+    if any(query.lower().lstrip().startswith(v) for v in verbs):
+        return query, intent, score, is_high_confidence, intent_locked
     hist = get_history_context(user)
-    if not hist: return query
-    
-    if len(query) > 150: return query
+    if not hist:
+        return query, intent, score, is_high_confidence, intent_locked
 
-    # Use Externalized Prompt from Settings
+    # Explicit handling for confirmations
+    if query.lower().strip().strip("!.") in ["yes", "sure", "please", "please do", "ok", "yep", "do it"]:
+         special_prompt = f"History:\n{hist}\nThe user confirmed 'Yes' to the Assistant's last question. Rewrite 'Yes' into a full, explicit command (e.g., 'Turn on the TV' or 'Turn on TV and play music').\nRefined Command (No JSON, Just Text):"
+         r = await call_ollama_generate(special_prompt, model)
+         refined = clean_llm_output(r.get("text", query), is_voice=False)
+         log.info(f"[CONTEXT REWRITE] Confirmation '{query}' -> '{refined}'")
+         return refined, intent, score, is_high_confidence, intent_locked
+
+    # [OPTIMIZATION] Skip rewrite if intent is already locked/high confidence
+    # This avoids unnecessary LLM calls (and potential timeouts) for clear commands
+    if intent_locked and is_high_confidence:
+        log.info(f"[CONTEXT REWRITE] Skipping rewrite for locked intent: {intent}")
+        return query, intent, score, is_high_confidence, intent_locked
+
+    if len(query) > 150:
+        return query, intent, score, is_high_confidence, intent_locked
     prompt = CONTEXT_REWRITE_PROMPT.format(history=hist, query=query)
-    
     r = await call_ollama_generate(prompt, model)
-    # Use is_voice=False to preserve content during rewrite
-    refined = clean_llm_output(r.get("text", query), is_voice=False) 
+    refined = clean_llm_output(r.get("text", query), is_voice=False)
+    if len(refined) > len(query) * 3:
+        return query, intent, score, is_high_confidence, intent_locked
+    return refined, intent, score, is_high_confidence, intent_locked
+
+
+async def _llm_orchestrator(
+    query: str, intent: str, score: float, model: str, conversation_history: str = "", intent_locked: bool = False
+) -> Dict[str, Any]:
+    # If intent is locked (regex-detected), instruct LLM to preserve it
+    lock_instruction = ""
+    if intent_locked:
+        lock_instruction = f"\n\nCRITICAL: The intent '{intent}' is LOCKED and was explicitly detected from the user's verb choice. You MUST use this intent in your response. DO NOT change it to any other intent. Extract only the device_name and media_title parameters."
     
-    if len(refined) > len(query) * 3: return query
-    return refined
-
-async def _attempt_fast_ha_command(query: str, user_creds: Dict[str, str], ha_collection) -> Optional[Dict[str, Union[str, bool]]]:
-    """
-    Attempts to execute a Home Assistant command directly by string matching
-    a verb and performing a vector search for the device name.
-    Returns the structured result if successful, or None.
-    """
-    q_low = query.lower().strip()
-
-    # 1. Simple verb check (Only proceed if it looks like a command)
-    if not any(x in q_low for x in ["turn on", "turn off", "toggle", "open", "close"]):
-        return None
-    
-    # CRITICAL: Prevent "Search the web" from falling into HA Control
-    if any(x in q_low for x in ["search", "find", "who", "what", "when", "where", "how", "explain"]):
-        return None
-
-    # 2. Clean query to isolate entity name
-    clean_q = q_low
-    for phrase in ["turn on", "turn off", "toggle", "play", "stop", "the", "please", " on ", "open", "close"]:
-        clean_q = clean_q.replace(phrase, " ")
-    clean_q = clean_q.strip()
-
-    if not clean_q:
-        return None
-    
-    eid = None
-    # 3. Vector Search for entity match (Enhanced Domain Prioritization)
-    if ha_collection:
-        # Search top 5 results to find a controllable entity
-        docs = await run_blocking(lambda: safe_similarity_search(ha_collection, clean_q, k=5))
-        
-        # New Domain Priority Scoring: Higher score = more likely to be the control entity
-        domain_priority = {
-            "cover": 5,   # Garage doors/blinds
-            "switch": 4, 
-            "light": 3, 
-            "media_player": 3,
-            "remote": 2,
-            "automation": 1,
-            "script": 1,
-            "camera": 0 # Explicitly zero out low-priority/non-controllable domains
-        }
-        
-        best_eid = None
-        best_score = 0
-        
-        # Filter: Find the highest scoring, relevant entity
-        for d in docs:
-            potential_eid = d.metadata.get("entity_id")
-            if potential_eid:
-                domain = potential_eid.split(".")[0]
-                priority = domain_priority.get(domain, 0)
-                
-                # Check for explicit automation/script command
-                is_explicit_secondary = domain in ["automation", "script"] and domain in q_low
-                
-                # Logic 1: Immediate execution if Automation/Script is explicitly named (e.g., "disable garage automation")
-                if is_explicit_secondary:
-                    eid = potential_eid
-                    log.info(f"FAST HA PATH: Executing explicit secondary control: {eid}")
-                    break
-                        
-                # Logic 2: For general actions (turn_on/open), prioritize functional devices.
-                # Only check for core control domains (score > 2)
-                if priority > best_score:
-                    best_score = priority
-                    best_eid = potential_eid
-        
-        # If we broke the loop due to explicit secondary action, use that eid. Otherwise, use the best scored one.
-        if eid:
-            pass # Use the explicitly selected eid
-        else:
-            eid = best_eid # Use the best device found by priority scoring
-        
-        if not eid:
-            return None # No suitable controllable entity found
-
-    if not eid: return None
-
-    # 4. Determine service based on original query
-    service = None
-    if "turn off" in q_low or "close" in q_low: service = "turn_off"
-    elif "turn on" in q_low or "open" in q_low: service = "turn_on"
-    elif "toggle" in q_low: service = "toggle"
-    
-    if not service:
-        log.warning(f"FAST HA PATH: Entity {eid} found, but could not determine service from query: {q_low}")
-        return None
-
-    domain = eid.split(".")[0]
-    target_dom = "homeassistant" if service in ["turn_on", "turn_off", "toggle"] else domain
-    
-    log.info(f"FAST HA PATH: Executing service {service} on {eid} due to string match bypass.")
-    
-    # Return structured result from the execution layer
-    return await execute_ha_service(target_dom, service, eid, user_creds, {}, GlobalResources.redis_client)
-
-
-async def _llm_orchestrator(query: str, intent: str, score: float, model: str) -> Dict[str, Any]:
-    """
-    Forces the LLM to generate a structured JSON action plan (tool_call or CONVERSE).
-    Includes a self-correction loop for invalid JSON (Hallucination Mitigation).
-    """
     orchestrator_prompt = ORCHESTRATOR_PROMPT.format(
-        query=query,
-        intent_name=intent,
-        intent_score=score
-    )
-    
+        query=query, intent_name=intent, intent_score=score, conversation_history=conversation_history
+    ) + lock_instruction
     last_error = ""
     for attempt in range(2):
         if attempt > 0:
-            # Self-Correction Loop
-            log.warning("LLM Orchestrator failed JSON validation. Attempting self-correction.")
-            # Inject error message into the prompt to guide correction
             correction_prompt = f"CRITICAL ERROR: Your previous JSON output failed validation: '{last_error}'. You must output ONLY a single, valid JSON object (DO NOT use markdown backticks). Review your plan and try again. User Query: {query} Best Vector Intent: {intent}."
-            
-            # Send the base prompt with the correction instruction
-            r = await call_ollama_generate(correction_prompt + "\n" + ORCHESTRATOR_PROMPT.format(query=query, intent_name=intent, intent_score=score), model)
+            r = await call_ollama_generate(
+                correction_prompt
+                + "\n"
+                + ORCHESTRATOR_PROMPT.format(
+                    query=query, intent_name=intent, intent_score=score, conversation_history=conversation_history
+                ),
+                model,
+            )
         else:
             r = await call_ollama_generate(orchestrator_prompt, model)
-            
-        # Use is_voice=False to preserve JSON structure for parsing
         text = clean_llm_output(r.get("text", ""), is_voice=False).strip()
-        
         try:
-            # Clean up potential markdown wrapping
-            text = text.strip().strip('`').strip()
-            if text.startswith('json\n'):
+            text = text.strip().strip("`").strip()
+            if text.startswith("json\n"):
                 text = text[5:].strip()
-            
-            # Find and parse the JSON block
             match = re.search(r"\{.*\}", text, re.DOTALL)
             if match:
                 parsed_json = json.loads(match.group(0))
-                
-                # Validation: Ensure core keys are present
                 if "action" not in parsed_json:
-                     raise ValueError("Missing 'action' key in JSON.")
-                
+                    raise ValueError("Missing 'action' key in JSON.")
                 return parsed_json
             else:
                 raise json.JSONDecodeError("No JSON object found in output.", text, 0)
-            
         except (json.JSONDecodeError, ValueError) as e:
             last_error = str(e)
-            log.error(f"Orchestrator JSON Error: {last_error}")
-            continue # Retry loop
+            continue
+    return {
+        "action": "CONVERSE",
+        "error": "Orchestrator failed to generate valid plan.",
+    }
 
-    # Final Failure: Default to conversation to prevent pipeline crash
-    log.critical("LLM Orchestrator failed self-correction. Defaulting to CONVERSE.")
-    return {"action": "CONVERSE", "error": "Orchestrator failed to generate valid plan."}
 
-
-async def _execute_tool_action(action_plan: Dict[str, Any], query: str, user_creds: Dict[str, str], model: str) -> Optional[Dict[str, Union[str, bool]]]:
-    """
-    Executes a structured action plan generated by the LLM Orchestrator.
-    Returns structured result or None.
-    """
+async def _execute_tool_action(
+    action_plan: Dict[str, Any], query: str, user_creds: Dict[str, str], model: str
+) -> Optional[Dict[str, Union[str, bool]]]:
+    """Delegates execution to the ActionDispatcher registry."""
     tool_name = action_plan.get("tool_name")
     params = action_plan.get("parameters", {})
-    
-    # --- CALENDAR TOOLS ---
-    if tool_name == "calendar_add":
-        # Calendar tools return simple strings on success/failure, wrap them.
-        res = await tool_calendar_add(query, user_creds, model, GlobalResources.redis_client)
-        return {"status": "SUCCESS" if "Scheduled" in res.get("message", "") else "FAILURE", "message": res.get("message", "Calendar operation failed."), "service": "calendar_add"}
-    
-    elif tool_name == "calendar_list":
-        res = await tool_calendar_list(user_creds, GlobalResources.redis_client)
-        return {"status": "SUCCESS", "message": res.get("message", "Calendar list failed."), "service": "calendar_list"}
 
-    elif tool_name == "calendar_delete":
-        return await tool_calendar_delete(query, user_creds, model, GlobalResources.redis_client)
-        
-    elif tool_name == "calendar_update":
-        return await tool_calendar_update(query, user_creds, model, GlobalResources.redis_client)
-
-    # --- ALARM TOOLS ---
-    elif tool_name == "alarm_set":
-        return await tool_alarm_set(query)
-    
-    elif tool_name == "alarm_list":
-        return await tool_alarm_list()
-        
-    elif tool_name == "alarm_delete":
-        return await tool_alarm_delete(query)
-
-    # --- MEDIA/HA COMMANDS ---
-    elif tool_name == "media_command":
-        # NOTE: We rely on handle_media_command for smart resolution (entity_id=None)
-        # and it already returns the structured Dict for verification.
-        intent = params.get("intent", "turn_on")
-        return await handle_media_command(
-            intent, 
-            query, 
-            None, # Let handle_media_command resolve entity
-            user_creds, 
-            GlobalResources.ha_collection, 
-            GlobalResources.redis_client
-        )
-    
-    # --- Other Tools (e.g., learn) ---
-    elif tool_name == "intent_learn":
-        res = f"Cannot learn '{params.get('phrase')}' with current prompt context." # Logic handled better by external endpoint
-        return {"status": "FAILURE", "message": res, "service": "intent_learn"}
-    
-    # --- Fallback for unhandled/internal tools ---
-    return {"status": "FAILURE", "message": f"Action requested unhandled tool: {tool_name}", "service": tool_name}
+    return await ActionDispatcher.dispatch(
+        tool_name, query=query, user_creds=user_creds, model=model, params=params
+    )
 
 
-async def _handle_single_command(query: Union[str, Dict], user_creds: Dict[str, str], model: str = None) -> Optional[List[Dict[str, Any]]]:
-    """
-    Routes a single command. Returns a list of structured action results or None to trigger RAG.
-    """
+async def _handle_single_command(
+    query: Union[str, Dict], user_creds: Dict[str, str], model: str = None, 
+    intent: Optional[str] = None, score: float = 0.0, is_high_confidence: bool = False, intent_locked: bool = False
+) -> Optional[List[Dict[str, Any]]]:
     if isinstance(query, dict):
         query = str(query.get("response", query.get("text", str(query))))
-    if not isinstance(query, str): query = str(query)
-    
+    if not isinstance(query, str):
+        query = str(query)
     if len(query) > 150:
-        log.warning(f"Ignoring overly long command ({len(query)} chars): {query[:50]}...")
         return None
 
-    q_low = query.lower().strip()
-    
-    # --- STAGE 2A: FAST PATH CHECK (The Speed Lane) ---
-    action_result = await _attempt_fast_ha_command(
-        query, 
-        user_creds, 
-        GlobalResources.ha_collection
+    # 1. Attempt Fast Path (Direct HA Command)
+    action_result = await FastPathExecutor.attempt_fast_command(
+        query, user_creds, GlobalResources.ha_collection
     )
     if action_result:
-        log.debug("FAST PATH executed, returning action result.")
-        # Wrap single result in a list for compatibility with compound handler
-        return [action_result] 
+        return [action_result]
 
-    # --- STAGE 2B: LLM ORCHESTRATION ---
-    
-    # 1. Vector Classification
-    intent, score, is_high_confidence = await intent_engine.classify(query, high_confidence_threshold=ACTION_TOOL_CONFIDENCE_THRESHOLD)
-    
-    # 2. LLM Planning (Structured JSON output)
-    orchestration_plan = await _llm_orchestrator(query, intent or "unknown", score, model)
-    
-    action_type = orchestration_plan.get("action")
-    
-    # 3. CONVERSE Decision (Balance Point)
-    if action_type == "CONVERSE":
-        log.info("LLM Orchestrator chose CONVERSE. Proceeding to RAG.")
-        # Return None to trigger Stage 3 (RAG)
-        return None 
-    
-    # 4. TOOL_CALL Decision (Execution)
-    if action_type == "tool_call":
-        log.info(f"LLM Orchestrator chose tool_call: {orchestration_plan.get('tool_name')}")
-        # Execute tool and wrap result in a list
-        result = await _execute_tool_action(orchestration_plan, query, user_creds, model)
-        return [result] if result else None
+    # 2. Intent Classification (only if not provided)
+    intent_locked = False
+    if intent is None:
+        try:
+            intent, score, is_high_confidence, intent_locked = await IntentClassifier.get_intent(query)
+            if intent:
+                log.info(f"[PIPELINE DEBUG] Intent detected: {intent} (Score: {score}, Locked: {intent_locked})")
+        except Exception as e:
+            log.exception(f"[PIPELINE ERROR] IntentClassifier failed: {e}")
+            intent, score, is_high_confidence, intent_locked = None, 0.0, False, False
+    else:
+        log.info(f"[PIPELINE DEBUG] Using provided intent: {intent} (Score: {score})")
 
-    # 5. Fallback - Should not be reached if orchestration is robust
-    return None 
-    
+    # --- FAST PATH ORCHESTRATION ---
+    # Skip LLM for simple, high-confidence intents to avoid timeouts
+    print(f"[DEBUG] FAST PATH ORCHESTRATION Starting for intent={intent}, is_high_confidence={is_high_confidence}")
+    log.info(f"[FAST PATH ORCHESTRATION] Starting for intent={intent}, is_high_confidence={is_high_confidence}")
+    if is_high_confidence and intent:
+        print(f"[DEBUG] FAST PATH Condition met, processing {intent}")
+        log.info(f"[FAST PATH] Condition met, processing {intent}")
+        action_plan = None
+        if intent in ["volume_set", "volume_up", "volume_down", "volume_mute"]:
+             # Extract volume from query using regex here or in the tool?
+             # The tool logic already handles extraction from query.
+             # We just need to route it.
+             action_plan = {
+                "action": "tool_call",
+                "tool_name": "media_command",
+                "parameters": {"intent": intent, "device_name": None} # None enables context lookup or query parsing
+             }
+        elif intent in ["media_next", "media_previous", "stop_media", "play_media", "watch_media", "turn_on", "turn_off", "toggle"]:
+            log.info(f"[FAST PATH] Matched transport intent: {intent}")
+            # For transport commands, only set device_name if query contains a device reference
+            device_in_query = bool(re.search(r"\b(on|in)\s+(the\s+)?(office|tv|bedroom|kitchen|speaker|remote|media)\b", query.lower()))
+            log.info(f"[FAST PATH] device_in_query: {device_in_query}, query: {query}")
 
-async def try_handle_compound_command(query, user_creds, model) -> Optional[List[Dict[str, Any]]]:
-    """
-    Manages decomposition and execution of (potentially multiple) commands.
-    Returns a list of structured results or None.
-    """
-    # META-PROMPT BYPASS (OpenWebUI)
-    if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
+            device_name = None
+            if device_in_query:
+                # Extract device name from query by finding text after "on" or "in"
+                # Improved regex to stop at common end-of-sentence or connector words if needed, but keeping simple for now
+                match = re.search(r"\b(on|in)\s+(the\s+)?(.+)", query.lower())
+                if match:
+                    device_part = match.group(3).strip()
+                    # Take first few words as device name (avoid including the media title)
+                    words = device_part.split()[:3]  # Limit to 3 words
+                    device_name = " ".join(words).title()
+            
+            # For play/watch, we should pass the query as media_title if specific params aren't extracted
+            # The handler will clean it up.
+            params = {"intent": intent, "device_name": device_name}
+            if intent in ["play_media", "watch_media"]:
+                params["media_title"] = query # Pass full query lets handler/integration clean it
+
+            action_plan = {
+                "action": "tool_call",
+                "tool_name": "media_command",
+                "parameters": params
+            }
+            log.info(f"[FAST PATH] action_plan set: {action_plan}")
+        elif intent in ["pause_media", "media_play", "timer_pause", "timer_resume", "timer_delete"]:
+            # Special handling for pause/resume - call dedicated handlers
+            log.info(f"[FAST PATH] Matched control intent: {intent}")
+            action_plan = {
+                "action": "tool_call",
+                "tool_name": intent,  # Call handler by intent name directly
+                "parameters": {}
+            }
+            log.info(f"[FAST PATH] action_plan set: {action_plan}")
+        elif intent in ["open_app"]:
+             action_plan = {
+                "action": "tool_call",
+                "tool_name": "media_command",
+                "parameters": {"intent": intent, "device_name": query, "media": query}
+             }
+        elif intent in ["nav_home", "navhome"]:
+             action_plan = {
+                "action": "tool_call",
+                "tool_name": "media_command",
+                "parameters": {"intent": intent, "device_name": query}
+             }
+        elif intent in ["set_brightness", "dim", "brighten", "set_color"]:
+            log.info(f"[FAST PATH] Matched lighting intent: {intent}")
+            action_plan = {
+                "action": "tool_call",
+                "tool_name": intent,  # Route to the registered handler
+                "parameters": {}
+            }
+            log.info(f"[FAST PATH] action_plan set: {action_plan}")
+        elif intent in ["list_playlists", "music_list", "list_radio"]:
+            log.info(f"[FAST PATH] Matched music list intent: {intent}")
+            action_plan = {
+                "action": "tool_call",
+                "tool_name": intent, # This matches the registered ActionDispatcher names
+                "parameters": {}
+            }
+            log.info(f"[FAST PATH] action_plan set: {action_plan}")
+        
+        if action_plan:
+            log.info(f"[FAST ORCHESTRA] Bypassing LLM for {intent}")
+            try:
+                result = await _execute_tool_action(
+                    action_plan, query, user_creds, model
+                )
+                # Result may already be a list (for handlers that return multiple results)
+                if isinstance(result, list):
+                    return result
+                else:
+                    return [result] if result else None
+            except Exception as e:
+                log.error(f"[FAST ORCHESTRA] Failed: {e}")
+                # Fallback to LLM if fast path fails?
+                pass
+
+    # 3. LLM Orchestration
+    try:
+        # Get conversation history for contextualization
+        from .utils import get_history_context
+        user = user_creds.get("user", "default")
+        conversation_history = get_history_context(user)
+        history_text = ""
+        if conversation_history:
+            history_text = f"\nConversation History:\n{conversation_history}"
+
+        orchestration_plan = await _llm_orchestrator(
+            query, intent or "unknown", score, model, history_text, intent_locked
+        )
+        log.info(f"[PIPELINE DEBUG] Orchestration Plan: {orchestration_plan}")
+        
+        # [INTENT LOCK ENFORCEMENT] If intent was locked, restore it if LLM changed it
+        log.info(f"[INTENT LOCK DEBUG] intent_locked={intent_locked}, action={orchestration_plan.get('action')}, original_intent={intent}")
+        if intent_locked and orchestration_plan.get("action") == "tool_call":
+            plan_intent = orchestration_plan.get("parameters", {}).get("intent")
+            log.info(f"[INTENT LOCK DEBUG] plan_intent={plan_intent}, checking if != {intent}")
+            if plan_intent and plan_intent != intent:
+                log.warning(f"[INTENT LOCK] LLM tried to change locked intent '{intent}' to '{plan_intent}'. Overriding back.")
+                orchestration_plan["parameters"]["intent"] = intent
+    except Exception as e:
+        log.exception(f"[PIPELINE ERROR] Orchestrator failed: {e}")
         return None
 
-    # Questions bypass tools
-    if re.match(r"^(what|who|when|how|why)\b", query.lower().strip()): 
-        if " and " not in query.lower():
-             if "what time" in query.lower() or "current time" in query.lower():
-                 now = datetime.now()
-                 # Simple time query is handled and returned as a SUCCESS context for synthesis
-                 return [{"status": "SUCCESS", "message": f"It is currently {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d')}."}]
-             return None # Trigger RAG for informational question
-    
-    # DECOMPOSITION: Split "Turn on X and Y"
+    action_type = orchestration_plan.get("action")
+    if action_type == "CONVERSE":
+        return None
+    if action_type == "tool_call":
+        try:
+            result = await _execute_tool_action(
+                orchestration_plan, query, user_creds, model
+            )
+            return [result] if result else None
+        except Exception as e:
+            log.exception(f"[PIPELINE ERROR] Tool Execution failed: {e}")
+            return [
+                {
+                    "status": "FAILURE",
+                    "message": f"Tool execution crashed: {e}",
+                    "service": "unknown",
+                }
+            ]
+    return None
+
+
+async def try_handle_compound_command(
+    query, user_creds, model, intent: Optional[str] = None, 
+    score: float = 0.0, is_high_confidence: bool = False, intent_locked: bool = False
+) -> Optional[List[Dict[str, Any]]]:
+    if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
+        return None
+    if re.match(r"^(what|who|when|how|why)\b", query.lower().strip()):
+        # If intent is locked (regex match) or high-confidence, don't assume it's a general question
+        if not intent_locked and not (is_high_confidence and intent):
+            if " and " not in query.lower():
+                if "what time" in query.lower() or "current time" in query.lower():
+                    now = datetime.now()
+                    return [
+                        {
+                            "status": "SUCCESS",
+                            "message": f"It is currently {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d')}.",
+                        }
+                    ]
+                return None
     cmds = await decompose_command_query(query, model)
     tasks = []
-    
-    # If decomposition resulted in multiple commands, we handle them as actions
     if len(cmds) > 1:
         for c in cmds:
             if isinstance(c, str) and len(c.strip()) > 2:
-                # Run single command handler for each part (can return results or None)
+                # For compound commands, don't pass intent (each sub-command needs its own)
                 tasks.append(_handle_single_command(c, user_creds, model))
     else:
-        # If single command, run the main handler
-        tasks.append(_handle_single_command(query, user_creds, model))
-            
-    if not tasks: return None
-    
-    # Run parallel/sequential commands
+        # For single command, pass the intent to avoid re-classification
+        tasks.append(_handle_single_command(query, user_creds, model, intent, score, is_high_confidence, intent_locked))
+    if not tasks:
+        return None
     results = await asyncio.gather(*tasks)
-    
-    # Aggregate results for LLM Synthesis
-    # Flatten the list of lists/results and filter out the None values (conversational path)
+    log.info(f"[COMPOUND] asyncio.gather returned: {results}")
     valid_results = []
     for r_list in results:
-        # Check if the result is a list (from compound commands) or a single dictionary (from single command)
+        log.info(f"[COMPOUND] Processing r_list: {r_list}, type: {type(r_list)}")
         if isinstance(r_list, list):
-            # FIX: Ensure we only extend with dictionaries (valid action results)
-            valid_results.extend([r for r in r_list if isinstance(r, dict)])
-        elif isinstance(r_list, dict): 
+            # Handle nested lists (flatten them)
+            for item in r_list:
+                if isinstance(item, list):
+                    valid_results.extend([r for r in item if isinstance(r, dict)])
+                elif isinstance(item, dict):
+                    valid_results.append(item)
+        elif isinstance(r_list, dict):
             valid_results.append(r_list)
-        elif r_list is not None:
-             # Should not happen with the fixes, but catch any non-None, non-list, non-dict
-            log.error(f"try_handle_compound_command: Found unexpected type in results: {type(r_list)}")
-
-
+    log.info(f"[COMPOUND] valid_results: {valid_results}")
     if not valid_results:
-        # If we failed to handle any action, return None to trigger RAG
+        log.info("[COMPOUND] Returning None - no valid results")
         return None
-    
+    log.info(f"[COMPOUND] Returning: {valid_results}")
+    print(f"[DEBUG] try_handle_compound_command returning: {valid_results}")
     return valid_results
 
-async def generate_rag_stream(query, user, model, use_openai, format_type) -> AsyncGenerator[str, None]:
-    """
-    Main Pipeline Entry Point (Modified to handle structured results).
-    """
-    # Start Timer
-    t0 = time.time()
-    
-    builder = StreamResponseBuilder(model, format_type)
-    is_voice = (format_type != "openai")
 
-    # 0. META-PROMPT BYPASS
+async def generate_rag_stream(
+    query, user, model, use_openai, format_type, include_tool_results: bool = False
+) -> AsyncGenerator[str, None]:
+    t0 = time.time()
+    builder = StreamResponseBuilder(model, format_type)
+    is_voice = format_type != "openai"
     if "### Task:" in query or "JSON format" in query or "<chat_history>" in query:
         yield builder.chunk(role="assistant")
         r = await call_ollama_generate(query, model, stream=True)
         if "iterable" in r:
             async for c in r["iterable"]():
-                token = c.get("response", "")
-                yield builder.chunk(content=token)
+                yield builder.chunk(content=c.get("response", ""))
         elif "text" in r:
             yield builder.chunk(content=r["text"])
         yield builder.chunk(finish_reason="stop")
         yield builder.done()
         return
 
-    # 1. Contextualize (Rewrite) Query
-    refined = await contextualize_query(query, user, model)
+    refined, intent, score, is_high_confidence, intent_locked = await contextualize_query(query, user, model)
     update_history(user, "user", query)
     creds = get_user_creds(user)
-    
-    # 2. Get Intent for Routing (Needed even if action fails)
-    # We call classify here to help decide which RAG context to fetch later
-    intent, score, _ = await intent_engine.classify(refined)
-    
-    # 3. Action Layer (Tools)
+    # Intent already obtained from contextualize_query, no need to re-classify
     t_action = time.time()
-    # Now returns a list of structured results or None
-    action_results = await try_handle_compound_command(refined, creds, model)
-    log.debug(f"Action Layer took: {time.time() - t_action:.4f}s")
-    
+    action_results = await try_handle_compound_command(refined, creds, model, intent, score, is_high_confidence, intent_locked)
+
+    # Handle failed no-search intents directly (don't call LLM)
+    # NOTE: We only skip LLM for core ACTION intents that failed to resolve.
+    # Informational intents (list, read) should ALWAYS fall through to LLM/RAG if tool execution was skipped.
+    no_search_intents = [
+        "turn_on", "turn_off", "toggle", "play_media", "stop_media",
+        "media_next", "media_previous", "open_app", "volume_up",
+        "volume_down", "volume_set", "volume_mute", "timer_add",
+        "alarm_add", "timer_delete", "timer_pause", "timer_resume",
+        "calendar_add", "calendar_delete", "calendar_update",
+        "dim", "brighten", "set_brightness", "set_color",
+        "note_add", "note_append", "note_delete"
+    ]
+    if action_results is None and intent in no_search_intents:
+        # All actions failed for a no-search intent, return a generic failure message
+        log.info(f"[NO LLM] All actions failed for no-search intent '{intent}', returning direct failure")
+        yield f"I couldn't perform that action. The device may not support this feature or there might be a connection issue."
+
+    # --- EMIT TOOL RESULTS FOR TESTS/CLIENT ---
+    if action_results and include_tool_results:
+        yield builder.chunk(tool_results=action_results)
+
     action_context = ""
     run_knowledge_retrieval = True
-    
-    # Check if any action was performed (even if it failed)
+
     if action_results:
-        # If any action was executed, we can skip the slower search and Nextcloud RAG
-        run_knowledge_retrieval = False
-        
-        # Inject structured action result for LLM synthesis (Verification/Error Handoff)
-        action_context = "### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):\n"
+        # 1. Determine if the action was purely informational (Search, List, Read)
+        is_informational_tool = False
         for res in action_results:
-            # FIX: res is now guaranteed to be a dictionary or filtered out.
+            svc = res.get("service", "")
+            if svc in [
+                "web_search",
+                "calendar_list",
+                "timer_list",
+                "calendar_read",
+                "note_read",
+                "note_list",
+                "music_search",
+                "music_list",
+            ]:
+                is_informational_tool = True
+
+        # 2. Only disable RAG if it's NOT an informational intent AND NOT an informational tool
+        if intent not in INFORMATIONAL_INTENTS and not is_informational_tool:
+            run_knowledge_retrieval = False
+
+        action_context = "### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):\n"
+        log.debug(f"[ACTION RESULTS] {len(action_results)} results: {action_results}")
+        for res in action_results:
             status = res.get("status", "FAILURE")
             msg = res.get("message", "Unknown action.")
-            
             if status == "SUCCESS":
-                # Use verified state for honest confirmation
-                new_state = res.get('new_state', 'N/A')
-                friendly_name = res.get('friendly_name', 'N/A') # NEW
-                service = res.get('service', 'N/A')             # NEW
-                action_context += f"- SUCCESS: Command '{service}' sent to {friendly_name}. Verified New State: {new_state}\n"
+                new_state = res.get("new_state", None)
+                friendly_name = res.get("friendly_name", res.get("entity_id", "N/A"))
+                service = res.get("service", "N/A")
+                state_msg = f" Verified New State: {new_state}" if new_state else ""
+                action_context += f"- SUCCESS: Command '{service}' sent to {friendly_name}.{state_msg}\n"
+                if service in [
+                    "web_search",
+                    "timer_list",
+                    "calendar_list",
+                    "calendar_read",
+                    "note_read",
+                    "note_list",
+                    "list_playlists",
+                    "list_radio",
+                    "music_list",
+                ]:
+                    action_context += f"TOOL OUTPUT:\n{msg}\n"
             else:
-                # Error Handoff: Force the LLM to acknowledge the failure
                 entity = res.get("entity_id", "N/A")
                 service = res.get("service", "N/A")
                 action_context += f"- FAILURE: Command '{service}' on '{entity}' failed. Reason: {msg}\n"
-        log.info(f"Action Context injected for synthesis: {action_context.strip()}")
-        
-    # 4. Smart Context Routing (The Fix)
-    t_rag = time.time()
+
+        log.debug(f"[ACTION CONTEXT] Sending to LLM:\n{action_context}")
+
     ha_ctx, nc_ctx, search_ctx, cal_ctx = "", "", "", ""
-    
     if run_knowledge_retrieval:
-        # Defaults
         fetch_ha = True
         fetch_nc = True
-        
-        # --- ROUTING LOGIC ---
-        # If intent suggests Documents/Knowledge, ignore Home Assistant Devices
         if intent == "content_query":
             fetch_ha = False
-            log.info(f"Context Routing: Skipping HA search for content intent '{intent}'")
-            
-        # If intent suggests Controls/Media, ignore Nextcloud Invoices/Notes
-        elif intent in ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "open_app"]:
+        elif intent in [
+            "turn_on",
+            "turn_off",
+            "toggle",
+            "play_media",
+            "stop_media",
+            "open_app",
+        ]:
             fetch_nc = False
-            log.info(f"Context Routing: Skipping Nextcloud search for control intent '{intent}'")
-            
-        # If intent is Calendar, we likely don't need generic RAG either
-        elif intent and intent.startswith("calendar"): # FIX: Check if intent is not None
+        elif intent and (intent.startswith("calendar") or intent.startswith("timer")):
             fetch_ha = False
             fetch_nc = False
-            
-        # Execute Fetches in Parallel based on flags
+
         tasks = []
-        if fetch_ha: tasks.append(get_ha_context(user, refined))
-        else: tasks.append(asyncio.sleep(0)) # No-op
-            
-        if fetch_nc: tasks.append(get_rag_context(refined))
-        else: tasks.append(asyncio.sleep(0)) # No-op
-            
-        tasks.append(tool_web_search(refined))
+        if fetch_ha:
+            tasks.append(get_ha_context(user, refined))
+        else:
+            tasks.append(asyncio.sleep(0))
+        if fetch_nc:
+            tasks.append(get_rag_context(refined))
+        else:
+            tasks.append(asyncio.sleep(0))
+
+        # Optimized: Only run Web Search if no other tools were executed
+        # AND if the intent is not a simple action that already succeeded
+        already_searched = any(
+            r.get("service") == "web_search" for r in (action_results or [])
+        )
         
+        # Define intents that should NOT trigger web search after success
+        no_search_intents = [
+            "turn_on", "turn_off", "toggle", "play_media", "stop_media",
+            "media_next", "media_previous", "open_app", "volume_up",
+            "volume_down", "volume_set", "volume_mute", "timer_add",
+            "alarm_add", "timer_delete", "timer_pause", "timer_resume",
+            "calendar_add", "calendar_delete", "calendar_update",
+            "dim", "brighten", "set_brightness", "set_color",
+            "note_add", "note_append", "note_delete",
+            "timer_list", "calendar_list", "calendar_read", "note_list", "note_read", 
+            "music_list", "list_playlists", "list_radio"
+        ]
+        
+        # Skip web search if:
+        # 1. Already searched in action results
+        # 2. OR action succeeded and intent is a simple command
+        # 3. OR action was executed (even if failed) for transport/media commands
+        action_succeeded = action_results and all(r.get("status") == "SUCCESS" for r in action_results)
+        is_no_search_intent = intent in no_search_intents
+
+        # For transport commands, consider them executed even if they fail (e.g., no active devices)
+        transport_executed = action_results and any(
+            "media_stop" in str(r.get("service", "")) or
+            "media_play" in str(r.get("service", "")) or
+            "media_pause" in str(r.get("service", "")) or
+            r.get("service") in ["stop_media", "media_play", "media_pause"]
+            for r in action_results
+        )
+
+        log.debug(f"[SEARCH DECISION] intent={intent}, action_succeeded={action_succeeded}, is_no_search_intent={is_no_search_intent}, transport_executed={transport_executed}")
+        should_search = not already_searched and not is_no_search_intent and not transport_executed
+        log.debug(f"[SEARCH DECISION] should_search={should_search}")
+
+        if should_search:
+            tasks.append(tool_web_search(refined))
+        else:
+            tasks.append(asyncio.sleep(0))
+
         results = await asyncio.gather(*tasks)
         ha_ctx = results[0] if fetch_ha else ""
         nc_ctx = results[1] if fetch_nc else ""
-        search_ctx = results[2]
-        
-        # Calendar Context Injection
-        if any(x in refined.lower() for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]):
-            # Only read calendar if we aren't actively modifying it right now
+        if not already_searched:
+            search_ctx = results[2]
+
+        if any(
+            x in refined.lower()
+            for x in ["calendar", "schedule", "meeting", "today", "tomorrow"]
+        ):
             if not action_results:
                 cal_ctx = await tool_calendar_read(creds, GlobalResources.redis_client)
-            
-    log.debug(f"Context Retrieval took: {time.time() - t_rag:.4f}s")
 
-    from settings import load_system_prompt
+    from app.settings import load_system_prompt
+
     base_sys_prompt = load_system_prompt()
-    
     now = datetime.now()
     sys_info = f"Current Date: {now.strftime('%A, %B %d, %Y')}\nCurrent Time: {now.strftime('%I:%M %p')}"
-    
-    # --- LOGIC BRANCH: CHOOSE TEMPLATE ---
-    # If an action was successful and it's a simple command, use the SIMPLE template
-    # to reduce token usage and response time.
-    simple_intents = ["turn_on", "turn_off", "toggle", "play_media", "stop_media", "media_next", "media_previous", "open_app"]
-    
+    simple_intents = [
+        "turn_on",
+        "turn_off",
+        "toggle",
+        "play_media",
+        "stop_media",
+        "media_next",
+        "media_previous",
+        "volume_up",
+        "volume_down",
+        "volume_set",
+        "volume_mute",
+        "open_app",
+        "timer_add",
+        "alarm_add",
+        "timer_delete",
+    ]
     use_simple = False
     if action_results and intent in simple_intents:
-        # Check if all actions succeeded
-        if all(r.get("status") == "SUCCESS" for r in action_results):
+        log.info(
+            f"DEBUG: Checking Simple Intent '{intent}' for silent mode. Results: {len(action_results)}"
+        )
+        if all(r.get("status") == "SUCCESS" for r in action_results) and not any(
+            r.get("service") == "web_search" for r in action_results
+        ):
+            # Check if we should be silent (Physical actions only)
+            silent_candidates = [
+                "turn_on",
+                "turn_off",
+                "toggle",
+                "play_media",
+                "stop_media",
+                "media_next",
+                "media_previous",
+                "open_app",
+                "volume_up",
+                "volume_down",
+                "volume_set",
+                "volume_mute",
+                "timer_add",
+                "timer_delete", 
+                "timer_pause",
+                "timer_resume",
+                "alarm_add",
+                "calendar_add",
+                "calendar_delete",
+                "calendar_update",
+                "note_add",
+                "note_delete",
+                "note_append"
+            ]
+            if intent in silent_candidates:
+                log.info(f"DEBUG: Entering Silent Mode for intent '{intent}'")
+                # Yield Silent Token and return
+                yield builder.chunk(content=SILENT_SUCCESS_TOKEN)
+                yield builder.chunk(finish_reason="stop")
+                yield builder.done()
+                return
+
             use_simple = True
 
-    if use_simple:
-        template_to_use = SIMPLE_RAG_TEMPLATE
-    else:
-        template_to_use = RAG_TEMPLATE
+    # Retrieve history for the final prompts
+    from .utils import get_history_context
+    history_text = get_history_context(user) or ""
 
-    # Use Externalized Prompt Template from Settings
-    prompt = template_to_use.format(
-        system_prompt=base_sys_prompt,
-        sys_info=sys_info,
-        ha_ctx=ha_ctx,
-        nc_ctx=nc_ctx,
-        search_ctx=search_ctx,
-        cal_ctx=cal_ctx,
-        query=refined
-    )
+    template_to_use = SIMPLE_RAG_TEMPLATE if use_simple else RAG_TEMPLATE
     
-    # Append Action Context to the prompt (CRITICAL for hallucination mitigation)
-    if action_context:
-        prompt += f"\n{action_context}"
-    
+    # Format based on which template is used (SIMPLE doesn't use history/context)
+    if use_simple:
+         prompt = template_to_use.format(
+            sys_info=sys_info,
+            query=refined,
+            action_context=action_context
+        )
+    else:
+        prompt = template_to_use.format(
+            system_prompt=base_sys_prompt,
+            sys_info=sys_info,
+            ha_ctx=ha_ctx,
+            nc_ctx=nc_ctx,
+            search_ctx=search_ctx,
+            cal_ctx=cal_ctx,
+            history=history_text,
+            query=refined,
+            action_context=action_context,
+        )
+        # Append action context for non-simple templates if available
+        if action_context:
+            prompt += f"\n{action_context}"
+
+
     yield builder.chunk(role="assistant")
-    
-    # 4. LLM Generation
     r = None
     if use_openai and openai_client:
         messages = [{"role": "system", "content": prompt}]
         r = await call_openai_chat(messages, model, stream=True)
     else:
         r = await call_ollama_generate(prompt, model, stream=True)
-    
     full_text = ""
     if "iterable" in r:
         async for c in r["iterable"]():
             token = c.get("response", "")
-            # CLEAN OUTPUT (Token-Safe)
-            token = clean_llm_output(token, is_voice) 
+            token = clean_llm_output(token, is_voice)
             full_text += token
             yield builder.chunk(content=token)
     elif "text" in r:
         full_text = clean_llm_output(r["text"], is_voice)
         yield builder.chunk(content=full_text)
-    
-    log.info(f"FINAL RESPONSE TO CLIENT: {full_text}")
-    log.info(f"Total Request Time: {time.time() - t0:.4f}s")
     update_history(user, "assistant", full_text)
+    log.debug(
+        f"[RESPONSE] Final response to user ({len(full_text)} chars): {full_text[:300]}"
+    )
     yield builder.chunk(finish_reason="stop")
     yield builder.done()
