@@ -48,7 +48,8 @@ strict separation of concerns:
   * **Tech**: Use LLM to classify efficient "content_type" before routing.
 * [x] **Playlist & Library Management**
   * **Goal**: "List my playlists", "What radio do I have?".
-  * **Tech**: Fast Path integration with Music Assistant to fetch and inject library data.
+  * **Tech**: Fast Path integration with Music Assistant to fetch and inject
+    library data.
   * **Status**: *Completed*.
 
 ## 🛠 Priority 2: System Hardening
