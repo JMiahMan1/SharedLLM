@@ -39,9 +39,10 @@ music on a smart speaker).
   * **Discovery**: It searches ChromaDB for other devices in the same
         physical group (e.g., "Office") that look like a TV. If that fails, it
         tries name matching (stripping `_cast` or `_chrome` suffixes).
-  * **Action**: If a sibling TV is found and is `off`, the integration sends
-        a `media_player.turn_on` command to the *TV* and waits 4 seconds before
-        sending the media to the *Cast* device.
+  * **Action**:
+        * If TV is **OFF**: Sends `media_player.turn_on`, waits 2-4s for boot, then plays.
+        * If TV is **ON**: Skips power commands to avoid interrupting active sessions (e.g., typically avoids "Home" pulses for video intents).
+        * If TV is **Android/Deep Sleep**: Uses a specialized "Home" pulse to wake the ADB connection without power toggling, unless a video session is imminent.
 * **Standard Playback**: Supports standard HASS `media_player.play_media`
     commands.
 
@@ -49,8 +50,9 @@ music on a smart speaker).
 
 | Feature | Natural Speech Example | What Happens |
 | :--- | :--- | :--- |
-| **SmartPowerSync** | "Play Brandon Lake on the Office TV" | 1. System finds Cast device; 2. Finds sibling TV; 3. Turns TV ON if off; 4. Waits 4s; 5. Plays music. |
-| **Auto-Search Video** | "Watch a fireplace video on the Living Room TV" | **System searches YouTube** for "fireplace video", extracts the first URL, and plays it automatically. No URL needed! |
+| **SmartPowerSync** | "Play Brandon Lake on the Office TV" | 1. Finds sibling TV; 2. intelligently manages power/wake state; 3. Plays music. |
+| **Video Intent** | "Watch Big Buck Bunny on Office TV" | **Fast Path** detects video match, extracted URL, and streams directly to Chromecast. bypasses LLM. |
+| **Auto-Search Video** | "Watch a fireplace video on the Living Room TV" | **System searches YouTube** for "fireplace video", extracts the first URL, and plays it. |
 | **Power Control** | "Turn on the Chromecast" | Turns on the device (and likely the TV via CEC). |
 
 ---
@@ -61,15 +63,16 @@ music on a smart speaker).
 AirPlay, Cast, etc.).
 
 **Key Feature**: "Smart Routing" - deeply integrates with the Router to steal
-"music" commands from hardware devices.
+"music" commands from hardware devices. Also supports **Library Management**.
 
 ### Music Assistant: User Guide & Voice Commands
 
 | Intent | Natural Speech Example | Internal Logic |
 | :--- | :--- | :--- |
 | **Music Search** | "Play some jazz on the kitchen speaker" | Cleans query to "jazz", searches MA, plays Radio/Playlist. |
-| **Artist Radio** | "Play The Midnight on the Office Speaker" | Starts "The Midnight Radio". |
-| **Smart Swap** | "Play music on the Office TV" | Router detects "Office TV" is a Cast device, but "music" intent prefers highest quality. **Swaps target** to `mass_office_speaker` automatically. |
+| **Playlist List** | "What playlists do I have?" | **Fast Path** fetches all MA playlists and injects the list into the LLM context for a natural response. |
+| **Radio List** | "List my radio stations" | Fetches favorited radio stations from Library. |
+| **Smart Swap** | "Play music on the Office TV" | Router detects "Office TV" is a Cast device. **Swaps target** to `mass_office_speaker` for high-res audio. |
 
 ---
 
