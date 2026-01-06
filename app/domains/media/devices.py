@@ -671,7 +671,7 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
             
         # Deprioritize cast/chrome for power - User rarely wants to "Turn off Chromecast" (background service)
         # They usually mean the TV itself.
-        if is_cast or "_chrome" in eid: 
+        if is_cast: 
             return -50
             
         # Music Assistant players are software entities, rarely power controlled

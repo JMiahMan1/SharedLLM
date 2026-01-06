@@ -117,6 +117,15 @@ steps.
 * **Logic**: `try_handle_compound_command` splits the query using "and" or
   "then" delimiters and dispatches them as separate pipeline tasks.
 
+### Fast Path Orchestration
+
+For high-confidence intents, the system bypasses the LLM generation phase entirely to achieve command execution in under 200ms.
+
+* **Trigger**: High confidence score from the Regex or Vector Intent Classifier (e.g., `watch_media` for "Watch Big Buck Bunny").
+* **Mechanism**: The `pipeline.py` orchestrator creates a direct `tool_call` action plan.
+* **Supported Intents**: `volume_*`, `nav_*`, `timer_*`, `watch_media`, `list_playlists`, `list_radio`.
+* **Benefit**: drastic latency reduction for simple, repetitive commands.
+
 ### Multi-User Context
 
 The system uses the `X-RAG-User` header to provide isolation:

@@ -97,6 +97,7 @@ requirements.txt
 - Streaming responses (OpenAI-compatible)
 - Shared memory via Redis (chat history, context)
 - Intent classification (regex overrides + vector matching)
+- **Low-Latency Fast Path** - High-confidence intents bypass LLM (< 200ms response).
 - **Multi-intent command parsing** ("turn off lights and play music")
 - **Conversation Context** - Robust handling of follow-up questions using
   history.
