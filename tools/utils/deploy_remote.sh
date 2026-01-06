@@ -41,7 +41,7 @@ ssh "$HOST" << EOF
     fi
     # Prune root-owned test reports/directory that block git reset
     echo "Pruning root-owned test reports..."
-    docker run --rm -v "$(pwd)/data:/data" alpine sh -c "rm -rf /data/tests" 2>/dev/null
+    docker run --rm -v "\$(pwd)/data:/data" alpine sh -c "rm -rf /data/tests" 2>/dev/null
 
     echo "Fetching latest code..."
     git fetch origin
