@@ -17,6 +17,8 @@ Scripts to inspect the state of the system, database, and integrations.
 
 Scripts to verify system functionality.
 
+- `runner.py`: **primary test entry point**. Orchestrates specific suites or all tests.
+  - Usage: `python -m app.tests.runner [--test MediaTests] [--url http://...]`
 - `test_media_playback.py`: Comprehensive test suite for Media Control
   (NL queries -> Intent -> Execution).
 - `test_ha_connectivity.py`: Verify connection to Home Assistant API.
