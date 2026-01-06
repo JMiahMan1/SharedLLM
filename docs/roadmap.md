@@ -42,14 +42,14 @@ strict separation of concerns:
   * **Tech**: Integrated `duckduckgo-search` and `yt-dlp` to fetch and stream
     results.
   * **Status**: *Completed*.
-* [ ] **Multi-Room Audio Groups**
-  * **Goal**: "Play music in the whole house" or "Move music to the Kitchen".
-  * **Tech**: Leverage Music Assistant's native grouping and valid
-    `media_player.join` services in HA.
-* [ ] **Smart Podcast/Audiobook Routing**
+* [x] **Smart Podcast/Audiobook Routing**
   * **Goal**: Distinguish between "Play Harry Potter" (Audiobook) and "Play Harry
     Potter Soundtrack" (Music).
   * **Tech**: Use LLM to classify efficient "content_type" before routing.
+* [x] **Playlist & Library Management**
+  * **Goal**: "List my playlists", "What radio do I have?".
+  * **Tech**: Fast Path integration with Music Assistant to fetch and inject library data.
+  * **Status**: *Completed*.
 
 ## 🛠 Priority 2: System Hardening
 
