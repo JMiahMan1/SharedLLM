@@ -1,0 +1,487 @@
+Fetched 1000 log lines.
+--- ERROR CONTEXT ---
+2026-01-04 17:37:59,412 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:37:59,412 [INFO] EXEC HA: media_player.media_pause on media_player.office_tv_chrome_2 | Data: {}
+2026-01-04 17:37:59,414 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:37:59,496 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/media_pause HTTP/1.1" 200 745
+2026-01-04 17:38:00,498 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:10,540 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x7f206426b650>: Failed to resolve 'ha.sumemail.com' (Name or service not known: ha.sumemail.com using 1 resolver(s))"))
+2026-01-04 17:38:11,541 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:11,576 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:38:12,580 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:13,595 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f2064228650>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:38:14,597 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:14,629 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:38:15,631 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:15,664 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:38:15,664 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]
+2026-01-04 17:38:15,665 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]]
+2026-01-04 17:38:15,665 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}], type: <class 'list'>
+2026-01-04 17:38:15,665 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]
+2026-01-04 17:38:15,665 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]
+2026-01-04 17:38:15,665 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]
+2026-01-04 17:38:15,665 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'media_player.media_pause' sent to Office TV. Verified New State: paused
+
+2026-01-04 17:38:15,666 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=7488
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:38:00,498 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:10,540 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x7f206426b650>: Failed to resolve 'ha.sumemail.com' (Name or service not known: ha.sumemail.com using 1 resolver(s))"))
+2026-01-04 17:38:11,541 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:11,576 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:38:12,580 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:13,595 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f2064228650>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:38:14,597 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:14,629 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:38:15,631 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:15,664 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:38:15,664 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]
+2026-01-04 17:38:15,665 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]]
+2026-01-04 17:38:15,665 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}], type: <class 'list'>
+2026-01-04 17:38:15,665 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]
+2026-01-04 17:38:15,665 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]
+2026-01-04 17:38:15,665 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Sent command to media pause the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_pause', 'new_state': 'paused'}]
+2026-01-04 17:38:15,665 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'media_player.media_pause' sent to Office TV. Verified New State: paused
+
+2026-01-04 17:38:15,666 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=7488
+2026-01-04 17:38:15,667 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:38:16,510 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:38:26,773 [DEBUG] [RESPONSE] Final response to user (200 chars): Pausing the show on the Office TV has been confirmed. The TV is now paused. Current time: five thirty-eight P M, January fourth, two thousand twenty-six. Be still, and know that I am God (Psalm 62:5).
+2026-01-04 17:38:26,773 [DEBUG] [RESPONSE] Returning to client: Pausing the show on the Office TV has been confirmed. The TV is now paused. Current time: five thirty-eight P M, January fourth, two thousand twenty-six. Be still, and know that I am God (Psalm 62:5).
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:38:39,569 [INFO] [Integration Inference] Found sibling media_player.office_tv with definitive integration 'androidtv'. Adopting.
+2026-01-04 17:38:39,569 [INFO] [Integration Override] Correcting integration from 'home_assistant' to 'androidtv' (Source: Metadata/Sibling)
+2026-01-04 17:38:39,569 [INFO] [HANDLE_MEDIA_COMMAND] Final Target: media_player.office_tv_chrome_2 (androidtv) Intent: media_next
+2026-01-04 17:38:39,569 [INFO] [HANDLE_MEDIA_COMMAND] Called with intent=media_next, entity_id=media_player.office_tv_chrome_2, device_name=None, integration=androidtv
+2026-01-04 17:38:39,570 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:38:54,586 [ERROR] State fetch error for media_player.office_tv_chrome_2: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x7f205412a9d0>: Failed to resolve 'ha.sumemail.com' (Name or service not known: ha.sumemail.com using 1 resolver(s))"))
+2026-01-04 17:38:54,586 [INFO] EXEC HA: media_player.media_next_track on media_player.office_tv_chrome_2 | Data: None
+2026-01-04 17:38:54,588 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:10,619 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:13,348 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/media_next_track HTTP/1.1" 200 776
+2026-01-04 17:39:14,350 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:15,369 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f202c086d90>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:39:16,369 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:16,481 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1237
+2026-01-04 17:39:17,483 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:17,512 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1237
+2026-01-04 17:39:18,514 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:23,560 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1237
+2026-01-04 17:39:24,562 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:29,603 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1237
+2026-01-04 17:39:29,604 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]
+2026-01-04 17:39:29,604 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]]
+2026-01-04 17:39:29,604 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}], type: <class 'list'>
+2026-01-04 17:39:29,604 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]
+2026-01-04 17:39:29,604 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:38:54,586 [INFO] EXEC HA: media_player.media_next_track on media_player.office_tv_chrome_2 | Data: None
+2026-01-04 17:38:54,588 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:10,619 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:13,348 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/media_next_track HTTP/1.1" 200 776
+2026-01-04 17:39:14,350 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:15,369 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f202c086d90>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:39:16,369 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:16,481 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1237
+2026-01-04 17:39:17,483 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:17,512 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1237
+2026-01-04 17:39:18,514 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:23,560 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1237
+2026-01-04 17:39:24,562 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:29,603 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1237
+2026-01-04 17:39:29,604 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]
+2026-01-04 17:39:29,604 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]]
+2026-01-04 17:39:29,604 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}], type: <class 'list'>
+2026-01-04 17:39:29,604 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]
+2026-01-04 17:39:29,604 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]
+2026-01-04 17:39:29,604 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Sent command to media next track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_next_track', 'new_state': 'playing'}]
+2026-01-04 17:39:29,604 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'media_player.media_next_track' sent to Office TV. Verified New State: playing
+
+2026-01-04 17:39:29,604 [INFO] DEBUG: Checking Simple Intent 'media_next' for silent mode. Results: 1
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:39:33,449 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:38,495 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:39:39,497 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:39,537 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:39:40,539 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:41,552 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f205aa7da90>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:39:42,554 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:47,597 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:39:48,600 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:49,613 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f20541281d0>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:39:49,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]
+2026-01-04 17:39:49,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]]
+2026-01-04 17:39:49,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}], type: <class 'list'>
+2026-01-04 17:39:49,613 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]
+2026-01-04 17:39:49,613 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]
+2026-01-04 17:39:49,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]
+2026-01-04 17:39:49,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'media_player.media_previous_track' sent to Office TV. Verified New State: N/A
+
+2026-01-04 17:39:49,614 [INFO] DEBUG: Checking Simple Intent 'media_previous' for silent mode. Results: 1
+2026-01-04 17:39:49,614 [INFO] DEBUG: Entering Silent Mode for intent 'media_previous'
+2026-01-04 17:39:49,614 [DEBUG] [RESPONSE] Returning to client: Done.
+2026-01-04 17:39:49,675 [INFO] [INTENT] get_intent called with query: 'Turn off the TV'
+2026-01-04 17:39:49,675 [INFO] [REGEX START] apply_regex_override called with: 'Turn off the TV'
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:39:40,539 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:41,552 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f205aa7da90>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:39:42,554 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:47,597 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome_2 HTTP/1.1" 200 1244
+2026-01-04 17:39:48,600 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:39:49,613 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome_2 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f20541281d0>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:39:49,613 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]
+2026-01-04 17:39:49,613 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]]
+2026-01-04 17:39:49,613 [INFO] [COMPOUND] Processing r_list: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}], type: <class 'list'>
+2026-01-04 17:39:49,613 [INFO] [COMPOUND] valid_results: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]
+2026-01-04 17:39:49,613 [INFO] [COMPOUND] Returning: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]
+2026-01-04 17:39:49,613 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'SUCCESS', 'message': 'Sent command to media previous track the Office TV.', 'entity_id': 'media_player.office_tv_chrome_2', 'friendly_name': 'Office TV', 'service': 'media_player.media_previous_track', 'new_state': 'N/A'}]
+2026-01-04 17:39:49,613 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- SUCCESS: Command 'media_player.media_previous_track' sent to Office TV. Verified New State: N/A
+
+2026-01-04 17:39:49,614 [INFO] DEBUG: Checking Simple Intent 'media_previous' for silent mode. Results: 1
+2026-01-04 17:39:49,614 [INFO] DEBUG: Entering Silent Mode for intent 'media_previous'
+2026-01-04 17:39:49,614 [DEBUG] [RESPONSE] Returning to client: Done.
+2026-01-04 17:39:49,675 [INFO] [INTENT] get_intent called with query: 'Turn off the TV'
+2026-01-04 17:39:49,675 [INFO] [REGEX START] apply_regex_override called with: 'Turn off the TV'
+2026-01-04 17:39:49,675 [INFO] [REGEX CHECK] Checking query: 'turn off the tv'
+2026-01-04 17:39:49,675 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 27 patterns
+2026-01-04 17:39:49,675 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 17:39:49,675 [INFO] [REGEX OVERRIDE] Matched 'turn_off' via pattern: \bturn\s+off\b...
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:40:48,357 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:40:48,385 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 523
+2026-01-04 17:40:48,386 [INFO] EXEC HA: media_player.play_media on media_player.office_tv | Data: {'media_content_id': 'press the home button the android tv', 'media_content_type': 'music'}
+2026-01-04 17:40:48,387 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:40:48,413 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+2026-01-04 17:40:48,414 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:40:48,387 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:40:48,413 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/play_media HTTP/1.1" 500 55
+2026-01-04 17:40:48,414 [WARNING] HA 500 Error: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+2026-01-04 17:40:48,417 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:40:49,195 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Final response to user (407 chars): Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g., a streaming box) is handling the input. Trust in God's guidance, for He leads the righteous in th
+---------------------
+--- ERROR CONTEXT ---
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+2026-01-04 17:40:48,417 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:40:49,195 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Final response to user (407 chars): Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g., a streaming box) is handling the input. Trust in God's guidance, for He leads the righteous in th
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Returning to client: Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g
+2026-01-04 17:41:00,162 [INFO] [INTENT] get_intent called with query: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX START] apply_regex_override called with: 'Launch YouTube on the Office TV'
+---------------------
+--- ERROR CONTEXT ---
+Server got itself in trouble
+2026-01-04 17:40:48,414 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+2026-01-04 17:40:48,417 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:40:49,195 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Final response to user (407 chars): Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g., a streaming box) is handling the input. Trust in God's guidance, for He leads the righteous in th
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Returning to client: Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g
+2026-01-04 17:41:00,162 [INFO] [INTENT] get_intent called with query: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX START] apply_regex_override called with: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Checking query: 'launch youtube on the office tv'
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:40:48,414 [ERROR] Failed to execute HA command: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+2026-01-04 17:40:48,417 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:40:49,195 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Final response to user (407 chars): Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g., a streaming box) is handling the input. Trust in God's guidance, for He leads the righteous in th
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Returning to client: Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g
+2026-01-04 17:41:00,162 [INFO] [INTENT] get_intent called with query: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX START] apply_regex_override called with: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Checking query: 'launch youtube on the office tv'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 27 patterns
+---------------------
+--- ERROR CONTEXT ---
+
+Server got itself in trouble
+2026-01-04 17:40:48,414 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+2026-01-04 17:40:48,417 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:40:49,195 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Final response to user (407 chars): Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g., a streaming box) is handling the input. Trust in God's guidance, for He leads the righteous in th
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Returning to client: Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g
+2026-01-04 17:41:00,162 [INFO] [INTENT] get_intent called with query: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX START] apply_regex_override called with: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Checking query: 'launch youtube on the office tv'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 27 patterns
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+---------------------
+--- ERROR CONTEXT ---
+Server got itself in trouble
+2026-01-04 17:40:48,414 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+2026-01-04 17:40:48,417 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:40:49,195 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Final response to user (407 chars): Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g., a streaming box) is handling the input. Trust in God's guidance, for He leads the righteous in th
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Returning to client: Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g
+2026-01-04 17:41:00,162 [INFO] [INTENT] get_intent called with query: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX START] apply_regex_override called with: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Checking query: 'launch youtube on the office tv'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 27 patterns
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+on\b -> turn_on
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:40:48,414 [INFO] [ACTION DISPATCH] Handler returned: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] asyncio.gather returned: [[{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Processing r_list: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}], type: <class 'list'>
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+2026-01-04 17:40:48,417 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:40:49,195 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Final response to user (407 chars): Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g., a streaming box) is handling the input. Trust in God's guidance, for He leads the righteous in th
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Returning to client: Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g
+2026-01-04 17:41:00,162 [INFO] [INTENT] get_intent called with query: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX START] apply_regex_override called with: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Checking query: 'launch youtube on the office tv'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 27 patterns
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+on\b -> turn_on
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] valid_results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,414 [INFO] [COMPOUND] Returning: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION RESULTS] 1 results: [{'status': 'FAILURE', 'message': 'Failed: HTTP 500: 500 Internal Server Error\n\nServer got itself in trouble', 'entity_id': 'media_player.office_tv', 'friendly_name': 'Office Tv', 'service': 'media_player.play_media'}]
+2026-01-04 17:40:48,415 [DEBUG] [ACTION CONTEXT] Sending to LLM:
+### PREVIOUS ACTIONS (Use to inform your response. Do not hallucinate success/failure):
+- FAILURE: Command 'media_player.play_media' on 'media_player.office_tv' failed. Reason: Failed: HTTP 500: 500 Internal Server Error
+
+Server got itself in trouble
+
+2026-01-04 17:40:48,415 [INFO] DEBUG: Checking Simple Intent 'play_media' for silent mode. Results: 1
+2026-01-04 17:40:48,416 [INFO] DEBUG: OLLAMA REQ URL=http://192.168.1.161:11434/api/generate MODEL=qwen3:latest PROMPT_LEN=8014
+2026-01-04 17:40:48,417 [DEBUG] Starting new HTTP connection (1): 192.168.1.161:11434
+2026-01-04 17:40:49,195 [DEBUG] http://192.168.1.161:11434 "POST /api/generate HTTP/1.1" 200 None
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Final response to user (407 chars): Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g., a streaming box) is handling the input. Trust in God's guidance, for He leads the righteous in th
+2026-01-04 17:41:00,153 [DEBUG] [RESPONSE] Returning to client: Pressing the home button on the Android TV has failed. The system does not support direct interaction with the TV's physical controls. You may need to use the TV's remote or ensure another device (e.g
+2026-01-04 17:41:00,162 [INFO] [INTENT] get_intent called with query: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX START] apply_regex_override called with: 'Launch YouTube on the Office TV'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Checking query: 'launch youtube on the office tv'
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] REGEX_INTENT_MAP has 27 patterns
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+off\b -> turn_off
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \bturn\s+on\b -> turn_on
+2026-01-04 17:41:00,163 [INFO] [REGEX CHECK] Testing pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hulu|plex|prime|spotify) -> open_app
+2026-01-04 17:41:00,163 [INFO] [REGEX OVERRIDE] Matched 'open_app' via pattern: \b(open|launch|start)\s+(netflix|youtube|disney|hu...
+2026-01-04 17:41:00,163 [INFO] [INTENT] Regex override: 'Launch YouTube on the Office TV' -> open_app [LOCKED]
+2026-01-04 17:41:00,164 [INFO] [PIPELINE DEBUG] Using provided intent: open_app (Score: 1.0)
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:41:23,948 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:24,061 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/media_stop HTTP/1.1" 200 593
+2026-01-04 17:41:25,063 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:25,094 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome HTTP/1.1" 200 1049
+2026-01-04 17:41:26,096 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:27,102 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f20650d6c90>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:41:28,104 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:34,126 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f2066d6d610>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:41:35,127 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:40,170 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome HTTP/1.1" 200 1049
+2026-01-04 17:41:41,172 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:41,202 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome HTTP/1.1" 200 1049
+2026-01-04 17:41:42,205 [INFO] [Group Lookup] Found sibling for media_player.office_tv_chrome: media_player.office_tv
+2026-01-04 17:41:42,206 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,224 [ERROR] State fetch error for media_player.office_tv: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f205aa8a9d0>, 'Connection to ha.sumemail.com timed out. (connect timeout=2.0)'))
+2026-01-04 17:41:49,224 [INFO] [SmartPowerSync] TV media_player.office_tv is unknown. Turning ON.
+2026-01-04 17:41:49,225 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,252 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 523
+2026-01-04 17:41:49,253 [INFO] EXEC HA: media_player.turn_on on media_player.office_tv | Data: {}
+2026-01-04 17:41:49,254 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,270 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/turn_on HTTP/1.1" 200 10
+2026-01-04 17:41:50,272 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:50,288 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 523
+2026-01-04 17:41:54,289 [INFO] [QueryCleaning] Input: 'Watch a video about cats on the Office TV', device_name: 'Office TV'
+2026-01-04 17:41:54,290 [INFO] [QueryCleaning] Core device name to remove: 'office tv'
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:41:25,063 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:25,094 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome HTTP/1.1" 200 1049
+2026-01-04 17:41:26,096 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:27,102 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f20650d6c90>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:41:28,104 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:34,126 [WARNING] [State Verify] Error: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv_chrome (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f2066d6d610>, 'Connection to ha.sumemail.com timed out. (connect timeout=1.0)'))
+2026-01-04 17:41:35,127 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:40,170 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome HTTP/1.1" 200 1049
+2026-01-04 17:41:41,172 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:41,202 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome HTTP/1.1" 200 1049
+2026-01-04 17:41:42,205 [INFO] [Group Lookup] Found sibling for media_player.office_tv_chrome: media_player.office_tv
+2026-01-04 17:41:42,206 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,224 [ERROR] State fetch error for media_player.office_tv: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f205aa8a9d0>, 'Connection to ha.sumemail.com timed out. (connect timeout=2.0)'))
+2026-01-04 17:41:49,224 [INFO] [SmartPowerSync] TV media_player.office_tv is unknown. Turning ON.
+2026-01-04 17:41:49,225 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,252 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 523
+2026-01-04 17:41:49,253 [INFO] EXEC HA: media_player.turn_on on media_player.office_tv | Data: {}
+2026-01-04 17:41:49,254 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,270 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/turn_on HTTP/1.1" 200 10
+2026-01-04 17:41:50,272 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:50,288 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 523
+2026-01-04 17:41:54,289 [INFO] [QueryCleaning] Input: 'Watch a video about cats on the Office TV', device_name: 'Office TV'
+2026-01-04 17:41:54,290 [INFO] [QueryCleaning] Core device name to remove: 'office tv'
+2026-01-04 17:41:54,290 [INFO] [QueryCleaning] Output: 'a about cats'
+2026-01-04 17:41:54,290 [INFO] [StandardIntegration] Searching Whoogle for 'a about cats youtube'...
+---------------------
+--- ERROR CONTEXT ---
+2026-01-04 17:41:40,170 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome HTTP/1.1" 200 1049
+2026-01-04 17:41:41,172 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:41,202 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv_chrome HTTP/1.1" 200 1049
+2026-01-04 17:41:42,205 [INFO] [Group Lookup] Found sibling for media_player.office_tv_chrome: media_player.office_tv
+2026-01-04 17:41:42,206 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,224 [ERROR] State fetch error for media_player.office_tv: HTTPSConnectionPool(host='ha.sumemail.com', port=443): Max retries exceeded with url: /api/states/media_player.office_tv (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f205aa8a9d0>, 'Connection to ha.sumemail.com timed out. (connect timeout=2.0)'))
+2026-01-04 17:41:49,224 [INFO] [SmartPowerSync] TV media_player.office_tv is unknown. Turning ON.
+2026-01-04 17:41:49,225 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,252 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 523
+2026-01-04 17:41:49,253 [INFO] EXEC HA: media_player.turn_on on media_player.office_tv | Data: {}
+2026-01-04 17:41:49,254 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:49,270 [DEBUG] https://ha.sumemail.com:443 "POST /api/services/media_player/turn_on HTTP/1.1" 200 10
+2026-01-04 17:41:50,272 [DEBUG] Starting new HTTPS connection (1): ha.sumemail.com:443
+2026-01-04 17:41:50,288 [DEBUG] https://ha.sumemail.com:443 "GET /api/states/media_player.office_tv HTTP/1.1" 200 523
+2026-01-04 17:41:54,289 [INFO] [QueryCleaning] Input: 'Watch a video about cats on the Office TV', device_name: 'Office TV'
+2026-01-04 17:41:54,290 [INFO] [QueryCleaning] Core device name to remove: 'office tv'
+2026-01-04 17:41:54,290 [INFO] [QueryCleaning] Output: 'a about cats'
+2026-01-04 17:41:54,290 [INFO] [StandardIntegration] Searching Whoogle for 'a about cats youtube'...
+2026-01-04 17:41:54,290 [INFO] Executing Web Search for: a about cats youtube
+2026-01-04 17:41:54,291 [DEBUG] Starting new HTTPS connection (1): search.sumemail.com:443
+2026-01-04 17:42:03,374 [DEBUG] https://search.sumemail.com:443 "GET /search?q=a+about+cats+youtube&format=json HTTP/2.0" 200 5353
+2026-01-04 17:42:03,375 [INFO] [StandardIntegration] Found precise video match: https://www.youtube.com/watch?v=33_1arqK0Dk
+2026-01-04 17:42:03,375 [INFO] [CastIntegration] Pre-resolved video query to: https://www.youtube.com/watch?v=33_1arqK0Dk
+2026-01-04 17:42:03,376 [INFO] [VideoHelper] Downloading video for local streaming: https://www.youtube.com/watch?v=33_1arqK0Dk
+2026-01-04 17:42:05,065 [DEBUG] [78efbe12ccb74165] TLS: Advertising to peer post-quantum algorithm using X25519ML768 (0x11EC)
+---------------------

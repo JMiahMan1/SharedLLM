@@ -1,0 +1,170 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T21:08:38.591895"
+  },
+  {
+    "test": "Media: Volume Up",
+    "status": "FAIL",
+    "message": "TR: []",
+    "timestamp": "2026-01-03T21:08:38.604444"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: []",
+    "timestamp": "2026-01-03T21:08:38.656952"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "FAIL",
+    "message": "Unexpected response: <!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.455861"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Response: <!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.473355"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "FAIL",
+    "message": "TR: []",
+    "timestamp": "2026-01-03T21:08:39.481598"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "FAIL",
+    "message": "TR: []",
+    "timestamp": "2026-01-03T21:08:39.498288"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "FAIL",
+    "message": "TR: []",
+    "timestamp": "2026-01-03T21:08:39.506120"
+  },
+  {
+    "test": "Media: Transport/Power",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.534116"
+  },
+  {
+    "test": "Media: Radio List",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.547789"
+  },
+  {
+    "test": "Media: Playlist List",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.556235"
+  },
+  {
+    "test": "Timer: Add",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.564031"
+  },
+  {
+    "test": "Search: Web Query",
+    "status": "FAIL",
+    "message": "Expected 'Ulaanbaatar', got: <!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL ",
+    "timestamp": "2026-01-03T21:08:39.578556"
+  },
+  {
+    "test": "Search: Music/Artist",
+    "status": "FAIL",
+    "message": "Response: <!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL ",
+    "timestamp": "2026-01-03T21:08:39.596600"
+  },
+  {
+    "test": "Calendar: Add",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL ",
+    "timestamp": "2026-01-03T21:08:39.603045"
+  },
+  {
+    "test": "Note: Create",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL ",
+    "timestamp": "2026-01-03T21:08:39.611377"
+  },
+  {
+    "test": "Hardware: Light On",
+    "status": "FAIL",
+    "message": "Msg: <!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n, TR: []",
+    "timestamp": "2026-01-03T21:08:39.630233"
+  },
+  {
+    "test": "Hardware: Light Off",
+    "status": "FAIL",
+    "message": "Msg: <!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n, TR: []",
+    "timestamp": "2026-01-03T21:08:39.639632"
+  },
+  {
+    "test": "Hardware: Light Toggle",
+    "status": "FAIL",
+    "message": "Msg: <!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n, TR: []",
+    "timestamp": "2026-01-03T21:08:39.649942"
+  },
+  {
+    "test": "Hardware: Set Color",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.674705"
+  },
+  {
+    "test": "Hardware: Brightness",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.685135"
+  },
+  {
+    "test": "Context: Setup",
+    "status": "INFO",
+    "message": "Turning on Office TV to set context",
+    "timestamp": "2026-01-03T21:08:39.685208"
+  },
+  {
+    "test": "Context: Pronoun Resolution",
+    "status": "FAIL",
+    "message": "No tool executed",
+    "timestamp": "2026-01-03T21:08:39.710781"
+  },
+  {
+    "test": "Context: Implicit Entity",
+    "status": "FAIL",
+    "message": "No tool executed",
+    "timestamp": "2026-01-03T21:08:39.738786"
+  },
+  {
+    "test": "AndroidTV: Remote Command",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.748911"
+  },
+  {
+    "test": "AndroidTV: Launch App",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.779390"
+  },
+  {
+    "test": "Advanced: Compound Commands",
+    "status": "FAIL",
+    "message": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+    "timestamp": "2026-01-03T21:08:39.791160"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: BaseTest.safe_post() missing 1 required positional argument: 'label'",
+    "timestamp": "2026-01-03T21:08:39.791220"
+  }
+]

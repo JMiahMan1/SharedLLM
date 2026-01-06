@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+import os
+import sys
+import requests
+import json
+import logging
+from typing import Dict
+
+# Setup minimal logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log = logging.getLogger("inspect_players")
+
+# Env setup (mimic app settings without importing whole app if possible, or minimal import)
+# We try to use app.settings if available to get correct HA_URL/TOKEN
+try:
+    from app.settings import HA_URL, HA_ENV_TOKEN
+    HA_TOKEN = HA_ENV_TOKEN
+except ImportError:
+    # Fallback to env vars
+    HA_URL = os.getenv("HA_URL")
+    HA_TOKEN = os.getenv("HA_TOKEN")
+
+def get_headers():
+    if not HA_TOKEN:
+        log.error("HA_TOKEN not found. Set HA_TOKEN env var or run in app environment.")
+        sys.exit(1)
+    return {
+        "Authorization": f"Bearer {HA_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+def fetch_media_players():
+    if not HA_URL:
+        log.error("HA_URL not found.")
+        sys.exit(1)
+        
+    url = f"{HA_URL.rstrip('/')}/api/states"
+    try:
+        resp = requests.get(url, headers=get_headers(), timeout=5)
+        resp.raise_for_status()
+        states = resp.json()
+        
+        players = [s for s in states if s['entity_id'].startswith("media_player.")]
+        return players
+    except Exception as e:
+        log.error(f"Failed to fetch states from HA: {e}")
+        return []
+
+def print_player_details(player):
+    attrs = player.get("attributes", {})
+    eid = player['entity_id']
+    state = player['state']
+    fname = attrs.get("friendly_name", eid)
+    
+    print(f"\n--- {fname} ({eid}) ---")
+    print(f"  State: {state.upper()}")
+    
+    # relevant attributes
+    keys = ["app_name", "app_id", "volume_level", "is_volume_muted", "source", "source_list", "media_title", "media_artist", "mass_player_type", "active_queue"]
+    
+    found_any = False
+    for k in keys:
+        if k in attrs:
+            val = attrs[k]
+            print(f"  {k}: {val}")
+            found_any = True
+            
+    # Check for Roku specific
+    if "roku" in eid or "roku" in fname.lower():
+        print(f"  [ROKU DETECTED]")
+        
+    # Check for MA specific
+    if attrs.get("mass_player_type") or "music_assistant" in eid:
+        print(f"  [MUSIC ASSISTANT DETECTED]")
+
+def main():
+    print(f"Inspecting Media Players on {HA_URL}...")
+    players = fetch_media_players()
+    print(f"Found {len(players)} media_player entities.")
+    
+    for p in players:
+        print_player_details(p)
+
+if __name__ == "__main__":
+    main()
