@@ -1,30 +1,120 @@
-# app/main.py — Interface
 import time
 import json
+import os
 import subprocess
 import requests
+import asyncio
+from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Fixed imports
-from settings import (
-    lifespan, get_user_creds, run_blocking, GlobalResources, log,
-    DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
-    initialize_rag_resources # IMPORTED HOT RELOAD FUNCTION
-)
-from logic import (
+# Fixed imports with Fallback
+try:
+    from app.settings import (
+        get_user_creds, run_blocking, GlobalResources, log,
+        DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
+        load_resources
+    )
+except ImportError:
+    from settings import (
+        get_user_creds, run_blocking, GlobalResources, log,
+        DEFAULT_MODEL, OPENAI_MODEL, OLLAMA_URL, openai_client, OPENAI_API_KEY, HA_URL,
+        load_resources
+    )
+from app.logic import (
     generate_rag_stream, contextualize_query, try_handle_compound_command, 
     call_ollama_generate, call_openai_chat, 
     get_ha_context, get_rag_context, update_history
 )
-from intent_engine import engine as intent_engine
+from app.logic.refresh_devices import refresh_db
+from app.intent_engine import engine as intent_engine
+from app.logic.timer_storage import storage as timer_storage
+from app.routers import music_assistant
+
+async def initialize_rag_resources():
+    """Reloads RAG resources for hot-reloading."""
+    await load_resources()
+    from app.intent_engine import engine
+
+    await engine.load()
+
+# --- LIFESPAN (Startup Logic) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await load_resources()
+
+    # Initialize Intent Engine
+    from app.intent_engine import engine
+    await engine.load()
+
+    # Start Device DB Refresh (Async)
+    from app.logic.refresh_devices import refresh_db
+    asyncio.create_task(refresh_db())
+
+    # Start Timer Scheduler
+    from app.logic.timer_scheduler import start_scheduler, stop_scheduler
+    log.info("Starting Timer/Alarm Scheduler...")
+    scheduler_task = asyncio.create_task(start_scheduler())
+
+    # Start Video Cache Cleanup
+    from app.utils.video_cache import schedule_periodic_cleanup
+    asyncio.create_task(schedule_periodic_cleanup())
+
+    yield
+
+    # Shutdown
+    log.info("--- SHUTDOWN: Cleaning up resources ---")
+    await stop_scheduler()
+    try:
+        scheduler_task.cancel()
+    except:
+        pass
+
+    GlobalResources.embedding_model = None
+    GlobalResources.chroma_client = None
+    GlobalResources.ha_collection = None
+    GlobalResources.nextcloud_collection = None
+    if GlobalResources.redis_client:
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+
+    if GlobalResources.redis_client:
+        GlobalResources.redis_client.close()
+    log.info("Shutdown complete.")
 
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# Mount Static Files for Simple Web UI
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# Register Routers
+app.include_router(music_assistant.router)
+from app.routers import android_tv
+from app.routers import webos
+from app.routers import roku
+from app.endpoints import cast_video
+from app.domains.media.dlna import video_server
+
+# Cast video streaming endpoint
+app.include_router(cast_video.router, tags=["cast"])
+# DLNA Router
+app.include_router(video_server.router)
+# TV Integration Routers
+app.include_router(android_tv.router)
+app.include_router(webos.router)
+app.include_router(roku.router)
+from app.routers import context
+from app.routers import music_assistant # Added import
+app.include_router(context.router)
+app.include_router(music_assistant.router) # Added include
 
 # --- Models ---
 class ChatMessage(BaseModel):
@@ -56,6 +146,24 @@ class LearnRequest(BaseModel):
 
 # --- Endpoints ---
 
+@app.post("/api/admin/run_tests")
+async def run_tests_endpoint():
+    """Trigger the comprehensive test suite."""
+    from app.tests.runner import MasterRunner
+    # Use internal URL
+    url = f"http://127.0.0.1:11435"
+    runner = MasterRunner(api_url=url)
+    report_path = await run_blocking(runner.run_all)
+    
+    with open(report_path, "r") as f:
+        results = json.load(f)
+        
+    return {
+        "status": "SUCCESS",
+        "report_path": report_path,
+        "results": results
+    }
+
 @app.post("/v1/chat/completions")
 @app.post("/api/chat")
 @app.post("/chat/completions")
@@ -66,13 +174,16 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
     
     format_type = "openai" if "completions" in request.url.path else "chat"
 
-    generator = generate_rag_stream(query, user, body.model, body.use_openai, format_type)
+    include_tool_results = request.headers.get("X-Include-Tool-Results", "false").lower() == "true"
+    generator = generate_rag_stream(query, user, body.model, body.use_openai, format_type, include_tool_results=include_tool_results)
 
     if body.stream:
         media_type = "text/event-stream" if format_type == "openai" else "application/x-ndjson"
         return StreamingResponse(generator, media_type=media_type)
 
     full_text = ""
+    collected_tool_results = []
+
     try:
         async for chunk in generator:
             try:
@@ -80,32 +191,49 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
                     if "[DONE]" in chunk: continue
                     d = json.loads(chunk.replace("data: ", ""))
                     if "choices" in d:
-                        full_text += d["choices"][0]["delta"].get("content", "")
+                        delta = d["choices"][0]["delta"]
+                        full_text += delta.get("content", "")
+                        if "tool_results" in delta:
+                            collected_tool_results = delta["tool_results"]
                 else:
                     d = json.loads(chunk)
                     if "message" in d:
                         full_text += d["message"].get("content", "")
                     elif "response" in d:
                         full_text += d.get("response", "")
+                    
+                    if "tool_results" in d:
+                        collected_tool_results = d["tool_results"]
             except: pass
     except Exception as e:
         log.error(f"Error accumulating response: {e}")
     
     if format_type == "openai":
-        return {
+        message_obj = {"role": "assistant", "content": full_text}
+        if include_tool_results and collected_tool_results:
+            message_obj["tool_results"] = collected_tool_results
+            
+        response = {
             "id": f"chat-{int(time.time())}",
             "object": "chat.completion",
             "created": int(time.time()),
             "model": body.model,
-            "choices": [{"message": {"role": "assistant", "content": full_text}, "finish_reason": "stop", "index": 0}]
+            "choices": [{"message": message_obj, "finish_reason": "stop", "index": 0}]
         }
+        log.debug(f"[RESPONSE] Returning to client: {full_text[:200]}")
+        return response
     
-    return {
+    response = {
         "model": body.model, 
         "created_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         "message": {"role": "assistant", "content": full_text}, 
         "done": True
     }
+    if include_tool_results and collected_tool_results:
+        response["tool_results"] = collected_tool_results
+        
+    log.debug(f"[RESPONSE] Returning to client: {full_text[:200]}")
+    return response
 
 # --- Intent Engine Endpoints ---
 @app.post("/api/intent/learn")
@@ -128,6 +256,29 @@ async def intent_list():
     """List all available intents."""
     return {"intents": intent_engine.get_valid_intents()}
 
+# --- Timer/Alarm API ---
+@app.get("/api/timer/list")
+async def api_timer_list():
+    """Returns a raw JSON list of active timers."""
+    return await timer_storage.list_timers()
+
+@app.post("/api/timer/delete")
+async def api_timer_delete(timer_id: str):
+    await timer_storage.delete_timer(timer_id)
+    return {"status": "ok", "msg": f"Timer {timer_id} deleted."}
+
+@app.post("/api/admin/reindex")
+async def admin_reindex(background_tasks: BackgroundTasks, request: Request):
+    creds = get_user_creds(request.headers.get("X-RAG-User") or "admin")
+    background_tasks.add_task(intent_engine.load)
+    return {"status": "Re-indexing started"}
+
+@app.post("/api/admin/refresh_devices")
+async def admin_refresh_devices(background_tasks: BackgroundTasks, request: Request):
+    """Triggers a full refresh of the Device DB for grouping."""
+    background_tasks.add_task(refresh_db)
+    return {"status": "Device DB Refresh started"}
+
 # --- HA Proxy ---
 @app.get("/api/ha/state/{entity_id}")
 async def get_ha_state_proxy(entity_id: str, request: Request):
@@ -144,9 +295,9 @@ async def get_ha_state_proxy(entity_id: str, request: Request):
 async def rag_query(body: CompletionRequest, request: Request):
     user = request.headers.get("X-RAG-User") or body.user or "admin"
     query = body.query or (body.messages[-1].content if body.messages else "")
-    refined = await contextualize_query(query, user, body.model)
+    refined, intent, score, is_high_confidence, intent_locked = await contextualize_query(query, user, body.model)
     creds = get_user_creds(user)
-    cmd = await try_handle_compound_command(refined, creds, body.model)
+    cmd = await try_handle_compound_command(refined, creds, body.model, intent, score, is_high_confidence)
     if cmd: return {"response": cmd}
     ha = await get_ha_context(user, query=refined)
     nc = await get_rag_context(refined)
@@ -180,11 +331,14 @@ async def generate(req: GenerateRequest):
     }
 
 # --- Ingestion Endpoints with Background Tasks ---
-def _run_sync(path):
-    """Runs a python script and captures both stdout and stderr."""
+def _run_sync(path, args=None):
+    """Runs a python script and captures both stdout and stderr with optional args."""
     try: 
+        cmd = ["python", path]
+        if args:
+            cmd.extend(args)
         result = subprocess.run(
-            ["python", path], 
+            cmd, 
             capture_output=True, 
             text=True
         )
@@ -195,10 +349,10 @@ def _run_sync(path):
     except Exception as e: 
         return f"Error executing subprocess: {e}"
 
-async def _run_background_ingest(script_name: str):
+async def _run_background_ingest(script_name: str, args: Optional[List[str]] = None):
     """Helper to run ingestion script in thread pool then reload RAG."""
-    log.info(f"--- Started Background Ingestion: {script_name} ---")
-    output = await run_blocking(_run_sync, f"/app/{script_name}")
+    log.info(f"--- Started Background Ingestion: {script_name} (Args: {args}) ---")
+    output = await run_blocking(_run_sync, f"/app/{script_name}", args)
     
     # Log output for debugging
     log.info(f"--- {script_name} Finished ---")
@@ -221,9 +375,10 @@ async def ing_ha(bg_tasks: BackgroundTasks):
     return {"status": "accepted", "msg": "Home Assistant ingestion started in background."}
 
 @app.post("/ingest/nextcloud")
-async def ing_nc(bg_tasks: BackgroundTasks):
-    bg_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py")
-    return {"status": "accepted", "msg": "Nextcloud ingestion started in background."}
+async def ing_nc(bg_tasks: BackgroundTasks, path: Optional[str] = None):
+    args = ["--path", path] if path else []
+    bg_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py", args)
+    return {"status": "accepted", "msg": f"Nextcloud ingestion started in background{' for ' + path if path else ''}."}
 
 @app.post("/ingest/all")
 async def ing_all(bg_tasks: BackgroundTasks):
@@ -241,26 +396,48 @@ async def system_reload():
 # --- RAG Management ---
 @app.post("/api/rag/upsert")
 async def rag_upsert(i: UpsertRagRequest):
-    if not GlobalResources.chroma_client: raise HTTPException(503)
-    from langchain_core.documents import Document
-    doc = Document(page_content=i.text, metadata=i.metadata or {})
-    await run_blocking(lambda: (GlobalResources.chroma_client.add_documents([doc]), GlobalResources.chroma_client.persist()))
-    return {"status": "ok"}
+    if not GlobalResources.chroma_client: 
+        raise HTTPException(503, detail="ChromaDB not initialized")
+    try:
+        from langchain_core.documents import Document
+        doc = Document(page_content=i.text, metadata=i.metadata or {})
+        await run_blocking(lambda: (GlobalResources.chroma_client.add_documents([doc]), GlobalResources.chroma_client.persist()))
+        return {"status": "ok"}
+    except Exception as e:
+        log.error(f"RAG Upsert Failed: {e}")
+        raise HTTPException(500, detail=f"Database Write Error: {str(e)}")
 
 @app.post("/api/rag/delete")
 async def rag_delete(id: str):
-    if not GlobalResources.chroma_client: raise HTTPException(503)
-    await run_blocking(lambda: GlobalResources.chroma_client.delete(ids=[id]))
-    return {"status": "ok"}
+    if not GlobalResources.chroma_client: 
+        raise HTTPException(503, detail="ChromaDB not initialized")
+    try:
+        await run_blocking(lambda: GlobalResources.chroma_client.delete(ids=[id]))
+        return {"status": "ok"}
+    except Exception as e:
+        log.error(f"RAG Delete Failed: {e}")
+        raise HTTPException(500, detail=f"Database Delete Error: {str(e)}")
 
 @app.get("/api/rag/list")
 async def rag_list(limit: int = 100):
     if not GlobalResources.chroma_client: raise HTTPException(503)
     def sync():
-        c = GlobalResources.chroma_client._collection
-        cnt = c.count()
-        s = c.peek(min(limit, cnt)) if cnt else {}
-        return {"count": cnt, "docs": [{"id": id, "preview": s["documents"][i][:200]} for i, id in enumerate(s.get("ids", []))]}
+        results = {"count": 0, "docs": []}
+        for name in ["nextcloud_docs", "home_assistant"]:
+            try:
+                c = GlobalResources.chroma_client.get_collection(name)
+                cnt = c.count()
+                results["count"] += cnt
+                s = c.peek(min(limit, cnt)) if cnt else {}
+                for i, id in enumerate(s.get("ids", [])):
+                    results["docs"].append({
+                        "id": id, 
+                        "collection": name,
+                        "preview": s["documents"][i][:200]
+                    })
+            except Exception:
+                pass # Collection might not exist yet
+        return results
     return await run_blocking(sync)
 
 @app.get("/api/rag/search")
@@ -272,15 +449,19 @@ async def rag_search(q: str, k: int = 4, source: Optional[str] = None):
     """
     results = []
     
-    # 1. Search Home Assistant (if source is None or 'ha')
-    if (source is None or source == 'ha') and GlobalResources.ha_collection:
+    # Determine which collections to search
+    search_ha = (source is None or source == 'ha')
+    search_nc = (source is None or source == 'nextcloud')
+    
+    # 1. Search Home Assistant (if enabled)
+    if search_ha and GlobalResources.ha_collection:
         try:
             ha_docs = await run_blocking(lambda: GlobalResources.ha_collection.similarity_search(q, k=k))
             results.extend([{"text": d.page_content, "metadata": d.metadata, "source": "home_assistant"} for d in ha_docs])
         except Exception as e: log.error(f"Error searching HA collection: {e}")
         
-    # 2. Search Nextcloud (if source is None or 'nextcloud')
-    if (source is None or source == 'nextcloud') and GlobalResources.nextcloud_collection:
+    # 2. Search Nextcloud (if enabled)
+    if search_nc and GlobalResources.nextcloud_collection:
         try:
             nc_docs = await run_blocking(lambda: GlobalResources.nextcloud_collection.similarity_search(q, k=k))
             results.extend([{"text": d.page_content, "metadata": d.metadata, "source": "nextcloud"} for d in nc_docs])
@@ -306,7 +487,72 @@ async def ping(): return {"ok": True}
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(r, e): return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+
 @app.exception_handler(Exception)
-async def generic_exception_handler(r, e): 
+async def generic_exception_handler(r, e):
     log.exception("Error")
     return JSONResponse(status_code=500, content={"detail": str(e)})
+
+# --- Admin Endpoints ---
+@app.get("/api/admin/logs")
+async def admin_logs(lines: int = 100):
+    """Read the last N lines of the application log file."""
+    log_file = "/data/app.log"
+    if not os.path.exists(log_file):
+        return {"error": "Log file not found"}
+    try:
+        # Simple tail implementation
+        with open(log_file, "r") as f:
+            all_lines = f.readlines()
+            return {"logs": all_lines[-lines:]}
+    except Exception as e:
+        return {"error": str(e)}
+
+# Duplicate endpoint removed. See run_tests_endpoint above.
+
+@app.get("/api/device/capabilities/{entity_id:path}")
+async def get_device_capabilities(entity_id: str):
+    """
+    Query device capabilities from ChromaDB.
+    Returns supported_features, color_modes, and parsed capability flags.
+    
+    Example: /api/device/capabilities/light.piano_lamp
+    """
+    try:
+        from app.logic.media_ops import get_device_capabilities as get_caps
+        user_creds = get_user_creds("default")
+        redis_client = GlobalResources.redis_client
+        
+        capabilities = await get_caps(entity_id, user_creds, redis_client)
+        
+        # Add human-readable feature breakdown
+        if "supported_features" in capabilities:
+            features = capabilities["supported_features"]
+            domain = capabilities.get("domain", "")
+            
+            if domain == "light":
+                capabilities["features_breakdown"] = {
+                    "brightness": bool(features & 1),
+                    "color_temp": bool(features & 2),
+                    "effect": bool(features & 4),
+                    "flash": bool(features & 8),
+                    "color": bool(features & 16),
+                    "transition": bool(features & 32)
+                }
+            elif domain == "media_player":
+                capabilities["features_breakdown"] = {
+                    "pause": bool(features & 1),
+                    "seek": bool(features & 2),
+                    "volume": bool(features & 4),
+                    "volume_mute": bool(features & 8),
+                    "previous_track": bool(features & 16),
+                    "next_track": bool(features & 32),
+                    "turn_on": bool(features & 128),
+                    "turn_off": bool(features & 256),
+                    "play_media": bool(features & 512)
+                }
+        
+        return capabilities
+    except Exception as e:
+        log.error(f"Error fetching capabilities for {entity_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})

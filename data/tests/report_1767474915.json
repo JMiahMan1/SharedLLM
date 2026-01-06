@@ -1,0 +1,98 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "message": "Service reachable",
+    "timestamp": "2026-01-03T14:12:09.587220"
+  },
+  {
+    "test": "Media: Volume Set",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Volume Set not supported on this Roku device. Try Volume Up/Down.'}] | Msg: {'model': 'qwen3:latest', 'created_at': '2026-01-03T21:12:16Z', 'message': {'role': 'assistant', 'content': 'The Office TV could not have its volume set to 30. The Roku device does not support direct volume adjustment via this method. Please use the volume up/down buttons on the remote or device itself. Isaiah 40:31 reminds us that those who wait on the Lord will renew their strength, trust that even small adjustments align with His perfect plan. Would you like to try another command or check the device manually?'}, 'done': True, 'tool_results': [{'status': 'FAILURE', 'message': 'Volume Set not supported on this Roku device. Try Volume Up/Down.'}]}",
+    "timestamp": "2026-01-03T14:12:16.982583"
+  },
+  {
+    "test": "Media: Volume Mute",
+    "status": "FAIL",
+    "message": "TR: [{'status': 'FAILURE', 'message': 'Unknown media command: volume_mute', 'entity_id': 'media_player.office_tv'}]",
+    "timestamp": "2026-01-03T14:12:24.177232"
+  },
+  {
+    "test": "Media: Play Intent",
+    "status": "FAIL",
+    "message": "Device state invalid: unknown",
+    "timestamp": "2026-01-03T14:12:29.385593"
+  },
+  {
+    "test": "Media: Stop",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:12:34.742378"
+  },
+  {
+    "test": "Media: Pause",
+    "status": "PASS",
+    "message": "State: idle",
+    "timestamp": "2026-01-03T14:12:52.190651"
+  },
+  {
+    "test": "Media: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:13:10.057021"
+  },
+  {
+    "test": "Media: Turn Off",
+    "status": "PASS",
+    "message": "Final State: off",
+    "timestamp": "2026-01-03T14:13:17.904854"
+  },
+  {
+    "test": "Media: Radio List",
+    "status": "PASS",
+    "message": "Found 1 stations",
+    "timestamp": "2026-01-03T14:13:42.056004"
+  },
+  {
+    "test": "Media: Playlist List",
+    "status": "FAIL",
+    "message": "The media player is currently experiencing an internal server error (HTTP 500), preventing access to playlists or device-specific information. Please check the device manually or try another command. Isaiah 40:31 reminds us that those who wait on the Lord will renew their strength, trust that even small adjustments align with His perfect plan. Would you like to attempt another action or investigate the device directly?",
+    "timestamp": "2026-01-03T14:13:49.671490"
+  },
+  {
+    "test": "Timer: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:14:17.740050"
+  },
+  {
+    "test": "Timer: Pause",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:14:27.615830"
+  },
+  {
+    "test": "Timer: Resume",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:14:40.129906"
+  },
+  {
+    "test": "Alarm: Add",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:14:58.470753"
+  },
+  {
+    "test": "Timer: List",
+    "status": "PASS",
+    "message": "",
+    "timestamp": "2026-01-03T14:15:14.582485"
+  },
+  {
+    "test": "Runner",
+    "status": "ERROR",
+    "message": "Suite execution crashed: BaseTest.safe_post() missing 1 required positional argument: 'label'",
+    "timestamp": "2026-01-03T14:15:15.649246"
+  }
+]
