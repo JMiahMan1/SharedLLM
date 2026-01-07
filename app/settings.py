@@ -162,6 +162,7 @@ Available Tools:
 20. 'music_list' (List playlists or radio stations in Music Assistant)
 21. 'music_search' (Search Music Assistant library for artist/album/track)
 22. 'ha_notify' (Send a persistent notification to Home Assistant. Params: 'message', 'title')
+23. 'announce' (Broadcast a voice message to devices. Handles TTS and Sound Effects. Params: 'message', 'target' (optional, e.g. 'office', 'kitchen'. Default='broadcast'))
 
 CRITICAL: Distinguish between Alarms/Timers and Calendar Events.
 - "Set an alarm for 8am" -> timer_add
