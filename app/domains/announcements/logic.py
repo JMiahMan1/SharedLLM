@@ -9,6 +9,7 @@ from typing import List, Dict, Optional, Union
 from app.settings import log, GlobalResources, HA_URL, ANNOUNCEMENT_BLACKLIST, SERVER_URL
 from app.domains.media.devices import smart_resolve_entity, get_available_media_players
 from app.domains.shared import execute_ha_service
+from app.domains.home.devices import get_entity_state
 
 SOUNDS_FILE = "/app/data/announcement_sounds.json"
 DEFAULT_SOUND_MAP = {}
@@ -116,6 +117,15 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
     async def _announce_one(entity_id):
         async with sem:
             try:
+                # [SMART ANNOUNCE] 
+                # Check if device is playing music. 
+                # If Playing -> announce=True (resumes queue)
+                # If Idle/Off -> announce=False (plays and stops)
+                current_state = await get_entity_state(entity_id, user_creds)
+                should_announce = current_state in ["playing"]
+                
+                log.info(f"Smart Announce for {entity_id}: state={current_state} -> announce={should_announce}")
+
                 # Play Sound Effect (if any)
                 if matched_sound:
                     # Play media (notification sound)
@@ -125,7 +135,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         {
                             "media_content_id": f"{HA_URL.rstrip('/')}{matched_sound}",
                             "media_content_type": "music",
-                            "announce": False 
+                            "announce": should_announce 
                         },
                         GlobalResources.redis_client
                     )
@@ -147,7 +157,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         {
                             "media_content_id": final_url,
                             "media_content_type": "music",
-                            "announce": False 
+                            "announce": should_announce 
                         },
                         GlobalResources.redis_client
                     )
@@ -160,7 +170,10 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         "tts", "google_translate_say", entity_id, user_creds,
                         {
                             "entity_id": entity_id,
-                            "message": clean_message
+                            "message": clean_message,
+                            # TTS service doesn't universally take 'announce' param like play_media does
+                            # It depends on how HA handles TTS->Media Player
+                            # Usually TTS creates a media item.
                         },
                         GlobalResources.redis_client
                     )
