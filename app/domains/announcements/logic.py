@@ -163,8 +163,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                      
                      svc_data = {
                          "media_content_id": final_url,
-                         "media_content_type": "music",
-                         "enqueue": "play" 
+                         "media_content_type": "music"
                      }
                      if should_announce:
                          svc_data["announce"] = True
@@ -184,8 +183,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                     
                     svc_data = {
                         "media_content_id": media_id,
-                        "media_content_type": "music",
-                        "enqueue": "play"
+                        "media_content_type": "music"
                     }
                     if should_announce:
                         svc_data["announce"] = True
