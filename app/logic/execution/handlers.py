@@ -474,10 +474,12 @@ async def handle_ha_notify(query: str, user_creds: dict, params: dict = None, **
     return {"status": "SUCCESS", "message": f"Notification sent: {message}", "service": "ha_notify"}
 
 # --- ANNOUNCEMENT TOOLS ---
-async def handle_announcement_logic(query: str, user_creds: dict, params: dict, redis_client):
+@ActionDispatcher.register("announce")
+async def handle_announce(query: str, user_creds: dict, params: dict = None, **kwargs):
     from app.domains.announcements.logic import process_announcement
     from app.logic.timer_ops import tool_timer_add
     
+    redis_client = GlobalResources.redis_client
     params = params or {}
     message = params.get("message")
     target = params.get("target") or params.get("device_name")
