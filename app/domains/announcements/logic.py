@@ -90,60 +90,72 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
         log.warning(f"No target devices found for announcement: {target}")
         return {"status": "FAILURE", "message": "Could not find any devices to announce on."}
 
-    # 3. Execution (Parallel)
+    # 3. Execution (Throttled)
     results = []
     
-    async def _announce_one(entity_id):
-        try:
-            # Play Sound Effect (if any)
-            if matched_sound:
-                # Play media (notification sound)
-                log.info(f"Playing sound {matched_sound} on {entity_id}")
-                await execute_ha_service(
-                    "media_player", "play_media", entity_id, user_creds,
-                    {
-                        "media_content_id": f"{HA_URL.rstrip('/')}{matched_sound}",
-                        "media_content_type": "music",
-                        "announce": True 
-                    },
-                    GlobalResources.redis_client
-                )
-                # Small delay for sound to start/finish
-                await asyncio.sleep(2)
+    # Semaphore to limit concurrent calls to HA to avoid 500 errors
+    sem = asyncio.Semaphore(2)  # Adjust concurrency limit if needed
 
-            # Play TTS OR Audio File
-            if audio_url:
-                 # INTERCOM MODE (Recorded Voice)
-                 # We need to ensure audio_url is absolute or accessible by HA.
-                 # If it starts with /static, prepend our own ingress URL if known, 
-                 # OR assume HA can access it if we use full URL.
-                 # For now, we assume the caller provided a usable URL or path.
-                 # If relative /static, we might need to prepend HA_URL if using HA proxy? No, HA needs to reach US.
-                 # If this app is sidecar, HA might reach it via host IP. 
-                 # We'll use the raw URL passed for now, assuming the uploader constructed it correctly relative to HA or robustly.
-                 
-                 final_url = audio_url
-                 # Naive absolute URL construction if just a path
-                 if audio_url.startswith("/") and "http" not in audio_url:
-                     # Attempt to discover own storage URL? 
-                     # Fallback: Just send it, maybe HA is on same host volume mount?
-                     # Better: Prepend a configured MIDDELWARE_EXTERNAL_URL if available.
-                     # Defaulting to sending valid http if we can.
-                     # For now, let's assume raw string is what HA needs (e.g. /local/... or http://...)
-                     pass
-                     
-                 log.info(f"Playing Intercom Audio '{final_url}' on {entity_id}")
-                 res = await execute_ha_service(
-                    "media_player", "play_media", entity_id, user_creds,
-                    {
-                        "media_content_id": final_url,
-                        "media_content_type": "music",
-                        "announce": True
-                    },
-                    GlobalResources.redis_client
-                )
-            else:
-                # TTS MODE
+    async def _announce_one(entity_id):
+        async with sem:
+            try:
+                # Play Sound Effect (if any)
+                if matched_sound:
+                    # Play media (notification sound)
+                    log.info(f"Playing sound {matched_sound} on {entity_id}")
+                    await execute_ha_service(
+                        "media_player", "play_media", entity_id, user_creds,
+                        {
+                            "media_content_id": f"{HA_URL.rstrip('/')}{matched_sound}",
+                            "media_content_type": "music",
+                            "announce": True 
+                        },
+                        GlobalResources.redis_client
+                    )
+                    # Small delay for sound to start/finish
+                    await asyncio.sleep(2)
+
+                # Play TTS OR Audio File
+                if audio_url:
+                     # INTERCOM MODE (Recorded Voice)
+                     final_url = audio_url
+                     # Naive absolute URL construction if just a path
+                     if audio_url.startswith("/") and "http" not in audio_url:
+                         pass
+                         
+                     log.info(f"Playing Intercom Audio '{final_url}' on {entity_id}")
+                     res = await execute_ha_service(
+                        "media_player", "play_media", entity_id, user_creds,
+                        {
+                            "media_content_id": final_url,
+                            "media_content_type": "music",
+                            "announce": True
+                        },
+                        GlobalResources.redis_client
+                    )
+                else:
+                    # TTS MODE
+                    log.info(f"Playing TTS '{clean_message}' on {entity_id}")
+                    # We use google_translate_say for generic TTS
+                    res = await execute_ha_service(
+                        "tts", "google_translate_say", entity_id, user_creds,
+                        {
+                            "entity_id": entity_id,
+                            "message": clean_message
+                        },
+                        GlobalResources.redis_client
+                    )
+                return True
+            except Exception as e:
+                log.error(f"Failed to announce on {entity_id}: {e}")
+                return False
+
+    # Run tasks with throttling
+    tasks = [_announce_one(eid) for eid in target_entities]
+    # We still use gather but the semaphore inside limits actual concurrency
+    await asyncio.gather(*tasks)
+    
+    return {"status": "SUCCESS", "message": f"Announced to {len(target_entities)} devices."}
                 log.info(f"Playing TTS '{clean_message}' on {entity_id}")
                 res = await execute_ha_service(
                     "tts", "google_translate_say", entity_id, user_creds,
