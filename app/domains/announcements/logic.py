@@ -118,25 +118,33 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
         async with sem:
             try:
                 # [SMART ANNOUNCE] 
-                # Check if device is playing music. 
-                # If Playing -> announce=True (resumes queue)
-                # If Idle/Off -> announce=False (plays and stops)
-                current_state = await get_entity_state(entity_id, user_creds)
-                should_announce = current_state in ["playing"]
+                # Check device capabilities to enable 'announce' feature (restore state)
+                # User Request: Ensure every device returns to previous state.
+                caps = await get_device_capabilities(entity_id, user_creds, GlobalResources.redis_client)
+                features = caps.get("supported_features", 0)
                 
-                log.info(f"Smart Announce for {entity_id}: state={current_state} -> announce={should_announce}")
+                # Check Bit 1048576 (ANNOUNCE)
+                supports_announce = bool(features & 1048576)
+                should_announce = supports_announce
+                
+                # Optional: Get state just for logging
+                current_state = await get_entity_state(entity_id, user_creds)
+                log.info(f"Smart Announce for {entity_id}: state={current_state}, supports_announce={supports_announce} -> announce={should_announce}")
 
                 # Play Sound Effect (if any)
                 if matched_sound:
                     # Play media (notification sound)
                     log.info(f"Playing sound {matched_sound} on {entity_id}")
+                    svc_data = {
+                         "media_content_id": f"{HA_URL.rstrip('/')}{matched_sound}",
+                         "media_content_type": "music"
+                    }
+                    if should_announce:
+                        svc_data["announce"] = True
+                        
                     await execute_ha_service(
                         "media_player", "play_media", entity_id, user_creds,
-                        {
-                            "media_content_id": f"{HA_URL.rstrip('/')}{matched_sound}",
-                            "media_content_type": "music",
-                            "announce": should_announce 
-                        },
+                        svc_data,
                         GlobalResources.redis_client
                     )
                     # Small delay for sound to start/finish
@@ -152,24 +160,39 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                          final_url = f"{SERVER_URL.rstrip('/')}{audio_url}"
                          
                      log.info(f"Playing Intercom Audio '{final_url}' on {entity_id}")
+                     
+                     svc_data = {
+                         "media_content_id": final_url,
+                         "media_content_type": "music",
+                         "enqueue": "play" 
+                     }
+                     if should_announce:
+                         svc_data["announce"] = True
+                         
                      res = await execute_ha_service(
                         "media_player", "play_media", entity_id, user_creds,
-                        {
-                            "media_content_id": final_url,
-                            "media_content_type": "music",
-                            "announce": should_announce 
-                        },
+                        svc_data,
                         GlobalResources.redis_client
                     )
                 else:
-                    # TTS MODE - Use Piper TTS via tts.speak
-                    log.info(f"Playing TTS '{clean_message}' on {entity_id} via Piper")
+                    # TTS MODE - Use media-source://tts/tts.piper to enable 'announce' flag support
+                    import urllib.parse
+                    encoded_msg = urllib.parse.quote(clean_message)
+                    media_id = f"media-source://tts/tts.piper?message={encoded_msg}"
+                    
+                    log.info(f"Playing TTS '{clean_message}' on {entity_id} via Piper (media-source)")
+                    
+                    svc_data = {
+                        "media_content_id": media_id,
+                        "media_content_type": "music",
+                        "enqueue": "play"
+                    }
+                    if should_announce:
+                        svc_data["announce"] = True
+
                     res = await execute_ha_service(
-                        "tts", "speak", "tts.piper", user_creds,
-                        {
-                            "media_player_entity_id": entity_id,
-                            "message": clean_message
-                        },
+                        "media_player", "play_media", entity_id, user_creds,
+                        svc_data,
                         GlobalResources.redis_client
                     )
                 return True
