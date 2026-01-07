@@ -6,7 +6,7 @@ import asyncio
 import re
 from typing import List, Dict, Optional, Union
 
-from app.settings import log, GlobalResources, HA_URL, ANNOUNCEMENT_BLACKLIST
+from app.settings import log, GlobalResources, HA_URL, ANNOUNCEMENT_BLACKLIST, SERVER_URL
 from app.domains.media.devices import smart_resolve_entity, get_available_media_players
 from app.domains.shared import execute_ha_service
 
@@ -136,7 +136,8 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                      final_url = audio_url
                      # Naive absolute URL construction if just a path
                      if audio_url.startswith("/") and "http" not in audio_url:
-                         pass
+                         # Prepend SERVER_URL to make it a valid absolute URL for Cast devices
+                         final_url = f"{SERVER_URL.rstrip('/')}{audio_url}"
                          
                      log.info(f"Playing Intercom Audio '{final_url}' on {entity_id}")
                      res = await execute_ha_service(
@@ -171,12 +172,3 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
     await asyncio.gather(*tasks)
     
     return {"status": "SUCCESS", "message": f"Announced to {len(capable_entities)} capable devices."}
-
-
-    
-    success_count = sum(1 for r in results if r.get("status") == "SUCCESS")
-    return {
-        "status": "SUCCESS" if success_count > 0 else "FAILURE",
-        "message": f"Announced on {success_count} devices.",
-        "details": results
-    }
