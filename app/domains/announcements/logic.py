@@ -131,6 +131,22 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 current_state = await get_entity_state(entity_id, user_creds)
                 log.info(f"Smart Announce for {entity_id}: state={current_state}, supports_announce={supports_announce} -> announce={should_announce}")
 
+                # [MANUAL STATE RESTORE]
+                # If device is OFF and 'announce' not supported, we must:
+                # 1. Turn ON (if supported)
+                # 2. Wait
+                # 3. Play
+                # 4. Turn OFF (restore state)
+                did_turn_on = False
+                if not should_announce and current_state == "off":
+                    if features & 128: # SUPPORT_TURN_ON
+                         log.info(f"Device {entity_id} is OFF. Turning ON manually...")
+                         await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, GlobalResources.redis_client)
+                         did_turn_on = True
+                         await asyncio.sleep(4) # Wait for TV/Speaker to wake up
+                    else:
+                         log.warning(f"Device {entity_id} is OFF and does not support turning on.")
+
                 # Play Sound Effect (if any)
                 if matched_sound:
                     # Play media (notification sound)
@@ -193,6 +209,19 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         svc_data,
                         GlobalResources.redis_client
                     )
+
+                # [RESTORE OFF STATE]
+                if did_turn_on:
+                    # Estimate duration based on message length (very rough) + buffer
+                    # Assuming ~15 chars per second for TTS. Min 5s.
+                    duration = max(5, len(clean_message or "") / 12)
+                    if is_audio_file:
+                        duration = 10 # Default for audio files if we don't know length
+                    
+                    log.info(f"Waiting {duration:.1f}s for playback before restoring OFF state for {entity_id}...")
+                    await asyncio.sleep(duration)
+                    await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)
+
                 return True
             except Exception as e:
                 log.error(f"Failed to announce on {entity_id}: {e}")
