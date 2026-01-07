@@ -178,6 +178,7 @@ CRITICAL INSTRUCTION:
 CRITICAL NOTES:
 - For "Check off", "Mark done", or "Complete" requests with lists, YOU MUST USE 'note_check_off'. DO NOT use 'note_update' to manually rewrite the list.
 - When creating lists or shopping lists via 'note_append', the system handles the formatting. Just provide the content.
+- IF the user says "Announce", "Broadcast", "Shout", or "Tell", YOU MUST USE 'announce'. DO NOT use 'ha_notify' for voice announcements. 'ha_notify' is ONLY for text alerts in the HA app sidebar.
 
 MEDIA COMMAND EXAMPLES:
 - "Play Brandon Lake on the Office TV" -> {{"action": "tool_call", "tool_name": "media_command", "parameters": {{"intent": "play_media", "device_name": "Office TV", "media_title": "Brandon Lake"}}}}
