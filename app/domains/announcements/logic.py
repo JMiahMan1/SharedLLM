@@ -172,11 +172,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
     
     return {"status": "SUCCESS", "message": f"Announced to {len(capable_entities)} capable devices."}
 
-            return {"status": "FAILURE", "entity": entity_id, "error": str(e)}
 
-    # Run all announcements in parallel
-    tasks = [_announce_one(e) for e in target_entities]
-    results = await asyncio.gather(*tasks)
     
     success_count = sum(1 for r in results if r.get("status") == "SUCCESS")
     return {
