@@ -93,4 +93,5 @@ REGEX_INTENT_MAP = {
     # Music Assistant Browsing
     r"\b(list|show|what)\s+(are|my)?\s*(playlists)": "list_playlists",
     r"\b(list|show|what)\s+(are|my)?\s*(radio|stations)": "list_radio",
+    r"\b(announce|broadcast|proclaim|shout|tell\s+everyone)\b": "announce",
 }
