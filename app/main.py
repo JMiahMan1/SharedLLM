@@ -113,8 +113,10 @@ app.include_router(webos.router)
 app.include_router(roku.router)
 from app.routers import context
 from app.routers import music_assistant # Added import
+from app.endpoints import intercom # NEW
 app.include_router(context.router)
 app.include_router(music_assistant.router) # Added include
+app.include_router(intercom.router) # NEW
 
 # --- Models ---
 class ChatMessage(BaseModel):
