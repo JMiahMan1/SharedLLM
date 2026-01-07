@@ -171,18 +171,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
     await asyncio.gather(*tasks)
     
     return {"status": "SUCCESS", "message": f"Announced to {len(capable_entities)} capable devices."}
-                log.info(f"Playing TTS '{clean_message}' on {entity_id}")
-                res = await execute_ha_service(
-                    "tts", "google_translate_say", entity_id, user_creds,
-                    {
-                        "message": clean_message,
-                        "cache": True
-                    },
-                    GlobalResources.redis_client
-                )
-            return res
-        except Exception as e:
-            log.error(f"Error announcing on {entity_id}: {e}")
+
             return {"status": "FAILURE", "entity": entity_id, "error": str(e)}
 
     # Run all announcements in parallel
