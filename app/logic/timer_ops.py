@@ -124,7 +124,9 @@ async def _create_timer_entry(
     origin_device: str,
     target_device: Optional[str],
     target_device_name: Optional[str],
-    redis_client
+    redis_client,
+    timer_type: str = None,
+    metadata: Dict = None
 ) -> Dict[str, Union[str, bool]]:
     """Internal helper to save timer/alarm to DB."""
     
@@ -148,9 +150,11 @@ async def _create_timer_entry(
         friendly = origin_device.split(".")[-1].replace("_", " ").title()
         target_display = f"{friendly} (Follow Me)"
         
+    final_type = timer_type if timer_type else ("alarm" if is_alarm else "timer")
+    
     timer_obj = {
         "id": str(uuid.uuid4()),
-        "type": "alarm" if is_alarm else "timer",
+        "type": final_type,
         "title": title,
         "created_at": datetime.now().isoformat(),
         "expires_at": expires_at.isoformat(),
@@ -160,7 +164,8 @@ async def _create_timer_entry(
         "recurrence": recurrence,
         # Metadata for UI
         "target_display": target_display,
-        "sound_display": sound_display
+        "sound_display": sound_display,
+        "metadata": metadata or {}
     }
 
     saved_id = await storage.add_timer(timer_obj, redis_client)
@@ -359,6 +364,11 @@ async def tool_timer_list(user_creds: Dict[str, str], redis_client=None) -> Dict
             line = f"- {t['title']}: expires in {rem_str} at {exp.strftime('%I:%M %p')}"
             
             if t.get("type") == "alarm":
+                alarm_lines.append(line)
+            elif t.get("type") == "announcement":
+                # Special formatting for announcements
+                msg = t.get("metadata", {}).get("message", "Announcement")
+                line = f"- 📢 '{msg}': triggers in {rem_str} at {exp.strftime('%I:%M %p')}"
                 alarm_lines.append(line)
             else:
                 timer_lines.append(line)

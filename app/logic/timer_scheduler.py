@@ -6,6 +6,7 @@ from datetime import datetime
 from app.settings import log, GlobalResources
 from app.logic.timer_storage import storage
 from app.logic.timer_ops import trigger_alarm
+from app.domains.announcements.logic import process_announcement
 
 SCHEDULER_INTERVAL = 5 # seconds
 
@@ -30,7 +31,16 @@ async def scheduler_loop():
                 if now >= expires:
                     # Fire!
                     # Run in background to not block scheduler
-                    asyncio.create_task(trigger_alarm(t))
+                    if t.get("type") == "announcement":
+                        log.info(f"Triggering Announcement: {t['title']}")
+                        # Announcement metadata should contain message and target
+                        meta = t.get("metadata", {})
+                        asyncio.create_task(process_announcement(meta.get("message", ""), meta.get("target", ""), None))
+                        # Remove one-time announcements immediately
+                        if not t.get("recurrence"):
+                             asyncio.create_task(storage.delete_timer(t["id"]))
+                    else:
+                        asyncio.create_task(trigger_alarm(t))
                     
         except Exception as e:
             log.error(f"Scheduler Error: {e}")

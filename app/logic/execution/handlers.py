@@ -472,3 +472,63 @@ async def handle_ha_notify(query: str, user_creds: dict, params: dict = None, **
         GlobalResources.redis_client
     )
     return {"status": "SUCCESS", "message": f"Notification sent: {message}", "service": "ha_notify"}
+
+# --- ANNOUNCEMENT TOOLS ---
+async def handle_announcement_logic(query: str, user_creds: dict, params: dict, redis_client):
+    from app.domains.announcements.logic import process_announcement
+    from app.logic.timer_ops import tool_timer_add
+    
+    params = params or {}
+    message = params.get("message")
+    target = params.get("target") or params.get("device_name")
+    
+    # If no message in params, try to extract from query fallback
+    if not message:
+        import re
+        match = re.search(r"announce\s+(?:that\s+)?(.+)", query, re.IGNORECASE)
+        if match:
+            message = match.group(1)
+            
+    if not message:
+         return {"status": "FAILURE", "message": "What should I announce?", "service": "announce"}
+
+    # Check for Scheduling
+    time_keywords = [" in ", " at ", " every ", "tomorrow", "tonight", "minute", "hour"]
+    is_scheduled = any(k in query.lower() for k in time_keywords)
+    
+    if is_scheduled:
+        metadata = {
+            "message": message,
+            "target": target
+        }
+        
+        # Determine if matches duration or absolute time
+        import re
+        query_lower = query.lower()
+        # Heuristic: if explicit duration units found
+        duration_match = re.search(r"(\d+)\s*(min|sec|hour)", query_lower)
+        if " in " in query_lower or duration_match:
+             # Try to strip the time part from the message if it was captured
+             # E.g. "Announce hello in 5 minutes" -> message="hello in 5 minutes" -> strip "in 5 minutes"
+             # This is a simple cleanup, might need more robust NLP
+             clean_msg = message
+             if duration_match:
+                 # Remove the match and "in" from the message end
+                 # simplistic approach: split by 'in' and take first part if valid
+                 if " in " in clean_msg.lower():
+                     parts = re.split(r"\s+in\s+\d", clean_msg, flags=re.IGNORECASE)
+                     if parts:
+                         clean_msg = parts[0].strip()
+             
+             metadata["message"] = clean_msg
+             
+             return await tool_timer_add(
+                 query, user_creds, "default", redis_client, GlobalResources.ha_collection, 
+                 params={"timer_type": "announcement", "metadata": metadata, "origin_device": target}
+             )
+        else:
+             # Fallback to immediate if complex alarm scheduling not yet fully piped or unsupported
+             return {"status": "FAILURE", "message": "Scheduled announcements currently support duration only (e.g. 'in 5 minutes').", "service": "announce"}
+
+    # Immediate Announcement
+    return await process_announcement(message, target, user_creds)

@@ -100,6 +100,12 @@ INFORMATIONAL_INTENTS = [
     "general_query",
 ]
 
+# --- Announcements ---
+ANNOUNCEMENT_BLACKLIST = os.getenv("ANNOUNCEMENT_BLACKLIST", "").split(",")
+# Clean up whitespace
+ANNOUNCEMENT_BLACKLIST = [x.strip() for x in ANNOUNCEMENT_BLACKLIST if x.strip()]
+
+
 # --- Alarm & Timer Config ---
 ALARM_KEYWORDS_PATH = os.getenv(
     "ALARM_KEYWORDS_PATH", "/app/config/alarm_keywords.json"
