@@ -101,7 +101,7 @@ INFORMATIONAL_INTENTS = [
 ]
 
 # --- Announcements ---
-ANNOUNCEMENT_BLACKLIST = os.getenv("ANNOUNCEMENT_BLACKLIST", "").split(",")
+ANNOUNCEMENT_BLACKLIST = os.getenv("ANNOUNCEMENT_BLACKLIST", "media_player.office_tv,media_player.media_player_office_tv").split(",")
 # Clean up whitespace
 ANNOUNCEMENT_BLACKLIST = [x.strip() for x in ANNOUNCEMENT_BLACKLIST if x.strip()]
 
