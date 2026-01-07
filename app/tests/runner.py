@@ -18,6 +18,7 @@ from app.tests.test_hardware import HardwareTests
 from app.tests.test_android_tv import AndroidTVTests
 from app.tests.test_advanced import AdvancedTests
 from app.tests.test_context import ContextTests
+from app.tests.test_live_announcements import AnnouncementsTests
 
 # Optional: Add existing logic from test_runner.py here or import it
 # For now, let's keep it modular
@@ -69,7 +70,9 @@ class MasterRunner:
                 "HardwareTests": HardwareTests,
                 "ContextTests": ContextTests,
                 "AndroidTVTests": AndroidTVTests,
-                "AdvancedTests": AdvancedTests
+                "AndroidTVTests": AndroidTVTests,
+                "AdvancedTests": AdvancedTests,
+                "AnnouncementsTests": AnnouncementsTests
             }
 
             if target_test:
