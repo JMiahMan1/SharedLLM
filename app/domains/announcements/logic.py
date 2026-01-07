@@ -162,18 +162,13 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         GlobalResources.redis_client
                     )
                 else:
-                    # TTS MODE  - Check if TTS is better handled by notify or tts domain?
-                    # execute_ha_service(tts) handles it via tts.google_translate_say usually
-                    log.info(f"Playing TTS '{clean_message}' on {entity_id}")
-                    # We use google_translate_say for generic TTS
+                    # TTS MODE - Use Piper TTS via tts.speak
+                    log.info(f"Playing TTS '{clean_message}' on {entity_id} via Piper")
                     res = await execute_ha_service(
-                        "tts", "google_translate_say", entity_id, user_creds,
+                        "tts", "speak", "tts.piper", user_creds,
                         {
-                            "entity_id": entity_id,
-                            "message": clean_message,
-                            # TTS service doesn't universally take 'announce' param like play_media does
-                            # It depends on how HA handles TTS->Media Player
-                            # Usually TTS creates a media item.
+                            "media_player_entity_id": entity_id,
+                            "message": clean_message
                         },
                         GlobalResources.redis_client
                     )
