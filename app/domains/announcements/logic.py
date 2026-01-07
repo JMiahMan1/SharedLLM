@@ -62,7 +62,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
     
     if not target or target.lower() in ["all", "everyone", "broadcast", "everywhere", "house"]:
         # BROADCAST MODE
-        all_players = await get_available_media_players(GlobalResources.ha_collection)
+        all_players = await get_available_media_players(user_creds)
         # Filter blacklist
         for p in all_players:
             if p not in ANNOUNCEMENT_BLACKLIST:
