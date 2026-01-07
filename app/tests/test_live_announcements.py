@@ -57,28 +57,28 @@ class AnnouncementsTests(BaseTest):
                  self.log("Text Announcement", "FAIL", f"No success confirmation found. Resp: {data}")
 
     def test_voice_intercom_upload(self):
-        print("Testing Intercom Audio Upload...")
+        print("Testing Intercom Audio Upload with Real MP3...")
         endpoint = "/api/intercom/upload"
         url = f"{self.api_url}{endpoint}"
         
-        # Create dummy WAV content (header only or minimal silence)
-        # Minimal valid WAV header (44 bytes) for 16-bit PCM, Mono, 44100Hz
-        # verifying if server strictly checks validity or just extension. 
-        # Using a minimal valid structure to be safe.
-        wav_header = b'RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00'
-        
-        file_obj = io.BytesIO(wav_header)
-        file_obj.name = "test_intercom.wav"
-        
-        files = {"file": ("test_intercom.wav", file_obj, "audio/wav")}
-        params = {"target": "broadcast", "message": "Live Test Intercom"}
+        # Use Test_Announcement.mp3 from tests/data/
+        # Adjust path relative to where test is run (root of repo)
+        mp3_path = "app/tests/data/Test_Announcement.mp3"
+        if not os.path.exists(mp3_path):
+            self.log("Intercom Upload", "ERROR", f"Test file {mp3_path} not found.")
+            return
+
+        with open(mp3_path, "rb") as f:
+            file_content = f.read()
+            
+        files = {"file": ("Test_Announcement.mp3", file_content, "audio/mpeg")}
+        # Target 'broadcast' to ensure it hits all valid speakers
+        params = {"target": "broadcast", "message": "Live Test Intercom MP3"}
         
         try:
-            # Using raw requests because BaseTest.safe_post sends JSON
-            r = requests.post(url, files=files, params=params, timeout=10)
+            r = requests.post(url, files=files, params=params, timeout=30)
             if r.status_code == 200:
-                self.log("Intercom Upload", "PASS", "Upload accepted")
-                # Cannot easily verify playback without hearing it, but 200 OK means logic ran.
+                self.log("Intercom Upload", "PASS", f"Upload accepted. URL: {r.json().get('url')}")
             else:
                 self.log("Intercom Upload", "FAIL", f"Status {r.status_code}: {r.text}")
         except Exception as e:
