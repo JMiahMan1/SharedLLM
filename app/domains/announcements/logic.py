@@ -125,7 +125,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         {
                             "media_content_id": f"{HA_URL.rstrip('/')}{matched_sound}",
                             "media_content_type": "music",
-                            "announce": True 
+                            "announce": False 
                         },
                         GlobalResources.redis_client
                     )
@@ -147,7 +147,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         {
                             "media_content_id": final_url,
                             "media_content_type": "music",
-                            "announce": True
+                            "announce": False 
                         },
                         GlobalResources.redis_client
                     )
