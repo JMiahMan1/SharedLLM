@@ -90,11 +90,26 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
         log.warning(f"No target devices found for announcement: {target}")
         return {"status": "FAILURE", "message": "Could not find any devices to announce on."}
 
-    # 3. Execution (Throttled)
+    # 3. Execution (Throttled & Filtered)
     results = []
     
     # Semaphore to limit concurrent calls to HA to avoid 500 errors
     sem = asyncio.Semaphore(2)  # Adjust concurrency limit if needed
+
+    # Pre-fetch capabilities to filter unsupported devices
+    from app.domains.media.devices import get_device_capabilities
+    
+    capable_entities = []
+    for eid in target_entities:
+         caps = await get_device_capabilities(eid, user_creds, GlobalResources.redis_client)
+         if caps.get("has_play_media") or caps.get("domain") == "group": 
+             # Groups might not report capabilities correctly but usually handle relaying
+             capable_entities.append(eid)
+         else:
+             log.warning(f"Skipping announcement for {eid}: Device does not support 'play_media'.")
+
+    if not capable_entities:
+        return {"status": "FAILURE", "message": "No capable devices found for announcement."}
 
     async def _announce_one(entity_id):
         async with sem:
@@ -134,7 +149,8 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         GlobalResources.redis_client
                     )
                 else:
-                    # TTS MODE
+                    # TTS MODE  - Check if TTS is better handled by notify or tts domain?
+                    # execute_ha_service(tts) handles it via tts.google_translate_say usually
                     log.info(f"Playing TTS '{clean_message}' on {entity_id}")
                     # We use google_translate_say for generic TTS
                     res = await execute_ha_service(
@@ -150,12 +166,11 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 log.error(f"Failed to announce on {entity_id}: {e}")
                 return False
 
-    # Run tasks with throttling
-    tasks = [_announce_one(eid) for eid in target_entities]
-    # We still use gather but the semaphore inside limits actual concurrency
+    # Run tasks with throttling on CAPABLE entities only
+    tasks = [_announce_one(eid) for eid in capable_entities]
     await asyncio.gather(*tasks)
     
-    return {"status": "SUCCESS", "message": f"Announced to {len(target_entities)} devices."}
+    return {"status": "SUCCESS", "message": f"Announced to {len(capable_entities)} capable devices."}
                 log.info(f"Playing TTS '{clean_message}' on {entity_id}")
                 res = await execute_ha_service(
                     "tts", "google_translate_say", entity_id, user_creds,
