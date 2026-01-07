@@ -241,5 +241,14 @@
     "look up in nextcloud",
     "check my files for",
     "read the source"
+  ],
+  "announce": [
+    "announce",
+    "broadcast",
+    "tell everyone",
+    "say on the speakers",
+    "make an announcement",
+    "shout",
+    "proclaim"
   ]
 }
