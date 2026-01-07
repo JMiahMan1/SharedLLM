@@ -79,12 +79,14 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
         if resolved:
             if isinstance(resolved, list):
                 for item in resolved:
-                    if isinstance(item, str):
+                    if isinstance(item, str) and item not in ANNOUNCEMENT_BLACKLIST:
                         target_entities.append(item)
-                    elif isinstance(item, (list, tuple)) and len(item) > 0:
+                    elif isinstance(item, (list, tuple)) and len(item) > 0 and item[0] not in ANNOUNCEMENT_BLACKLIST:
                         target_entities.append(item[0])
-            elif isinstance(resolved, tuple):
+            elif isinstance(resolved, tuple) and resolved[0] not in ANNOUNCEMENT_BLACKLIST:
                  target_entities.append(resolved[0])
+            elif isinstance(resolved, str) and resolved not in ANNOUNCEMENT_BLACKLIST:
+                 target_entities.append(resolved)
 
     if not target_entities:
         log.warning(f"No target devices found for announcement: {target}")
