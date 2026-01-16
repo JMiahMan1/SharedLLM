@@ -5,6 +5,6 @@
     "⏰": "/local/sounds/rooster.mp3",
     "🚨": "/local/sounds/siren.mp3",
     "🎉": "/local/sounds/tada.mp3",
-    "dinner": "/local/sounds/ding.mp3"
+    "dinner": "/static/sounds/dinner-bell.mp3"
   }
 ]
