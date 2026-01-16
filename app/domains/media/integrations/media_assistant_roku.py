@@ -156,13 +156,21 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 return await self.play(entity_id, user_creds, **kwargs)
 
             # 1. Resolve Metadata for Roku Display
-            log.info(f"[RokuMA] Resolving metadata for display: '{cleaned_query}'")
-            search_res = await music_assistant_ops.tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
             best_match = None
-            if search_res.get("status") == "SUCCESS" and search_res.get("results"):
-                # Use the first result (highest score)
-                best_match = search_res["results"][0]
-                log.info(f"[RokuMA] Found best match: {best_match.get('title')} ({best_match.get('type')})")
+            
+            # [TTS/Announcement Handling]
+            # If query is a 'media-source://' URI (e.g. TTS), skip search and App URL.
+            # The Roku App cannot resolve this URI, but MASS can play it via the stream.
+            if query.startswith("media-source://"):
+                log.info(f"[RokuMA] Announcement detected (media-source). Skipping metadata search.")
+                cleaned_query = query # Preserve the URI
+            else:
+                log.info(f"[RokuMA] Resolving metadata for display: '{cleaned_query}'")
+                search_res = await music_assistant_ops.tool_music_search(cleaned_query, user_creds, kwargs.get("redis_client"))
+                if search_res.get("status") == "SUCCESS" and search_res.get("results"):
+                    # Use the first result (highest score)
+                    best_match = search_res["results"][0]
+                    log.info(f"[RokuMA] Found best match: {best_match.get('title')} ({best_match.get('type')})")
 
             # 2. Populate Params for ECP Launch (Roku UI)
             params = {"t": "a", "autoplay": "true"} # Audio mode
@@ -175,6 +183,14 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                 # Use the specific URI for the MA service call to be precise
                 ma_media_id = best_match.get("media_content_id") or cleaned_query
                 ma_media_type = best_match.get("media_content_type") or "music"
+            elif query.startswith("media-source://"):
+                 # Announcement Mode
+                 params["songName"] = kwargs.get("media_title", "Announcement")
+                 params["artistName"] = "System Notification"
+                 # DO NOT set 'u' (URL) - Roku App cannot handle media-source://
+                 # MASS will push the audio.
+                 ma_media_id = query
+                 ma_media_type = "music"
             else:
                 params["songName"] = cleaned_query
                 ma_media_id = cleaned_query
