@@ -490,7 +490,8 @@ async def handle_announce(query: str, user_creds: dict, params: dict = None, **k
     # If no message in params, try to extract from query fallback (Fast Path support)
     if not message:
         import re
-        from app.domains.media import smart_resolve_entity
+        # Use re-export from logic to valid circular import issues
+        from app.logic.media_ops import smart_resolve_entity
         
         # Strategy: Extract "on [Something...]" and use iterative resolution (Longest Prefix Match)
         # matches "Announce on Office Speaker Dinner is ready" -> raw_target_msg="Office Speaker Dinner is ready"
@@ -501,35 +502,77 @@ async def handle_announce(query: str, user_creds: dict, params: dict = None, **k
              words = raw_text.split()
              
              best_target = None
+             best_score = -1
              best_target_len = 0
              
-             # Iterate through word combinations (up to 5 words for target name)
-             # We want the LONGEST valid device name match.
-             # e.g. "Office" (Valid), "Office Speaker" (Valid), "Office Speaker Dinner" (Invalid)
-             for i in range(1, min(len(words), 6)):
+             # Iterate through word combinations (up to 6 words for target name)
+             # We want the candidate that BEST matches the resolved entity name.
+             for i in range(1, min(len(words), 8)):
                  candidate = " ".join(words[:i])
                  # Resolving...
-                 # optimization: check if we have this device in HA logic (quick lookup)
-                 # We use smart_resolve_entity (which is async, but we are in async func)
-                 # Warning: failure to await might be issue if smart_resolve is heavy, but it uses cache
                  res = await smart_resolve_entity(candidate, "play_media", GlobalResources.ha_collection)
                  
-                 found = False
-                 if isinstance(res, tuple) and res[0]: found = True
-                 elif isinstance(res, list) and res: found = True
-                 elif isinstance(res, str) and res: found = True
+                 valid_match = False
+                 meta = {}
+                 if isinstance(res, tuple) and res[0]: 
+                     valid_match = True
+                     meta = res[2] if len(res) > 2 else {}
+                 elif isinstance(res, list) and res: 
+                     valid_match = True
+                     # Take first
+                     meta = res[0][2] if len(res[0]) > 2 else {}
+                 elif isinstance(res, str) and res: 
+                     valid_match = True
                  
-                 if found:
-                     best_target = candidate
-                     best_target_len = i
+                 if valid_match:
+                     # Calculate Match Quality Score
+                     score = 0
+                     fname = meta.get("friendly_name", "").lower() if meta else ""
+                     cname = candidate.lower()
+                     
+                     if fname == cname:
+                         # Exact Match (Perfect)
+                         score = 100
+                     elif fname and cname == fname:
+                         score = 90
+                     elif fname and fname in cname:
+                         # Candidate is LONGER than Friendly Name (e.g. "Master Bedroom TV Check out" vs "Master Bedroom TV")
+                         # This implies we ate part of the message. Penalize heavily.
+                         # But wait, if fname is "Office" and candidate is "Office Speaker", that's good?
+                         # "Office Speaker" (Candidate) vs "Office Speaker" (Name) -> 100
+                         # "Office Speaker" (Candidate) vs "Office" (Name) -> Name in Candidate.
+                         # If device is "Office Speaker", candidate "Office Speaker" is 100.
+                         # If device is "Master Bedroom TV", candidate "Master Bedroom TV Check" contains Name.
+                         # We want to AVOID eating the message.
+                         # So if candidate contains name but is longer, it's suspect, UNLESS the extra words are part of alias.
+                         # Since we can't know aliases easily here, we rely on the implementation detail that Exact Matches return first.
+                         if len(cname) > len(fname):
+                              # Candidate is longer than name. Likely ate message.
+                              score = 10
+                         else:
+                              score = 50
+                     elif fname and cname in fname:
+                         # Candidate is substring of Name (e.g. "Master" vs "Master Bedroom TV")
+                         score = 60
+                     else:
+                         # Fallback if no metadata
+                         score = 30
+                     
+                     # Prefer higher score. If tie, prefer longer candidate (more specific)
+                     if score > best_score:
+                         best_score = score
+                         best_target = candidate
+                         best_target_len = i
+                     elif score == best_score and i > best_target_len:
+                         # Tie-breaker: Longer candidate is better (e.g. "Office Speaker" > "Office")
+                         best_target = candidate
+                         best_target_len = i
              
              if best_target:
                  target = best_target
                  # Message is the rest
                  message = " ".join(words[best_target_len:])
              else:
-                 # Fallback: Assume target is first 2 words if capitalized? Or just fail to broadcast?
-                 # Let's fallback to pattern 2 (Message on Target) if this failed
                  pass
 
         if not message:

@@ -258,9 +258,9 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 
                 # Estimate duration
                 duration = max(5, len(clean_message or "") / 12)
-                if is_audio_file:
+                if audio_url:
                     duration = 10 
-                
+                                
                 # If we need to restore state OR play sound after, we wait.
                 # Check for specific keywords that need "Double Ding" (Before & After)
                 # For now, just 'dinner' triggers this behavior per user request
