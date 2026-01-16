@@ -985,6 +985,43 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
             # Return exact match immediately, but prioritize native integrations if multiple
             if exact_matches:
+                # [Optimization] Sibling Expansion for Modality
+                # If we have an exact match but it's a TV and we want Music (or vice versa), 
+                # check if there's a better sibling in the same group (e.g., MASS player).
+                if is_music or is_video:
+                    for em in list(exact_matches): # Copy list to iterate
+                        # em is (eid, integ, meta)
+                         meta = em[2]
+                         group_id = meta.get("group_id")
+                         if group_id and group_id != "unknown":
+                             try:
+                                 # We need to fetch siblings. 
+                                 # NOTE: This might be slow if we do it for every query, but for exact matches it's worth it.
+                                 group_docs = GlobalResources.ha_collection._collection.get(
+                                     where={"group_id": group_id},
+                                     include=["metadatas"]
+                                 )
+                                 if group_docs and group_docs.get("metadatas"):
+                                     for sibling_meta in group_docs["metadatas"]:
+                                         sib_eid = sibling_meta.get("entity_id")
+                                         sib_int = sibling_meta.get("integration", "").lower()
+                                         sib_fn = sibling_meta.get("friendly_name", "")
+                                         
+                                         # Avoid duplicates
+                                         if any(x[0] == sib_eid for x in exact_matches): continue
+                                         
+                                         # If Music Intent -> Add MASS players
+                                         if is_music and ("music_assistant" in sib_int or "mass" in sib_int):
+                                             log.info(f"[Resolver] Found MASS sibling '{sib_eid}' for music intent. Adding to candidates.")
+                                             exact_matches.append((sib_eid, sib_int, sibling_meta))
+                                             
+                                         # If Video Intent -> Add TVs (if we matched a speaker/cast)
+                                         if is_video and sib_int in ["androidtv", "roku", "webostv", "samsungtv", "tv"]:
+                                             log.info(f"[Resolver] Found TV sibling '{sib_eid}' for video intent. Adding to candidates.")
+                                             exact_matches.append((sib_eid, sib_int, sibling_meta))
+                             except Exception as sib_err:
+                                 log.warning(f"[Resolver] Error checking siblings: {sib_err}")
+
                 # Sort using the shared helper
                 def _helper_score(item):
                     # item is (eid, integ, meta)
@@ -1007,9 +1044,6 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                 if intent.startswith("volume_"):
                     refined_id = await _refine_target_for_volume(best[0], intent)
                     if refined_id != best[0]:
-                         # Look for the refined entity in docs to get full metadata tuple
-                         # Or just return simple tuple if strictly internal usage
-                         # Better to search docs for metadata continuity
                          return await smart_resolve_entity(refined_id, intent, ha_collection, is_music, is_video, allow_multiple)
 
                 return [best] if allow_multiple else best
