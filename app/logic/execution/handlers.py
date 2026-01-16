@@ -484,12 +484,32 @@ async def handle_announce(query: str, user_creds: dict, params: dict = None, **k
     message = params.get("message")
     target = params.get("target") or params.get("device_name")
     
-    # If no message in params, try to extract from query fallback
+    # If no message in params, try to extract from query fallback (Fast Path support)
     if not message:
         import re
-        match = re.search(r"announce\s+(?:that\s+)?(.+)", query, re.IGNORECASE)
+        # Pattern 1: "Announce on [Target] [Message]"
+        match = re.search(r"announce\s+(?:that\s+)?on\s+(?:the\s+)?(?P<target>.+?)\s+(?:that\s+)?(?P<message>.+)", query, re.IGNORECASE)
         if match:
-            message = match.group(1)
+             target = match.group("target")
+             message = match.group("message")
+        else:
+             # Pattern 2: "Announce [Message] on [Target]"
+             # This is harder because Message can contain "on". We assume Target is at the end.
+             match = re.search(r"announce\s+(?:that\s+)?(?P<message>.+)\s+on\s+(?:the\s+)?(?P<target>.+)$", query, re.IGNORECASE)
+             if match and len(match.group("target").split()) <= 4: # Heuristic: Target is usually short
+                  target = match.group("target")
+                  message = match.group("message")
+             else:
+                  # Pattern 3: "Tell [Target] [Message]"
+                  match = re.search(r"tell\s+(?:the\s+)?(?P<target>.+?)\s+(?:that\s+)?(?P<message>.+)", query, re.IGNORECASE)
+                  if match:
+                       target = match.group("target")
+                       message = match.group("message")
+                  else:
+                       # Fallback: Treat everything after announce as message (Broadcast)
+                       match = re.search(r"(?:announce|broadcast|shout|say)\s+(?:that\s+)?(.+)", query, re.IGNORECASE)
+                       if match:
+                           message = match.group(1)
             
     if not message:
          return {"status": "FAILURE", "message": "What should I announce?", "service": "announce"}
