@@ -181,8 +181,20 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 if matched_sound:
                     # Play media (notification sound)
                     log.info(f"Playing sound {matched_sound} on {entity_id}")
+                    
+                    # Determine URL base
+                    final_sound_url = matched_sound
+                    if matched_sound.startswith("http"):
+                        final_sound_url = matched_sound
+                    elif matched_sound.startswith("/static"):
+                         # Serve from SharedLLM
+                         final_sound_url = f"{SERVER_URL.rstrip('/')}{matched_sound}"
+                    else:
+                         # Default to Home Assistant /local/
+                         final_sound_url = f"{HA_URL.rstrip('/')}{matched_sound}"
+
                     svc_data = {
-                         "media_content_id": f"{HA_URL.rstrip('/')}{matched_sound}",
+                         "media_content_id": final_sound_url,
                          "media_content_type": "music"
                     }
                     if should_announce:
@@ -261,7 +273,17 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                     if play_after:
                         # Play sound again
                         log.info(f"Playing suffix sound {matched_sound} on {entity_id}")
-                        svc_data["media_content_id"] = f"{HA_URL.rstrip('/')}{matched_sound}"
+                        
+                        # Determine URL base (Same logic)
+                        final_sound_url = matched_sound
+                        if matched_sound.startswith("http"):
+                            final_sound_url = matched_sound
+                        elif matched_sound.startswith("/static"):
+                             final_sound_url = f"{SERVER_URL.rstrip('/')}{matched_sound}"
+                        else:
+                             final_sound_url = f"{HA_URL.rstrip('/')}{matched_sound}"
+
+                        svc_data["media_content_id"] = final_sound_url
                         svc_data["media_content_type"] = "music" # Reset for sound
                         if "announce" in svc_data:
                             svc_data["announce"] = True
