@@ -170,8 +170,26 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 did_turn_on = False
                 if not should_announce and current_state == "off":
                     if features & 128: # SUPPORT_TURN_ON
-                         log.info(f"Device {entity_id} is OFF. Turning ON manually...")
-                         await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, GlobalResources.redis_client)
+                         log.info(f"Device {entity_id} is OFF. Turning ON manually via Integration Wrapper...")
+                         
+                         # [Fix: Use Integration Factory]
+                         try:
+                             from app.domains.media.integrations.factory import IntegrationFactory
+                             # Use the integration name from capabilities if available, or default
+                             integration_name = caps.get("integration", "standard")
+                             # Factory logic handles basic string lookup
+                             integration_instance = IntegrationFactory.get_integration(integration_name)
+                             
+                             if integration_instance:
+                                 await integration_instance.turn_on(entity_id, user_creds, redis_client=GlobalResources.redis_client)
+                             else:
+                                 # Fallback to standard service call if no integration found
+                                 await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, GlobalResources.redis_client)
+                                 
+                         except Exception as e:
+                             log.warning(f"Integration-specific turn_on failed, falling back to generic: {e}")
+                             await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, GlobalResources.redis_client)
+                         
                          did_turn_on = True
                          await asyncio.sleep(4) # Wait for TV/Speaker to wake up
                     else:
