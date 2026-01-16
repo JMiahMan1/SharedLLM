@@ -37,25 +37,55 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
     """
     log.info(f"Processing Announcement: '{message}' (Audio: {bool(audio_url)}) to target: '{target}'")
     
-    # 1. Extract Emojis & Sounds
-    # ... (Keep existing logic)
+    # 1. Clean Message (Strip prefixes)
+    # Common prefixes to remove so TTS doesn't say "Announce..."
+    prefixes = [
+        "announce that", "announce", 
+        "tell everyone that", "tell everyone", 
+        "broadcast that", "broadcast", 
+        "shout that", "shout",
+        "say"
+    ]
+    clean_message = message.strip()
+    for p in prefixes:
+        if clean_message.lower().startswith(p + " "):
+            clean_message = clean_message[len(p):].strip()
+        elif clean_message.lower().startswith(p): # Exact match or punctuation
+            clean_message = clean_message[len(p):].strip()
+            
+    # Remove leading punctuation causing "An ounce" issues if partially stripped
+    clean_message = clean_message.lstrip(' :,-')
+
+    # 1b. Extract Emojis & Keyword Sounds
     emojis_found = []
-    clean_message = message
-    
-    # Simple regex for emojis (this is a basic range, might need expansion)
-    # We prioritize matching keys in our sound map
     matched_sound = None
     
     if DEFAULT_SOUND_MAP:
-        for emoji_char, sound_path in DEFAULT_SOUND_MAP.items():
-            if emoji_char in message:
-                emojis_found.append(emoji_char)
+        # Check for both Emojis AND Keywords (case-insensitive) in the original message OR the cleaned message
+        # We check the cleaned message to avoid triggering on the command word itself if mapped (unlikely)
+        msg_lower = clean_message.lower()
+        
+        for key, sound_path in DEFAULT_SOUND_MAP.items():
+            # If key is emoji (non-ascii roughly) or keyword
+            if key.lower() in msg_lower:
+                # If it's a keyword like 'dinner', we don't necessarily remove it from text, 
+                # but we trigger the sound.
+                # If it's an emoji, we usually remove it.
+                is_emoji = not key.isascii()
+                
                 matched_sound = sound_path
-                clean_message = clean_message.replace(emoji_char, "")
+                if is_emoji:
+                    clean_message = clean_message.replace(key, "")
+                    emojis_found.append(key)
+                
+                # We stop at first match for now to avoid chaos, or could chain them.
+                # User asked for "Kitchen" -> Bell? No, "Dinner" -> Bell.
+                break
             
     clean_message = clean_message.strip()
     if not clean_message and not audio_url:
-        clean_message = "Announcement" # Fallback if only emoji was sent and no audio
+        clean_message = "Announcement"
+
     
     # ... (Target Resolution logic is same)
     # 2. Resolve Targets
@@ -211,16 +241,42 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                     )
 
                 # [RESTORE OFF STATE]
-                if did_turn_on:
-                    # Estimate duration based on message length (very rough) + buffer
-                    # Assuming ~15 chars per second for TTS. Min 5s.
-                    duration = max(5, len(clean_message or "") / 12)
-                    if is_audio_file:
-                        duration = 10 # Default for audio files if we don't know length
-                    
-                    log.info(f"Waiting {duration:.1f}s for playback before restoring OFF state for {entity_id}...")
+                # Also handle "Sound After" (e.g. Dinner bell at end)
+                # We need to wait for playback anyway if restoring state.
+                
+                # Estimate duration
+                duration = max(5, len(clean_message or "") / 12)
+                if is_audio_file:
+                    duration = 10 
+                
+                # If we need to restore state OR play sound after, we wait.
+                # Check for specific keywords that need "Double Ding" (Before & After)
+                # For now, just 'dinner' triggers this behavior per user request
+                play_after = matched_sound and ("dinner" in clean_message.lower())
+                
+                if did_turn_on or play_after:
+                    log.info(f"Waiting {duration:.1f}s for playback (Restore: {did_turn_on}, SoundData: {play_after})...")
                     await asyncio.sleep(duration)
-                    await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)
+                    
+                    if play_after:
+                        # Play sound again
+                        log.info(f"Playing suffix sound {matched_sound} on {entity_id}")
+                        svc_data["media_content_id"] = f"{HA_URL.rstrip('/')}{matched_sound}"
+                        svc_data["media_content_type"] = "music" # Reset for sound
+                        if "announce" in svc_data:
+                            svc_data["announce"] = True
+                            
+                        await execute_ha_service(
+                             "media_player", "play_media", entity_id, user_creds,
+                             svc_data,
+                             GlobalResources.redis_client
+                        )
+                        # Wait for sound to finish before turning off?
+                        if did_turn_on:
+                            await asyncio.sleep(2)
+
+                    if did_turn_on:
+                         await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)
 
                 return True
             except Exception as e:
