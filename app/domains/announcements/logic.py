@@ -316,7 +316,11 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                             await asyncio.sleep(2)
 
                     if did_turn_on:
-                         await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)
+                         if 'integration_instance' in locals() and integration_instance:
+                              log.info(f"Turning OFF via Integration Wrapper...")
+                              await integration_instance.turn_off(entity_id, user_creds, redis_client=GlobalResources.redis_client)
+                         else:
+                              await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)
 
                 return True
             except Exception as e:
