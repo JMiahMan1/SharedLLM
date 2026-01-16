@@ -392,6 +392,13 @@ async def _handle_single_command(
                 "parameters": {}
             }
             log.info(f"[FAST PATH] action_plan set: {action_plan}")
+        elif intent == "announce":
+            log.info(f"[FAST PATH] Matched announce intent")
+            action_plan = {
+                "action": "tool_call",
+                "tool_name": "announce",
+                "parameters": {"message": None} # None triggers handler regex extraction
+            }
         
         if action_plan:
             log.info(f"[FAST ORCHESTRA] Bypassing LLM for {intent}")
