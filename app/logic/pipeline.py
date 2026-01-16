@@ -166,6 +166,7 @@ async def contextualize_query(query, user, model):
         "volume_down",
         "volume_set",
         "volume_mute",
+        "announce",
     ]
     if is_high_confidence and intent in stateless_intents:
         return query, intent, score, is_high_confidence, intent_locked
