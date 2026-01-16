@@ -314,9 +314,42 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         )
 
     async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
-        """Turn on Roku device"""
-        log.info(f"[RokuMA] Turning on {entity_id}")  
-        return await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        """
+        Turn on Roku device using valid wake sequence.
+        Roku TVs often require 'PowerOn' specifically to wake the panel, 
+        as 'turn_on' might just be mapped to Home which isn't enough from deep sleep.
+        """
+        log.info(f"[RokuMA] Turning on {entity_id}")
+        
+        # 1. Standard Turn On (Best Effort)
+        await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        
+        # 2. Get Remote Sibling
+        remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
+        if not remote_entity_id:
+             remote_entity_id = entity_id.replace("media_player.", "remote.")
+             
+        # 3. Explicit 'PowerOn' (Wakes Panel)
+        log.info(f"[RokuMA] Sending explicit 'PowerOn' to {remote_entity_id}")
+        await execute_ha_service(
+            "remote", 
+            "send_command", 
+            remote_entity_id, 
+            user_creds, 
+            {"command": "PowerOn"}, 
+            kwargs.get("redis_client")
+        )
+        
+        # 4. Follow up with Home (Wakes App/UI)
+        await asyncio.sleep(1)
+        return await execute_ha_service(
+            "remote", 
+            "send_command", 
+            remote_entity_id, 
+            user_creds, 
+            {"command": "Home"}, 
+            kwargs.get("redis_client")
+        )
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """Turn off Roku - send explicit PowerOff command"""
