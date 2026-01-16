@@ -487,12 +487,52 @@ async def handle_announce(query: str, user_creds: dict, params: dict = None, **k
     # If no message in params, try to extract from query fallback (Fast Path support)
     if not message:
         import re
-        # Pattern 1: "Announce on [Target] [Message]"
-        match = re.search(r"announce\s+(?:that\s+)?on\s+(?:the\s+)?(?P<target>.+?)\s+(?:that\s+)?(?P<message>.+)", query, re.IGNORECASE)
+    # If no message in params, try to extract from query fallback (Fast Path support)
+    if not message:
+        import re
+        from app.domains.media import smart_resolve_entity
+        
+        # Strategy: Extract "on [Something...]" and use iterative resolution (Longest Prefix Match)
+        # matches "Announce on Office Speaker Dinner is ready" -> raw_target_msg="Office Speaker Dinner is ready"
+        match = re.search(r"\b(?:announce|tell|say)\s+(?:that\s+)?on\s+(?:the\s+)?(?P<after_on>.+)", query, re.IGNORECASE)
+        
         if match:
-             target = match.group("target")
-             message = match.group("message")
-        else:
+             raw_text = match.group("after_on").strip()
+             words = raw_text.split()
+             
+             best_target = None
+             best_target_len = 0
+             
+             # Iterate through word combinations (up to 5 words for target name)
+             # We want the LONGEST valid device name match.
+             # e.g. "Office" (Valid), "Office Speaker" (Valid), "Office Speaker Dinner" (Invalid)
+             for i in range(1, min(len(words), 6)):
+                 candidate = " ".join(words[:i])
+                 # Resolving...
+                 # optimization: check if we have this device in HA logic (quick lookup)
+                 # We use smart_resolve_entity (which is async, but we are in async func)
+                 # Warning: failure to await might be issue if smart_resolve is heavy, but it uses cache
+                 res = await smart_resolve_entity(candidate, "play_media", GlobalResources.ha_collection)
+                 
+                 found = False
+                 if isinstance(res, tuple) and res[0]: found = True
+                 elif isinstance(res, list) and res: found = True
+                 elif isinstance(res, str) and res: found = True
+                 
+                 if found:
+                     best_target = candidate
+                     best_target_len = i
+             
+             if best_target:
+                 target = best_target
+                 # Message is the rest
+                 message = " ".join(words[best_target_len:])
+             else:
+                 # Fallback: Assume target is first 2 words if capitalized? Or just fail to broadcast?
+                 # Let's fallback to pattern 2 (Message on Target) if this failed
+                 pass
+
+        if not message:
              # Pattern 2: "Announce [Message] on [Target]"
              # This is harder because Message can contain "on". We assume Target is at the end.
              match = re.search(r"announce\s+(?:that\s+)?(?P<message>.+)\s+on\s+(?:the\s+)?(?P<target>.+)$", query, re.IGNORECASE)
@@ -500,16 +540,10 @@ async def handle_announce(query: str, user_creds: dict, params: dict = None, **k
                   target = match.group("target")
                   message = match.group("message")
              else:
-                  # Pattern 3: "Tell [Target] [Message]"
-                  match = re.search(r"tell\s+(?:the\s+)?(?P<target>.+?)\s+(?:that\s+)?(?P<message>.+)", query, re.IGNORECASE)
-                  if match:
-                       target = match.group("target")
-                       message = match.group("message")
-                  else:
-                       # Fallback: Treat everything after announce as message (Broadcast)
-                       match = re.search(r"(?:announce|broadcast|shout|say)\s+(?:that\s+)?(.+)", query, re.IGNORECASE)
-                       if match:
-                           message = match.group(1)
+                   # Fallback: Treat everything after announce as message (Broadcast)
+                   match = re.search(r"(?:announce|broadcast|proclaim|shout|say)\s+(?:that\s+)?(.+)", query, re.IGNORECASE)
+                   if match:
+                       message = match.group(1)
             
     if not message:
          return {"status": "FAILURE", "message": "What should I announce?", "service": "announce"}
