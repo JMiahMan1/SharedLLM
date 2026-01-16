@@ -1014,6 +1014,14 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                                          # [Music Intent] -> Add players with 'active_queue' capability (Music Assistant)
                                          # User specifically requested routing by "queue capabilities"
                                          if is_music and ("active_queue" in sib_attrs or "music_assistant" in sib_int or "mass" in sib_int):
+                                             # [EXCEPTION] Roku devices have a special integration (RokuMediaAssistantIntegration)
+                                             # that launches a custom UI App (Channel 782875). 
+                                             # We must NOT swap to the generic MASS entity, or we lose the UI.
+                                             is_roku_context = any(m[1] == "roku" for m in exact_matches)
+                                             if is_roku_context:
+                                                 log.info(f"[Resolver] Skipping generic MASS sibling for Roku to allow custom App UI handling.")
+                                                 continue
+
                                              log.info(f"[Resolver] Found Queue-Capable sibling '{sib_eid}' for music intent. Adding to candidates.")
                                              exact_matches.append((sib_eid, sib_int, sibling_meta))
                                              
