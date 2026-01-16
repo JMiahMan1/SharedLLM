@@ -401,6 +401,45 @@ async def handle_media_command(
             if not entity_id:
                 entity_id = get_last_entity(redis_client, user_creds.get("user"))
 
+    # [Query Cleaning] Strip the resolved device name from the query content
+    # This prevents sending "jazz on master bedroom tv" as the song name.
+    # We do this AFTER resolution so we know exactly what to strip.
+    if entity_id:
+        # Get friendly name if available (either from resolution metadata or fetching it)
+        target_name = None
+        
+        # Check if we have metadata from resolution
+        if 'metadata' in locals() and metadata:
+            target_name = metadata.get("friendly_name")
+        elif 'resolved' in locals() and isinstance(resolved, tuple) and len(resolved) == 3:
+             # Just in case metadata wasn't unpacked to locals yet
+             target_name = resolved[2].get("friendly_name")
+        
+        # If not found, try to clean based on "on X" pattern if we have a robust entity match
+        if target_name:
+            import re
+            qt = query
+            # Case insensitive replace of "on {name}" or just "{name}"
+            # Protect against empty target_name
+            if len(target_name) > 2:
+                 # 1. Try naive "on [Target]"
+                 pattern_on = re.compile(f"\\b(?:on|in|at|to)\\s+{re.escape(target_name)}\\b", re.IGNORECASE)
+                 query = pattern_on.sub("", query).strip()
+                 
+                 # 2. Try just "[Target]"
+                 pattern_raw = re.compile(f"\\b{re.escape(target_name)}\\b", re.IGNORECASE)
+                 query = pattern_raw.sub("", query).strip()
+                 
+                 # 3. Clean up leading/trailing prepositions if stranded
+                 query = re.sub(r"\b(play|watch|listen to|hear)\b", "", query, flags=re.IGNORECASE).strip()
+                 
+                 if query != qt:
+                     log.info(f"[Query Cleaning] Stripped target '{target_name}': '{qt}' -> '{query}'")
+    
+        # Fallback: if we didn't have metadata but used "device_name" param logic earlier (unlikely for Fast Path)
+        if device_name and device_name in query:
+             query = query.replace(device_name, "").strip()
+
     if entity_id:
         user = user_creds.get("user")
         log.info(f"[CONTEXT UPDATE] user={user}, entity_id={entity_id}, redis_client={redis_client is not None}")
