@@ -1006,13 +1006,15 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
                                          sib_eid = sibling_meta.get("entity_id")
                                          sib_int = sibling_meta.get("integration", "").lower()
                                          sib_fn = sibling_meta.get("friendly_name", "")
+                                         sib_attrs = str(sibling_meta.get("attributes", "")).lower()
                                          
                                          # Avoid duplicates
                                          if any(x[0] == sib_eid for x in exact_matches): continue
                                          
-                                         # If Music Intent -> Add MASS players
-                                         if is_music and ("music_assistant" in sib_int or "mass" in sib_int):
-                                             log.info(f"[Resolver] Found MASS sibling '{sib_eid}' for music intent. Adding to candidates.")
+                                         # [Music Intent] -> Add players with 'active_queue' capability (Music Assistant)
+                                         # User specifically requested routing by "queue capabilities"
+                                         if is_music and ("active_queue" in sib_attrs or "music_assistant" in sib_int or "mass" in sib_int):
+                                             log.info(f"[Resolver] Found Queue-Capable sibling '{sib_eid}' for music intent. Adding to candidates.")
                                              exact_matches.append((sib_eid, sib_int, sibling_meta))
                                              
                                          # If Video Intent -> Add TVs (if we matched a speaker/cast)
