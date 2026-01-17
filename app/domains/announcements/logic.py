@@ -167,10 +167,12 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 # 2. Wait
                 # 3. Play
                 # 4. Turn OFF (restore state)
+                # 4. Turn OFF (restore state)
                 did_turn_on = False
-                if not should_announce and current_state == "off":
+                # [Fix] treat 'idle' as off-ish for TVs that need waking (User: "idle just means online, not on")
+                if not should_announce and current_state in ["off", "idle", "standby"]:
                     if features & 128: # SUPPORT_TURN_ON
-                         log.info(f"Device {entity_id} is OFF. Turning ON manually via Integration Wrapper...")
+                         log.info(f"Device {entity_id} is {current_state}. Turning ON manually via Integration Wrapper...")
                          
                          # [Fix: Use Integration Factory]
                          try:
