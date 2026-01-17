@@ -273,56 +273,28 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
         
         return result
 
-
-    async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
-        """
-        Turn on Roku device using valid wake sequence (Kitchen Sink).
-        Matches logic in media_assistant_roku.py.
-        """
-        log.info(f"[Roku] Turning on {entity_id}")
-        
-        # 1. Standard Turn On
-        await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
-        
-        # 2. Get Remote Sibling
-        remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
-        
-        # 3. Explicit 'PowerOn'
-        log.info(f"[Roku] Sending explicit 'PowerOn' to {remote_entity_id}")
-        await execute_ha_service(
-            "remote", "send_command", remote_entity_id, user_creds, 
-            {"command": "PowerOn"}, kwargs.get("redis_client")
-        )
-        
-        # 4. Follow up with Home (Wake UI)
-        await asyncio.sleep(1)
-        return await execute_ha_service(
-            "remote", "send_command", remote_entity_id, user_creds, 
-            {"command": "Home"}, kwargs.get("redis_client")
-        )
-
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
-        Turn off Roku device. Uses 'PowerOff' if available, or toggles idle.
+        Turn off Roku device. Note: Roku devices report 'idle' when off/on home screen.
         """
+        from app.domains.media.devices import get_entity_state
+        
         log.info(f"[Roku] Turning off {entity_id}")
         
-        remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
+        # Check current state - Roku uses 'idle' for off/home screen
+        state = await get_entity_state(entity_id, user_creds)
+        if state in ["idle", "off", "standby"]:
+            log.info(f"[Roku] {entity_id} is already off (state: {state})")
+            return {
+                "status": "SUCCESS",
+                "message": f"Roku is already off.",
+                "entity_id": entity_id,
+                "service": "turn_off"
+            }
         
-        # 1. Try explicit PowerOff
-        res = await execute_ha_service(
-            "remote", "send_command", remote_entity_id, user_creds, 
-            {"command": "PowerOff"}, kwargs.get("redis_client")
-        )
-        
-        # 2. Also send Home to exit any app (failsafe)
-        await execute_ha_service(
-             "remote", "send_command", remote_entity_id, user_creds,
-             {"command": "Home"}, kwargs.get("redis_client")
-        )
-        
-        return res
-
+        # Send Home button to exit app (goes to idle/home = off)
+        return await self.stop_media(entity_id, user_creds, **kwargs)
+    
     async def _get_roku_remote(self, entity_id: str, user_creds: Dict) -> Optional[str]:
         """
         Find the remote entity for this Roku device by checking the same group.
@@ -425,7 +397,7 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             }
         
         return result
-
+    
     async def _get_roku_ip(self, entity_id: str, user_creds: Dict) -> Optional[str]:
         """Get Roku IP address using SSDP network discovery with robust retries"""
         from app.settings import HA_URL
