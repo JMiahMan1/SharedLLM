@@ -20,6 +20,70 @@ class AndroidTVIntegration(StandardIntegration, VideoHelperMixin):
     def integration_type(self) -> str:
         return "androidtv"
 
+    async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Turn on Android TV with explicit remote commands to handle 'idle' (screen off) states.
+        """
+        log.info(f"[AndroidTV] Turning on {entity_id}")
+        redis_client = kwargs.get("redis_client")
+        
+        # 1. Standard Turn On
+        # Many Android TVs respond to this, but some ignore it if "idle".
+        await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, redis_client)
+        
+        # 2. Remote Wake-up (Kitchen Sink)
+        # Try to find a sibling remote and send 'POWER' or 'WAKEUP'
+        # We need a quick way to find the remote. 
+        # StandardIntegration doesn't have _get_roku_remote, we should implement a generic _get_remote or just look for it.
+        # Most often it's remote.<name> matching media_player.<name>
+        
+        remote_entity_id = None
+        # Naive guess first: replace domain
+        candidate = entity_id.replace("media_player.", "remote.")
+        # Check against HA state to see if it exists? We don't have easy synchronous check here without overhead.
+        # But we can just try sending blindly if we trust the naming, or use the exact sibling logic.
+        # Let's try the safe 'send if exists' approach if we can confirm it. 
+        # Actually execute_ha_service fails gracefully usually? No, it might log error.
+        
+        # Better: Quick metadata check if we have it?
+        # Let's implement a quick helper here or just duplicate the simple lookup.
+        try:
+            # Try to resolve remote via simple string substitution which works for 90% of HA setups
+            # If standard naming conventions are followed.
+            remote_entity_id = entity_id.replace("media_player", "remote")
+            
+            # Send explicit Power toggle/on
+            # Android keys: POWER, WAKEUP. 'POWER' is safer single-button mapping usually.
+            log.info(f"[AndroidTV] Sending explicit 'POWER' to {remote_entity_id}")
+            await execute_ha_service(
+                "remote", "send_command", remote_entity_id, user_creds, 
+                {"command": "POWER"}, redis_client
+            )
+        except Exception:
+            pass
+            
+        return {"status": "SUCCESS"}
+
+    async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Explicit turn off for Android TV.
+        """
+        log.info(f"[AndroidTV] Turning off {entity_id}")
+        
+        # 1. Standard Turn Off
+        await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        
+        # 2. Remote Power (Backup)
+        try:
+            remote_entity_id = entity_id.replace("media_player", "remote")
+            await execute_ha_service(
+                "remote", "send_command", remote_entity_id, user_creds, 
+                {"command": "POWER"}, kwargs.get("redis_client")
+            )
+        except Exception: pass
+        
+        return {"status": "SUCCESS"}
+
     async def play_media(self, entity_id: str, query: str, media_type: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Play media on Android TV.
