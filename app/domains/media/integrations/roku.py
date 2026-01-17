@@ -242,6 +242,39 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
             kwargs.get("redis_client")
         )
     
+
+    async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Turn on Roku device using valid wake sequence.
+        Standard Roku integration often needs explicit PowerOn to wake panel.
+        """
+        log.info(f"[Roku] Turning on {entity_id}")
+        
+        # 1. Standard Turn On
+        await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        
+        # 2. Get Remote Sibling
+        remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
+        
+        # 3. Explicit 'PowerOn' (Critical for wakeup reliability)
+        if remote_entity_id:
+            log.info(f"[Roku] Sending explicit 'PowerOn' to {remote_entity_id}")
+            await execute_ha_service(
+                "remote", "send_command", remote_entity_id, user_creds, 
+                {"command": "PowerOn"}, kwargs.get("redis_client")
+            )
+        
+        # 4. Follow up with Home (Wake UI)
+        await asyncio.sleep(1)
+        if remote_entity_id:
+             return await execute_ha_service(
+                "remote", "send_command", remote_entity_id, user_creds, 
+                {"command": "Home"}, kwargs.get("redis_client")
+             )
+        else:
+             # Fallback if no remote
+             return await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+
     async def stop_media(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Stop media playback on Roku by sending Home key.
