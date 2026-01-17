@@ -275,6 +275,24 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
              # Fallback if no remote
              return await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
 
+    async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
+        """
+        Turn off Roku device. Uses 'PowerOff' if available.
+        """
+        log.info(f"[Roku] Turning off {entity_id}")
+        
+        remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
+        
+        # 1. Try explicit PowerOff
+        if remote_entity_id:
+            return await execute_ha_service(
+                "remote", "send_command", remote_entity_id, user_creds, 
+                {"command": "PowerOff"}, kwargs.get("redis_client")
+            )
+        else:
+             # Fallback
+             return await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, kwargs.get("redis_client"))
+
     async def stop_media(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
         Stop media playback on Roku by sending Home key.
