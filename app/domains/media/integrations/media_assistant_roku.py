@@ -409,7 +409,31 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         except Exception as e:
             log.warning(f"[RokuMA] ChromaDB lookup failed: {e}")
         
-        # Strategy 2: Fallback to simple replacement
+        # Strategy 2: Friendly Name Match (Cross-Group)
+        if not remote_entity:
+            try:
+                 if GlobalResources.ha_collection:
+                     current_docs = GlobalResources.ha_collection.get(ids=[entity_id], include=["metadatas"])
+                     if current_docs and current_docs.get("metadatas") and len(current_docs["metadatas"]) > 0:
+                          friendly = current_docs["metadatas"][0].get("friendly_name")
+                          
+                          if friendly:
+                              remote_docs = GlobalResources.ha_collection.get(
+                                   where={"friendly_name": friendly}, 
+                                   include=["metadatas"]
+                              )
+                              
+                              if remote_docs and remote_docs.get("metadatas"):
+                                   for r_meta in remote_docs["metadatas"]:
+                                       eid = r_meta.get("entity_id", "")
+                                       if eid.startswith("remote.") and eid != entity_id:
+                                            remote_entity = eid
+                                            log.info(f"[RokuMA] Found remote via Friendly Name match: {remote_entity}")
+                                            return remote_entity
+            except Exception as e:
+                 log.warning(f"[RokuMA] Friendly Name lookup failed: {e}")
+
+        # Strategy 3: Fallback to simple replacement
         if not remote_entity:
             remote_entity = entity_id.replace("media_player.", "remote.")
             log.info(f"[RokuMA] Using fallback remote entity: {remote_entity}")
