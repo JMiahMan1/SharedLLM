@@ -178,7 +178,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                              # Use the integration name from capabilities if available, or default
                              integration_name = caps.get("integration", "standard")
                              # Factory logic handles basic string lookup
-                             integration_instance = IntegrationFactory.get_integration(integration_name)
+                             integration_instance = IntegrationFactory.get_handler(integration_name)
                              
                              if integration_instance:
                                  await integration_instance.turn_on(entity_id, user_creds, redis_client=GlobalResources.redis_client)
