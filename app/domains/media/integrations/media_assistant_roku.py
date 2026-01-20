@@ -142,21 +142,40 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                                 break
                     except: continue
 
-                     if current_dev: 
-                         target_friendly_name = current_dev.get("attributes", {}).get("friendly_name")
-                
-                if target_friendly_name:
-                     log.info(f"[RokuMA] Attempting Friendly Name match for MA Sibling: '{target_friendly_name}'")
-                     # We need to scan all media_players. This is expensive but necessary as fallback.
-                     # Since we don't have a global registry convenient here, we might need to rely on 'active_queue' being unique-ish?
-                     # Actually, we can assume the MA player has a predictable ID or we just fail.
-                     # BETTER: Use find_by_name equivalent if possible?
-                     # For now, let's try to assume the MA player might be mapped in the settings or just fail gracefully.
-                     
-                     # Wait! We can use the 'find_entity_by_name' helper if it exists?
-                     # No.
-                     pass
-                     
+            # Fallback 2: Friendly Name Match (Strategy 2) via GlobalResources
+            if not ma_player_entity:
+                try:
+                    from app.settings import GlobalResources
+                    target_friendly_name = kwargs.get("friendly_name")
+                    if not target_friendly_name:
+                         # Fetch current friendly name if not passed
+                         from app.domains.media.devices import get_entity
+                         current_dev = await get_entity(entity_id, user_creds)
+                         if current_dev: 
+                             target_friendly_name = current_dev.get("attributes", {}).get("friendly_name")
+                    
+                    if target_friendly_name and GlobalResources.ha_collection:
+                         log.info(f"[RokuMA] Attempting Friendly Name match for MA Sibling: '{target_friendly_name}'")
+                         # Search all devices with this name
+                         matches = GlobalResources.ha_collection.get(
+                               where={"friendly_name": target_friendly_name}, 
+                               include=["metadatas"]
+                         )
+                         if matches and matches.get("metadatas"):
+                               for meta in matches["metadatas"]:
+                                   candidate_id = meta.get("entity_id", "")
+                                   if candidate_id != entity_id and candidate_id.startswith("media_player."):
+                                       candidate_state = await self.get_state(candidate_id, user_creds)
+                                       if candidate_state and candidate_state.attributes:
+                                           attrs = candidate_state.attributes
+                                           # Check for generic MA indicators
+                                           if "active_queue" in attrs or "mass_player_type" in attrs or "music_assistant" in str(attrs.get("integration", "")):
+                                               ma_player_entity = candidate_id
+                                               log.info(f"[RokuMA] Found MA Sibling via Friendly Name: {ma_player_entity}")
+                                               break
+                except Exception as e:
+                    log.warning(f"[RokuMA] Friendly Name Sibling Lookup failed: {e}")
+
             if not ma_player_entity:
                 log.error(f"[RokuMA] Could not find MA player sibling for {entity_id}")
                 return {"status": "FAILURE", "message": "Could not find Music Assistant player entity for this Roku family"}
