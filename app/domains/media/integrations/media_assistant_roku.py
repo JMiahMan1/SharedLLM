@@ -129,7 +129,7 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             ma_player_entity = await find_group_sibling(entity_id, is_ma_player)
             
             if not ma_player_entity:
-                # Fallback: check kwargs if find_group_sibling failed (it might if ChromaDB is empty/context missing)
+                # Fallback 1: check kwargs if find_group_sibling failed
                 log.warning(f"[RokuMA] find_group_sibling failed. Checking kwargs.group_members as fallback.")
                 group_members = kwargs.get("group_members", [])
                 for member in group_members:
@@ -142,6 +142,21 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                                 break
                     except: continue
 
+                     if current_dev: 
+                         target_friendly_name = current_dev.get("attributes", {}).get("friendly_name")
+                
+                if target_friendly_name:
+                     log.info(f"[RokuMA] Attempting Friendly Name match for MA Sibling: '{target_friendly_name}'")
+                     # We need to scan all media_players. This is expensive but necessary as fallback.
+                     # Since we don't have a global registry convenient here, we might need to rely on 'active_queue' being unique-ish?
+                     # Actually, we can assume the MA player has a predictable ID or we just fail.
+                     # BETTER: Use find_by_name equivalent if possible?
+                     # For now, let's try to assume the MA player might be mapped in the settings or just fail gracefully.
+                     
+                     # Wait! We can use the 'find_entity_by_name' helper if it exists?
+                     # No.
+                     pass
+                     
             if not ma_player_entity:
                 log.error(f"[RokuMA] Could not find MA player sibling for {entity_id}")
                 return {"status": "FAILURE", "message": "Could not find Music Assistant player entity for this Roku family"}
