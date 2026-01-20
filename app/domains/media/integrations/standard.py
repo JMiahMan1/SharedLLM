@@ -253,7 +253,7 @@ class StandardIntegration(MediaIntegration):
              
              for url in urls:
                  # Filter OUT Channel/User pages - they are not playable
-                 if any(x in url for x in ["/channel/", "/user/", "/@"]):
+                 if any(x in url for x in ["/channel/", "/user/", "/@/", "/c/"]):
                      log.info(f"[StandardIntegration] Skipping Channel URL: {url}")
                      continue
 
