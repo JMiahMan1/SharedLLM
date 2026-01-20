@@ -245,35 +245,56 @@ class RokuIntegration(MediaIntegration, VideoHelperMixin):
 
     async def turn_on(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
-        Turn on Roku device using valid wake sequence.
+        Turn on Roku device using valid wake sequence with retries and state validation.
         Standard Roku integration often needs explicit PowerOn to wake panel.
         """
-        log.info(f"[Roku] Turning on {entity_id}")
+        from app.domains.media.devices import get_entity_state
         
-        # 1. Standard Turn On
-        await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        log.info(f"[Roku] Turning on {entity_id} with validation loop")
+        redis_client = kwargs.get("redis_client")
         
-        # 2. Get Remote Sibling
+        # 1. Get Remote Sibling upfront
         remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
+        if not remote_entity_id:
+             remote_entity_id = entity_id.replace("media_player.", "remote.")
+
+        # Retry Loop
+        max_retries = 3
+        for i in range(max_retries):
+            # A. Standard Turn On
+            await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, redis_client)
+            
+            # B. Explicit 'PowerOn' (Critical for wakeup reliability)
+            if remote_entity_id:
+                log.info(f"[Roku] Sending explicit 'PowerOn' to {remote_entity_id} (Attempt {i+1}/{max_retries})")
+                await execute_ha_service(
+                    "remote", "send_command", remote_entity_id, user_creds, 
+                    {"command": "PowerOn"}, redis_client
+                )
+            
+            # C. Follow up with Home (Wake UI)
+            await asyncio.sleep(2)
+            if remote_entity_id:
+                 await execute_ha_service(
+                    "remote", "send_command", remote_entity_id, user_creds, 
+                    {"command": "Home"}, redis_client
+                 )
+            
+            # D. Validation Wait
+            await asyncio.sleep(3)
+            
+            # E. Check State
+            # We check the media_player state, not the remote state (remote often stays 'on')
+            current_state = await get_entity_state(entity_id, user_creds)
+            log.info(f"[Roku] Post-Wake State Check ({i+1}): {current_state}")
+            
+            if current_state not in ["off", "unavailable", "unknown"]:
+                log.info(f"[Roku] Device confirmed ON (State: {current_state})")
+                return {"status": "SUCCESS", "state": current_state}
         
-        # 3. Explicit 'PowerOn' (Critical for wakeup reliability)
-        if remote_entity_id:
-            log.info(f"[Roku] Sending explicit 'PowerOn' to {remote_entity_id}")
-            await execute_ha_service(
-                "remote", "send_command", remote_entity_id, user_creds, 
-                {"command": "PowerOn"}, kwargs.get("redis_client")
-            )
-        
-        # 4. Follow up with Home (Wake UI)
-        await asyncio.sleep(1)
-        if remote_entity_id:
-             return await execute_ha_service(
-                "remote", "send_command", remote_entity_id, user_creds, 
-                {"command": "Home"}, kwargs.get("redis_client")
-             )
-        else:
-             # Fallback if no remote
-             return await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, kwargs.get("redis_client"))
+        # If we failed after retries, log warning but return success to allow flow to continue (best effort)
+        log.warning(f"[Roku] Device {entity_id} failed to report ON state after {max_retries} attempts.")
+        return {"status": "SUCCESS", "message": "Commands sent but state verification failed"}
 
     async def turn_off(self, entity_id: str, user_creds: Dict, **kwargs) -> Dict[str, Any]:
         """
