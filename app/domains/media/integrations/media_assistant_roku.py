@@ -356,6 +356,9 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
         log.info(f"[RokuMA] Turning on {entity_id} with validation loop")
         redis_client = kwargs.get("redis_client")
         
+        # Resolve IP for direct ECP check (More reliable than HA state)
+        roku_ip = await self._get_roku_ip(entity_id, user_creds)
+        
         # 1. Get Remote Sibling
         remote_entity_id = await self._get_roku_remote(entity_id, user_creds)
         if not remote_entity_id:
@@ -392,7 +395,22 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
             # D. Validation Wait
             await asyncio.sleep(3)
             
-            # E. Check State
+            # E. Check State (Direct ECP first)
+            if roku_ip:
+                try:
+                    # Ping ECP root (fastest check for power/network presence)
+                    from app.settings import run_blocking
+                    import requests
+                    def _ping():
+                        return requests.get(f"http://{roku_ip}:8060/", timeout=1)
+                    
+                    resp = await run_blocking(_ping)
+                    if resp.status_code == 200:
+                         log.info(f"[RokuMA] ECP Ping Success (http://{roku_ip}:8060/). Device is ON.")
+                         return {"status": "SUCCESS", "state": "on"}
+                except Exception:
+                    pass
+
             current_state = await get_entity_state(entity_id, user_creds)
             log.info(f"[RokuMA] Post-Wake State Check ({i+1}): {current_state}")
             
