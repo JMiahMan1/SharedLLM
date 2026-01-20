@@ -149,10 +149,10 @@ class RokuMediaAssistantIntegration(MediaIntegration, VideoHelperMixin):
                     target_friendly_name = kwargs.get("friendly_name")
                     if not target_friendly_name:
                          # Fetch current friendly name if not passed
-                         from app.domains.media.devices import get_entity
-                         current_dev = await get_entity(entity_id, user_creds)
-                         if current_dev: 
-                             target_friendly_name = current_dev.get("attributes", {}).get("friendly_name")
+                         from app.domains.media.devices import get_device_capabilities
+                         caps = await get_device_capabilities(entity_id, user_creds, kwargs.get("redis_client"))
+                         if caps: 
+                             target_friendly_name = caps.get("friendly_name")
                     
                     if target_friendly_name and GlobalResources.ha_collection:
                          log.info(f"[RokuMA] Attempting Friendly Name match for MA Sibling: '{target_friendly_name}'")
