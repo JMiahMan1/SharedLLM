@@ -255,6 +255,14 @@ DEFAULT_PHRASES = {
         "make a note",
         "add note",
     ],
+    "document_index": [
+        "index this document",
+        "save this code",
+        "index this code",
+        "save to nextcloud",
+        "store this document",
+        "index this text"
+    ],
     "note_append": [
         "add to note",
         "append to note",
