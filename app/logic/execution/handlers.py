@@ -19,7 +19,7 @@ from app.logic.web_search import tool_web_search
 
 from app.domains.media import handle_media_command
 from app.logic.music_assistant_ops import tool_list_playlists, tool_list_radio, tool_music_search
-from app.logic.android_remote_ops import tool_remote_command, tool_launch_app_android
+from app.logic.android_remote_ops import tool_remote_command
 from app.domains.shared import execute_ha_service
 
 # Helper function for finding remote entity
@@ -550,9 +550,6 @@ async def handle_web_search(query: str, user_creds: dict = None, model: str = No
     res = await tool_web_search(query)
     return {"status": "SUCCESS", "message": res, "service": "web_search"}
 
-    res = f"Cannot learn '{params.get('phrase', '')}' with current prompt context." if params else "Cannot learn phrase."
-    return {"status": "FAILURE", "message": res, "service": "intent_learn"}
-
 @ActionDispatcher.register("ha_notify")
 async def handle_ha_notify(query: str, user_creds: dict, params: dict = None, **kwargs):
     """
@@ -563,7 +560,7 @@ async def handle_ha_notify(query: str, user_creds: dict, params: dict = None, **
     title = params.get("title", "SharedLLM Notification")
     
     # We use execute_ha_service directly
-    result = await execute_ha_service(
+    await execute_ha_service(
         "persistent_notification",
         "create",
         "persistent_notification.sharedllm", # Dummy entity_id needed for the function signature, usually ignored by this service or handled generically
