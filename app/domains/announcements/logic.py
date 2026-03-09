@@ -242,11 +242,18 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         did_turn_on = True
                         await asyncio.sleep(4)
 
+                # [Fix: Audibility] If we just turned on the device, 'announce' flag might not be needed
+                # and can sometimes cause silence on Cast devices if not already playing.
+                if (did_turn_on or sibling_turned_on) and should_announce:
+                    log.info(f"Disabling 'announce' flag for {entity_id} because it was just powered on.")
+                    should_announce = False
+
                 # 3.5 [VOLUME CONTROL]
                 # Ensure the device is audible (User reported silent announcement)
                 try:
                     log.info(f"Setting volume for {entity_id} to 0.6 before announcement")
                     await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.6}, GlobalResources.redis_client)
+                    await asyncio.sleep(2) # Wait for volume to apply
                 except Exception as ve:
                     log.warning(f"Failed to set volume for {entity_id}: {ve}")
 
