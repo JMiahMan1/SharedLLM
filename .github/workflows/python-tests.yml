@@ -47,8 +47,8 @@ jobs:
         HA_TOKEN: "dummy_token"
         DEFAULT_MODEL: "llama3"
       run: |
-        # Skip legacy_root if pytest.ini ignores it, but just ensuring we run everything valid
-        pytest --cov=app --cov-report=xml --cov-report=term test/
+        # Run unit tests only (integration tests require live services)
+        pytest --cov=app --cov-report=xml --cov-report=term test/unit/
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v4
