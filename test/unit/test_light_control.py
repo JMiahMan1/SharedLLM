@@ -4,9 +4,10 @@ import sys
 import os
 
 # Adjust path to import app modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../app')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from logic.media_ops import handle_media_command, COLOR_MAP
+from app.logic.media_ops import handle_media_command
+from app.logic.light_ops import COLOR_MAP
 
 class TestLightControl(unittest.IsolatedAsyncioTestCase):
 
@@ -19,8 +20,8 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         # Mock entity resolution (entity_id passed directly for simplicity)
         entity_id = "light.piano_lamp"
         
-        with patch('logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
-             patch('logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
+             patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             mock_exec.return_value = {"status": "SUCCESS", "message": "Color set"}
             mock_caps.return_value = {"domain": "light", "has_brightness": True, "has_color": True, "color_modes": ["rgb"], "friendly_name": "Piano Lamp"}
             
@@ -50,8 +51,8 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         user_creds = {"user": "test", "ha_token": "fake"}
         entity_id = "light.piano_lamp"
         
-        with patch('logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
-             patch('logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
+             patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             mock_exec.return_value = {"status": "SUCCESS"}
             mock_caps.return_value = {"domain": "light", "has_brightness": True, "has_color": True, "friendly_name": "Piano Lamp"}
     
@@ -79,9 +80,9 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         user_creds = {"user": "test", "ha_token": "fake"}
         entity_id = "light.piano_lamp"
         
-        with patch('logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec:
+        with patch('app.logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = {"status": "SUCCESS"}
-            with patch('logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+            with patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
                 mock_caps.return_value = {"domain": "light", "has_brightness": True, "has_color": True, "friendly_name": "Piano Lamp"}
     
                 result_list = await handle_media_command(
@@ -108,8 +109,8 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         user_creds = {"user": "test", "ha_token": "fake"}
         entity_id = "light.piano_lamp"
         
-        with patch('logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
-             patch('logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
+             patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             
             mock_exec.return_value = {"status": "SUCCESS"}
             mock_caps.return_value = {"domain": "light", "has_brightness": True, "has_color": True, "color_modes": ["rgb"], "friendly_name": "Piano Lamp"}
@@ -141,7 +142,7 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         user_creds = {"user": "test", "ha_token": "fake"}
         entity_id = "switch.office_fan"  # Not a light
         
-        with patch('logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             mock_caps.return_value = {"domain": "switch", "friendly_name": "Office Fan"}
             
             result_list = await handle_media_command(
