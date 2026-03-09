@@ -607,16 +607,10 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
         log.info(f"[Scoring] Penalizing {eid} for state {state} (-200)")
 
     # [CUSTOM ROUTING] Hardware Reality Alignment
-    # 1. Office TV (and its MASS proxy) have no speakers. Use for power ONLY.
-    is_office_tv = eid in ["media_player.office_tv", "media_player.media_player_office_tv"]
-    if is_office_tv and intent == "play_media":
-        score -= 500
-        log.info(f"[Scoring] Hard-penalizing {eid} for audio intent (No speakers) (-500)")
-
-    # 2. Office Speaker (MASS) is the ONLY reliable audio target.
+    # 1. Office Speaker (MASS) is a high-capability audio target.
     if eid == "media_player.office_speaker":
-        score += 200
-        log.info(f"[Scoring] Boosting {eid} for Office audio (+200)")
+        score += 150
+        log.info(f"[Scoring] Boosting {eid} for Office audio (+150)")
 
     # 1. BASELINE PREFERENCE (Hardware vs Software)
     # Prefer Hardware TVs (Roku, Android TV, Apple TV, WebOS, Samsung) over Cast/DLNA for most things
