@@ -123,22 +123,47 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
     # 3. Execution (Throttled & Filtered)
     
     # Semaphore to limit concurrent calls to HA to avoid 500 errors
-    sem = asyncio.Semaphore(2)  # Adjust concurrency limit if needed
+    sem = asyncio.Semaphore(3)
+    
+    # Per-device timeout to prevent broadcast stalling on unresponsive devices
+    DEVICE_TIMEOUT = 45  # seconds
 
     # Pre-fetch capabilities to filter unsupported devices
     from app.domains.media.devices import get_device_capabilities
     
+    is_broadcast = not target or target.lower() in ["all", "everyone", "broadcast", "everywhere", "house"]
+    
     capable_entities = []
     for eid in target_entities:
          caps = await get_device_capabilities(eid, user_creds, GlobalResources.redis_client)
-         if caps.get("has_play_media") or caps.get("domain") == "group": 
-             # Groups might not report capabilities correctly but usually handle relaying
-             capable_entities.append(eid)
-         else:
-             log.warning(f"Skipping announcement for {eid}: Device does not support 'play_media'.")
+         features = caps.get("supported_features", 0)
+         has_play_media = caps.get("has_play_media") or caps.get("domain") == "group"
+         
+         if not has_play_media:
+              log.warning(f"Skipping announcement for {eid}: Device does not support 'play_media'.")
+              continue
+         
+         # For broadcast: also check if the device is reachable and can actually play audio
+         if is_broadcast:
+              current_state = await get_entity_state(eid, user_creds)
+              supports_announce = bool(features & 1048576)  # ANNOUNCE flag
+              supports_turn_on = bool(features & 128)       # SUPPORT_TURN_ON flag
+              
+              if current_state in ["unavailable", "unknown", None]:
+                   log.warning(f"Skipping broadcast for {eid}: Device is {current_state} (unreachable).")
+                   continue
+              
+              if current_state in ["off", "standby"] and not supports_announce and not supports_turn_on:
+                   log.warning(f"Skipping broadcast for {eid}: Device is {current_state} and cannot be turned on or announce.")
+                   continue
+              
+              log.info(f"Broadcast eligible: {eid} (state={current_state}, announce={supports_announce}, turn_on={supports_turn_on})")
+         
+         capable_entities.append(eid)
 
     if not capable_entities:
         return {"status": "FAILURE", "message": "No capable devices found for announcement."}
+
 
     async def _announce_one(entity_id):
         async with sem:
@@ -327,8 +352,21 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 log.error(f"Failed to announce on {entity_id}: {e}")
                 return False
 
-    # Run tasks with throttling on CAPABLE entities only
-    tasks = [_announce_one(eid) for eid in capable_entities]
-    await asyncio.gather(*tasks)
+    # Run tasks with throttling on CAPABLE entities only, with per-device timeout
+    async def _safe_announce(eid):
+        try:
+            return await asyncio.wait_for(_announce_one(eid), timeout=DEVICE_TIMEOUT)
+        except asyncio.TimeoutError:
+            log.error(f"Announcement timed out for {eid} after {DEVICE_TIMEOUT}s")
+            return False
     
-    return {"status": "SUCCESS", "message": f"Announced to {len(capable_entities)} capable devices."}
+    tasks = [_safe_announce(eid) for eid in capable_entities]
+    results = await asyncio.gather(*tasks)
+    
+    succeeded = sum(1 for r in results if r)
+    failed = len(results) - succeeded
+    msg = f"Announced to {succeeded}/{len(capable_entities)} devices."
+    if failed:
+        msg += f" ({failed} failed or timed out.)"
+    
+    return {"status": "SUCCESS", "message": msg}
