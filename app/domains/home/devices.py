@@ -29,14 +29,21 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
     url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
 
-    try:
-        def _fetch():
-            return requests.get(url, headers=headers, timeout=2.0)
+    for attempt in range(3):
+        try:
+            def _fetch():
+                return requests.get(url, headers=headers, timeout=5.0)
 
-        r = await run_blocking(_fetch)
-        if r.status_code == 200:
-            return r.json().get("state", "unknown")
-    except Exception as e:
-        log.error(f"State fetch error for {entity_id}: {e}")
+            r = await run_blocking(_fetch)
+            if r.status_code == 200:
+                return r.json().get("state", "unknown")
+            break # Not a connection error, just a non-200, so break and return unknown
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as ce:
+            log.warning(f"Connection error fetching state for {entity_id} (attempt {attempt+1}): {ce}")
+            if attempt == 2: break
+            await asyncio.sleep(1.0)
+        except Exception as e:
+            log.error(f"State fetch error for {entity_id}: {e}")
+            break
 
     return "unknown"

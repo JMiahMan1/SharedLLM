@@ -255,15 +255,16 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 # [Fix: Audibility] Re-enable 'announce' flag as requested by user.
                 # Silence was likely due to device not being "ready" to stream.
                 if (did_turn_on or sibling_turned_on):
-                    log.info(f"Device just woke up. Polling {entity_id} for readiness (max 10s)...")
-                    for _ in range(5):
+                    log.info(f"Device just woke up. Polling {entity_id} for readiness (max 30s)...")
+                    # Increased to 15 iterations (30s) to give Cast integration time to wake up
+                    for _ in range(15):
                         await asyncio.sleep(2)
                         st = await get_entity_state(entity_id, user_creds)
                         if st not in ["unavailable", "unknown", "off"]:
                             log.info(f"Device {entity_id} is now {st}. Ready for announcement.")
                             break
                     else:
-                        log.warning(f"Device {entity_id} still {current_state} after 10s. Proceeding anyway...")
+                        log.warning(f"Device {entity_id} still {current_state} after 30s. Proceeding anyway...")
 
                 # 3.5 [VOLUME CONTROL]
                 # Ensure the device is audible (User reported silent announcement)
