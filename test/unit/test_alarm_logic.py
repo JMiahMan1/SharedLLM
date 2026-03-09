@@ -94,15 +94,15 @@ async def test_alarm_logic():
     # We can't easily run the complex async logic of smart_resolve without more heavy mocking of 'run_blocking' and 'safe_similarity_search'
     # So we'll test handle_media_command logic for "turn_on"
     
-    with patch('app.logic.media_ops.get_entity_state', return_value="off"), \
-         patch('app.logic.media_ops.execute_ha_service', return_value={"status": "SUCCESS"}) as mock_ha:
+    with patch('app.domains.home.devices.get_entity_state', return_value="off"), \
+         patch('app.domains.media.integrations.standard.execute_ha_service', return_value={"status": "SUCCESS"}) as mock_ha:
              
          print("3. Testing Turn On TV Logic")
          # Case: "Turn on Living Room TV" -> Should map to media_player, NOT remote (unless nav)
          # We simulated a resolved entity 'media_player.living_room' coming from orchestrator or smart_resolve
          
          # If we pass entity_id="media_player.living_room" and intent="turn_on"
-         await handle_media_command("turn_on", "turn on living room tv", "media_player.living_room", {"user": "test"}, None, mock_redis)
+         await handle_media_command("turn_on", "turn on living room tv", "media_player.living_room", {"user": "test", "ha_token": "dummy"}, None, mock_redis)
          
          args, _ = mock_ha.call_args
          # domain, service, entity_id

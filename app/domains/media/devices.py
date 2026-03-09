@@ -1045,7 +1045,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
         log.info(f"DEBUG: Search returned {len(results)} docs.")
     except Exception as e:
         log.error(f"Error querying Chroma: {e}")
-        return [] if allow_multiple else (None, None)
+        return [] if allow_multiple else (None, None, {})
 
     # 3. Filter & formatting
     raw_candidates = []
@@ -1111,17 +1111,17 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
 
     except Exception as e:
         log.error(f"Error filtering candidates: {e}")
-        return [] if allow_multiple else (None, None)
+        return [] if allow_multiple else (None, None, {})
 
     if not raw_candidates:
-        return [] if allow_multiple else (None, None)
+        return [] if allow_multiple else (None, None, {})
 
     # 3.5 AREA FILTERING (New Modular Step)
     raw_candidates = _filter_by_area(raw_candidates, query_name)
     
     if not raw_candidates:
          log.info("Area filtering removed all candidates. Returning None.")
-         return [] if allow_multiple else (None, None)
+         return [] if allow_multiple else (None, None, {})
 
     # 4. Pattern Logic Application
     if patterns:
@@ -1157,7 +1157,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     scored_candidates.sort(key=lambda x: x[0], reverse=True)
     
     if not scored_candidates:
-         return [] if allow_multiple else (None, None)
+         return [] if allow_multiple else (None, None, {})
          
     best_score, best_dict = scored_candidates[0]
     log.info(f"Smart Resolution Selected: {best_dict['eid']} (Score: {best_score})")
@@ -1165,7 +1165,7 @@ async def smart_resolve_entity(query_name: str, intent: str, ha_collection, is_m
     # Check for hard disqualification
     if best_score <= -100:
          log.warning("Best candidate disqualified by strict intent rules.")
-         return [] if allow_multiple else (None, None)
+         return [] if allow_multiple else (None, None, {})
 
     # ---------------------------------------------------------
     # CAPABILITY / GROUP ROUTING
