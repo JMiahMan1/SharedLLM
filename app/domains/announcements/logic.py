@@ -167,190 +167,142 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
 
     async def _announce_one(entity_id):
         async with sem:
+            # Initialization
+            sibling_turned_on = None  # (sib_id, sib_orig_state, sib_meta)
+            did_turn_on = False
+            integration_instance = None
+            should_announce = False
+            
             try:
-                # [SMART ANNOUNCE] 
-                # Check device capabilities to enable 'announce' feature (restore state)
-                # User Request: Ensure every device returns to previous state.
+                # 1. Get capabilities and state
                 caps = await get_device_capabilities(entity_id, user_creds, GlobalResources.redis_client)
                 features = caps.get("supported_features", 0)
-                
-                # Check Bit 1048576 (ANNOUNCE)
                 supports_announce = bool(features & 1048576)
                 should_announce = supports_announce
                 
-                # Optional: Get state just for logging
                 current_state = await get_entity_state(entity_id, user_creds)
                 log.info(f"Smart Announce for {entity_id}: state={current_state}, supports_announce={supports_announce} -> announce={should_announce}")
 
-                # [MANUAL STATE RESTORE]
-                # If device is OFF and 'announce' not supported, we must:
-                # 1. Turn ON (if supported)
-                # 2. Wait
-                # 3. Play
-                # 4. Turn OFF (restore state)
-                # 4. Turn OFF (restore state)
-                did_turn_on = False
-                # [Fix] treat 'idle' as off-ish for TVs that need waking (User: "idle just means online, not on")
-                if not should_announce and current_state in ["off", "idle", "standby"]:
-                    if features & 128: # SUPPORT_TURN_ON
-                         log.info(f"Device {entity_id} is {current_state}. Turning ON manually via Integration Wrapper...")
-                         
-                         # [Fix: Use Integration Factory]
-                         try:
-                             from app.domains.media.integrations.factory import IntegrationFactory
-                             # Use the integration name from capabilities if available, or default
-                             integration_name = caps.get("integration", "standard")
-                             # Factory logic handles basic string lookup
-                             integration_instance = IntegrationFactory.get_handler(integration_name)
-                             
-                             if integration_instance:
-                                 await integration_instance.turn_on(entity_id, user_creds, redis_client=GlobalResources.redis_client)
-                             else:
-                                 # Fallback to standard service call if no integration found
-                                 await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, GlobalResources.redis_client)
-                                 
-                         except Exception as e:
-                             log.warning(f"Integration-specific turn_on failed, falling back to generic: {e}")
-                             await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, GlobalResources.redis_client)
-                         
-                         did_turn_on = True
-                         await asyncio.sleep(4) # Wait for TV/Speaker to wake up
-                    else:
-                         log.warning(f"Device {entity_id} is OFF and does not support turning on.")
-
-                # Play Sound Effect (if any)
-                if matched_sound:
-                    # Play media (notification sound)
-                    log.info(f"Playing sound {matched_sound} on {entity_id}")
+                # 2. [GROUP-AWARE POWER MANAGEMENT]
+                if current_state in ["unavailable", "unknown"]:
+                    from app.domains.media.devices import find_group_sibling
+                    log.info(f"Device {entity_id} is {current_state}. Attempting group-aware power sync...")
                     
-                    # Determine URL base
-                    final_sound_url = matched_sound
-                    if matched_sound.startswith("http"):
-                        final_sound_url = matched_sound
-                    elif matched_sound.startswith("/static"):
-                         # Serve from SharedLLM
-                         final_sound_url = f"{SERVER_URL.rstrip('/')}{matched_sound}"
-                    else:
-                         # Default to Home Assistant /local/
-                         final_sound_url = f"{HA_URL.rstrip('/')}{matched_sound}"
+                    def is_power_controller(meta):
+                        integ = meta.get("integration", "").lower()
+                        return integ in ["androidtv", "webostv", "samsungtv", "braviatv", "roku", "esphome"]
+                    
+                    sibling = await find_group_sibling(entity_id, is_power_controller, return_meta=True)
+                    
+                    # Fallback: group_name lookup
+                    if not sibling:
+                        try:
+                            ha_col = GlobalResources.ha_collection
+                            our_doc = ha_col.get(ids=[entity_id], include=["metadatas"])
+                            if our_doc and our_doc.get("metadatas"):
+                                our_group_name = our_doc["metadatas"][0].get("group_name", "")
+                                if our_group_name:
+                                    all_docs = ha_col._collection.get(where={"group_name": our_group_name}, include=["metadatas"])
+                                    if all_docs and all_docs.get("metadatas"):
+                                        for meta in all_docs["metadatas"]:
+                                            cid = meta.get("entity_id")
+                                            if cid != entity_id and is_power_controller(meta):
+                                                sibling = (cid, meta)
+                                                break
+                        except: pass
 
-                    svc_data = {
-                         "media_content_id": final_sound_url,
-                         "media_content_type": "music"
-                    }
-                    if should_announce:
-                        svc_data["announce"] = True
-                        
-                    await execute_ha_service(
-                        "media_player", "play_media", entity_id, user_creds,
-                        svc_data,
-                        GlobalResources.redis_client
-                    )
-                    # Small delay for sound to start/finish
+                    if sibling:
+                        sibling_id, sibling_meta = sibling
+                        sibling_state = await get_entity_state(sibling_id, user_creds)
+                        if sibling_state in ["off", "standby", "idle", "unavailable"]:
+                            try:
+                                from app.domains.media.integrations.factory import IntegrationFactory
+                                handler = IntegrationFactory.get_handler(sibling_meta.get("integration", "standard"))
+                                if handler: await handler.turn_on(sibling_id, user_creds, redis_client=GlobalResources.redis_client)
+                                else: await execute_ha_service("media_player", "turn_on", sibling_id, user_creds, {}, GlobalResources.redis_client)
+                                sibling_turned_on = (sibling_id, sibling_state, sibling_meta)
+                            except:
+                                await execute_ha_service("media_player", "turn_on", sibling_id, user_creds, {}, GlobalResources.redis_client)
+                                sibling_turned_on = (sibling_id, sibling_state, sibling_meta)
+                            
+                            # Polling
+                            for _ in range(10):
+                                await asyncio.sleep(2)
+                                current_state = await get_entity_state(entity_id, user_creds)
+                                if current_state not in ["unavailable", "unknown"]: break
+
+                # 3. [MANUAL STATE RESTORE] (Main Device)
+                if not should_announce and current_state in ["off", "idle", "standby"]:
+                    if features & 128:
+                        log.info(f"Device {entity_id} is {current_state}. Turning ON manually...")
+                        from app.domains.media.integrations.factory import IntegrationFactory
+                        integration_instance = IntegrationFactory.get_handler(caps.get("integration", "standard"))
+                        if integration_instance: await integration_instance.turn_on(entity_id, user_creds, redis_client=GlobalResources.redis_client)
+                        else: await execute_ha_service("media_player", "turn_on", entity_id, user_creds, {}, GlobalResources.redis_client)
+                        did_turn_on = True
+                        await asyncio.sleep(4)
+
+                # 4. Sound Before
+                if matched_sound:
+                    log.info(f"Playing sound {matched_sound} on {entity_id}")
+                    sound_url = matched_sound if matched_sound.startswith("http") else (f"{SERVER_URL.rstrip('/')}{matched_sound}" if matched_sound.startswith("/static") else f"{HA_URL.rstrip('/')}{matched_sound}")
+                    svc_data = {"media_content_id": sound_url, "media_content_type": "music"}
+                    if should_announce: svc_data["announce"] = True
+                    await execute_ha_service("media_player", "play_media", entity_id, user_creds, svc_data, GlobalResources.redis_client)
                     await asyncio.sleep(2)
 
-                # Play TTS OR Audio File
+                # 5. Play Main Content
                 if audio_url:
-                     # INTERCOM MODE (Recorded Voice)
-                     final_url = audio_url
-                     # Naive absolute URL construction if just a path
-                     if audio_url.startswith("/") and "http" not in audio_url:
-                         # Prepend SERVER_URL to make it a valid absolute URL for Cast devices
-                         final_url = f"{SERVER_URL.rstrip('/')}{audio_url}"
-                         
-                     log.info(f"Playing Intercom Audio '{final_url}' on {entity_id}")
-                     
-                     svc_data = {
-                         "media_content_id": final_url,
-                         "media_content_type": "music"
-                     }
-                     if should_announce:
-                         svc_data["announce"] = True
-                         
-                     res = await execute_ha_service(
-                        "media_player", "play_media", entity_id, user_creds,
-                        svc_data,
-                        GlobalResources.redis_client
-                    )
+                    final_url = audio_url if ("http" in audio_url) else f"{SERVER_URL.rstrip('/')}{audio_url}"
+                    svc_data = {"media_content_id": final_url, "media_content_type": "music"}
+                    if should_announce: svc_data["announce"] = True
+                    await execute_ha_service("media_player", "play_media", entity_id, user_creds, svc_data, GlobalResources.redis_client)
                 else:
-                    # TTS MODE - Use media-source://tts/tts.piper to enable 'announce' flag support
                     import urllib.parse
-                    encoded_msg = urllib.parse.quote(clean_message)
-                    media_id = f"media-source://tts/tts.piper?message={encoded_msg}"
-                    
-                    log.info(f"Playing TTS '{clean_message}' on {entity_id} via Piper (media-source)")
-                    
-                    svc_data = {
-                        "media_content_id": media_id,
-                        "media_content_type": "music"
-                    }
-                    if should_announce:
-                        svc_data["announce"] = True
+                    media_id = f"media-source://tts/tts.piper?message={urllib.parse.quote(clean_message)}"
+                    svc_data = {"media_content_id": media_id, "media_content_type": "music"}
+                    if should_announce: svc_data["announce"] = True
+                    await execute_ha_service("media_player", "play_media", entity_id, user_creds, svc_data, GlobalResources.redis_client)
 
-                    res = await execute_ha_service(
-                        "media_player", "play_media", entity_id, user_creds,
-                        svc_data,
-                        GlobalResources.redis_client
-                    )
-
-                # [RESTORE OFF STATE]
-                # Also handle "Sound After" (e.g. Dinner bell at end)
-                # We need to wait for playback anyway if restoring state.
-                
-                # Estimate duration
-                duration = max(5, len(clean_message or "") / 12)
-                if audio_url:
-                    duration = 10 
-                                
-                # If we need to restore state OR play sound after, we wait.
-                # Check for specific keywords that need "Double Ding" (Before & After)
-                # For now, just 'dinner' triggers this behavior per user request
+                # 6. Sound After / Wait
+                duration = max(5, len(clean_message or "") / 12) if not audio_url else 10
                 play_after = matched_sound and ("dinner" in clean_message.lower())
                 
-                if did_turn_on or play_after:
-                    log.info(f"Waiting {duration:.1f}s for playback (Restore: {did_turn_on}, SoundData: {play_after})...")
+                if did_turn_on or play_after or sibling_turned_on:
+                    log.info(f"Waiting {duration:.1f}s for playback...")
                     await asyncio.sleep(duration)
-                    
                     if play_after:
-                        # Play sound again
-                        log.info(f"Playing suffix sound {matched_sound} on {entity_id}")
-                        
-                        # Determine URL base (Same logic)
-                        final_sound_url = matched_sound
-                        if matched_sound.startswith("http"):
-                            final_sound_url = matched_sound
-                        elif matched_sound.startswith("/static"):
-                             final_sound_url = f"{SERVER_URL.rstrip('/')}{matched_sound}"
-                        else:
-                             final_sound_url = f"{HA_URL.rstrip('/')}{matched_sound}"
-
-                        after_svc_data = {
-                            "media_content_id": final_sound_url,
-                            "media_content_type": "music"
-                        }
-                        if should_announce:
-                            after_svc_data["announce"] = True
-                            
-                        await execute_ha_service(
-                             "media_player", "play_media", entity_id, user_creds,
-                             after_svc_data,
-                             GlobalResources.redis_client
-                        )
-                        # Wait for sound to finish before turning off?
-                        if did_turn_on:
-                            await asyncio.sleep(2)
-
-                    if did_turn_on:
-                         if 'integration_instance' in locals() and integration_instance:
-                              log.info("Turning OFF via Integration Wrapper...")
-                              await integration_instance.turn_off(entity_id, user_creds, redis_client=GlobalResources.redis_client)
-                         else:
-                              await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)
+                        sound_url = matched_sound if matched_sound.startswith("http") else (f"{SERVER_URL.rstrip('/')}{matched_sound}" if matched_sound.startswith("/static") else f"{HA_URL.rstrip('/')}{matched_sound}")
+                        svc_data = {"media_content_id": sound_url, "media_content_type": "music"}
+                        if should_announce: svc_data["announce"] = True
+                        await execute_ha_service("media_player", "play_media", entity_id, user_creds, svc_data, GlobalResources.redis_client)
+                        await asyncio.sleep(2)
 
                 return True
+
             except Exception as e:
                 log.error(f"Failed to announce on {entity_id}: {e}")
                 return False
+                
+            finally:
+                # 7. [ROBUST STATE RESTORATION]
+                if did_turn_on:
+                    log.info(f"Restoring main device {entity_id} to OFF")
+                    try:
+                        if integration_instance: await integration_instance.turn_off(entity_id, user_creds, redis_client=GlobalResources.redis_client)
+                        else: await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)
+                    except: pass
+                
+                if sibling_turned_on:
+                    sib_id, sib_orig_state, sib_meta = sibling_turned_on
+                    log.info(f"[Group Power] Restoring sibling {sib_id} to {sib_orig_state}")
+                    try:
+                        from app.domains.media.integrations.factory import IntegrationFactory
+                        handler = IntegrationFactory.get_handler(sib_meta.get("integration", "standard"))
+                        if handler: await handler.turn_off(sib_id, user_creds, redis_client=GlobalResources.redis_client)
+                        else: await execute_ha_service("media_player", "turn_off", sib_id, user_creds, {}, GlobalResources.redis_client)
+                    except: pass
+
 
     # Run tasks with throttling on CAPABLE entities only, with per-device timeout
     async def _safe_announce(eid):
