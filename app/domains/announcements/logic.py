@@ -126,7 +126,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
     sem = asyncio.Semaphore(3)
     
     # Per-device timeout to prevent broadcast stalling on unresponsive devices
-    DEVICE_TIMEOUT = 45  # seconds
+    DEVICE_TIMEOUT = 90  # seconds
 
     # Pre-fetch capabilities to filter unsupported devices
     from app.domains.media.devices import get_device_capabilities
