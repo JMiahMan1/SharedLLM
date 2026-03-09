@@ -599,10 +599,14 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
     
     caps_set = set(str(c).lower().strip() for c in caps)
 
-    # --- Scoring Logic (Consolidated from _route_by_intent) ---
-    score = 0
-    
-    # 0. BASELINE PREFERENCE (Hardware vs Software)
+    # 0. AVAILABILITY PENALTY
+    # Penalize unavailable/unknown entities so we prefer reachable siblings
+    state = str(metadata.get("state", "unknown")).lower()
+    if state in ["unavailable", "unknown"]:
+        score -= 200
+        log.info(f"[Scoring] Penalizing {eid} for state {state} (-200)")
+
+    # 1. BASELINE PREFERENCE (Hardware vs Software)
     # Prefer Hardware TVs (Roku, Android TV, Apple TV, WebOS, Samsung) over Cast/DLNA for most things
     HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "samsungtv", "apple_tv", "braviatv", "firetv", "tv"]
     is_hardware_tv = any(x in integ for x in HW_TV_INTEGRATIONS)
