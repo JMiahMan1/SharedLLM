@@ -101,7 +101,7 @@ INFORMATIONAL_INTENTS = [
 ]
 
 # --- Announcements ---
-ANNOUNCEMENT_BLACKLIST = os.getenv("ANNOUNCEMENT_BLACKLIST", "media_player.lg_webos_tv_un6955zuf_airplay").split(",")
+ANNOUNCEMENT_BLACKLIST = os.getenv("ANNOUNCEMENT_BLACKLIST", "").split(",")
 # Clean up whitespace
 ANNOUNCEMENT_BLACKLIST = [x.strip() for x in ANNOUNCEMENT_BLACKLIST if x.strip()]
 
