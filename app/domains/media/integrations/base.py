@@ -171,7 +171,9 @@ class VideoHelperMixin:
             search_results = await tool_web_search(f"{query} youtube")
             urls = re.findall(r'URL: (https?://[^\s]+)', search_results)
             for url in urls:
-                if any(x in url for x in ["/channel/", "/user/", "/@"]): continue
+                # [Fix]: Explicitly exclude channel/user pages to prevent yt-dlp hanging on playlists
+                if any(x in url for x in ["/channel/", "/user/", "/c/", "/@"]): 
+                    continue
                 if "youtube.com" in url or "youtu.be" in url: return url
             return None
         except Exception: return None

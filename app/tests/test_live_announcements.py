@@ -9,6 +9,7 @@ class AnnouncementsTests(BaseTest):
     def run(self):
         print("\n[AnnouncementsTests] Starting Live Tests...")
         self.test_text_announcement()
+        self.test_targeted_announcement()
         self.test_voice_intercom_upload()
         print("[AnnouncementsTests] Finished.\n")
 
@@ -18,7 +19,7 @@ class AnnouncementsTests(BaseTest):
         
         # We use the raw chat endpoint via safe_post
         payload = {
-            "model": "qwen3:14b", # or default
+            # "model": "qwen3:14b", # Rely on server default
             "messages": [{"role": "user", "content": query}],
             "stream": False
         }
@@ -55,6 +56,29 @@ class AnnouncementsTests(BaseTest):
                  self.log("Text Announcement", "PASS", f"Response indicates success: {resp_text}")
             else:
                  self.log("Text Announcement", "FAIL", f"No success confirmation found. Resp: {data}")
+
+    def test_targeted_announcement(self):
+        query = "Announce on Office TV Testing targeted announcement 📺"
+        print(f"Testing Query: '{query}'")
+        
+        # We need to simulate the chat endpoint
+        payload = {
+            "messages": [{"role": "user", "content": query}],
+            "user": "admin"
+        }
+        
+        resp_content, status = self.safe_post("/api/chat", payload, "Targeted Announcement")
+        
+        if status != 200:
+            self.log("Targeted Announcement", "FAIL", f"Status {status}")
+            return
+
+        # LLMs might return empty tool output or a confirmation
+        # We assume success if status is 200 and no error in response text
+        if "simulated" in str(resp_content).lower() or "error" in str(resp_content).lower():
+             self.log("Targeted Announcement", "FAIL", f"Response contained error/simulation: {resp_content}")
+        else:
+             self.log("Targeted Announcement", "PASS", f"Tool executed successfully via '{query}'")
 
     def test_voice_intercom_upload(self):
         print("Testing Intercom Audio Upload with Real MP3...")

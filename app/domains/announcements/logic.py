@@ -1,10 +1,7 @@
 # app/domains/announcements/logic.py
 import os
 import json
-import logging
 import asyncio
-import re
-from typing import List, Dict, Optional, Union
 
 from app.settings import log, GlobalResources, HA_URL, ANNOUNCEMENT_BLACKLIST, SERVER_URL
 from app.domains.media.devices import smart_resolve_entity, get_available_media_players
@@ -124,7 +121,6 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
         return {"status": "FAILURE", "message": "Could not find any devices to announce on."}
 
     # 3. Execution (Throttled & Filtered)
-    results = []
     
     # Semaphore to limit concurrent calls to HA to avoid 500 errors
     sem = asyncio.Semaphore(2)  # Adjust concurrency limit if needed
@@ -303,14 +299,16 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         else:
                              final_sound_url = f"{HA_URL.rstrip('/')}{matched_sound}"
 
-                        svc_data["media_content_id"] = final_sound_url
-                        svc_data["media_content_type"] = "music" # Reset for sound
-                        if "announce" in svc_data:
-                            svc_data["announce"] = True
+                        after_svc_data = {
+                            "media_content_id": final_sound_url,
+                            "media_content_type": "music"
+                        }
+                        if should_announce:
+                            after_svc_data["announce"] = True
                             
                         await execute_ha_service(
                              "media_player", "play_media", entity_id, user_creds,
-                             svc_data,
+                             after_svc_data,
                              GlobalResources.redis_client
                         )
                         # Wait for sound to finish before turning off?
@@ -319,7 +317,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
 
                     if did_turn_on:
                          if 'integration_instance' in locals() and integration_instance:
-                              log.info(f"Turning OFF via Integration Wrapper...")
+                              log.info("Turning OFF via Integration Wrapper...")
                               await integration_instance.turn_off(entity_id, user_creds, redis_client=GlobalResources.redis_client)
                          else:
                               await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)

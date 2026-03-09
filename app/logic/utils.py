@@ -1,17 +1,13 @@
 # app/logic/utils.py
 import json
-import time
 import re
 import requests
 import asyncio
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Union
 
 from app.settings import (
     log, run_blocking, get_user_creds,
-    OLLAMA_URL, HA_URL, NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS,
-    WHOOGLE_URL, OPENAI_MODEL, DEFAULT_MODEL, OLLAMA_TIMEOUT, OLLAMA_RETRY,
-    GlobalResources, openai_client, EMB_MODEL, CHAT_HISTORY_TTL,
+    OLLAMA_URL, HA_URL, OPENAI_MODEL, DEFAULT_MODEL, OLLAMA_TIMEOUT, OLLAMA_RETRY,
+    GlobalResources, openai_client, CHAT_HISTORY_TTL,
     MAX_HISTORY_TURNS
 )
 

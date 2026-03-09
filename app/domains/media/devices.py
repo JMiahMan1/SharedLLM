@@ -513,51 +513,9 @@ async def resolve_multiple_entities_with_pattern(
                 return [(entity_id, integration, metadata)]
         return []
 
-    # Prioritize Music Assistant entities if multiple are active
-    ma_players = []
-    other_players = []
-
-    try:
-        log.info(f"Scan: Checking {len(entities)} players for active state.")
-        for entity in entities:
-             state = entity.get("state")
-             eid = entity.get("entity_id")
-             # Log potentially active devices to debug state mismatches
-             if state in ["playing", "buffering", "paused"]:
-                 log.info(f"Scan: Inspecting {eid} (State: {state})")
-
-             if state == "playing":
-                  # Check for MA attributes
-                  attrs = entity.get("attributes") or {}
-
-                  # DEBUG LOG
-                  aid = attrs.get("app_id")
-                  mass_type = attrs.get("mass_player_type")
-
-                  if aid == "music_assistant" or mass_type:
-                       log.info(f"Scan: MATCH MA Player {eid} (app_id={aid})")
-                       ma_players.append(eid)
-                  else:
-                       log.info(f"Scan: MATCH Generic Player {eid} (app_id={aid})")
-                       other_players.append(eid)
-    except Exception as e:
-        log.error(f"Error in scan_for_active_players: {e}")
-        # Fallback to simple scan if complex one fails
-        for entity in entities:
-            if entity.get("state") == "playing":
-                return entity.get("entity_id")
-
-    # Return MA player if exists, else first other player
-    if ma_players:
-         return ma_players[0]
-    if other_players:
-         return other_players[0]
-
-    return None
-
-    log.info(f"[PATTERN] Detected patterns: {[p[0] for p in detected_patterns]}")
-
     # Pattern detected - get all candidates and filter
+    log.info(f"[PATTERN] Detected patterns: {[p[0] for p in detected_patterns]}")
+    
     docs = await run_blocking(lambda: safe_similarity_search(ha_collection, query, k=50))
     if not docs:
         return []
