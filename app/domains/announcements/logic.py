@@ -242,6 +242,14 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         did_turn_on = True
                         await asyncio.sleep(4)
 
+                # 3.5 [VOLUME CONTROL]
+                # Ensure the device is audible (User reported silent announcement)
+                try:
+                    log.info(f"Setting volume for {entity_id} to 0.6 before announcement")
+                    await execute_ha_service("media_player", "volume_set", entity_id, user_creds, {"volume_level": 0.6}, GlobalResources.redis_client)
+                except Exception as ve:
+                    log.warning(f"Failed to set volume for {entity_id}: {ve}")
+
                 # 4. Sound Before
                 if matched_sound:
                     log.info(f"Playing sound {matched_sound} on {entity_id}")
