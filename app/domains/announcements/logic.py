@@ -2,6 +2,7 @@
 import os
 import json
 import asyncio
+import re
 
 from app.settings import log, GlobalResources, HA_URL, ANNOUNCEMENT_BLACKLIST, SERVER_URL
 from app.domains.media.devices import smart_resolve_entity, get_available_media_players
@@ -52,6 +53,15 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
             
     # Remove leading punctuation causing "An ounce" issues if partially stripped
     clean_message = clean_message.lstrip(' :,-')
+    
+    # 1.5. If target is in the message, strip it too to avoid the TTS saying "on the Office TV"
+    if target and target.lower() in clean_message.lower():
+        # Remove "on the [target]", "to the [target]", etc.
+        clean_message = re.sub(rf"\b(on|to|in|at)\s+(the\s+)?{re.escape(target.lower())}\b", "", clean_message, flags=re.IGNORECASE)
+        # Also strip just the target name
+        clean_message = clean_message.replace(target, "").replace(target.lower(), "").strip()
+        # Clean up double spaces
+        clean_message = re.sub(r'\s+', ' ', clean_message).strip()
 
     # 1b. Extract Emojis & Keyword Sounds
     emojis_found = []
@@ -247,6 +257,9 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 if (did_turn_on or sibling_turned_on) and should_announce:
                     log.info(f"Disabling 'announce' flag for {entity_id} because it was just powered on.")
                     should_announce = False
+                    # [Fix: Audibility] Give the Cast device 5s to settle after waking before playing
+                    log.info(f"Giving {entity_id} 5s to settle after waking...")
+                    await asyncio.sleep(5)
 
                 # 3.5 [VOLUME CONTROL]
                 # Ensure the device is audible (User reported silent announcement)
