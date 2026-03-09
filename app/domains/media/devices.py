@@ -606,6 +606,11 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
         score -= 200
         log.info(f"[Scoring] Penalizing {eid} for state {state} (-200)")
 
+    # [CUSTOM PRIORITY] Highly favor the active Office Speaker for reliability
+    if eid == "media_player.office_speaker":
+        score += 100
+        log.info(f"[Scoring] Boosting {eid} priority (+100)")
+
     # 1. BASELINE PREFERENCE (Hardware vs Software)
     # Prefer Hardware TVs (Roku, Android TV, Apple TV, WebOS, Samsung) over Cast/DLNA for most things
     HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "samsungtv", "apple_tv", "braviatv", "firetv", "tv"]
