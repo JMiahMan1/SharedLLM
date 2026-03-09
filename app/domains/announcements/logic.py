@@ -264,7 +264,49 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                             log.info(f"Device {entity_id} is now {st}. Ready for announcement.")
                             break
                     else:
-                        log.warning(f"Device {entity_id} still {current_state} after 30s. Proceeding anyway...")
+                        log.warning(f"Device {entity_id} still {current_state} after 30s. Attempting Family Fallback...")
+                        try:
+                            from app.domains.media.devices import find_group_sibling
+                            
+                            # Find a sibling that is ONLINE and can play media
+                            # Check live state for candidates
+                            async def is_ready_sibling(meta):
+                                sid = meta.get("entity_id")
+                                # Skip self and already checked siblings
+                                if sid == entity_id: return False
+                                
+                                # Check live state
+                                s_state = await get_entity_state(sid, user_creds)
+                                return s_state not in ["unavailable", "unknown", "off"]
+
+                            # We can't pass async to find_group_sibling, so we'll fetch then filter
+                            fb_res = await find_group_sibling(entity_id, lambda m: True, return_meta=True)
+                            if fb_res:
+                                # fetch all siblings and check states
+                                sid, smeta = fb_res
+                                group_id = smeta.get("group_id")
+                                if group_id:
+                                    docs = GlobalResources.ha_collection._collection.get(where={"group_id": group_id}, include=["metadatas"])
+                                    if docs and docs.get("metadatas"):
+                                        for m in docs["metadatas"]:
+                                            sid = m.get("entity_id")
+                                            if sid == entity_id: continue
+                                            
+                                            s_state = await get_entity_state(sid, user_creds)
+                                            if s_state not in ["unavailable", "unknown", "off"]:
+                                                # Verify it has play_media
+                                                s_caps = await get_device_capabilities(sid, user_creds, GlobalResources.redis_client)
+                                                if s_caps.get("has_play_media"):
+                                                    log.info(f"[Family Fallback] Diverting announcement: {entity_id} -> {sid} (State: {s_state})")
+                                                    entity_id = sid
+                                                    current_state = s_state
+                                                    caps = s_caps
+                                                    features = caps.get("supported_features", 0)
+                                                    supports_announce = bool(features & 1048576)
+                                                    should_announce = supports_announce
+                                                    break
+                        except Exception as fb_err:
+                            log.error(f"Family Fallback error: {fb_err}")
 
                 # 3.5 [VOLUME CONTROL]
                 # Ensure the device is audible (User reported silent announcement)
