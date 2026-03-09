@@ -180,6 +180,7 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
             # Initialization
             sibling_turned_on = None  # (sib_id, sib_orig_state, sib_meta)
             did_turn_on = False
+            did_turn_on_office_tv = False # Initialized for Special Duo Mode
             integration_instance = None
             should_announce = False
             
@@ -194,6 +195,25 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                 log.info(f"Smart Announce for {entity_id}: state={current_state}, supports_announce={supports_announce} -> announce={should_announce}")
 
                 # 2. [GROUP-AWARE POWER MANAGEMENT]
+                if entity_id == "media_player.office_speaker":
+                    # Special Case: Office Speaker doesn't control the TV power automatically
+                    # We manually wake the TV for visual presence if it's off
+                    tv_id = "media_player.office_tv"
+                    tv_state = await get_entity_state(tv_id, user_creds)
+                    if tv_state in ["off", "standby", "idle"]:
+                        log.info(f"[Office Special] Waking Office TV ({tv_id}) for visual presence during speaker announcement...")
+                        # We use the remote sibling logic already built or direct turn_on
+                        # But to keep it simple and reuse existing restoration logic, we'll mimic the sibling structure
+                        from app.domains.media.devices import find_group_sibling
+                        remote_sib = await find_group_sibling(tv_id, lambda m: m.get("domain") == "remote", return_meta=True)
+                        if remote_sib:
+                            rsid, rmeta = remote_sib
+                            await execute_ha_service("remote", "turn_on", rsid, user_creds, {}, GlobalResources.redis_client)
+                            sibling_turned_on = (rsid, tv_state, rmeta) # This ensures it turns OFF later
+                        else:
+                            await execute_ha_service("media_player", "turn_on", tv_id, user_creds, {}, GlobalResources.redis_client)
+                            did_turn_on_office_tv = True # Need to handle this in finally
+
                 if current_state in ["unavailable", "unknown"]:
                     from app.domains.media.devices import find_group_sibling
                     log.info(f"Device {entity_id} is {current_state}. Attempting group-aware power sync...")
@@ -366,6 +386,12 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                     try:
                         if integration_instance: await integration_instance.turn_off(entity_id, user_creds, redis_client=GlobalResources.redis_client)
                         else: await execute_ha_service("media_player", "turn_off", entity_id, user_creds, {}, GlobalResources.redis_client)
+                    except: pass
+                
+                if did_turn_on_office_tv:
+                    log.info(f"[Office Special] Restoring Office TV to OFF")
+                    try:
+                        await execute_ha_service("media_player", "turn_off", "media_player.office_tv", user_creds, {}, GlobalResources.redis_client)
                     except: pass
                 
                 if sibling_turned_on:
