@@ -252,14 +252,18 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
                         did_turn_on = True
                         await asyncio.sleep(4)
 
-                # [Fix: Audibility] If we just turned on the device, 'announce' flag might not be needed
-                # and can sometimes cause silence on Cast devices if not already playing.
-                if (did_turn_on or sibling_turned_on) and should_announce:
-                    log.info(f"Disabling 'announce' flag for {entity_id} because it was just powered on.")
-                    should_announce = False
-                    # [Fix: Audibility] Give the Cast device 5s to settle after waking before playing
-                    log.info(f"Giving {entity_id} 5s to settle after waking...")
-                    await asyncio.sleep(5)
+                # [Fix: Audibility] Re-enable 'announce' flag as requested by user.
+                # Silence was likely due to device not being "ready" to stream.
+                if (did_turn_on or sibling_turned_on):
+                    log.info(f"Device just woke up. Polling {entity_id} for readiness (max 10s)...")
+                    for _ in range(5):
+                        await asyncio.sleep(2)
+                        st = await get_entity_state(entity_id, user_creds)
+                        if st not in ["unavailable", "unknown", "off"]:
+                            log.info(f"Device {entity_id} is now {st}. Ready for announcement.")
+                            break
+                    else:
+                        log.warning(f"Device {entity_id} still {current_state} after 10s. Proceeding anyway...")
 
                 # 3.5 [VOLUME CONTROL]
                 # Ensure the device is audible (User reported silent announcement)
