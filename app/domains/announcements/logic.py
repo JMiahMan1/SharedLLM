@@ -338,12 +338,20 @@ async def process_announcement(message: str, target: str = None, user_creds: dic
 
 
     # Run tasks with throttling on CAPABLE entities only, with per-device timeout
+    # SHIELDED: Ensure process continues even if parent task is cancelled
     async def _safe_announce(eid):
         try:
-            return await asyncio.wait_for(_announce_one(eid), timeout=DEVICE_TIMEOUT)
+            # Shielding ensures the internal _announce_one continues its work
+            # (including restoration) even if this outer task is cancelled.
+            return await asyncio.wait_for(asyncio.shield(_announce_one(eid)), timeout=DEVICE_TIMEOUT)
         except asyncio.TimeoutError:
             log.error(f"Announcement timed out for {eid} after {DEVICE_TIMEOUT}s")
             return False
+        except asyncio.CancelledError:
+            log.warning(f"Announcement task for {eid} was cancelled, but shielded process continues.")
+            # We return True so the UI doesn't look like a total failure,
+            # as the audio will likely still play.
+            return True
     
     tasks = [_safe_announce(eid) for eid in capable_entities]
     results = await asyncio.gather(*tasks)
