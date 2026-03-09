@@ -606,12 +606,20 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
         score -= 200
         log.info(f"[Scoring] Penalizing {eid} for state {state} (-200)")
 
-    # [CUSTOM ROUTING] Hardware Reality Alignment
-    # 1. Office Speaker (MASS) is a high-capability audio target.
-    if eid == "media_player.office_speaker":
-        score += 150
-        log.info(f"[Scoring] Boosting {eid} for Office audio (+150)")
+    # 0.5 CAPABILITY-BASED SCORING (No Hardcoding)
+    # Heavily favor entities that actually support the requested intent
+    if intent == "play_media":
+        if caps_set.intersection({"play_media", "browse_media", "announce"}):
+            score += 100
+            log.info(f"[Scoring] Boosting {eid} for Audio Capability (+100)")
+        else:
+            score -= 300
+            log.info(f"[Scoring] Penalizing {eid} for lack of Audio Capability (-300)")
 
+    if intent in ["turn_on", "turn_off", "toggle"]:
+        if caps_set.intersection({"turn_on", "turn_off"}):
+            score += 50
+    
     # 1. BASELINE PREFERENCE (Hardware vs Software)
     # Prefer Hardware TVs (Roku, Android TV, Apple TV, WebOS, Samsung) over Cast/DLNA for most things
     HW_TV_INTEGRATIONS = ["roku", "androidtv", "webostv", "samsungtv", "apple_tv", "braviatv", "firetv", "tv"]
