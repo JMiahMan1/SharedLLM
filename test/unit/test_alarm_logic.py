@@ -12,12 +12,12 @@ sys.modules['pydantic'] = MagicMock()
 sys.modules['uvicorn'] = MagicMock()
 sys.modules['dateparser'] = MagicMock()
 
-# Add app to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../app')))
+# Add project root to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from logic.alarm_audio import audio_manager
-from logic.media_ops import smart_resolve_entity, handle_media_command
-from settings import GlobalResources
+from app.logic.alarm_audio import audio_manager
+from app.logic.media_ops import smart_resolve_entity, handle_media_command
+from app.settings import GlobalResources
 
 class MockRedis:
     def __init__(self):
@@ -35,9 +35,9 @@ async def test_alarm_logic():
     GlobalResources.redis_client = mock_redis
     
     # Mocking media_ops helpers
-    with patch('logic.alarm_audio.get_active_media_players', return_value=[]), \
-         patch('logic.alarm_audio.get_available_media_players', return_value=['media_player.kitchen', 'media_player.bedroom']), \
-         patch('logic.alarm_audio.execute_ha_service') as mock_exec:
+    with patch('app.logic.alarm_audio.get_active_media_players', return_value=[]), \
+         patch('app.logic.alarm_audio.get_available_media_players', return_value=['media_player.kitchen', 'media_player.bedroom']), \
+         patch('app.logic.alarm_audio.execute_ha_service') as mock_exec:
         
         mock_exec.return_value = {"status": "SUCCESS"}
 
@@ -94,8 +94,8 @@ async def test_alarm_logic():
     # We can't easily run the complex async logic of smart_resolve without more heavy mocking of 'run_blocking' and 'safe_similarity_search'
     # So we'll test handle_media_command logic for "turn_on"
     
-    with patch('logic.media_ops.get_entity_state', return_value="off"), \
-         patch('logic.media_ops.execute_ha_service', return_value={"status": "SUCCESS"}) as mock_ha:
+    with patch('app.logic.media_ops.get_entity_state', return_value="off"), \
+         patch('app.logic.media_ops.execute_ha_service', return_value={"status": "SUCCESS"}) as mock_ha:
              
          print("3. Testing Turn On TV Logic")
          # Case: "Turn on Living Room TV" -> Should map to media_player, NOT remote (unless nav)
