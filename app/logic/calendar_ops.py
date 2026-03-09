@@ -334,6 +334,9 @@ async def tool_calendar_delete(query: str, user_creds: Dict[str, str], model: st
                         # --- FILTER 2: NAME CHECK ---
                         if keyword:
                             matched_name = False
+                            original_keyword = keyword
+                            cleaned_keyword = re.sub(r"\b(appointment|meeting|event|session)\b", "", keyword, flags=re.IGNORECASE).strip()
+                            
                             # Broaden matching: split keywords and check if any significant word matches
                             kw_parts = [p for p in re.split(r'\s+', cleaned_keyword.lower()) if len(p) > 3]
                             if not kw_parts: kw_parts = [cleaned_keyword.lower()]
