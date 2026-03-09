@@ -235,15 +235,40 @@ async def get_ha_context(user, query=None):
         log.error(f"HA Context Error: {e}")
     return ""
 
-async def get_rag_context(query):
+async def extract_search_query(query: str, model: str = DEFAULT_MODEL) -> str:
+    """Extracts the core question from a large user prompt (e.g. PDF upload) for RAG search."""
+    # Ensure it's not impossibly large for Ollama context window
+    truncated_query = query[:8000]
+    prompt = f"Extract only the core question from this user prompt to be used for a semantic database search. Ignore any pasted text, code, or document context. Return ONLY the short search query (MAX 10 words). If there is no clear question, summarize the topic in 3-5 words.\n\nPrompt: {truncated_query}\n\nSearch Query:"
+    
+    try:
+        r = await call_ollama_generate(prompt, model)
+        result = clean_llm_output(r.get("text", ""), is_voice=False).strip()
+        if result:
+            return result
+    except Exception as e:
+        log.warning(f"Failed to extract search query: {e}")
+    # Fallback: Just return a chunk of the original query
+    return query[:300]
+
+
+async def get_rag_context(query, model: str = DEFAULT_MODEL):
     """
     Retrieves context ONLY from Nextcloud/Documents collection.
     Does NOT search HA Devices.
+    If the query is very large (e.g., pasted PDF/Code), it extracts the core question first.
     """
     if not GlobalResources.nextcloud_collection: return ""
+    
+    search_query = query
+    if len(query) > 500:
+        log.info(f"Query is unusually large ({len(query)} chars). Extracting core search question...")
+        search_query = await extract_search_query(query, model)
+        log.info(f"Extracted Search Query: '{search_query}'")
+
     try:
         # STRICT SEPARATION: Only query 'nextcloud_collection'
-        docs = await run_blocking(lambda: safe_similarity_search(GlobalResources.nextcloud_collection, query, k=3))
+        docs = await run_blocking(lambda: safe_similarity_search(GlobalResources.nextcloud_collection, search_query, k=3))
         
         # Add source metadata to context so LLM knows where it came from
         context_lines = []

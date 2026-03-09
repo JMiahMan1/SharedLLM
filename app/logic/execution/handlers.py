@@ -435,6 +435,106 @@ async def handle_note_check_off(query: str, params: dict = None, **kwargs):
     return {"status": "SUCCESS" if not isinstance(res, dict) or res.get("status") == "success" else "FAILURE", "message": str(res), "service": "note_check_off"}
 
 # --- SEARCH & MISC ---
+@ActionDispatcher.register("document_index")
+async def handle_document_index(query: str, user_creds: dict, model: str, **kwargs) -> dict:
+    import json
+    import time
+    from datetime import datetime
+    import urllib.parse
+    import subprocess
+    import requests
+    import os
+    import re
+    from app.logic.utils import call_ollama_generate, clean_llm_output
+    from app.settings import log, NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS, run_blocking
+
+    if not (NEXTCLOUD_URL and NEXTCLOUD_USER and NEXTCLOUD_PASS):
+        return {"status": "FAILURE", "message": "Nextcloud credentials missing", "service": "document_index"}
+
+    # 1. Ask LLM to extract the document content and suggest a filename
+    extraction_prompt = f"""
+    You are an assistant extracting a document or code snippet to be saved to a file.
+    The user's query contains an instruction to save or index something, along with the actual content.
+    Extract ONLY the content to be saved. Also, suggest a concise, valid filename (without extension).
+    
+    Output your response as a JSON object with two keys:
+    "filename": (string) Suggested filename
+    "content": (string) The exact content or code to be saved.
+    
+    User Query: {query}
+    """
+    try:
+        r = await call_ollama_generate(extraction_prompt, model)
+        text = clean_llm_output(r.get("text", ""), is_voice=False).strip()
+        text = text.strip("`").strip()
+        if text.startswith("json\n"):
+            text = text[5:].strip()
+            
+        # Try to find JSON block if LLM added conversational text
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            text = match.group(0)
+            
+        parsed = json.loads(text)
+        filename_base = parsed.get("filename", f"Document_Upload_{int(time.time())}").replace(" ", "_").replace("/", "-")
+        content = parsed.get("content", "")
+    except Exception as e:
+        log.warning(f"Failed to use LLM for document extraction: {e}")
+        filename_base = f"Appended_Document_{int(time.time())}"
+        content = query
+
+    if not content:
+        return {"status": "FAILURE", "message": "Could not identify content to index.", "service": "document_index"}
+
+    # 2. Upload to NextCloud AI_Uploads directory
+    AI_UPLOADS_DIR = "AI_Uploads"
+    base_url = f"{NEXTCLOUD_URL.rstrip('/')}/remote.php/dav/files/{NEXTCLOUD_USER}/{AI_UPLOADS_DIR}"
+    
+    def _ensure_dir():
+        try:
+            resp = requests.request("PROPFIND", base_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), verify=False)
+            if resp.status_code == 404:
+                requests.request("MKCOL", base_url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), verify=False)
+        except: pass
+    
+    await run_blocking(_ensure_dir)
+
+    filename = f"{filename_base}.md"
+    url = f"{base_url}/{urllib.parse.quote(filename)}"
+
+    # Prepend metadata
+    full_content = f"# {filename_base}\nSaved via AI interaction: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n{content}"
+
+    def _write_file():
+        return requests.put(url, data=full_content.encode('utf-8'), auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), verify=False)
+
+    try:
+        resp = await run_blocking(_write_file)
+        if resp.status_code not in [200, 201, 204]:
+            return {"status": "FAILURE", "message": f"WebDAV upload failed with status {resp.status_code}", "service": "document_index"}
+    except Exception as e:
+        return {"status": "FAILURE", "message": f"WebDAV error: {e}", "service": "document_index"}
+
+    # 3. Trigger ingest_nextcloud.py for this specific file
+    rel_path = f"{AI_UPLOADS_DIR}/{filename}"
+    log.info(f"Triggering NextCloud ingest for new document: {rel_path}")
+    
+    def _run_ingest():
+        try:
+            # Determine path to ingest script based on environment (Docker vs Local)
+            ingest_script = "/app/ingest_nextcloud.py" if os.path.exists("/app/ingest_nextcloud.py") else "app/ingest_nextcloud.py"
+            subprocess.Popen(["python3", ingest_script, "--path", rel_path])
+        except Exception as e:
+            log.error(f"Failed to trigger ingest: {e}")
+
+    await run_blocking(_run_ingest)
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Saved and indexed '{filename}' to NextCloud.",
+        "service": "document_index"
+    }
+
 @ActionDispatcher.register("web_search")
 async def handle_web_search(query: str, user_creds: dict = None, model: str = None, **kwargs):
     log.info(f"Executing Tool: web_search for query: {query}")
