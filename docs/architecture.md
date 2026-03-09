@@ -169,8 +169,12 @@ State Architecture**:
 
 * **Unified RAG**: Retrieval Augmented Generation for non-command queries.
   Indexes docs from Nextcloud and entity state from HA.
-  * **Large Context Extraction**: Automatically extracts the core question from large pasted text blocks (e.g. PDFs or code snippets) before running the RAG vector search, preventing ChromaDB context limit errors.
-  * **Document Ingestion (`document_index`)**: Users can prompt the AI to save text snippets or documents directly into NextCloud (`AI_Uploads` directory) which triggers an immediate re-index into the RAG database.
+  * **Large Context Extraction**: Automatically extracts the core question from
+    large pasted text blocks (e.g. PDFs or code snippets) before running the
+    RAG vector search, preventing ChromaDB context limit errors.
+  * **Document Ingestion (`document_index`)**: Users can prompt the AI to save
+    text snippets or documents directly into NextCloud (`AI_Uploads` directory)
+    which triggers an immediate re-index into the RAG database.
 * **DeviceDB**: A specialized ChromaDB collection that stores "Device
   Documents". Defines `group_id`, `integration`, and `capabilities` for every
   smart device, enabling sophisticated group-aware logic (e.g.,

@@ -138,8 +138,10 @@ requirements.txt
 - **Calendar**: Create, List, Update, and Delete events.
 - **Notes**: Create, Read, Append (with checkboxes), Update, and Delete.
 - **List Management**: "Check off" items in notes via `note_check_off`.
-- **Document Indexing**: Save text snippets or PDF contents directly into Nextcloud AI Uploads directory via chat (`document_index`).
-- **Large RAG Queries**: Automatically extracts intent from massive copy/pasted text blocks to perform RAG without blowing up the context window.
+- **Document Indexing**: Save text snippets or PDF contents directly into
+  Nextcloud AI Uploads directory via chat (`document_index`).
+- **Large RAG Queries**: Automatically extracts intent from massive copy/pasted
+  text blocks to perform RAG without blowing up the context window.
 
 ### ✅ Documentation & Testing
 
