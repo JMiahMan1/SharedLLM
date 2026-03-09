@@ -8,12 +8,11 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../app')))
 
 # Mock Settings and GlobalResources
-mock_settings = MagicMock()
-mock_settings.get_user_creds = lambda x: {}
-sys.modules['settings'] = mock_settings
+# Removed sys.modules hack
 
 # Mock Media Ops Imports
-import logic.media_ops as media_ops
+import app.domains.media.devices as media_devices
+from app.logic.media_ops import smart_resolve_entity
 
 # Mock capabilities function
 async def mock_get_caps(eid, creds, client):
@@ -31,8 +30,7 @@ async def mock_get_caps(eid, creds, client):
         }
     return {}
 
-media_ops.get_device_capabilities = AsyncMock(side_effect=mock_get_caps)
-media_ops.GlobalResources = MagicMock()
+media_devices.get_device_capabilities = AsyncMock(side_effect=mock_get_caps)
 
 @pytest.mark.asyncio
 async def test_capability_routing_priority():
@@ -45,7 +43,7 @@ async def test_capability_routing_priority():
     # Intent: Turn Off
     # Expected: Office TV (Android) wins over Chrome
     
-    selected = await media_ops.smart_resolve_entity(
+    selected = await smart_resolve_entity(
         "Office TV", 
         "turn_off", 
         None # Collection mock not needed since we mock candidates logic?
@@ -57,25 +55,32 @@ async def test_capability_routing_priority():
     # So I have to Mock the Vector Search to return these candidates.
     pass
 
-# To make this testable, I need to Mock the `similarity_search` of the collection passed in.
+from unittest.mock import patch
+
+@pytest.mark.asyncio
 async def test_full_flow():
     mock_collection = MagicMock()
     mock_collection.similarity_search_with_score = MagicMock(return_value=[
-        (MagicMock(metadata={"entity_id": "media_player.office_tv_chrome", "integration": "unknown"}), 0.9),
-        (MagicMock(metadata={"entity_id": "media_player.office_tv", "integration": "unknown"}), 0.85)
+        (MagicMock(metadata={"entity_id": "media_player.office_tv_chrome", "integration": "cast", "friendly_name": "Office TV Chrome"}), 0.9),
+        (MagicMock(metadata={"entity_id": "media_player.office_tv", "integration": "androidtv", "friendly_name": "Office TV"}), 0.85)
     ])
     
     # Make the synchronous run_blocking mock execute the lambda
     async def mock_run_blocking(func, *args):
         return func(*args)
-    mock_settings.run_blocking = AsyncMock(side_effect=mock_run_blocking)
-    
-    # Run
-    eid, integ = await media_ops.smart_resolve_entity("Office TV", "turn_off", mock_collection)
+        
+    with patch('app.settings.run_blocking', new_callable=AsyncMock) as mock_run, \
+         patch('app.settings.GlobalResources') as mock_global:
+        mock_run.side_effect = mock_run_blocking
+        mock_global.ha_collection = mock_collection
+        
+        # Run
+        eid, integ, _ = await smart_resolve_entity("Office TV", "turn_off", mock_collection)
     
     print(f"Selected: {eid}, {integ}")
+    # androidtv scores 80 for turn_off, cast scores -50
     assert eid == "media_player.office_tv"
-    assert integ == "androidtv" # It should return the enriched integration
+    assert integ == "androidtv"
 
 if __name__ == "__main__":
     # verification script style

@@ -7,7 +7,8 @@ import json
 # Adjust path to import app modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../app')))
 
-from logic.media_ops import get_device_capabilities, handle_media_command
+from app.domains.media.devices import get_device_capabilities
+from app.domains.lighting.commands import handle_light_command
 
 class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
 
@@ -28,8 +29,8 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
             }
         }
         
-        with patch('logic.media_ops.HA_URL', 'http://test'), \
-             patch('logic.media_ops.run_blocking', new_callable=AsyncMock) as mock_run:
+        with patch('app.domains.media.devices.HA_URL', 'http://test'), \
+             patch('app.domains.media.devices.run_blocking', new_callable=AsyncMock) as mock_run:
             
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -65,8 +66,8 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
             }
         }
         
-        with patch('logic.media_ops.HA_URL', 'http://test'), \
-             patch('logic.media_ops.run_blocking', new_callable=AsyncMock) as mock_run:
+        with patch('app.domains.media.devices.HA_URL', 'http://test'), \
+             patch('app.domains.media.devices.run_blocking', new_callable=AsyncMock) as mock_run:
             
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -94,8 +95,8 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
             }
         }
         
-        with patch('logic.media_ops.HA_URL', 'http://test'), \
-             patch('logic.media_ops.run_blocking', new_callable=AsyncMock) as mock_run:
+        with patch('app.domains.media.devices.HA_URL', 'http://test'), \
+             patch('app.domains.media.devices.run_blocking', new_callable=AsyncMock) as mock_run:
             
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -122,8 +123,8 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
             }
         }
         
-        with patch('logic.media_ops.HA_URL', 'http://test'), \
-             patch('logic.media_ops.run_blocking', new_callable=AsyncMock) as mock_run:
+        with patch('app.domains.media.devices.HA_URL', 'http://test'), \
+             patch('app.domains.media.devices.run_blocking', new_callable=AsyncMock) as mock_run:
             
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -152,8 +153,8 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
         })
         mock_redis.get.return_value = cached_data.encode('utf-8')
         
-        with patch('logic.media_ops.HA_URL', 'http://test'), \
-             patch('logic.media_ops.run_blocking', new_callable=AsyncMock) as mock_run:
+        with patch('app.domains.media.devices.HA_URL', 'http://test'), \
+             patch('app.domains.media.devices.run_blocking', new_callable=AsyncMock) as mock_run:
             
             caps = await get_device_capabilities("light.cached", user_creds, mock_redis)
             
@@ -171,7 +172,7 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
         entity_id = "light.simple"
         
         # Mock capabilities response (brightness only)
-        with patch('logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.domains.media.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             mock_caps.return_value = {
                 "domain": "light",
                 "has_brightness": True,
@@ -180,12 +181,11 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
                 "friendly_name": "Simple Bulb"
             }
             
-            result_list = await handle_media_command(
+            result_list = await handle_light_command(
                 intent="set_color",
                 query="set simple bulb to blue",
                 entity_id=entity_id,
                 user_creds=user_creds,
-                ha_collection=None,
                 redis_client=mock_redis
             )
             
@@ -201,19 +201,18 @@ class TestCapabilityDetection(unittest.IsolatedAsyncioTestCase):
         mock_redis = None
         entity_id = "light.on_off_only"
         
-        with patch('logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.domains.media.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             mock_caps.return_value = {
                 "domain": "light",
                 "has_brightness": False,
                 "friendly_name": "On/Off Light"
             }
             
-            result_list = await handle_media_command(
+            result_list = await handle_light_command(
                 intent="set_brightness",
                 query="set on/off light to 50%",
                 entity_id=entity_id,
                 user_creds=user_creds,
-                ha_collection=None,
                 redis_client=mock_redis
             )
     

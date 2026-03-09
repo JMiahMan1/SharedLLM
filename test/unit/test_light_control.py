@@ -6,8 +6,8 @@ import os
 # Adjust path to import app modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from app.logic.media_ops import handle_media_command
-from app.logic.light_ops import COLOR_MAP
+from app.domains.lighting.commands import handle_light_command
+from app.domains.lighting.commands import COLOR_MAP
 
 class TestLightControl(unittest.IsolatedAsyncioTestCase):
 
@@ -20,17 +20,16 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         # Mock entity resolution (entity_id passed directly for simplicity)
         entity_id = "light.piano_lamp"
         
-        with patch('app.logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
-             patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.domains.shared.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
+             patch('app.domains.media.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             mock_exec.return_value = {"status": "SUCCESS", "message": "Color set"}
             mock_caps.return_value = {"domain": "light", "has_brightness": True, "has_color": True, "color_modes": ["rgb"], "friendly_name": "Piano Lamp"}
             
-            result_list = await handle_media_command(
+            result_list = await handle_light_command(
                 intent="set_color",
                 query="set piano lamp to red",
                 entity_id=entity_id,
                 user_creds=user_creds,
-                ha_collection=mock_collection,
                 redis_client=mock_redis
             )
             
@@ -51,17 +50,16 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         user_creds = {"user": "test", "ha_token": "fake"}
         entity_id = "light.piano_lamp"
         
-        with patch('app.logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
-             patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.domains.shared.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
+             patch('app.domains.media.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             mock_exec.return_value = {"status": "SUCCESS"}
             mock_caps.return_value = {"domain": "light", "has_brightness": True, "has_color": True, "friendly_name": "Piano Lamp"}
     
-            result_list = await handle_media_command(
+            result_list = await handle_light_command(
                 intent="set_brightness",
                 query="set piano lamp to 50%",
                 entity_id=entity_id,
                 user_creds=user_creds,
-                ha_collection=mock_collection,
                 redis_client=mock_redis
             )
             
@@ -80,27 +78,26 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         user_creds = {"user": "test", "ha_token": "fake"}
         entity_id = "light.piano_lamp"
         
-        with patch('app.logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec:
+        with patch('app.domains.shared.execute_ha_service', new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = {"status": "SUCCESS"}
-            with patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+            with patch('app.domains.media.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
                 mock_caps.return_value = {"domain": "light", "has_brightness": True, "has_color": True, "friendly_name": "Piano Lamp"}
     
-                result_list = await handle_media_command(
+                result_list = await handle_light_command(
                     intent="dim",
                     query="dim the piano lamp",
                     entity_id=entity_id,
                     user_creds=user_creds,
-                    ha_collection=mock_collection,
                     redis_client=mock_redis
                 )
                 
                 result = result_list[0] if isinstance(result_list, list) else result_list
     
-                # Verify dim sets brightness to 70 (~30%)
+                # Verify dim sets brightness to ~20% (51/255)
                 call_args = mock_exec.call_args
                 service_data = call_args[0][4]
                 brightness = service_data["brightness"]
-                self.assertEqual(brightness, 70)
+                self.assertEqual(brightness, 51)
 
     async def test_brighten_command(self):
         """Test: 'Brighten the lights' should set brightness to max (255)."""
@@ -109,18 +106,17 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         user_creds = {"user": "test", "ha_token": "fake"}
         entity_id = "light.piano_lamp"
         
-        with patch('app.logic.media_ops.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
-             patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.domains.shared.execute_ha_service', new_callable=AsyncMock) as mock_exec, \
+             patch('app.domains.media.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             
             mock_exec.return_value = {"status": "SUCCESS"}
             mock_caps.return_value = {"domain": "light", "has_brightness": True, "has_color": True, "color_modes": ["rgb"], "friendly_name": "Piano Lamp"}
 
-            result_list = await handle_media_command(
+            result_list = await handle_light_command(
                 intent="brighten",
                 query="brighten the piano lamp",
                 entity_id=entity_id,
                 user_creds=user_creds,
-                ha_collection=mock_collection,
                 redis_client=mock_redis
             )
             
@@ -142,15 +138,14 @@ class TestLightControl(unittest.IsolatedAsyncioTestCase):
         user_creds = {"user": "test", "ha_token": "fake"}
         entity_id = "switch.office_fan"  # Not a light
         
-        with patch('app.logic.media_ops.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
+        with patch('app.domains.media.get_device_capabilities', new_callable=AsyncMock) as mock_caps:
             mock_caps.return_value = {"domain": "switch", "friendly_name": "Office Fan"}
             
-            result_list = await handle_media_command(
+            result_list = await handle_light_command(
                 intent="set_color",
                 query="set office fan to red",
                 entity_id=entity_id,
                 user_creds=user_creds,
-                ha_collection=mock_collection,
                 redis_client=mock_redis
             )
             
