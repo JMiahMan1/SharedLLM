@@ -587,19 +587,33 @@ async def handle_announce(query: str, user_creds: dict, params: dict = None, **k
     # If no message in params, try to extract from query fallback (Fast Path support)
     if not message:
         import re
-        # Use re-export from logic to valid circular import issues
-        from app.logic.media_ops import smart_resolve_entity
         
-        # Strategy: Extract "on [Something...]" and use iterative resolution (Longest Prefix Match)
-        # matches "Announce on Office Speaker Dinner is ready" -> raw_target_msg="Office Speaker Dinner is ready"
-        match = re.search(r"\b(?:announce|tell|say)\s+(?:that\s+)?on\s+(?:the\s+)?(?P<after_on>.+)", query, re.IGNORECASE)
+        # Fast Path parsing for common Voice Assistant phrasing
+        m1 = re.search(r"\b(?:announce|tell|say|broadcast)\s+(?:that\s+)?(.+?)\s+on\s+(?:the\s+)?(.+)", query, re.IGNORECASE)
+        m2 = re.search(r"\b(?:announce|tell|say|broadcast)\s+(?:that\s+)?on\s+(?:the\s+)?(.+?)\s+(?:that\s+)(.+)", query, re.IGNORECASE)
         
-        if match:
-             raw_text = match.group("after_on").strip()
-             words = raw_text.split()
-             
-             best_target = None
-             best_score = -1
+        extracted_message = None
+        extracted_target = None
+        
+        if m1:
+            extracted_message = m1.group(1).strip()
+            extracted_target = m1.group(2).strip()
+        elif m2:
+            extracted_target = m2.group(1).strip()
+            extracted_message = m2.group(2).strip()
+            
+        if extracted_message and extracted_target:
+            log.info(f"[ANNOUNCE FAST PATH] Extracted Message: '{extracted_message}', Target: '{extracted_target}'")
+            message = extracted_message
+            target = extracted_target
+        else:
+             # Legacy fallback (Try to resolve target from suffix if not strictly formatted)
+             match = re.search(r"\b(?:announce|tell|say)\s+(?:that\s+)?on\s+(?:the\s+)?(?P<after_on>.+)", query, re.IGNORECASE)
+             if match:
+                 raw_text = match.group("after_on").strip()
+                 words = raw_text.split()
+                 best_target = None
+                 best_score = -1
              best_target_len = 0
              
              # Iterate through word combinations (up to 6 words for target name)
