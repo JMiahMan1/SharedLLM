@@ -31,7 +31,10 @@ EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2
 COLLECTION_NAME = "home_assistant" 
 
 # API URL for reloading resources after ingestion
-API_RELOAD_URL = "http://localhost:11435/api/system/reload"
+# Use 127.0.0.1 explicitly — 'localhost' can fail inside docker exec on some hosts.
+# Timeout raised to 8s to account for ChromaDB reload time under load.
+API_RELOAD_URL = "http://127.0.0.1:11435/api/system/reload"
+API_RELOAD_TIMEOUT = 8
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -242,9 +245,13 @@ def ingest_ha_metadata(ha_url: str = None, ha_token: str = None):
             # This ensures the running API picks up the new database state immediately
             try:
                 logger.info("Triggering API resource reload...")
-                requests.post(API_RELOAD_URL, timeout=2)
-            except Exception:
-                logger.warning("Could not trigger API reload (API might be down or busy). Data is saved to disk though.")
+                resp = requests.post(API_RELOAD_URL, timeout=API_RELOAD_TIMEOUT)
+                if resp.status_code == 200:
+                    logger.info("API resource reload successful.")
+                else:
+                    logger.warning(f"API reload returned HTTP {resp.status_code}: {resp.text[:100]}")
+            except Exception as e:
+                logger.warning(f"Could not trigger API reload ({e}). Data is saved to disk though.")
                 
         except Exception as e:
             logger.critical(f"CRITICAL: Failed to add documents to Chroma: {e}")

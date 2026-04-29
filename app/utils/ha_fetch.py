@@ -41,14 +41,15 @@ def fetch_ha_data(ha_url: str = None, ha_token: str = None) -> Tuple[List[Dict[s
     logger.info(f"Connecting to Home Assistant at {_url}...")
     states = fetch_endpoint("states") or []
 
-    # Try standard endpoints first
-    device_registry_list = fetch_endpoint("config/device_registry/list") or []
-    entity_registry_list = fetch_endpoint("config/entity_registry/list") or []
-    area_registry_list = fetch_endpoint("config/area_registry/list") or []
+    # Note: REST registry endpoints (config/device_registry/list etc.) are deprecated
+    # in Home Assistant 2023.4+ and return 404. We go directly to the Template API
+    # which is reliable across all modern HA versions.
+    device_registry_list = []
+    entity_registry_list = []
+    area_registry_list = []
 
-    # Fallback: Use Template API if registries are empty (Common with non-admin tokens)
+    # Fallback: Use Template API (preferred path for all modern HA versions)
     if not device_registry_list:
-        logger.info("Registry endpoints failed (404/403). Attempting fallback via Template API...")
         
         template_str = """
         {
