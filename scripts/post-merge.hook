@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# =============================================================================
+# SharedLLM Git post-merge Hook
+# Automatically installed to .git/hooks/post-merge by install-hooks.sh
+#
+# Git fires this hook after EVERY successful "git pull" that merges new commits.
+# If the pull was already up-to-date (no changes), this hook does NOT run.
+# =============================================================================
+
+REPO_DIR="$(git rev-parse --show-toplevel)"
+DEPLOY_SCRIPT="$REPO_DIR/scripts/deploy.sh"
+
+echo "[post-merge] New commits detected — triggering SharedLLM auto-deploy..."
+
+if [ ! -f "$DEPLOY_SCRIPT" ]; then
+    echo "[post-merge] ERROR: $DEPLOY_SCRIPT not found. Skipping auto-deploy."
+    exit 0
+fi
+
+bash "$DEPLOY_SCRIPT"
