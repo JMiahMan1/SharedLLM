@@ -4,10 +4,9 @@ General Home Assistant device utilities.
 """
 
 import logging
-import requests
 import asyncio
 from typing import Optional
-from app.settings import run_blocking, HA_URL
+from app.settings import HA_URL
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +22,15 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
     Returns:
         Current state string or "unknown" if unable to determine
     """
+    from app.settings import GlobalResources
+    from app.main import http_session
+    
+    # 1. Check Redis Cache First (<1ms latency)
+    if GlobalResources.redis_client:
+        cached_state = GlobalResources.redis_client.hget(f"ha:state:{entity_id}", "state")
+        if cached_state:
+            return cached_state.decode("utf-8")
+            
     if not HA_URL:
         return "unknown"
 
@@ -31,19 +39,14 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
 
     for attempt in range(3):
         try:
-            def _fetch():
-                return requests.get(url, headers=headers, timeout=5.0)
-
-            r = await run_blocking(_fetch)
-            if r.status_code == 200:
-                return r.json().get("state", "unknown")
+            async with http_session.get(url, headers=headers, timeout=5.0) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    return data.get("state", "unknown")
             break # Not a connection error, just a non-200, so break and return unknown
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as ce:
-            log.warning(f"Connection error fetching state for {entity_id} (attempt {attempt+1}): {ce}")
+        except Exception as e:
+            log.warning(f"Connection error fetching state for {entity_id} (attempt {attempt+1}): {e}")
             if attempt == 2: break
             await asyncio.sleep(1.0)
-        except Exception as e:
-            log.error(f"State fetch error for {entity_id}: {e}")
-            break
 
     return "unknown"

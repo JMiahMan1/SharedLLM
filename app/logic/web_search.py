@@ -1,6 +1,5 @@
 # app/logic/web_search.py
 import re
-import requests
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from app.settings import log, run_blocking, WHOOGLE_URL, SEARCH_HEADERS
@@ -36,27 +35,25 @@ async def tool_web_search(query: str) -> str:
 
     # --- Tier 1: JSON API ---
     try:
-        def do_search_json():
-            return requests.get(search_endpoint, params={"q": query, "format": "json"}, headers=SEARCH_HEADERS, timeout=6)
-        
-        r = await run_blocking(do_search_json)
-        if r.status_code == 200:
-            data = r.json()
-            raw_results = data.get("results", data.get("hits", []))
-            if raw_results:
-                for res in raw_results[:5]:
-                    url = res.get('url') or res.get('link') or res.get('href')
-                    if url:
-                        results.append({
-                            "title": res.get('title'),
-                            "url": url,
-                            "snippet": res.get('content', '')
-                        })
-                
-                if not results:
-                     log.warning("Web Search Tier 1 (JSON) returned data but no valid URLs.")
-        else:
-            log.warning(f"Web Search Tier 1 (JSON) returned status {r.status_code}")
+        from app.main import http_session
+        async with http_session.get(search_endpoint, params={"q": query, "format": "json"}, headers=SEARCH_HEADERS, timeout=6) as r:
+            if r.status == 200:
+                data = await r.json()
+                raw_results = data.get("results", data.get("hits", []))
+                if raw_results:
+                    for res in raw_results[:5]:
+                        url = res.get('url') or res.get('link') or res.get('href')
+                        if url:
+                            results.append({
+                                "title": res.get('title'),
+                                "url": url,
+                                "snippet": res.get('content', '')
+                            })
+                    
+                    if not results:
+                         log.warning("Web Search Tier 1 (JSON) returned data but no valid URLs.")
+            else:
+                log.warning(f"Web Search Tier 1 (JSON) returned status {r.status}")
     except Exception as e:
         log.warning(f"Web Search Tier 1 (JSON) Failed: {e}. Switching to Tier 2.")
 
@@ -64,34 +61,33 @@ async def tool_web_search(query: str) -> str:
     # --- Tier 2: HTML Scraping ---
     if not results:
         try:
-            def do_search_html():
-                return requests.get(search_endpoint, params={"q": query}, headers=SEARCH_HEADERS, timeout=8)
-            
-            r = await run_blocking(do_search_html)
-            if r.status_code == 200:
-                soup = BeautifulSoup(r.text, "html.parser")
-                # Standard Whoogle/Google result selectors
-                selectors = [".result", "#main .result", ".result-content", "article", ".g", "div[class*='result']"]
-                
-                found_nodes = []
-                for sel in selectors:
-                    found_nodes = soup.select(sel)
-                    if found_nodes: break
-                
-                for res in found_nodes[:5]:
-                    title = res.select_one("h3, a, h2")
-                    body = res.select_one(".content, .st, p")
-                    if title and body:
-                        t_text = title.get_text(strip=True)
-                        b_text = body.get_text(strip=True)
-                        link = title.get("href") or ""
-                        if t_text and b_text:
-                            results.append({
-                                "title": t_text,
-                                "url": link,
-                                "snippet": b_text,
-                                "source": "Whoogle HTML"
-                            })
+            from app.main import http_session
+            async with http_session.get(search_endpoint, params={"q": query}, headers=SEARCH_HEADERS, timeout=8) as r:
+                if r.status == 200:
+                    text = await r.text()
+                    soup = BeautifulSoup(text, "html.parser")
+                    # Standard Whoogle/Google result selectors
+                    selectors = [".result", "#main .result", ".result-content", "article", ".g", "div[class*='result']"]
+                    
+                    found_nodes = []
+                    for sel in selectors:
+                        found_nodes = soup.select(sel)
+                        if found_nodes: break
+                    
+                    for res in found_nodes[:5]:
+                        title = res.select_one("h3, a, h2")
+                        body = res.select_one(".content, .st, p")
+                        if title and body:
+                            t_text = title.get_text(strip=True)
+                            b_text = body.get_text(strip=True)
+                            link = title.get("href") or ""
+                            if t_text and b_text:
+                                results.append({
+                                    "title": t_text,
+                                    "url": link,
+                                    "snippet": b_text,
+                                    "source": "Whoogle HTML"
+                                })
         except Exception as e:
             log.warning(f"Web Search Tier 2 (HTML) Error: {e}")
 

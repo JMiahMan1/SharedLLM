@@ -9,23 +9,24 @@ import requests
 import asyncio
 from typing import Dict, Optional
 from app.settings import run_blocking, HA_URL
+from aiobreaker import CircuitBreaker
 
+from datetime import timedelta
 log = logging.getLogger(__name__)
 
+ha_circuit_breaker = CircuitBreaker(fail_max=3, timeout_duration=timedelta(seconds=30))
 
+@ha_circuit_breaker
 async def execute_ha_service(domain, service, entity_id, user_creds, service_data=None, redis_client=None):
     """
     Executes a Home Assistant service and returns a structured dictionary result.
-    Includes optimized state verification loop.
+    Optimized to use aiohttp and circuit breakers with Redis-cached state lookups.
     """
+    from app.main import http_session
     user = user_creds.get("user")
 
     if not HA_URL:
         return {"status": "FAILURE", "message": "Error: Home Assistant URL not configured.", "entity_id": entity_id, "service": f"{domain}.{service}"}
-
-    # Fetch initial state for pre/post comparison
-    from app.domains.home.devices import get_entity_state
-    initial_state = await get_entity_state(entity_id, user_creds)
 
     url = f"{HA_URL.rstrip('/')}/api/services/{domain}/{service}"
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
@@ -33,109 +34,40 @@ async def execute_ha_service(domain, service, entity_id, user_creds, service_dat
 
     log.info(f"EXEC HA: {domain}.{service} on {entity_id} | Data: {service_data}")
 
-    last_err = None
-
-    for attempt in range(2):
-        try:
-            def _post():
-                return requests.post(url, json=payload, headers=headers, timeout=5.0)
-
-            r = await run_blocking(_post)
-
-            if r.status_code < 400:
-                # Update last entity tracking
-                if redis_client and user and entity_id:
-                    from app.domains.media.devices import _set_last_entity
-                    _set_last_entity(redis_client, user, entity_id)
-
-                # --- OPTIMIZED: Faster State Verification ---
-                # No initial long wait, start checking immediately
-                new_state = "N/A"
-                friendly_name = entity_id
-
-                # Check up to 5 times, every 0.5 seconds (Total ~2.5s max wait)
-                for state_attempt in range(5):
-                    await asyncio.sleep(1.0)
-                    # Retry logic for state fetching (DNS/Connection issues)
-                    for state_retry in range(3):
-                        try:
-                            state_url = f"{HA_URL.rstrip('/')}/api/states/{entity_id}"
-                            def _get_name():
-                                return requests.get(state_url, headers=headers, timeout=5.0)
-
-                            r_state = await run_blocking(_get_name)
-                            if r_state.status_code == 200:
-                                state_data = r_state.json()
-                                friendly_name = state_data.get("attributes", {}).get("friendly_name", entity_id)
-                                current_state = state_data.get("state", "unknown")
-                                attrs = state_data.get("attributes", {})
-
-                                # Check for expected state change
-                                expected_change = False
-                                if service.startswith("turn_off") and current_state in ["off", "unavailable"]:
-                                    expected_change = True
-                                elif service.startswith("turn_on") and current_state not in ["off", "unavailable"]:
-                                    expected_change = True
-                                elif service.startswith("media_play") or service == "play_media":
-                                    if current_state in ["playing", "paused", "buffering"]:
-                                        req_content = (service_data or {}).get("media_content_id", "")
-                                        match = True
-                                        if req_content and len(req_content) > 5:
-                                            curr_content_id = str(attrs.get("media_content_id", ""))
-                                            match = req_content in curr_content_id or curr_content_id in req_content
-                                        if match:
-                                            expected_change = True
-
-                                if expected_change or state_attempt == 4:
-                                    new_state = current_state
-                                    break
-                            break # Success, exit retry loop
-                        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as ce:
-                            log.warning(f"[State Verify] Connection error on attempt {state_retry+1}: {ce}")
-                            if state_retry == 2: raise
-                            await asyncio.sleep(1.0)
-                        except Exception as e:
-                            log.warning(f"[State Verify] Error: {e}") 
-                            break
-
-                # --- END FIX ---
-                
-                # ChromaDB update is NOT needed here because get_ha_context fetches live state.
-                # Avoid heavy re-indexing on every command.
-
-                verb = service.replace("_", " ")
-                return {
-                    "status": "SUCCESS",
-                    "message": f"Sent command to {verb} the {friendly_name}.",
-                    "entity_id": entity_id,
-                    "friendly_name": friendly_name,
-                    "service": f"{domain}.{service}",
-                    "new_state": new_state
-                }
-
-            # Error Capture
-            try:
-                err_data = r.json()
-                msg = err_data.get("message", r.text)
-            except:
-                msg = r.text[:200] if r.text else "Unknown Error"
-
-            last_err = f"HTTP {r.status_code}: {msg}"
-
-            if r.status_code >= 500:
-                log.warning(f"HA 500 Error: {msg}")
-                break
-
-        except Exception as e:
-            last_err = str(e)
-
-        await asyncio.sleep(1.0)
-
-    log.error(f"Failed to execute HA command: {last_err}")
-    return {
-        "status": "FAILURE",
-        "message": f"Failed: {last_err}",
-        "entity_id": entity_id,
-        "friendly_name": entity_id.split(".")[-1].replace("_", " ").title() if entity_id else "System",
-        "service": f"{domain}.{service}"
-    }
+    try:
+        async with http_session.post(url, json=payload, headers=headers, timeout=5.0) as response:
+            if response.status >= 400:
+                err_text = await response.text()
+                log.warning(f"HA Error: {err_text}")
+                return {"status": "FAILURE", "message": err_text, "entity_id": entity_id, "service": f"{domain}.{service}"}
+            
+            # Update last entity tracking
+            if redis_client and user and entity_id:
+                from app.domains.media.devices import _set_last_entity
+                _set_last_entity(redis_client, user, entity_id)
+            
+            # Use Redis for instant state lookup (populated by WS listener)
+            new_state = "N/A"
+            friendly_name = entity_id
+            if redis_client:
+                # Try to get state and friendly name from Redis cache if available
+                cached_state = redis_client.hget(f"ha:state:{entity_id}", "state")
+                cached_name = redis_client.hget(f"ha:state:{entity_id}", "friendly_name")
+                if cached_state:
+                    new_state = cached_state.decode("utf-8")
+                if cached_name:
+                    friendly_name = cached_name.decode("utf-8")
+                    
+            verb = service.replace("_", " ")
+            return {
+                "status": "SUCCESS",
+                "message": f"Sent command to {verb} the {friendly_name}.",
+                "entity_id": entity_id,
+                "friendly_name": friendly_name,
+                "service": f"{domain}.{service}",
+                "new_state": new_state
+            }
+    except Exception as e:
+        log.error(f"Failed to execute HA command: {e}")
+        # The circuit breaker will handle repeated failures
+        raise

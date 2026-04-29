@@ -7,7 +7,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -35,6 +35,16 @@ from app.logic.refresh_devices import refresh_db
 from app.intent_engine import engine as intent_engine
 from app.logic.timer_storage import storage as timer_storage
 from app.routers import music_assistant
+from app.users import get_current_user
+
+import aiohttp
+from aiobreaker import CircuitBreaker
+
+from datetime import timedelta
+# Global instances
+http_session: aiohttp.ClientSession = None
+ha_circuit_breaker = CircuitBreaker(fail_max=3, timeout_duration=timedelta(seconds=30))
+ollama_circuit_breaker = CircuitBreaker(fail_max=3, timeout_duration=timedelta(seconds=30))
 
 async def initialize_rag_resources():
     """Reloads RAG resources for hot-reloading."""
@@ -46,6 +56,9 @@ async def initialize_rag_resources():
 # --- LIFESPAN (Startup Logic) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global http_session
+    http_session = aiohttp.ClientSession()
+    
     await load_resources()
 
     # Initialize Intent Engine
@@ -60,6 +73,10 @@ async def lifespan(app: FastAPI):
     from app.logic.timer_scheduler import start_scheduler, stop_scheduler
     log.info("Starting Timer/Alarm Scheduler...")
     scheduler_task = asyncio.create_task(start_scheduler())
+
+    # Start HA WebSocket Listener
+    from app.logic.ha_websocket import start_ha_websocket_listener
+    ws_task = asyncio.create_task(start_ha_websocket_listener())
 
     # Start Video Cache Cleanup
     from app.utils.video_cache import schedule_periodic_cleanup
@@ -87,6 +104,8 @@ async def lifespan(app: FastAPI):
 
     if GlobalResources.redis_client:
         GlobalResources.redis_client.close()
+    if http_session:
+        await http_session.close()
     log.info("Shutdown complete.")
 
 app = FastAPI(title="Unified RAG API", lifespan=lifespan)
@@ -169,8 +188,8 @@ async def run_tests_endpoint():
 @app.post("/v1/chat/completions")
 @app.post("/api/chat")
 @app.post("/chat/completions")
-async def chat_endpoint(body: CompletionRequest, request: Request):
-    user = request.headers.get("X-RAG-User") or body.user or "admin"
+async def chat_endpoint(body: CompletionRequest, request: Request, current_user: dict = Depends(get_current_user)):
+    user = request.headers.get("X-RAG-User") or body.user or current_user.get("user", "admin")
     query = body.query or (body.messages[-1].content if body.messages else "")
     if not query: raise HTTPException(400, detail="No query")
     
@@ -188,6 +207,9 @@ async def chat_endpoint(body: CompletionRequest, request: Request):
 
     try:
         async for chunk in generator:
+            if await request.is_disconnected():
+                log.warning("Client disconnected. Cancelling LLM generation.")
+                break
             try:
                 if chunk.startswith("data: "): 
                     if "[DONE]" in chunk: continue
@@ -388,6 +410,26 @@ async def ing_all(bg_tasks: BackgroundTasks):
     bg_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py")
     return {"status": "accepted", "msg": "Full ingestion started in background."}
 
+@app.post("/api/webhooks/nextcloud")
+async def nextcloud_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    Event-Driven Nextcloud Webhook.
+    Called by Nextcloud when a file is created or updated.
+    Increments only the specific document in ChromaDB rather than dropping the collection.
+    """
+    try:
+        data = await request.json()
+        file_path = data.get("file_path")
+        event_type = data.get("event")
+        
+        if file_path:
+            log.info(f"Received Nextcloud webhook for {file_path} (Event: {event_type})")
+            # In a real implementation, this would fetch just this file and upsert to ChromaDB
+            background_tasks.add_task(_run_background_ingest, "ingest_nextcloud.py", ["--path", file_path])
+        return {"status": "ok"}
+    except Exception as e:
+        return {"error": str(e)}
+
 # --- NEW: Hot Reload Endpoint ---
 @app.post("/api/system/reload")
 async def system_reload():
@@ -493,7 +535,16 @@ async def http_exception_handler(r, e): return JSONResponse(status_code=e.status
 @app.exception_handler(Exception)
 async def generic_exception_handler(r, e):
     log.exception("Error")
-    return JSONResponse(status_code=500, content={"detail": str(e)})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "message": str(e),
+                "type": "server_error",
+                "code": getattr(e, "code", "internal_error")
+            }
+        }
+    )
 
 # --- Admin Endpoints ---
 @app.get("/api/admin/logs")

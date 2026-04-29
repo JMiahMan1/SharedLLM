@@ -7,6 +7,7 @@ from app.domains.media.integrations.roku import RokuIntegration
 from app.domains.media.integrations.media_assistant_roku import RokuMediaAssistantIntegration
 from app.domains.media.integrations.androidtv import AndroidTVIntegration
 from app.domains.media.integrations.standard import StandardIntegration
+from app.domains.media.integrations.infrared import InfraredIntegration
 from app.settings import ROKU_USE_MEDIA_ASSISTANT
 
 log = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class IntegrationFactory:
         "roku": RokuIntegration, 
         "roku_media_assistant": RokuMediaAssistantIntegration,
         "webostv": StandardIntegration,
+        "infrared": InfraredIntegration,
         "unknown": StandardIntegration
     }
     

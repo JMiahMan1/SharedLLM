@@ -125,12 +125,12 @@ class MediaIntegration(ABC):
 async def unwrap_entity_if_needed(entity_id: str, request_type: str, user_creds: dict) -> str:
     """Unwrap wrapper entities."""
     try:
-        import requests
         from app.settings import HA_URL
+        from app.main import http_session
         headers = {"Authorization": f"Bearer {user_creds.get('ha_token')}", "Content-Type": "application/json"}
-        response = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5)
-        if response.status_code != 200: return entity_id
-        entity_data = response.json()
+        async with http_session.get(f"{HA_URL}/api/states/{entity_id}", headers=headers, timeout=5) as response:
+            if response.status != 200: return entity_id
+            entity_data = await response.json()
         attributes = entity_data.get("attributes", {})
         from app.domains.media.integrations.factory import IntegrationFactory
         from app.domains.media.integrations.music_assistant import MusicAssistantIntegration

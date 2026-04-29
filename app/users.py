@@ -154,3 +154,25 @@ Supported settings:
 
 All users automatically have access to shared data from the default user.
 """
+
+from fastapi import Security, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+security = HTTPBearer(auto_error=False)
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
+    if not credentials:
+        return get_user_config("default")
+        
+    token = credentials.credentials
+    all_users = get_all_users()
+    
+    # Simple token mapping (can be expanded to real JWT validation)
+    for user_name, config in all_users.items():
+        if config.get("api_key") == token or user_name == token:
+            return config
+            
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication credentials"
+    )

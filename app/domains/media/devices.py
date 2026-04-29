@@ -102,12 +102,11 @@ async def get_entity_state(entity_id: str, user_creds: dict) -> str:
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
 
     try:
-        def _fetch():
-            return requests.get(url, headers=headers, timeout=2.0)
-
-        r = await run_blocking(_fetch)
-        if r.status_code == 200:
-            return r.json().get("state", "unknown")
+        from app.main import http_session
+        async with http_session.get(url, headers=headers, timeout=2.0) as r:
+            if r.status == 200:
+                data = await r.json()
+                return data.get("state", "unknown")
     except Exception as e:
         log.error(f"State fetch error for {entity_id}: {e}")
 
@@ -346,17 +345,15 @@ async def get_device_capabilities(entity_id: str, user_creds: dict, redis_client
 
     try:
         log.debug(f"[CAPABILITY] Fetching from HA API: {entity_id}")
-        def _fetch():
-            return requests.get(url, headers=headers, timeout=3.0)
-
-        r = await run_blocking(_fetch)
-        log.debug(f"[CAPABILITY] HA API response: {r.status_code} for {entity_id}")
-
-        if r.status_code != 200:
-            log.warning(f"Failed to fetch capabilities for {entity_id}: {r.status_code}")
-            return {"domain": entity_id.split('.')[0], "error": "unavailable"}
-
-        data = r.json()
+        from app.main import http_session
+        async with http_session.get(url, headers=headers, timeout=3.0) as r:
+            log.debug(f"[CAPABILITY] HA API response: {r.status} for {entity_id}")
+    
+            if r.status != 200:
+                log.warning(f"Failed to fetch capabilities for {entity_id}: {r.status}")
+                return {"domain": entity_id.split('.')[0], "error": "unavailable"}
+    
+            data = await r.json()
         attrs = data.get("attributes", {})
 
         # Base capabilities
@@ -436,20 +433,18 @@ async def get_active_media_players(user_creds: dict) -> list:
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
 
     try:
-        def _fetch_all():
-            return requests.get(url, headers=headers, timeout=3.0)
-
-        r = await run_blocking(_fetch_all)
-        if r.status_code == 200:
-            all_states = r.json()
-            active = []
-            for s in all_states:
-                eid = s.get("entity_id", "")
-                if eid.startswith("media_player."):
-                    state = s.get("state", "off")
-                    if state in ["playing", "paused", "buffering"]:
-                        active.append(eid)
-            return active
+        from app.main import http_session
+        async with http_session.get(url, headers=headers, timeout=3.0) as r:
+            if r.status == 200:
+                all_states = await r.json()
+                active = []
+                for s in all_states:
+                    eid = s.get("entity_id", "")
+                    if eid.startswith("media_player."):
+                        state = s.get("state", "off")
+                        if state in ["playing", "paused", "buffering"]:
+                            active.append(eid)
+                return active
     except Exception as e:
         log.error(f"Error fetching active players: {e}")
         return []
@@ -464,20 +459,18 @@ async def get_available_media_players(user_creds: dict) -> list:
     headers = {"Authorization": f"Bearer {user_creds['ha_token']}"}
 
     try:
-        def _fetch_all():
-            return requests.get(url, headers=headers, timeout=3.0)
-
-        r = await run_blocking(_fetch_all)
-        if r.status_code == 200:
-            all_states = r.json()
-            available = []
-            for s in all_states:
-                eid = s.get("entity_id", "")
-                if eid.startswith("media_player."):
-                    state = s.get("state", "unknown")
-                    if state not in ["unavailable", "unknown"]:
-                        available.append(eid)
-            return available
+        from app.main import http_session
+        async with http_session.get(url, headers=headers, timeout=3.0) as r:
+            if r.status == 200:
+                all_states = await r.json()
+                available = []
+                for s in all_states:
+                    eid = s.get("entity_id", "")
+                    if eid.startswith("media_player."):
+                        state = s.get("state", "unknown")
+                        if state not in ["unavailable", "unknown"]:
+                            available.append(eid)
+                return available
     except Exception as e:
         log.error(f"Error fetching available players: {e}")
         return []
@@ -604,7 +597,13 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
     state = str(metadata.get("state", "unknown")).lower()
     if state in ["unavailable", "unknown"]:
         score -= 200
-        log.info(f"[Scoring] Penalizing {eid} for state {state} (-200)")
+        # BOOST: If this is an EXACT name match, give it a massive boost 
+        # to ensure we don't jump to an unrelated idle speaker just because the TV is offline.
+        if query_name and friendly_name and query_name.lower() == friendly_name.lower():
+            score += 1000
+            log.info(f"[Scoring] Boosting targeted offline device {eid} (+1000)")
+        else:
+            log.info(f"[Scoring] Penalizing {eid} for state {state} (-200)")
 
     # 0.5 CAPABILITY-BASED SCORING (No Hardcoding)
     # Heavily favor entities that actually support the requested intent
@@ -615,6 +614,13 @@ def _score_candidate_for_intent_and_media_type(candidate, intent: str, is_music:
         else:
             score -= 300
             log.info(f"[Scoring] Penalizing {eid} for lack of Audio Capability (-300)")
+        
+        # [Discriminator] Prefer Speakers over TVs for audio intents if both match
+        d_class = str(metadata.get("device_class", "")).lower()
+        if d_class == "speaker":
+            score += 50
+        elif d_class == "tv":
+            score -= 50
 
     if intent in ["turn_on", "turn_off", "toggle"]:
         if caps_set.intersection({"turn_on", "turn_off"}):
