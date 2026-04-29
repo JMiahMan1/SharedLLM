@@ -67,7 +67,9 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=10.0
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                log.error(f"Execution Bridge error ({resp.status_code}): {resp.text}")
+                return {"status": "FAILURE", "message": f"Execution error: {resp.text}", "service": endpoint}
             return resp.json()
         except httpx.RequestError as e:
             log.error(f"Execution Bridge unreachable: {e}")
