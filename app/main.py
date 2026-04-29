@@ -343,6 +343,72 @@ async def ver():
     try: return requests.get(f"{OLLAMA_URL.rstrip('/')}/api/version", timeout=3).json()
     except: return {}
 
+class PullRequest(BaseModel):
+    model: Optional[str] = None
+    name: Optional[str] = None  # some clients send 'name' instead of 'model'
+    stream: Optional[bool] = True
+    insecure: Optional[bool] = False
+
+@app.post("/api/pull")
+async def api_pull(req: PullRequest, request: Request):
+    """
+    Ollama-compatible /api/pull endpoint.
+    Checks if the model already exists locally — if so, returns a success
+    response immediately without hitting Ollama (avoids unnecessary network calls).
+    If the model is NOT found, proxies the pull request to the real Ollama server.
+    """
+    from fastapi.responses import StreamingResponse as SR
+    import json as _json
+
+    model_name = req.model or req.name or ""
+    log.info(f"[/api/pull] Request for model: '{model_name}'")
+
+    # 1. Check if model already exists in Ollama
+    already_have = False
+    try:
+        tags_resp = requests.get(f"{OLLAMA_URL.rstrip('/')}/api/tags", timeout=5)
+        if tags_resp.status_code == 200:
+            local_models = [m.get("name", "") for m in tags_resp.json().get("models", [])]
+            # Match exact name or without tag (e.g. "qwen3" matches "qwen3:latest")
+            for local in local_models:
+                if local == model_name or local.split(":")[0] == model_name.split(":")[0]:
+                    already_have = True
+                    log.info(f"[/api/pull] Model '{model_name}' already present as '{local}'. Skipping pull.")
+                    break
+    except Exception as e:
+        log.warning(f"[/api/pull] Could not check local models: {e}")
+
+    if already_have:
+        # Return the Ollama success wire format (streaming or single JSON)
+        success_payload = _json.dumps({"status": "success"})
+        if req.stream:
+            async def _success_stream():
+                yield success_payload + "\n"
+            return SR(_success_stream(), media_type="application/x-ndjson")
+        return _json.loads(success_payload)
+
+    # 2. Model not found locally — proxy the pull to real Ollama
+    log.info(f"[/api/pull] Model '{model_name}' not found locally. Proxying pull to Ollama...")
+    try:
+        pull_url = f"{OLLAMA_URL.rstrip('/')}/api/pull"
+        pull_payload = {"model": model_name, "stream": req.stream, "insecure": req.insecure}
+
+        if req.stream:
+            # Stream the pull progress back to the client
+            def _proxy_stream():
+                with requests.post(pull_url, json=pull_payload, stream=True, timeout=600) as r:
+                    for chunk in r.iter_lines():
+                        if chunk:
+                            yield chunk.decode("utf-8") + "\n"
+            return SR(_proxy_stream(), media_type="application/x-ndjson")
+        else:
+            r = requests.post(pull_url, json=pull_payload, timeout=600)
+            return r.json()
+    except Exception as e:
+        log.error(f"[/api/pull] Proxy to Ollama failed: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail=f"Ollama pull failed: {e}")
+
 @app.post("/generate")
 @app.post("/api/generate")
 async def generate(req: GenerateRequest):
