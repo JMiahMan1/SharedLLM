@@ -74,13 +74,13 @@ EMB_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-# Initialize OpenAI Client
+# Initialize OpenAI Client (sync — called via run_blocking from async context)
 openai_client = None
 if OPENAI_API_KEY:
     try:
-        from openai import AsyncOpenAI
+        from openai import OpenAI
 
-        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
     except ImportError:
         log.warning("openai module not installed, skipping client init")
 

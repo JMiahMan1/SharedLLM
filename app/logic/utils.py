@@ -153,31 +153,67 @@ async def call_ollama_generate(prompt: str, model: str = DEFAULT_MODEL, stream: 
             await asyncio.sleep(0.5)
     return {"error": "Ollama unavailable"}
 
-async def call_openai_chat(messages, model=OPENAI_MODEL, stream=False):
-    if not openai_client: 
+async def call_openai_chat(messages, model=OPENAI_MODEL, stream=False, tools=None, tool_choice=None):
+    """
+    Async wrapper for the OpenAI Chat Completions API (openai >= 1.0).
+    Supports function/tool calling via the `tools` and `tool_choice` parameters.
+    Returns:
+      - On tool call:  {"choices": [{"message": {"tool_calls": [...], "content": null}}]}
+      - On text reply: {"text": "..."}   (non-streaming)
+      - On stream:     {"iterable": async_generator}
+    """
+    if not openai_client:
         return {"error": "OpenAI not configured. Check OPENAI_API_KEY."}
 
     try:
-        def _create_completion():
-            return openai_client.ChatCompletion.create(
-                model=model,
-                messages=messages,
-                stream=stream
-            )
+        kwargs = dict(model=model, messages=messages, stream=stream)
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice or "auto"
 
         if stream:
-            response_stream = await run_blocking(_create_completion)
+            def _create_stream():
+                return openai_client.chat.completions.create(**kwargs)
+
+            response_stream = await run_blocking(_create_stream)
+
             async def async_iter():
                 for chunk in response_stream:
-                    if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-                        content = getattr(chunk.choices[0].delta, 'content', '')
-                        if content:
-                            yield {"response": content}
-                    await asyncio.sleep(0) 
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        yield {"response": delta.content}
+                    await asyncio.sleep(0)
+
             return {"iterable": async_iter}
         else:
-            resp = await run_blocking(_create_completion)
-            return {"text": resp.choices[0].message.content}
+            def _create():
+                return openai_client.chat.completions.create(**kwargs)
+
+            resp = await run_blocking(_create)
+            choice = resp.choices[0]
+            msg = choice.message
+
+            # Tool call response — return raw structure so orchestrator can parse it
+            if getattr(msg, "tool_calls", None):
+                return {
+                    "choices": [{
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments,
+                                    }
+                                }
+                                for tc in msg.tool_calls
+                            ],
+                            "content": msg.content,
+                        }
+                    }]
+                }
+
+            return {"text": msg.content or ""}
+
     except Exception as e:
         log.error(f"OpenAI Call Error: {e}")
         return {"error": str(e)}
