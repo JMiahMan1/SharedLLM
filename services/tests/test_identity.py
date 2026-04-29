@@ -1,21 +1,16 @@
 import os
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import SQLModel, Session, select
 
 # Set env vars before importing identity modules
 os.environ["IDENTITY_DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="  # Valid 32-byte b64 key
+os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 
-from identity.main import app, get_session
+from identity.main import app, get_session, engine
 from identity.models import User, DeviceAssignment
 from identity.crypto import encrypt
-
-engine = create_engine(
-    os.environ["IDENTITY_DATABASE_URL"], 
-    connect_args={"check_same_thread": False}
-)
 
 def override_get_session():
     with Session(engine) as session:
@@ -26,6 +21,7 @@ app.dependency_overrides[get_session] = override_get_session
 @pytest.fixture(autouse=True)
 def setup_db():
     SQLModel.metadata.create_all(engine)
+
     
     with Session(engine) as session:
         # Default user with shared creds
@@ -102,4 +98,5 @@ def test_resolve_fallback_default():
 
 def test_unauthorized_internal():
     resp = client.post("/api/resolve", json={"rag_user": "alice"})
-    assert resp.status_code == 403
+    # Missing required header X-Internal-Secret throws 422 Unprocessable Entity in FastAPI
+    assert resp.status_code == 422
