@@ -1,0 +1,63 @@
+version: "3.8"
+
+networks:
+  sharedllm_internal:
+    driver: bridge
+
+volumes:
+  identity_db:
+  chroma_data:
+
+services:
+  identity:
+    build: ./services/identity
+    container_name: sharedllm_identity
+    restart: unless-stopped
+    networks:
+      - sharedllm_internal
+    environment:
+      - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - FERNET_KEY=${FERNET_KEY} # Must be provided!
+    volumes:
+      - identity_db:/data
+      # Mount the legacy .env file so the seed script can read it on first run
+      - ./.env:/app/.env.legacy:ro
+
+  execution:
+    build: ./services/execution
+    container_name: sharedllm_execution
+    restart: unless-stopped
+    networks:
+      - sharedllm_internal
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+
+  rag:
+    build: ./services/rag
+    container_name: sharedllm_rag
+    restart: unless-stopped
+    networks:
+      - sharedllm_internal
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - CHROMA_PERSIST_DIR=/data/chroma_db
+    volumes:
+      - chroma_data:/data
+
+  gateway:
+    build: ./services/gateway
+    container_name: sharedllm_gateway
+    restart: unless-stopped
+    networks:
+      - sharedllm_internal
+    ports:
+      - "11435:8002" # Only the Gateway is exposed externally
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./data/phrasebook.json:/app/data/phrasebook.json:ro
