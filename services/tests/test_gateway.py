@@ -1,0 +1,112 @@
+import os
+import pytest
+from fastapi.testclient import TestClient
+
+os.environ["INTERNAL_SECRET"] = "test-secret"
+os.environ["FAST_PATH_THRESHOLD"] = "0.85"
+
+from gateway.main import app
+
+client = TestClient(app)
+
+@pytest.fixture
+def mock_identity(mocker):
+    """Mock the Identity Service resolution."""
+    mock_resp = mocker.Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "user": "alice",
+        "ha_url": "http://ha.local",
+        "ha_token": "secret-token"
+    }
+    mock_resp.raise_for_status = mocker.Mock()
+    
+    return mocker.patch("httpx.AsyncClient.post", return_value=mock_resp)
+
+
+@pytest.fixture
+def mock_intent(mocker):
+    """Mock the semantic router."""
+    return mocker.patch("gateway.main.engine.classify")
+
+def test_gateway_health():
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["service"] == "gateway"
+
+def test_fast_path_light_control(mock_identity, mock_intent, mocker):
+    """Test the Gateway Fast Path successfully routes a turn_on intent to Execution."""
+    # Mock high confidence intent
+    mock_intent.return_value = ("turn_on", 0.95)
+    
+    # We need a separate mock specifically for the execution call since httpx.post is called twice
+    # First for identity, second for execution
+    async def mock_post_side_effect(url, *args, **kwargs):
+        resp = mocker.Mock()
+        resp.status_code = 200
+        if "resolve" in url:
+            resp.json.return_value = {"user": "alice", "ha_url": "http", "ha_token": "tok"}
+        else:
+            resp.json.return_value = {"status": "SUCCESS", "message": "Lights on", "service": "light_control"}
+        resp.raise_for_status = mocker.Mock()
+        return resp
+        
+    mocker.patch("httpx.AsyncClient.post", side_effect=mock_post_side_effect)
+
+    resp = client.post("/api/chat", json={
+        "query": "Turn on the living room lights",
+        "voice_id": "alice"
+    })
+    
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    assert data["intent"] == "turn_on"
+    assert data["confidence"] == 0.95
+    assert data["execution_result"]["service"] == "light_control"
+
+
+def test_slow_path_conversational(mock_intent, mocker):
+    """Test the Gateway Slow Path when confidence is low or intent is unknown."""
+    mock_intent.return_value = ("unknown", 0.40)
+    
+    async def mock_post_side_effect(url, *args, **kwargs):
+        resp = mocker.Mock()
+        resp.status_code = 200
+        if "resolve" in url:
+            resp.json.return_value = {"user": "alice", "ha_url": "http", "ha_token": "tok"}
+        elif "rag/search" in url:
+            resp.json.return_value = {"results": [{"content": "Doc 1", "metadata": {}}]}
+        resp.raise_for_status = mocker.Mock()
+        return resp
+        
+    mocker.patch("httpx.AsyncClient.post", side_effect=mock_post_side_effect)
+
+    resp = client.post("/api/chat", json={
+        "query": "What is the meaning of life?",
+        "voice_id": "alice"
+    })
+    
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    assert "Simulated LLM response" in data["message"]
+    assert data["intent"] == "unknown"
+    assert data["execution_result"] is None
+
+def test_identity_resolution_failure(mocker):
+    """Test Gateway rejects chat if Identity Service fails to resolve user."""
+    async def mock_post_side_effect(url, *args, **kwargs):
+        resp = mocker.Mock()
+        resp.status_code = 404
+        return resp
+        
+    mocker.patch("httpx.AsyncClient.post", side_effect=mock_post_side_effect)
+    
+    resp = client.post("/api/chat", json={
+        "query": "Turn on the lights",
+        "voice_id": "unknown_intruder"
+    })
+    
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "User resolution failed"
