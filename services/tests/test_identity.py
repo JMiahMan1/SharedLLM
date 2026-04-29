@@ -1,29 +1,35 @@
 import os
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import SQLModel, Session, select
+from sqlmodel import SQLModel, Session, select, create_engine
+from sqlalchemy.pool import StaticPool
 
 # Set env vars before importing identity modules
-os.environ["IDENTITY_DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 
-from identity.main import app, get_session, engine
+from identity.main import app, get_session
 from identity.models import User, DeviceAssignment
 from identity.crypto import encrypt
 
+# Create a dedicated test engine with StaticPool to keep in-memory data across sessions
+test_engine = create_engine(
+    "sqlite://", 
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool
+)
+
 def override_get_session():
-    with Session(engine) as session:
+    with Session(test_engine) as session:
         yield session
 
 app.dependency_overrides[get_session] = override_get_session
 
 @pytest.fixture(autouse=True)
 def setup_db():
-    SQLModel.metadata.create_all(engine)
-
+    SQLModel.metadata.create_all(test_engine)
     
-    with Session(engine) as session:
+    with Session(test_engine) as session:
         # Default user with shared creds
         default_user = User(
             username="default",
