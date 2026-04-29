@@ -222,48 +222,44 @@ async def contextualize_query(query, user, model):
 async def _llm_orchestrator(
     query: str, intent: str, score: float, model: str, conversation_history: str = "", intent_locked: bool = False
 ) -> Dict[str, Any]:
-    # If intent is locked (regex-detected), instruct LLM to preserve it
-    lock_instruction = ""
-    if intent_locked:
-        lock_instruction = f"\n\nCRITICAL: The intent '{intent}' is LOCKED and was explicitly detected from the user's verb choice. You MUST use this intent in your response. DO NOT change it to any other intent. Extract only the device_name and media_title parameters."
+    from app.logic.execution.registry import ActionDispatcher
+    tools = ActionDispatcher.get_openai_tools()
     
-    orchestrator_prompt = ORCHESTRATOR_PROMPT.format(
-        query=query, intent_name=intent, intent_score=score, conversation_history=conversation_history
-    ) + lock_instruction
-    last_error = ""
-    for attempt in range(2):
-        if attempt > 0:
-            correction_prompt = f"CRITICAL ERROR: Your previous JSON output failed validation: '{last_error}'. You must output ONLY a single, valid JSON object (DO NOT use markdown backticks). Review your plan and try again. User Query: {query} Best Vector Intent: {intent}."
-            r = await call_ollama_generate(
-                correction_prompt
-                + "\n"
-                + ORCHESTRATOR_PROMPT.format(
-                    query=query, intent_name=intent, intent_score=score, conversation_history=conversation_history
-                ),
-                model,
-            )
-        else:
-            r = await call_ollama_generate(orchestrator_prompt, model)
-        text = clean_llm_output(r.get("text", ""), is_voice=False).strip()
-        try:
-            text = text.strip().strip("`").strip()
-            if text.startswith("json\n"):
-                text = text[5:].strip()
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                parsed_json = json.loads(match.group(0))
-                if "action" not in parsed_json:
-                    raise ValueError("Missing 'action' key in JSON.")
-                return parsed_json
-            else:
-                raise json.JSONDecodeError("No JSON object found in output.", text, 0)
-        except (json.JSONDecodeError, ValueError) as e:
-            last_error = str(e)
-            continue
-    return {
-        "action": "CONVERSE",
-        "error": "Orchestrator failed to generate valid plan.",
-    }
+    system_prompt = "You are an orchestration AI. Decide the best tool to fulfill the user's request. Only use tools if necessary."
+    if intent_locked:
+        system_prompt += f"\n\nCRITICAL: The intent '{intent}' is LOCKED. You MUST use the appropriate tool for this intent."
+        
+    messages = []
+    if conversation_history:
+        messages.append({"role": "system", "content": f"Conversation History:\n{conversation_history}"})
+    
+    messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": query})
+    
+    try:
+        response = await call_openai_chat(messages=messages, model=model, tools=tools)
+        message = response.get("choices", [{}])[0].get("message", {})
+        
+        if message.get("tool_calls"):
+            tool_call = message["tool_calls"][0]
+            func_name = tool_call["function"]["name"]
+            args = json.loads(tool_call["function"]["arguments"])
+            return {
+                "action": "tool_call",
+                "tool_name": func_name,
+                "parameters": args
+            }
+            
+        return {
+            "action": "CONVERSE",
+            "error": message.get("content", "Orchestrator decided not to use a tool."),
+        }
+    except Exception as e:
+        log.error(f"Orchestrator LLM call failed: {e}")
+        return {
+            "action": "CONVERSE",
+            "error": "Orchestrator failed to generate a valid plan."
+        }
 
 
 async def _execute_tool_action(

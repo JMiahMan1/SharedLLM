@@ -1,4 +1,5 @@
-from typing import Dict, Any, Callable, Awaitable, Optional
+import inspect
+from typing import Dict, Any, Callable, Awaitable, Optional, List
 from app.settings import log
 
 # Type definition for tool handlers
@@ -53,3 +54,33 @@ class ActionDispatcher:
     @classmethod
     def list_tools(cls):
         return list(cls._registry.keys())
+
+    @classmethod
+    def get_openai_tools(cls) -> List[Dict]:
+        tools = []
+        for name, func in cls._registry.items():
+            sig = inspect.signature(func)
+            properties = {}
+            required = []
+            
+            # Simple inference of parameters from signature
+            for param_name, param in sig.parameters.items():
+                if param_name in ["query", "user_creds", "model", "redis_client", "kwargs"]:
+                    continue
+                properties[param_name] = {"type": "string"}
+                if param.default == inspect.Parameter.empty:
+                    required.append(param_name)
+                    
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": func.__doc__ or f"Execute {name}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required
+                    }
+                }
+            })
+        return tools
