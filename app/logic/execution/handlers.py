@@ -238,58 +238,73 @@ async def handle_media_play(query: str, user_creds: dict, params: dict = None, *
 @ActionDispatcher.register("stop_media")
 @ActionDispatcher.register("media_pause")
 async def handle_stop_media(query: str, user_creds: dict, params: dict = None, **kwargs):
+    entity_id = params.get("entity_id") if params else None
+    device_name = params.get("device_name") if params else None
     return await handle_media_command(
         "stop_media",
         query,
-        None,
+        entity_id,
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
+        device_name=device_name
     )
 
 @ActionDispatcher.register("media_next")
 @ActionDispatcher.register("media_skip")
 async def handle_media_next(query: str, user_creds: dict, params: dict = None, **kwargs):
+    entity_id = params.get("entity_id") if params else None
+    device_name = params.get("device_name") if params else None
     return await handle_media_command(
         "media_next",
         query,
-        None,
+        entity_id,
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
+        device_name=device_name
     )
 
 @ActionDispatcher.register("media_previous")
 async def handle_media_previous(query: str, user_creds: dict, params: dict = None, **kwargs):
+    entity_id = params.get("entity_id") if params else None
+    device_name = params.get("device_name") if params else None
     return await handle_media_command(
         "media_previous",
         query,
-        None,
+        entity_id,
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
+        device_name=device_name
     )
 
 @ActionDispatcher.register("turn_on")
 async def handle_turn_on(query: str, user_creds: dict, params: dict = None, **kwargs):
+    entity_id = params.get("entity_id") if params else None
+    device_name = params.get("device_name") if params else None
     return await handle_media_command(
         "turn_on",
         query,
-        None,
+        entity_id,
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
+        device_name=device_name
     )
 
 @ActionDispatcher.register("turn_off")
 async def handle_turn_off(query: str, user_creds: dict, params: dict = None, **kwargs):
+    entity_id = params.get("entity_id") if params else None
+    device_name = params.get("device_name") if params else None
     return await handle_media_command(
         "turn_off",
         query,
-        None,
+        entity_id,
         user_creds,
         GlobalResources.ha_collection,
         GlobalResources.redis_client,
+        device_name=device_name
     )
 
 @ActionDispatcher.register("set_color")
