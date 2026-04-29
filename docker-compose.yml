@@ -36,9 +36,13 @@ services:
       - ./data:/data:z
       - ./tools:/tools:z
       - rag_chroma:/data/chroma_db:z
-      - huggingface_cache:/root/.cache/huggingface:z
+      - huggingface_cache:/home/jeremiah/.cache/huggingface:z
       # Adding the necessary temp dir for Nextcloud ingestion
       - ./data/nextcloud_temp:/data/nextcloud_temp:z
+
+    # Run as the host user so log files in ./data/ are owned by jeremiah, not root.
+    # UID/GID are resolved from the environment (set in .env or via shell export).
+    user: "${UID:-1000}:${GID:-1000}"
 
     working_dir: /
     entrypoint: []
