@@ -42,7 +42,7 @@ services:
 
     working_dir: /
     entrypoint: []
-    command: [ "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "11435", "--workers", "1", "--reload", "--reload-dir", "/app", "--log-level", "debug" ]
+    command: bash -c "python -m uvicorn app.main:app --host 0.0.0.0 --port 11435 --workers 1 --reload --reload-dir /app --log-level debug 2>&1 | tee -a /data/shared_llm.log"
     depends_on:
       - redis # CRITICAL: Depend on Redis service
     network_mode: "host" # Use Host Networking for Cast Discovery
