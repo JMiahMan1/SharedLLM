@@ -1,0 +1,13 @@
+# =============================================================================
+# SharedLLM SOA Architecture Plan
+# =============================================================================
+#
+# services/
+# ├── identity/          Service 1 — Identity & Profile (SQLite + Fernet)
+# ├── gateway/           Service 2 — Intent Gateway (Semantic Router + LLM)
+# ├── execution/         Service 3 — HA & Media Execution Bridge
+# └── rag/               Service 4 — Context & RAG Service (ChromaDB)
+#
+# Shared:
+# ├── shim_users.py      Drop-in replacement for app/users.py
+# └── docker-compose.soa.yml
