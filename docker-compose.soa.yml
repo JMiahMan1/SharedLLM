@@ -59,5 +59,6 @@ services:
       - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
