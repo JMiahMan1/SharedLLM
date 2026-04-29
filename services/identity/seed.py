@@ -10,8 +10,8 @@ import os
 import logging
 from sqlmodel import Session, select
 
-from .models import User
-from .crypto import encrypt
+from models import User
+from crypto import encrypt
 
 log = logging.getLogger("identity.seed")
 
