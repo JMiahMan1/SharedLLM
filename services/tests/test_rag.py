@@ -1,9 +1,16 @@
 import os
+import sys
+from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+# Mock heavy ML dependencies before importing the app
+sys.modules['chromadb'] = MagicMock()
+sys.modules['chromadb.config'] = MagicMock()
+sys.modules['chromadb.utils'] = MagicMock()
+sys.modules['sentence_transformers'] = MagicMock()
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
-# Use a fast in-memory embedding model for tests
 os.environ["EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
 os.environ["CHROMA_PERSIST_DIR"] = "/tmp/chroma_test_db"
 
