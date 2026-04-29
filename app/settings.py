@@ -22,17 +22,33 @@ if os.getenv("DOCKER_ENV") != "1" and os.path.exists(".env"):
     load_dotenv(".env")
 
 # --- Logging ---
+import logging.handlers as _log_handlers
+
 DEBUG = os.getenv("DEBUG", "0") in ("1", "true", "True")
 log_file = os.getenv("LOG_FILE", "/data/app.log")
 # Fallback if directory doesn't exist
 if os.path.dirname(log_file) and not os.path.exists(os.path.dirname(log_file)):
     log_file = "app.log"
 
-logging.basicConfig(
-    level=logging.DEBUG if DEBUG else logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(log_file)],
+_log_level = logging.DEBUG if DEBUG else logging.INFO
+_log_fmt = logging.Formatter("%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+
+# Rotating file handler — 10 MB per file, keep 5 backups (~50 MB max)
+_file_handler = _log_handlers.RotatingFileHandler(
+    log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
 )
+_file_handler.setFormatter(_log_fmt)
+
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(_log_fmt)
+
+logging.basicConfig(level=_log_level, handlers=[_stream_handler, _file_handler])
+
+# Suppress noisy third-party DEBUG spam that bloats the log file
+for _noisy in ("httpx", "httpcore", "chromadb", "sentence_transformers",
+               "huggingface_hub", "urllib3", "asyncio"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 log = logging.getLogger("unified-rag")
 
 # --- Configuration ---
