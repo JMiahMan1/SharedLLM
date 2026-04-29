@@ -75,3 +75,5 @@ html2text
 vobject
 icalendar
 beautifulsoup4
+aiohttp
+aiobreaker
