@@ -1,0 +1,62 @@
+name: SOA Microservices CI
+
+on:
+  push:
+    branches: [ main, master, microservices ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov pytest-mock httpx fastapi uvicorn sqlmodel cryptography pydantic requests
+        # We install dummy packages for chromadb and sentence-transformers to run tests
+        # without downloading heavy machine learning models on GitHub actions runners.
+        # But since our tests mock these heavy deps, we only need the API contracts.
+
+    - name: Install service dependencies
+      run: |
+        pip install -r services/identity/requirements.txt
+        pip install -r services/execution/requirements.txt
+        pip install -r services/gateway/requirements.txt
+        # RAG has huge deps (Torch), so we mock it for CI unit tests
+        # The tests are designed to bypass heavy ML loads via mocker.
+
+    - name: Run Pytest
+      env:
+        PYTHONPATH: ${{ github.workspace }}/services
+        FERNET_KEY: bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=
+        INTERNAL_SECRET: test-secret-github-actions
+      run: |
+        pytest services/tests/ \
+          --junitxml=pytest-report.xml \
+          --cov=services/ \
+          --cov-report=xml
+
+    - name: Upload Coverage Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: coverage-report
+        path: coverage.xml
+
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: pytest-results
+        path: pytest-report.xml
