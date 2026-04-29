@@ -63,6 +63,7 @@ app/
   ingest_nextcloud.py      # Nextcloud document ingestion
   intent_engine.py         # Vector-based intent classification
   logic/
+    ha_websocket.py        # Async Home Assistant event listener
     pipeline.py            # Main request processing pipeline
     media_ops.py           # Media/device control
     music_assistant_ops.py # Music Assistant integration
@@ -92,15 +93,16 @@ requirements.txt
 
 ### ✅ Core Infrastructure
 
+- **Asynchronous I/O** - Highly concurrent execution using `aiohttp` and `aiobreaker` circuit breakers.
+- **Event-Driven States** - Persistent HA Websocket listener for `<1ms` state lookups via Redis.
+- **Native Tool Calling** - Deep integration with OpenAI's strict JSON function schemas for deterministic execution.
 - RAG retrieval from ChromaDB
 - Multi-backend LLM support (Ollama/OpenAI)
 - Streaming responses (OpenAI-compatible)
 - Shared memory via Redis (chat history, context)
-- Intent classification (regex overrides + vector matching)
-- **Low-Latency Fast Path** - High-confidence intents bypass LLM (< 200ms response).
+- **High-Confidence Intent Caching** - Bypasses vector embeddings for >90% match rates to reduce latency.
 - **Multi-intent command parsing** ("turn off lights and play music")
-- **Conversation Context** - Robust handling of follow-up questions using
-  history.
+- **Conversation Context** - Robust handling of follow-up questions using history.
 
 ### ✅ Home Assistant Integration
 
@@ -109,6 +111,7 @@ requirements.txt
 - Volume control (set, up, down, mute)
 - Media playback control (play, pause, stop, next, previous)
 - **Android TV Support** - Button commands and App launching
+- **Infrared Proxies** - Stateless fire-and-forget IR remote controls via the `sendspin` protocol.
 - Navigation control (up, down, left, right, back, home, select)
 - Device grouping and batch operations
 - Smart device resolution with capability routing
