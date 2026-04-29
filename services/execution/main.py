@@ -17,7 +17,7 @@ from schemas import (
     AnnouncementRequest, TVCastRequest,
     ExecutionResult,
 )
-from  import ha_client
+import ha_client
 
 log = logging.getLogger("execution")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
