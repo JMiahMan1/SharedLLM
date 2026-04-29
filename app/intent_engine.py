@@ -352,6 +352,13 @@ class IntentEngine:
         threshold: float = 0.60,
         high_confidence_threshold: float = 0.80,
     ) -> Tuple[Optional[str], float, bool]:
+        # 1. Check Exact Intent Cache (Redis)
+        cache_key = f"intent_cache:{query.strip().lower()}"
+        if GlobalResources.redis_client:
+            cached_intent = GlobalResources.redis_client.get(cache_key)
+            if cached_intent:
+                return cached_intent.decode('utf-8'), 1.0, True
+                
         # Check regex overrides first
         log.info(f"[REGEX CHECK] Intent engine checking query: '{query}'")
         from app.domains.media import REGEX_INTENT_MAP
@@ -389,6 +396,11 @@ class IntentEngine:
                 log.debug(
                     f"Intent Match: '{query}' -> '{intent}' ({best_score:.2f}) via '{matched_phrase}'"
                 )
+                
+                # Cache >90% confidence for 7 days (604800 seconds)
+                if best_score >= 0.90 and GlobalResources.redis_client:
+                    GlobalResources.redis_client.setex(cache_key, 604800, intent)
+                    
                 return intent, best_score, is_high_confidence
 
             log.debug(

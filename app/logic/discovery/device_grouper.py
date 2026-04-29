@@ -63,6 +63,14 @@ def group_entities(entities: list, device_map: dict = None) -> dict:
         if man and mod:
              # Include clean_name to distinguish multiple TVs of same model (e.g. "Living Room TV" vs "Bed TV")
              group_key = f"hw:{man}:{mod}:{clean_name}".lower()
+             
+        # Strategy 1.5: Sendspin Protocol Clustering (HA 2026.4)
+        elif attrs.get("protocol") == "sendspin":
+            if attrs.get("device_class") == "visualizer":
+                # Do not group visualizers with audio sinks
+                group_key = f"visualizer:{clean_name}"
+            else:
+                group_key = f"sendspin:{clean_name}"
         
         # Strategy 2: Native HA Device ID (Strongest Native link)
         elif did:
