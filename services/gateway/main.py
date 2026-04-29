@@ -10,8 +10,8 @@ import httpx
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 
-from .schemas import ChatRequest, ChatResponse
-from .intent_engine import engine
+from schemas import ChatRequest, ChatResponse
+from intent_engine import engine
 
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
