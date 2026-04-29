@@ -27,6 +27,7 @@ app.dependency_overrides[get_session] = override_get_session
 
 @pytest.fixture(autouse=True)
 def setup_db():
+    SQLModel.metadata.drop_all(test_engine)
     SQLModel.metadata.create_all(test_engine)
     
     with Session(test_engine) as session:
@@ -55,7 +56,8 @@ def setup_db():
         session.commit()
         
     yield
-    SQLModel.metadata.drop_all(engine)
+    
+    SQLModel.metadata.drop_all(test_engine)
 
 client = TestClient(app)
 
