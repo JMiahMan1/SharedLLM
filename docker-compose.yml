@@ -36,17 +36,13 @@ services:
       - ./data:/data:z
       - ./tools:/tools:z
       - rag_chroma:/data/chroma_db:z
-      - huggingface_cache:/home/jeremiah/.cache/huggingface:z
+      - huggingface_cache:/root/.cache/huggingface:z
       # Adding the necessary temp dir for Nextcloud ingestion
       - ./data/nextcloud_temp:/data/nextcloud_temp:z
 
-    # Run as the host user so log files in ./data/ are owned by jeremiah, not root.
-    # UID/GID are resolved from the environment (set in .env or via shell export).
-    user: "${UID:-1000}:${GID:-1000}"
-
     working_dir: /
     entrypoint: []
-    command: bash -c "python -m uvicorn app.main:app --host 0.0.0.0 --port 11435 --workers 1 --reload --reload-dir /app --log-level debug 2>&1 | tee -a /data/shared_llm.log"
+    command: bash -c "umask 022 && touch /data/app.log /data/shared_llm.log && chmod 644 /data/app.log /data/shared_llm.log && python -m uvicorn app.main:app --host 0.0.0.0 --port 11435 --workers 1 --reload --reload-dir /app --log-level debug 2>&1 | tee -a /data/shared_llm.log"
     depends_on:
       - redis # CRITICAL: Depend on Redis service
     network_mode: "host" # Use Host Networking for Cast Discovery
