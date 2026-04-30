@@ -109,7 +109,7 @@ async def readiness():
 
 # --- Logging Helper ---
 async def emit_log(level: str, message: str, context: dict = None):
-    log.info(f"[{level}] {message} context={context}")
+    print(f"DIAGNOSTIC [{level}] {message} context={context}")
     try:
         async with httpx.AsyncClient() as client:
             await client.post(
