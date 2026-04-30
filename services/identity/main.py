@@ -8,7 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import List
 
-from fastapi import FastAPI, Depends, HTTPException, Header, status
+from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
 from sqlmodel import Session, SQLModel, create_engine, select
 
 try:
