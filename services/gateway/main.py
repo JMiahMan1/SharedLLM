@@ -170,31 +170,31 @@ async def chat_handler(request: Request):
                 return resp.json()
         raise HTTPException(status_code=400, detail="No query found")
 
-    # 1. Intent Classification (Semantic Router)
+    # 1. Resolve Identity and Entities (Always needed for context)
+    try:
+        req_for_id = ChatRequest(query=query, rag_user=body.get("rag_user"), voice_id=body.get("voice_id"))
+        creds = await resolve_identity(req_for_id)
+        user_context = {
+            "user": creds["user"],
+            "ha_url": creds.get("ha_url", ""),
+            "ha_token": creds.get("ha_token", "")
+        }
+        real_entities = await fetch_ha_entities(creds)
+    except Exception as e:
+        log.warning(f"Resolution error: {e}")
+        user_context = {"user": "admin", "ha_url": "", "ha_token": ""}
+        real_entities = []
+
+    # 2. Intent Classification (Semantic Router)
     intent, confidence = engine.classify(query)
     log.info(f"[gateway] Classified '{query}' -> {intent} ({confidence:.2f})")
 
-    # 2. Fast Path Evaluation
+    # 3. Fast Path Evaluation
+    # Skip Fast Path for queries/questions
     is_fast_path = confidence >= FAST_PATH_THRESHOLD and intent in ("turn_on", "turn_off", "toggle", "play_media", "pause_media", "announce")
 
     if is_fast_path:
         log.info(f"[gateway] FAST PATH triggered for {intent}")
-        # Resolve Identity and Entities
-        try:
-            req_for_id = ChatRequest(query=query, rag_user=body.get("rag_user"), voice_id=body.get("voice_id"))
-            creds = await resolve_identity(req_for_id)
-            user_context = {
-                "user": creds["user"],
-                "ha_url": creds.get("ha_url", ""),
-                "ha_token": creds.get("ha_token", "")
-            }
-            # FETCH REAL ENTITIES HERE
-            real_entities = await fetch_ha_entities(creds)
-        except Exception as e:
-            log.warning(f"Fast path resolution error: {e}")
-            user_context = {"user": "admin", "ha_url": "", "ha_token": ""}
-            real_entities = []
-
         entity_id = extract_entity_heuristic(query, intent, real_entities)
         
         # Execute
@@ -227,6 +227,7 @@ async def chat_handler(request: Request):
                 "model": body.get("model", "gateway-fast-path"),
                 "created_at": "2024-01-01T00:00:00Z", # Mock
                 "message": {"role": "assistant", "content": msg},
+                "status": exec_res.get("status", "SUCCESS"),
                 "done": True
             }
             if body.get("stream", False):
@@ -243,9 +244,28 @@ async def chat_handler(request: Request):
                 execution_result=exec_res
             )
 
+    # Build Device Context for LLM
+    device_context = ""
+    if real_entities:
+        q_low = query.lower()
+        for e in real_entities:
+            fname = e.get("attributes", {}).get("friendly_name", "").lower()
+            eid = e.get("entity_id", "").lower()
+            if (fname and fname in q_low) or (eid.split(".")[1].replace("_", " ") in q_low):
+                state = e.get("state", "unknown")
+                actual_name = e.get("attributes", {}).get("friendly_name") or eid
+                device_context += f"- {actual_name}: {state}\n"
+    
+    if device_context:
+        ctx_msg = f"## Home Assistant Device Context\nThe following devices were mentioned and their current status is:\n{device_context}\nUse this information to answer the user's question accurately."
+        log.info(f"[gateway] Injecting device context for {len(device_context.splitlines())} devices")
+        if is_native_proxy:
+            # Inject into messages for Ollama/OpenAI
+            body["messages"].insert(0, {"role": "system", "content": ctx_msg})
+
     # 3. Slow Path / Proxy
     if is_native_proxy:
-        log.info(f"[gateway] Proxying to Ollama")
+        log.info(f"[gateway] Proxying to Ollama (with context injection)")
         async def _proxy_stream():
             async with httpx.AsyncClient() as client:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body, timeout=None) as r:
