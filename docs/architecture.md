@@ -236,3 +236,93 @@ truth for Git repositories. The better split is:
 * Nextcloud remains useful for personal organization and cross-device discovery.
 * The assistant can answer both "what changed in this branch?" and "what design
   note did I save next to this repo?" without conflating the two storage models.
+
+---
+
+## 6. Multi-Backend Content Indexing
+
+The Storage service should not be designed as a Nextcloud-only bridge. Nextcloud
+is only the first backend. The architecture should support multiple file stores
+at the same time, including open-source and proprietary systems.
+
+### Design Goals
+
+* **Backend-agnostic**: The indexer reasons over normalized storage entries,
+  not provider-specific objects.
+* **Multi-source**: A user may have multiple active stores at once, such as
+  Nextcloud, local disk mirrors, cloud drives, or document archives.
+* **Capability-aware**: The system should classify what an item is and which
+  internal tools can use it.
+* **Incremental**: Discovery, classification, and enrichment should be able to
+  run separately rather than forcing full deep parsing on every scan.
+
+### Storage Pipeline
+
+1. **Provider Layer**
+   * Each backend implements a provider interface that returns normalized
+     `StorageEntry` records.
+   * Initial provider: Nextcloud via WebDAV.
+   * Future providers can include local filesystems, S3-compatible stores,
+     Dropbox, Google Drive, or SMB/NFS-backed mirrors.
+
+2. **Discovery Layer**
+   * Walk the provider tree and record stable metadata:
+     `path`, `name`, `is_dir`, `size`, `mtime`, `content_type`.
+   * This stage should stay cheap and deterministic.
+
+3. **Classification Layer**
+   * Infer content type from extension, MIME type, directory markers, sibling
+     files, and naming patterns.
+   * Examples:
+     * `.git` folder => git repository
+     * `.obsidian` folder => notes vault
+     * `.mp3` => audio
+     * `.epub` => ebook
+     * `.docx`, `.pdf`, `.xlsx` => document family
+     * `.png`, `.jpg`, `.svg` => image family
+
+4. **Capability Mapping Layer**
+   * Convert classification into a capability map describing what tools can use
+     the item.
+   * Example capability tags:
+     * `full_text`
+     * `structured_parse`
+     * `table_extraction`
+     * `code_navigation`
+     * `git_metadata`
+     * `ocr`
+     * `transcription`
+     * `thumbnail`
+     * `playback`
+
+5. **Consumer Layer**
+   * Gateway, RAG, librarian flows, and media tools consume the index rather
+     than guessing file behavior ad hoc.
+
+### Content Families
+
+The classifier should cover at least:
+
+* **Repositories and source trees**
+  * Git repositories, source code, scripts, configs, workflows
+* **Notes and markdown**
+  * Markdown notes, note exports, vault-style folders
+* **Documents**
+  * TXT, RTF, PDF, DOC/DOCX, ODT, PPT/PPTX, ODP, XLS/XLSX, ODS, CSV, TSV
+* **Ebooks**
+  * EPUB, MOBI, AZW, AZW3, FB2
+* **Structured data**
+  * JSON, YAML, XML, ICS, VCF, ENEX
+* **Images**
+  * PNG, JPG, JPEG, WEBP, GIF, BMP, TIFF, SVG, HEIC, AVIF
+* **Audio**
+  * MP3, M4A, WAV, FLAC, OGG, AAC
+* **Video**
+  * MP4, MKV, MOV, AVI, WEBM, M4V
+
+### Why this matters
+
+The librarian/guru layer should not merely know that a file exists. It should
+know what sort of information it contains and which tools can derive value from
+it. That makes the system extensible across multiple storage backends without
+re-implementing heuristics in every downstream tool.
