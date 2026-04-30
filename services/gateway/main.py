@@ -591,8 +591,8 @@ async def chat_handler(request: Request):
                         rag_context += f"\n\nNextCloud Files found:\n{storage_text}"
                             
     except Exception as e:
-        await emit_log("ERROR", "Context injection failed (check internal logs)")
-        log.error(f"Context injection failed: {e}")
+        await emit_log("ERROR", f"Context injection failed: {str(e)}")
+        log.error(f"Context injection failed: {e}\n{traceback.format_exc()}")
 
     # 5. Proxy to Ollama (Slow Path)
     try:
