@@ -161,6 +161,8 @@ async def execute_light(req: LightControlRequest):
     if req.rgb_color is not None:
         service_data["rgb_color"] = list(req.rgb_color)
 
+    log.info(f"[light] Calling HA service '{req.action}' on {req.entity_id} with data: {service_data}")
+
     result = await _run(
         ha_client.call_service,
         ctx.ha_url, ctx.ha_token,

@@ -237,7 +237,7 @@ async def chat_handler(request: Request):
                     "user_context": user_context,
                     "entity_id": entity_id,
                     "action": action,
-                    "brightness": brightness
+                    "brightness_pct": brightness
                 }
                 exec_res = await execute_command("/execute/light", exec_payload)
             elif intent in ("play_media", "pause_media"):
