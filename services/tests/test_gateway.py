@@ -16,19 +16,22 @@ os.environ["OLLAMA_URL"] = "http://ollama"
 
 from gateway.main import app
 
-client = TestClient(app)
+@pytest.fixture
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 @pytest.fixture
 def mock_intent(mocker):
     """Mock the semantic router."""
     return mocker.patch("gateway.main.engine.classify")
 
-def test_gateway_health():
+def test_gateway_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["service"] == "gateway"
 
-def test_fast_path_light_control(mock_intent, mocker):
+def test_fast_path_light_control(client, mock_intent, mocker):
     """Test the Gateway Fast Path successfully routes a turn_on intent to Execution."""
     # Mock high confidence intent
     mock_intent.return_value = ("turn_on", 0.95)
@@ -52,7 +55,7 @@ def test_fast_path_light_control(mock_intent, mocker):
     assert data["execution_result"]["service"] == "light_control"
 
 
-def test_slow_path_conversational(mock_intent, mocker):
+def test_slow_path_conversational(client, mock_intent, mocker):
     """Test the Gateway Slow Path when confidence is low or intent is unknown."""
     mock_intent.return_value = ("unknown", 0.40)
     
