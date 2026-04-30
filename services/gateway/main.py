@@ -277,46 +277,40 @@ async def chat_handler(request: Request):
                 )
 
     # Build Device Context for LLM
-    device_context = ""
+    catalog_str = ""
+    deep_details = ""
     if real_entities:
         q_low = query.lower()
         mentioned_eids = set()
         
-        # 1. Find Primary Entities (Direct mention)
+        # 1. Primary Match (Deep Detail)
         for e in real_entities:
             eid = e.get("entity_id", "").lower()
             fname = e.get("attributes", {}).get("friendly_name", "").lower()
             if (fname and fname in q_low) or (eid.split(".")[1].replace("_", " ") in q_low):
                 mentioned_eids.add(eid)
-        
-        # 2. Broad Query Handling (If no specific mention but general question)
-        # Check for broad keywords like "control", "devices", "everything", "all", "capabilities", "what can you do"
-        broad_keywords = ["control", "devices", "everything", "all", "capabilities", "list", "what can you", "status"]
-        is_broad = any(k in q_low for k in broad_keywords)
-        
-        if not mentioned_eids and is_broad:
-            log.info("[gateway] Broad query detected - injecting minimal controllable entity summary")
-            domains = ["light", "switch", "media_player", "climate", "lock", "cover", "vacuum"]
-            total_injected = 0
-            for domain in domains:
-                if total_injected >= 10: break
-                matches = [e for e in real_entities if e.get("entity_id", "").startswith(domain + ".")]
-                if matches:
-                    for e in matches[:2]:
-                        mentioned_eids.add(e["entity_id"])
-                        total_injected += 1
 
-        # 3. Find Related Entities
+        # 2. Related Entities (Deep Detail)
         prefixes = set()
         for eid in mentioned_eids:
             parts = eid.split(".")
             if len(parts) > 1:
                 prefixes.add(parts[1].split("_")[0]) 
 
-        # 4. Compile full context
+        # 3. Catalog (Lightweight List of ALL devices)
+        catalog = {}
         for e in real_entities:
             eid = e.get("entity_id", "")
-            fname = e.get("attributes", {}).get("friendly_name", "").lower()
+            domain = eid.split(".")[0]
+            if domain not in catalog: catalog[domain] = []
+            catalog[domain].append(eid)
+        
+        for domain, eids in catalog.items():
+            catalog_str += f"- {domain}: {', '.join(eids[:20])}{'...' if len(eids) > 20 else ''}\n"
+
+        # 4. Compile Deep Context for mentioned items
+        for e in real_entities:
+            eid = e.get("entity_id", "")
             is_mentioned = eid.lower() in mentioned_eids
             is_related = any(p in eid.lower() for p in prefixes) if prefixes else False
             
@@ -325,36 +319,27 @@ async def chat_handler(request: Request):
                 actual_name = e.get("attributes", {}).get("friendly_name") or eid
                 attrs = e.get("attributes", {})
                 
-                # Sanitize attributes but KEEP capabilities
+                # Keep important capability keys
                 filtered_attrs = {}
                 keep_keys = ("supported_features", "supported_color_modes", "color_mode", "brightness", "color_temp_kelvin", "min_color_temp_kelvin", "max_color_temp_kelvin")
                 for k, v in attrs.items():
-                    # Keep important capability keys
-                    if k in keep_keys:
+                    if k in keep_keys: filtered_attrs[k] = v
+                    elif k not in ("icon", "entity_picture", "templates", "friendly_name") and not isinstance(v, (dict, list)):
+                        if isinstance(v, str) and len(v) > 50: v = v[:47] + "..."
                         filtered_attrs[k] = v
-                        continue
-                    # Skip bulky meta
-                    if k in ("icon", "entity_picture", "templates", "friendly_name"): continue
-                    # Truncate others
-                    if isinstance(v, str) and len(v) > 50: v = v[:47] + "..."
-                    filtered_attrs[k] = v
                     
-                device_context += f"- {actual_name} ({eid}): {state} (Attrs: {filtered_attrs})\n"
+                deep_details += f"- {actual_name} ({eid}): {state} (Full Context: {filtered_attrs})\n"
     
-    if device_context:
-        # Final safety truncation
-        if len(device_context) > 10000:
-            device_context = device_context[:10000] + "... [Truncated]"
-
+    if catalog_str or deep_details:
         ctx_msg = (
             "## Home Assistant Device Context\n"
-            "The following devices and sensors were found. Use this info to answer. "
-            "IMPORTANT: Home Assistant hides attributes like 'brightness' when a device is OFF. "
-            "To see if a feature is supported, ALWAYS check 'supported_color_modes' (e.g. 'brightness', 'color_temp') "
-            "or the 'supported_features' bitmask. If 'brightness' is listed in supported_color_modes, IT IS SUPPORTED.\n\n"
-            f"{device_context}\n"
+            "SYSTEM CATALOG (Summary of available devices):\n"
+            f"{catalog_str}\n"
+            "DEEP DETAILS (Full attributes for relevant devices):\n"
+            f"{deep_details if deep_details else 'No specific devices mentioned in query.'}\n\n"
+            "NOTE: If 'brightness' is None but 'brightness' is in 'supported_color_modes', the device supports it but is currently OFF."
         )
-        log.info(f"[gateway] Injected System Msg Size: {len(ctx_msg)} chars")
+        log.info(f"[gateway] Injected Context: Catalog ({len(catalog_str)} chars), Deep ({len(deep_details)} chars)")
         if is_native_proxy:
             # Inject into messages for Ollama/OpenAI
             body["messages"].insert(0, {"role": "system", "content": ctx_msg})
