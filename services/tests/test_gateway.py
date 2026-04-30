@@ -41,17 +41,27 @@ def test_fast_path_light_control(mock_identity, mock_intent, mocker):
     
     # We need a separate mock specifically for the execution call since httpx.post is called twice
     # First for identity, second for execution
-    async def mock_post_side_effect(url, *args, **kwargs):
+    # We need to mock both POST (identity, execution) and GET (entities)
+    async def mock_http_side_effect(method, url, *args, **kwargs):
         resp = mocker.Mock()
         resp.status_code = 200
-        if "resolve" in url:
-            resp.json.return_value = {"user": "alice", "ha_url": "http", "ha_token": "tok"}
-        else:
-            resp.json.return_value = {"status": "SUCCESS", "message": "Lights on", "service": "light_control"}
+        if method == "POST":
+            if "resolve" in url:
+                resp.json.return_value = {"user": "alice", "ha_url": "http", "ha_token": "tok"}
+            else:
+                resp.json.return_value = {"status": "SUCCESS", "message": "Lights on", "service": "light_control"}
+        elif method == "GET":
+            if "entities" in url:
+                resp.json.return_value = [
+                    {"entity_id": "light.living_room", "state": "off", "attributes": {"friendly_name": "living room lights"}}
+                ]
         resp.raise_for_status = mocker.Mock()
         return resp
         
-    mocker.patch("httpx.AsyncClient.post", side_effect=mock_post_side_effect)
+    mocker.patch("httpx.AsyncClient.request", side_effect=mock_http_side_effect)
+    # Also patch specific methods if they are used directly
+    mocker.patch("httpx.AsyncClient.post", side_effect=lambda url, **kwargs: mock_http_side_effect("POST", url, **kwargs))
+    mocker.patch("httpx.AsyncClient.get", side_effect=lambda url, **kwargs: mock_http_side_effect("GET", url, **kwargs))
 
     resp = client.post("/api/chat", json={
         "query": "Turn on the living room lights",
@@ -99,6 +109,7 @@ def test_identity_resolution_failure(mocker):
     async def mock_post_side_effect(url, *args, **kwargs):
         resp = mocker.Mock()
         resp.status_code = 404
+        resp.json.return_value = {"detail": "User not found"}
         return resp
         
     mocker.patch("httpx.AsyncClient.post", side_effect=mock_post_side_effect)
