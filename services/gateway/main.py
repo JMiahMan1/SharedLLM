@@ -95,8 +95,57 @@ def extract_entity_heuristic(query: str, intent: str) -> str:
     # Fallback dummy entity
     return "light.dummy_light"
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
+@app.post("/api/chat")
+@app.post("/v1/chat/completions")
+@app.post("/chat/completions")
+async def chat_handler(request: Request):
+    """
+    Unified chat endpoint. Handles:
+    1. RAG-style ChatRequest (query: str)
+    2. Ollama-style chat (messages: list)
+    3. OpenAI-style chat (messages: list)
+    """
+    body = await request.json()
+    
+    # CASE 1: Ollama/OpenAI native proxy
+    if "messages" in body:
+        log.info(f"[gateway] Proxying native chat request to Ollama")
+        async def _proxy_stream():
+            async with httpx.AsyncClient() as client:
+                async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body, timeout=None) as r:
+                    async for chunk in r.aiter_bytes():
+                        yield chunk
+        
+        if body.get("stream", True):
+            return StreamingResponse(_proxy_stream(), media_type="application/x-ndjson")
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=60.0)
+            return resp.json()
+
+    # CASE 2: RAG / Intent Pipeline
+    # Convert body to ChatRequest (allow missing fields for legacy compatibility)
+    try:
+        # Extract query from various possible fields
+        query = body.get("query") or body.get("prompt") or ""
+        if not query and "messages" not in body:
+             # If no query and no messages, we can't do much.
+             # But let's try to be helpful if it's a legacy pull or something else misrouted.
+             pass
+        
+        req = ChatRequest(
+            query=query,
+            voice_id=body.get("voice_id"),
+            device_id=body.get("device_id"),
+            rag_user=body.get("rag_user"),
+            model=body.get("model"),
+            stream=body.get("stream", False)
+        )
+    except Exception as e:
+        log.error(f"Failed to parse ChatRequest: {e}")
+        raise HTTPException(status_code=422, detail=f"Invalid request format: {e}")
+
+    # --- Start original chat logic ---
     # 1. Identity Resolution
     creds = await resolve_identity(req)
     user_context = {
@@ -157,8 +206,6 @@ async def chat(req: ChatRequest):
         )
 
     # 4. Slow Path (LLM + RAG)
-    # If not fast path, we would call the RAG service and then the LLM.
-    # For this architecture scaffold, we simulate the LLM response.
     log.info(f"[gateway] SLOW PATH for intent {intent} ({confidence:.2f})")
     
     # Simulate RAG call
@@ -273,26 +320,4 @@ async def api_show(request: Request):
         resp = await client.post(f"{OLLAMA_URL}/api/show", json=body, timeout=5.0)
         return resp.json()
 
-@app.post("/api/chat")
-async def api_ollama_chat(request: Request):
-    """Proxy Ollama's native chat endpoint if it's not the RAG chat."""
-    # We differentiate by content-type or if it has 'messages' instead of 'query'
-    body = await request.json()
-    if "messages" in body:
-        # This is an Ollama-native chat request, proxy it
-        async def _proxy_stream():
-            async with httpx.AsyncClient() as client:
-                async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body, timeout=None) as r:
-                    async for chunk in r.aiter_bytes():
-                        yield chunk
-        if body.get("stream", True):
-            return StreamingResponse(_proxy_stream(), media_type="application/x-ndjson")
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=60.0)
-            return resp.json()
-    
-    # If it reached here but didn't have messages, it might be our own ChatRequest
-    # (but /api/chat is overloaded, so we handle it based on schema)
-    # Actually, ChatRequest has 'query'. 
-    # If we have both, we need to be careful.
-    return await chat(ChatRequest(**body))
+# End of Chat Handlers
