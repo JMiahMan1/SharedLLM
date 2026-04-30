@@ -35,7 +35,19 @@ async def lifespan(app: FastAPI):
     yield
     log.info("Gateway shutting down...")
 
+from fastapi.responses import JSONResponse
+import traceback
+
 app = FastAPI(title="SharedLLM Intent Gateway", version="1.0.0", lifespan=lifespan)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    err_msg = f"Gateway Error: {type(exc).__name__}: {str(exc)}"
+    log.error(f"{err_msg}\n{traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={"status": "ERROR", "message": err_msg, "detail": traceback.format_exc().splitlines()[-3:]}
+    )
 
 async def resolve_identity(req: ChatRequest) -> dict:
     """Call Identity Service to get decrypted credentials."""
