@@ -63,6 +63,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SharedLLM Identity Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi.responses import JSONResponse
+import traceback
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    err_msg = f"Identity Error: {type(exc).__name__}: {str(exc)}"
+    log.error(f"{err_msg}\n{traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={"status": "ERROR", "message": "Internal Identity Error", "detail": str(exc)}
+    )
+
 # ─── Dependencies ──────────────────────────────────────────────────────────────
 
 def get_session():

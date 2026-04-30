@@ -55,6 +55,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SOA Intent Gateway", version="1.0.0", lifespan=lifespan)
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    err_msg = f"Gateway Error: {type(exc).__name__}: {str(exc)}"
+    log.error(f"{err_msg}\n{traceback.format_exc()}")
+    await emit_log("ERROR", err_msg, {"trace": traceback.format_exc()})
+    return JSONResponse(
+        status_code=500,
+        content={"status": "ERROR", "message": "Internal Gateway Error", "detail": str(exc)}
+    )
+
 # --- Global Health & Readiness ---
 @app.get("/health")
 def health():
@@ -148,16 +158,22 @@ async def decompose_command_query(query: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 async def resolve_identity(body: dict) -> dict:
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{IDENTITY_SVC}/api/resolve",
-            json=body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=5.0
-        )
-        if resp.status_code != 200:
-            return {"user": "admin"}
-        return resp.json()
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC}/api/resolve",
+                json=body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=5.0
+            )
+            if resp.status_code != 200:
+                err_detail = f"Identity resolution failed: {resp.status_code} {resp.text}"
+                log.error(err_detail)
+                raise HTTPException(status_code=resp.status_code, detail=err_detail)
+            return resp.json()
+    except httpx.RequestError as e:
+        log.error(f"Identity service unreachable: {e}")
+        raise HTTPException(status_code=503, detail="Identity service unreachable")
 
 async def fetch_ha_entities(creds: dict) -> list:
     try:
@@ -167,15 +183,22 @@ async def fetch_ha_entities(creds: dict) -> list:
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=5.0
         )
-        entities = resp.json() if resp.status_code == 200 else []
+        if resp.status_code != 200:
+            log.warning(f"Failed to fetch entities: {resp.status_code}")
+            return []
+        
+        entities = resp.json()
         if entities:
+            # Async sync task
             asyncio.create_task(_global_http_client.post(
                 f"{RAG_SVC}/rag/sync/ha",
                 json={"entities": entities, "user_id": creds.get("user", "admin")},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             ))
         return entities
-    except: return []
+    except Exception as e:
+        log.error(f"Entity discovery error: {e}")
+        return []
 
 @app.post("/api/discovery/sync")
 async def discovery_sync(request: Request):
