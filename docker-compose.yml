@@ -64,6 +64,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
       - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
+      - CODING_MODEL=${CODING_MODEL:-qwen2.5-coder:7b}
       - TZ=America/Phoenix
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro

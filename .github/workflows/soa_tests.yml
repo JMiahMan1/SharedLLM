@@ -42,6 +42,8 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}/services
         FERNET_KEY: bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=
         INTERNAL_SECRET: test-secret-github-actions
+        ASSISTANT_MODEL: qwen3:latest
+        CODING_MODEL: qwen2.5-coder:7b
       run: |
         pytest services/tests/ \
           --junitxml=pytest-report.xml \

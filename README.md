@@ -33,6 +33,11 @@ Or manually:
 docker compose up -d --build
 ```
 
+Runtime model roles are environment-driven. In particular, the gateway can
+route obvious coding requests to a dedicated coding model when
+`CODING_MODEL` is set, while leaving normal assistant traffic on
+`ASSISTANT_MODEL` or `DEFAULT_MODEL`.
+
 ## 📂 Project Structure
 
 ```text

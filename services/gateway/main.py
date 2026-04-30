@@ -206,6 +206,41 @@ def extract_media_request(query: str) -> tuple[str | None, str | None]:
     return (media_query or None, device_name or None)
 
 
+def is_likely_video_request(query: str) -> bool:
+    q = (query or "").lower()
+    video_signals = (
+        "watch ",
+        " video",
+        "youtube",
+        "youtu.be",
+        "movie",
+        "episode",
+        "netflix",
+        "hulu",
+        "disney",
+        "prime video",
+    )
+    return any(signal in q for signal in video_signals)
+
+
+def extract_media_transport_command(query: str) -> str | None:
+    q = (query or "").strip().lower()
+    if not q:
+        return None
+
+    command_patterns = (
+        (r"\b(?:pause|hold)\b", "pause"),
+        (r"\bresume\b", "resume"),
+        (r"\bstop\b", "stop"),
+        (r"\b(?:back|previous|go back)\b", "previous"),
+        (r"\b(?:next|skip)\b", "next"),
+    )
+    for pattern, command in command_patterns:
+        if re.search(pattern, q, flags=re.IGNORECASE):
+            return command
+    return None
+
+
 def resolve_media_target(query: str, entities: list[dict]) -> str:
     """
     Prefer a Music Assistant queue/speaker entity for music playback on named targets.
@@ -215,10 +250,18 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
     requested_lower = requested_device.lower() if requested_device else ""
     fallback = "auto"
 
+    def _normalize_name(value: str) -> str:
+        cleaned = re.sub(r"[^a-z0-9]+", " ", (value or "").lower())
+        cleaned = re.sub(r"\b(remote|cast|chrome)\b", " ", cleaned)
+        return " ".join(cleaned.split())
+
+    requested_normalized = _normalize_name(requested_lower)
+
     def _score(entity: dict) -> tuple[int, str]:
         eid = entity.get("entity_id", "")
         attrs = entity.get("attributes") or {}
         friendly = str(attrs.get("friendly_name") or "").lower()
+        friendly_normalized = _normalize_name(friendly)
         source = str(attrs.get("source") or "").lower()
         device_class = str(attrs.get("device_class") or "").lower()
         state = str(entity.get("state") or "").lower()
@@ -226,6 +269,10 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
         score = 0
         if requested_lower and requested_lower in friendly:
             score += 100
+        if requested_normalized and requested_normalized == friendly_normalized:
+            score += 120
+        elif requested_normalized and requested_normalized in friendly_normalized:
+            score += 80
         if "music assistant queue" in source:
             score += 50
         if device_class == "speaker":
@@ -241,6 +288,21 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
     candidates = [e for e in entities if e.get("entity_id", "").startswith("media_player.")]
     if not candidates:
         return fallback
+
+    if requested_normalized:
+        matching_ma_queues = []
+        for entity in candidates:
+            attrs = entity.get("attributes") or {}
+            friendly_normalized = _normalize_name(str(attrs.get("friendly_name") or ""))
+            source = str(attrs.get("source") or "").lower()
+            if "music assistant queue" not in source:
+                continue
+            if requested_normalized == friendly_normalized or requested_normalized in friendly_normalized:
+                matching_ma_queues.append(entity)
+
+        if matching_ma_queues:
+            ranked_queues = sorted((_score(e) for e in matching_ma_queues), reverse=True)
+            return ranked_queues[0][1]
 
     ranked = sorted((_score(e) for e in candidates), reverse=True)
     best_score, best_eid = ranked[0]
@@ -377,12 +439,13 @@ async def chat_handler(request: Request):
     refined_query = await contextualize_query(query, history)
     sub_commands = await decompose_command_query(refined_query)
     media_query, _ = extract_media_request(refined_query)
+    media_transport_command = extract_media_transport_command(refined_query)
+    is_video_request = is_likely_video_request(refined_query)
     
     # 3. Fast Path (Semantic Routing)
     intent, confidence = engine.classify(refined_query)
-    force_music_fast_path = bool(media_query)
-    if force_music_fast_path:
-        intent = "play_media"
+    if media_transport_command:
+        intent = "media_transport"
         confidence = 1.0
 
     if confidence >= FAST_PATH_THRESHOLD:
@@ -393,6 +456,7 @@ async def chat_handler(request: Request):
             "turn_on": "/execute/light",
             "turn_off": "/execute/light",
             "play_media": "/execute/media/play",
+            "media_transport": "/execute/media/transport",
             "pause_media": "/execute/media/transport",
             "open_garage": "/execute/security",
             "close_garage": "/execute/security"
@@ -434,7 +498,7 @@ async def chat_handler(request: Request):
                     lights = [e for e in real_entities if e['entity_id'].startswith('light.')]
                     if lights: target_entity = lights[0]['entity_id']
 
-            if intent == "play_media" and media_query:
+            if intent in {"play_media", "media_transport", "pause_media"} and (media_query or media_transport_command) and not is_video_request:
                 target_entity = resolve_media_target(refined_query, real_entities)
 
             exec_payload = {
@@ -451,6 +515,13 @@ async def chat_handler(request: Request):
                 else:
                     exec_payload["media_content_id"] = "http://stream.radioparadise.com/flac"
                     exec_payload["media_content_type"] = "music"
+            elif intent in {"media_transport", "pause_media"}:
+                if not media_transport_command:
+                    return JSONResponse(
+                        {"status": "ERROR", "message": "Could not determine media transport command."},
+                        status_code=400,
+                    )
+                exec_payload["command"] = media_transport_command
 
             exec_res = await execute_command(endpoint, exec_payload)
             if intent == "play_media" and exec_res.get("status") == "FAILURE":

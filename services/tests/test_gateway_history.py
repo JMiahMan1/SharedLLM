@@ -8,9 +8,12 @@ from fastapi.testclient import TestClient
 from gateway.main import app
 import json
 
-client = TestClient(app)
+@pytest.fixture
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
-def test_history_aware_matching(mocker):
+def test_history_aware_matching(client, mocker):
     # Mock the execution bridge response
     async def mock_get_resp(*args, **kwargs):
         r = mocker.Mock()

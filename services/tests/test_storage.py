@@ -7,14 +7,17 @@ import pytest
 from fastapi.testclient import TestClient
 from storage.main import app
 
-client = TestClient(app)
+@pytest.fixture
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
-def test_health():
+def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["service"] == "storage"
 
-def test_nextcloud_list_unauthorized(mocker):
+def test_nextcloud_list_unauthorized(client, mocker):
     # Mocking easywebdav connect to avoid real network calls
     mocker.patch("easywebdav.connect")
     

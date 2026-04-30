@@ -179,3 +179,60 @@ State Architecture**:
   Documents". Defines `group_id`, `integration`, and `capabilities` for every
   smart device, enabling sophisticated group-aware logic (e.g.,
   SmartPowerSync).
+
+---
+
+## 5. Repo-Aware Nextcloud Assistance
+
+For code assistance, Nextcloud should not be treated as the editable source of
+truth for Git repositories. The better split is:
+
+1. **Git workspace is authoritative for code state**
+   * Active code edits, tests, diffs, and branch state should come from the
+     checked-out local repository.
+   * This avoids stale file snapshots, merge ambiguity, and accidental edits to
+     synced artifacts rather than the real branch.
+
+2. **Nextcloud is authoritative for workspace discovery and durable references**
+   * The Storage service can treat directories like `/Code/SharedLLM` as
+     registered workspaces for a user profile.
+   * Folder metadata can provide a stable mapping such as:
+     `display_name`, `nextcloud_path`, `local_path`, `git_remote`, `default_branch`,
+     `sync_mode`.
+
+3. **RAG indexes repository-adjacent documents, not raw Git state**
+   * Good candidates: architecture docs, notes, design briefs, exported issues,
+     handoff files, and snapshots intentionally stored in Nextcloud.
+   * Bad candidates: every tracked source file on every sync, because Git is a
+     better system of record for that content during active development.
+
+### Recommended Architecture
+
+* **Workspace Registry**
+  * Add a user-scoped registry of known code folders, starting with
+    `/Code/SharedLLM`.
+  * Each entry should map the Nextcloud folder to a local checkout path.
+
+* **Capability Split**
+  * **Storage service**: list/search registered workspace folders and retrieve
+    non-code companion documents from Nextcloud.
+  * **Gateway**: detect coding intent and route code questions to the coding
+    model.
+  * **Local agent/runtime**: inspect the mapped local checkout for `git status`,
+    file reads, diffs, and test execution.
+
+* **Trigger Behavior**
+  * If the user asks about code in a registered repo, prefer the local mapped
+    checkout.
+  * If the user asks for supporting documents, notes, or design context, search
+    Nextcloud under that repo folder.
+  * If the repo is not available locally, the system can fall back to
+    Nextcloud-backed document assistance, but should clearly state that it is
+    reasoning over synced files rather than a live Git worktree.
+
+### Why this split works
+
+* Git remains the canonical source for code correctness.
+* Nextcloud remains useful for personal organization and cross-device discovery.
+* The assistant can answer both "what changed in this branch?" and "what design
+  note did I save next to this repo?" without conflating the two storage models.
