@@ -376,9 +376,15 @@ async def chat_handler(request: Request):
     # 2. Contextualize & Decompose
     refined_query = await contextualize_query(query, history)
     sub_commands = await decompose_command_query(refined_query)
+    media_query, _ = extract_media_request(refined_query)
     
     # 3. Fast Path (Semantic Routing)
     intent, confidence = engine.classify(refined_query)
+    force_music_fast_path = bool(media_query)
+    if force_music_fast_path:
+        intent = "play_media"
+        confidence = 1.0
+
     if confidence >= FAST_PATH_THRESHOLD:
         log.info(f"[FastPath] intent='{intent}' confidence={confidence}")
         
@@ -428,7 +434,6 @@ async def chat_handler(request: Request):
                     lights = [e for e in real_entities if e['entity_id'].startswith('light.')]
                     if lights: target_entity = lights[0]['entity_id']
 
-            media_query, _ = extract_media_request(refined_query)
             if intent == "play_media" and media_query:
                 target_entity = resolve_media_target(refined_query, real_entities)
 
