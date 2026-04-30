@@ -544,90 +544,90 @@ async def chat_handler(request: Request):
                 "execution_result": exec_res
             })
     
-        # 4. Context Injection (RAG + Storage)
-        rag_context = ""
-        try:
-            selected_model = select_model_for_query(refined_query)
-            log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}'")
+    # 4. Context Injection (RAG + Storage)
+    rag_context = ""
+    try:
+        selected_model = select_model_for_query(refined_query)
+        log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}'")
+        
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            # HA Entity Context
+            rag_resp = await client.post(
+                f"{RAG_SVC}/rag/search",
+                json={
+                    "query": refined_query,
+                    "user_id": user_id,
+                    "collection_name": "ha_entities",
+                    "k": 5
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if rag_resp.status_code == 200:
+                results = rag_resp.json().get("results", [])
+                if results:
+                    rag_context = "Relevant Device Context:\n" + "\n".join([r["content"] for r in results])
             
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                # HA Entity Context
-                rag_resp = await client.post(
-                    f"{RAG_SVC}/rag/search",
+            # Storage Context for Librarian
+            if selected_model == LIBRARIAN_MODEL:
+                storage_resp = await client.post(
+                    f"{STORAGE_SVC}/nextcloud/search",
+                    params={"query": refined_query},
                     json={
-                        "query": refined_query,
-                        "user_id": user_id,
-                        "collection_name": "ha_entities",
-                        "k": 5
+                        "nc_url": creds.get("nextcloud_url"),
+                        "nc_user": creds.get("nextcloud_user"),
+                        "nc_pass": creds.get("nextcloud_pass")
                     },
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if rag_resp.status_code == 200:
-                    results = rag_resp.json().get("results", [])
-                    if results:
-                        rag_context = "Relevant Device Context:\n" + "\n".join([r["content"] for r in results])
-                
-                # Storage Context for Librarian
-                if selected_model == LIBRARIAN_MODEL:
-                    storage_resp = await client.post(
-                        f"{STORAGE_SVC}/nextcloud/search",
-                        params={"query": refined_query},
-                        json={
-                            "nc_url": creds.get("nextcloud_url"),
-                            "nc_user": creds.get("nextcloud_user"),
-                            "nc_pass": creds.get("nextcloud_pass")
-                        },
-                        headers={"X-Internal-Secret": INTERNAL_SECRET}
-                    )
-                    if storage_resp.status_code == 200:
-                        matches = storage_resp.json().get("matches", [])
-                        if matches:
-                            storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
-                            rag_context += f"\n\nNextCloud Files found:\n{storage_text}"
+                if storage_resp.status_code == 200:
+                    matches = storage_resp.json().get("matches", [])
+                    if matches:
+                        storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
+                        rag_context += f"\n\nNextCloud Files found:\n{storage_text}"
                             
-        except Exception as e:
-            await emit_log("ERROR", "Context injection failed (check internal logs)")
-            log.error(f"Context injection failed: {e}")
+    except Exception as e:
+        await emit_log("ERROR", "Context injection failed (check internal logs)")
+        log.error(f"Context injection failed: {e}")
 
-        # 5. Proxy to Ollama (Slow Path)
-        try:
-            await emit_log("INFO", f"Slow path triggered for: {refined_query}")
+    # 5. Proxy to Ollama (Slow Path)
+    try:
+        await emit_log("INFO", f"Slow path triggered for: {refined_query}")
         
-            # Try /api/chat first (Ollama standard)
-            ollama_payload = {
+        # Try /api/chat first (Ollama standard)
+        ollama_payload = {
+            "model": selected_model,
+            "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
+            "stream": False
+        }
+        resp = await call_ollama(ollama_payload, use_chat=True)
+        
+        if resp.status_code == 404:
+            # Fallback to /api/generate for older Ollama versions
+            log.warning("Ollama /api/chat not found, falling back to /api/generate")
+            gen_payload = {
                 "model": selected_model,
-                "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
+                "prompt": f"{refined_query}", # Simplified
                 "stream": False
             }
-            resp = await call_ollama(ollama_payload, use_chat=True)
+            resp = await call_ollama(gen_payload, use_chat=False)
             
-            if resp.status_code == 404:
-                # Fallback to /api/generate for older Ollama versions
-                log.warning("Ollama /api/chat not found, falling back to /api/generate")
-                gen_payload = {
-                    "model": selected_model,
-                    "prompt": f"{refined_query}", # Simplified
-                    "stream": False
-                }
-                resp = await call_ollama(gen_payload, use_chat=False)
-                
-            if resp.status_code != 200:
-                err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
-                log.error(err_msg)
-                return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
-                
-            data = resp.json()
-            answer = data.get("message", {}).get("content") or data.get("response", "I encountered an error.")
+        if resp.status_code != 200:
+            err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
+            log.error(err_msg)
+            return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
             
-            # Save to history
-            await update_history(user_id, "user", query)
-            await update_history(user_id, "assistant", answer)
-            
-            return JSONResponse({"status": "SUCCESS", "message": answer})
+        data = resp.json()
+        answer = data.get("message", {}).get("content") or data.get("response", "I encountered an error.")
         
-        except Exception as e:
-            log.error(f"LLM Proxy Error: {e}")
-            raise HTTPException(status_code=502, detail="Upstream LLM error")
+        # Save to history
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", answer)
+        
+        return JSONResponse({"status": "SUCCESS", "message": answer})
+        
+    except Exception as e:
+        log.error(f"LLM Proxy Error: {e}")
+        raise HTTPException(status_code=502, detail="Upstream LLM error")
 
 # --- Ollama Proxy ---
 @app.post("/api/generate")
