@@ -53,7 +53,21 @@ def test_brightness():
     except Exception as e:
         print(f"Brightness Test failed: {e}")
 
+STORAGE_URL = "http://localhost:8005" # Default internal, but might be different if mapped
+
+def test_storage_health():
+    print("\n--- Testing Storage Service Health ---")
+    try:
+        # Note: We use the internal service name 'storage' if running in docker, 
+        # or localhost if running locally and port is mapped.
+        # For the smoke test, we assume we can reach it.
+        resp = requests.get(f"http://localhost:8005/health")
+        print(f"Storage Health: {resp.status_code} - {resp.json()}")
+    except Exception as e:
+        print(f"Storage unreachable: {e}")
+
 if __name__ == "__main__":
     test_health()
     test_intent_classification()
     test_brightness()
+    test_storage_health()
