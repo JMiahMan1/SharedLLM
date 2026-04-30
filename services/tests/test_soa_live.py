@@ -1,3 +1,8 @@
+"""
+Live SOA Integration Testing Script.
+Used for manual verification of Gateway, Fast Path, and Slow Path behavior in a live environment.
+Related code: services/gateway/main.py
+"""
 import requests
 import json
 import time

@@ -1,3 +1,8 @@
+"""
+Specialized tests for the Gateway's history-aware entity resolution.
+Verifies that multi-turn context (e.g. 'Can it be dimmed?') correctly resolves entities from previous turns.
+Related code: services/gateway/main.py
+"""
 import pytest
 from fastapi.testclient import TestClient
 from gateway.main import app
