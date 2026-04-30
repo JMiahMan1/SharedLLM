@@ -16,10 +16,15 @@ try:
     from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
     from .intent_engine import engine
     from .history import get_history, update_history, ping_redis
-except ImportError:
-    from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
-    from gateway.intent_engine import engine
-    from gateway.history import get_history, update_history, ping_redis
+except (ImportError, ValueError):
+    try:
+        from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
+        from gateway.intent_engine import engine
+        from gateway.history import get_history, update_history, ping_redis
+    except ImportError:
+        from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
+        from intent_engine import engine
+        from history import get_history, update_history, ping_redis
 
 # --- Setup Logging ---
 log = logging.getLogger("gateway")

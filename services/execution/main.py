@@ -13,14 +13,23 @@ try:
         CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
     )
     from .handlers import light, media, climate, security, calendar, note, timer
-except ImportError:
-    from execution import ha_client
-    from execution.schemas import (
-        LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-        TVCastRequest, HAServiceRequest, AnnouncementRequest,
-        CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
-    )
-    from execution.handlers import light, media, climate, security, calendar, note, timer
+except (ImportError, ValueError):
+    try:
+        from execution import ha_client
+        from execution.schemas import (
+            LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+            TVCastRequest, HAServiceRequest, AnnouncementRequest,
+            CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
+        )
+        from execution.handlers import light, media, climate, security, calendar, note, timer
+    except ImportError:
+        import ha_client
+        from schemas import (
+            LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+            TVCastRequest, HAServiceRequest, AnnouncementRequest,
+            CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
+        )
+        from handlers import light, media, climate, security, calendar, note, timer
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
