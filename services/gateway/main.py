@@ -294,6 +294,7 @@ async def chat_handler(request: Request):
     if device_context:
         ctx_msg = f"## Home Assistant Device Context\nThe following devices were mentioned and their current status is:\n{device_context}\nUse this information to answer the user's question accurately."
         log.info(f"[gateway] Injecting device context for {len(device_context.splitlines())} devices")
+        log.info(f"[gateway] Injected Context: {ctx_msg}")
         if is_native_proxy:
             # Inject into messages for Ollama/OpenAI
             body["messages"].insert(0, {"role": "system", "content": ctx_msg})
