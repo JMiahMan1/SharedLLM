@@ -7,6 +7,10 @@ __pycache__/
 .vscode/
 *.swp
 *.swo
+*.db
+*.sqlite3
+*.mp4
+app/static/temp/audio/*.mp3
 app.log
 temp_output/
-*.log
+*.log*
