@@ -92,5 +92,13 @@
         "broadcast a message",
         "tell everyone it is time to go",
         "make an announcement"
+    ],
+    "index_storage": [
+        "index my library",
+        "reindex my files",
+        "scan my nextcloud",
+        "update my knowledge base",
+        "index my documents",
+        "scan my library"
     ]
 }
