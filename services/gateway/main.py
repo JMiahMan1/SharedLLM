@@ -124,9 +124,15 @@ def extract_entity_heuristic(query: str, intent: str, entities: list = None) -> 
             domain = entity_id.split(".")[0]
             
             # Check if domain matches intent type
-            if intent in ("turn_on", "turn_off", "toggle") and domain not in ("light", "switch", "media_player"):
+            if intent in ("turn_on", "turn_off", "toggle", "set_brightness") and domain not in ("light", "switch", "media_player"):
                 continue
             if intent in ("play_media", "pause_media") and domain != "media_player":
+                continue
+            if intent == "set_temperature" and domain != "climate":
+                continue
+            if intent in ("lock_security", "unlock_security") and domain != "lock":
+                continue
+            if intent in ("open_cover", "close_cover") and domain != "cover":
                 continue
                 
             fname = e.get("attributes", {}).get("friendly_name", "").lower()
@@ -219,7 +225,13 @@ async def chat_handler(request: Request):
 
     # 3. Fast Path Evaluation
     # Skip Fast Path for queries/questions
-    is_fast_path = confidence >= FAST_PATH_THRESHOLD and intent in ("turn_on", "turn_off", "toggle", "set_brightness", "play_media", "pause_media", "announce")
+    fast_path_intents = (
+        "turn_on", "turn_off", "toggle", "set_brightness", 
+        "play_media", "pause_media", "announce",
+        "set_temperature", "lock_security", "unlock_security", 
+        "open_cover", "close_cover"
+    )
+    is_fast_path = confidence >= FAST_PATH_THRESHOLD and intent in fast_path_intents
 
     if is_fast_path:
         log.info(f"[gateway] FAST PATH triggered for {intent}")
@@ -240,6 +252,17 @@ async def chat_handler(request: Request):
                     "brightness_pct": brightness
                 }
                 exec_res = await execute_command("/execute/light", exec_payload)
+            elif intent == "set_temperature":
+                # Basic temperature extraction
+                import re
+                temp_match = re.search(r"(\d+)", query)
+                temp = float(temp_match.group(1)) if temp_match else 70.0
+                exec_payload = {"user_context": user_context, "entity_id": entity_id, "temperature": temp}
+                exec_res = await execute_command("/execute/climate", exec_payload)
+            elif intent in ("lock_security", "unlock_security", "open_cover", "close_cover"):
+                action = intent.split("_")[0] # "lock", "unlock", "open", "close"
+                exec_payload = {"user_context": user_context, "entity_id": entity_id, "action": action}
+                exec_res = await execute_command("/execute/security", exec_payload)
             elif intent in ("play_media", "pause_media"):
                 if intent == "play_media":
                     exec_payload = {"user_context": user_context, "entity_id": entity_id, "query": query.replace("play", "").strip()}

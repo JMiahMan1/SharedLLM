@@ -72,8 +72,44 @@ def test_storage_health():
     except Exception as e:
         print(f"Storage unreachable: {e}")
 
+def test_climate():
+    print("\n--- Testing Climate Control (Fast Path) ---")
+    payload = {
+        "messages": [{"role": "user", "content": "Set the thermostat to 72"}],
+        "model": "qwen3:latest",
+        "rag_user": "default"
+    }
+    try:
+        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload)
+        print(f"Status Code: {resp.status_code}")
+        data = resp.json()
+        print(f"Message: {data.get('message', {}).get('content')}")
+        if data.get("status") == "SUCCESS":
+            print("Climate Test: PASSED")
+    except Exception as e:
+        print(f"Climate Test failed: {e}")
+
+def test_security():
+    print("\n--- Testing Security Control (Fast Path) ---")
+    payload = {
+        "messages": [{"role": "user", "content": "Lock the front door"}],
+        "model": "qwen3:latest",
+        "rag_user": "default"
+    }
+    try:
+        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload)
+        print(f"Status Code: {resp.status_code}")
+        data = resp.json()
+        print(f"Message: {data.get('message', {}).get('content')}")
+        if data.get("status") == "SUCCESS":
+            print("Security Test: PASSED")
+    except Exception as e:
+        print(f"Security Test failed: {e}")
+
 if __name__ == "__main__":
     test_health()
     test_intent_classification()
     test_brightness()
+    test_climate()
+    test_security()
     test_storage_health()
