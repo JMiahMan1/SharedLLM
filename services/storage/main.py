@@ -96,8 +96,9 @@ async def search_nextcloud_compat(req: dict, query: str):
     
     # Fallback for broad listing queries
     if not matches and any(k in query.lower() for k in ["list", "files", "folders", "what", "show", "get"]):
-        log.info("No direct match, returning top-level entries for broad query")
-        matches = [e for e in response["entries"] if e["path"].count("/") <= 1]
+        sample_path = response['entries'][0]['path'] if response['entries'] else 'NONE'
+        log.info(f"No direct match, broad query fallback. Sample path: {sample_path}")
+        matches = [e for e in response["entries"] if e["path"].count("/") <= 2]
         
     return {"status": "SUCCESS", "matches": matches[:15]}
 
