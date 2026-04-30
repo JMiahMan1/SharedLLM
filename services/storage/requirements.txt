@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+requests
+easywebdav
+python-dotenv
+pydantic
+pydantic-settings
+httpx

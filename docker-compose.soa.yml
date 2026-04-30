@@ -60,8 +60,18 @@ services:
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
+
+  storage:
+    build: ./services/storage
+    container_name: sharedllm_storage
+    restart: unless-stopped
+    networks:
+      - sharedllm_internal
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
