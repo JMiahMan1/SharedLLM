@@ -282,18 +282,44 @@ async def chat_handler(request: Request):
             }
     
     # 4. Proxy to Ollama (Slow Path)
-    await update_history(user_id, "user", query)
-    
-    # Injection logic for HA context
-    if real_entities:
-        # (Add entity injection here if needed)
-        pass
-
-    async with httpx.AsyncClient(timeout=None) as client:
-        ollama_resp = await client.post(f"{OLLAMA_URL}/api/chat", json={"model": "llama3", "messages": [{"role": "user", "content": refined_query}], "stream": False})
-        msg = ollama_resp.json().get("message", {}).get("content", "I encountered an error.")
-        await update_history(user_id, "assistant", msg)
-        return {"status": "SUCCESS", "message": msg}
+    # 4. LLM Proxy (Slow Path)
+    await emit_log("INFO", f"Slow path triggered for: {refined_query}")
+    try:
+        # Try /api/chat first (Ollama standard)
+        ollama_payload = {
+            "model": "llama3",
+            "messages": history + [{"role": "user", "content": refined_query}],
+            "stream": False
+        }
+        resp = await _global_http_client.post(f"{OLLAMA_URL}/api/chat", json=ollama_payload)
+        
+        if resp.status_code == 404:
+            # Fallback to /api/generate for older Ollama versions
+            log.warning("Ollama /api/chat not found, falling back to /api/generate")
+            gen_payload = {
+                "model": "llama3",
+                "prompt": f"{refined_query}", # Simplified
+                "stream": False
+            }
+            resp = await _global_http_client.post(f"{OLLAMA_URL}/api/generate", json=gen_payload)
+            
+        if resp.status_code != 200:
+            err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
+            log.error(err_msg)
+            return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
+            
+        data = resp.json()
+        answer = data.get("message", {}).get("content") or data.get("response", "I encountered an error.")
+        
+        # Save to history
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", answer)
+        
+        return JSONResponse({"status": "SUCCESS", "message": answer})
+        
+    except Exception as e:
+        log.error(f"LLM Proxy Error: {e}")
+        raise HTTPException(status_code=502, detail="Upstream LLM error")
 
 # --- Ollama Proxy ---
 @app.post("/api/generate")
