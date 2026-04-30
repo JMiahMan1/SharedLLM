@@ -4,6 +4,7 @@ Performs end-to-end health checks and basic functional verification across multi
 Related code: All microservices in services/
 """
 import requests
+import json
 import os
 import sys
 
