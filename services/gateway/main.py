@@ -325,10 +325,17 @@ async def chat_handler(request: Request):
                 actual_name = e.get("attributes", {}).get("friendly_name") or eid
                 attrs = e.get("attributes", {})
                 
-                # Aggressive sanitize attributes
+                # Sanitize attributes but KEEP capabilities
                 filtered_attrs = {}
+                keep_keys = ("supported_features", "supported_color_modes", "color_mode", "brightness", "color_temp_kelvin", "min_color_temp_kelvin", "max_color_temp_kelvin")
                 for k, v in attrs.items():
-                    if k in ("icon", "entity_picture", "templates", "friendly_name", "supported_features", "supported_color_modes"): continue
+                    # Keep important capability keys
+                    if k in keep_keys:
+                        filtered_attrs[k] = v
+                        continue
+                    # Skip bulky meta
+                    if k in ("icon", "entity_picture", "templates", "friendly_name"): continue
+                    # Truncate others
                     if isinstance(v, str) and len(v) > 50: v = v[:47] + "..."
                     filtered_attrs[k] = v
                     
@@ -336,12 +343,15 @@ async def chat_handler(request: Request):
     
     if device_context:
         # Final safety truncation
-        if len(device_context) > 5000:
-            device_context = device_context[:5000] + "... [Truncated]"
+        if len(device_context) > 10000:
+            device_context = device_context[:10000] + "... [Truncated]"
 
         ctx_msg = (
             "## Home Assistant Device Context\n"
             "The following devices and sensors were found. Use this info to answer. "
+            "IMPORTANT: Home Assistant hides attributes like 'brightness' when a device is OFF. "
+            "To see if a feature is supported, ALWAYS check 'supported_color_modes' (e.g. 'brightness', 'color_temp') "
+            "or the 'supported_features' bitmask. If 'brightness' is listed in supported_color_modes, IT IS SUPPORTED.\n\n"
             f"{device_context}\n"
         )
         log.info(f"[gateway] Injected System Msg Size: {len(ctx_msg)} chars")
