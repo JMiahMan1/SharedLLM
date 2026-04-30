@@ -14,7 +14,7 @@ _KEY = os.getenv("FERNET_KEY", "").encode()
 _fernet: Fernet | None = None
 
 def _get_fernet() -> Fernet:
-    global _fernet, _KEY
+    global _fernet
     if _fernet is None:
         if not _KEY:
             raise RuntimeError(

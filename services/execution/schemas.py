@@ -84,3 +84,37 @@ class TVCastRequest(BaseModel):
     media_content_id: str
     media_content_type: str = "url"
     power_on_wait_ms: int = Field(3000, ge=0, le=15000)
+
+
+# ─── Personal Data (Calendar / Notes) ──────────────────────────────────────────
+
+class CalendarRequest(BaseModel):
+    user_context: UserContext
+    action: Literal["list", "read", "add", "delete", "update"]
+    query: Optional[str] = None
+    summary: Optional[str] = None
+    start_time: Optional[str] = None
+    calendar_name: Optional[str] = None
+
+
+class NoteRequest(BaseModel):
+    user_context: UserContext
+    action: Literal["create", "append", "read", "delete", "check_off"]
+    title: str
+    content: Optional[str] = None
+    category: Optional[str] = "General"
+    item: Optional[str] = None # For check_off
+
+
+# ─── Timers / Alarms ────────────────────────────────────────────────────────────
+
+class TimerRequest(BaseModel):
+    user_context: UserContext
+    action: Literal["add", "list", "delete", "pause", "resume"]
+    type: Literal["timer", "alarm"] = "timer"
+    query: Optional[str] = None
+    title: Optional[str] = None
+    duration_str: Optional[str] = None
+    time_str: Optional[str] = None
+    recurrence: Optional[str] = None
+    target_device: Optional[str] = None

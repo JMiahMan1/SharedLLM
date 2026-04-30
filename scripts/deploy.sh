@@ -33,7 +33,7 @@ log "========================================="
 CHANGED_FILES=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || echo "")
 NEEDS_REBUILD=false
 
-if echo "$CHANGED_FILES" | grep -qE "^(Dockerfile|requirements\.txt|docker-compose\.yml)$"; then
+if echo "$CHANGED_FILES" | grep -qE "(Dockerfile|requirements\.txt|docker-compose\.soa\.yml)$"; then
     NEEDS_REBUILD=true
     log "Core infrastructure files changed — full rebuild required."
 else
@@ -42,19 +42,19 @@ fi
 
 # --- Step 2: Restart or Rebuild ---
 if [ "$NEEDS_REBUILD" = true ]; then
-    log "Running: docker compose up -d --build"
+    log "Running: $COMPOSE up -d --build"
     $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"
 else
-    log "Running: docker compose restart rag-api"
-    $COMPOSE restart rag-api 2>&1 | tee -a "$LOG_FILE"
+    log "Running: $COMPOSE restart"
+    $COMPOSE restart 2>&1 | tee -a "$LOG_FILE"
 fi
 
-log "Waiting 10s for container to initialize..."
-sleep 10
+log "Waiting 15s for SOA stack to initialize..."
+sleep 15
 
 # --- Step 3: Verify the API is healthy ---
-HEALTH_URL="http://localhost:11435/health"
-log "Checking API health at $HEALTH_URL ..."
+HEALTH_URL="http://localhost:11435/health/ready"
+log "Checking SOA Readiness at $HEALTH_URL ..."
 
 MAX_ATTEMPTS=6
 ATTEMPT=0
@@ -79,8 +79,11 @@ if [ "$HEALTHY" = false ]; then
 fi
 
 # --- Step 4: Re-ingest HA devices ---
-log "Re-ingesting Home Assistant devices..."
-docker compose exec -T rag-api python3 -m app.ha_ingest 2>&1 | tee -a "$LOG_FILE"
+log "Re-ingesting Home Assistant devices via Gateway..."
+curl -s -X POST "http://localhost:11435/api/discovery/sync" \
+     -H "Content-Type: application/json" \
+     -d '{"user": "admin"}' \
+     | tee -a "$LOG_FILE"
 
 log "========================================="
 log "Deploy complete."

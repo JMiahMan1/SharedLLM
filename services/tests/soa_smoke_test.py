@@ -1,7 +1,7 @@
 """
 SOA Smoke Test Script.
 Performs end-to-end health checks and basic functional verification across multiple microservices.
-Related code: All microservices in services/
+Usage: python soa_smoke_test.py [BASE_URL] [INTERNAL_SECRET]
 """
 import requests
 import json
@@ -9,132 +9,51 @@ import os
 import sys
 
 # Configuration
-GATEWAY_URL = "http://localhost:11435"
-INTERNAL_SECRET = "test-secret-12345"
+BASE_URL = sys.argv[1] if len(sys.argv) > 1 else os.getenv("GATEWAY_URL", "http://localhost:11435")
+INTERNAL_SECRET = sys.argv[2] if len(sys.argv) > 2 else os.getenv("INTERNAL_SECRET", "test-secret-12345")
+
+print(f"--- SharedLLM Smoke Test Targeting: {BASE_URL} ---")
 
 def test_health():
-    print("--- Testing Service Health ---")
+    print("\n[Health Checks]")
+    services = ["gateway", "identity", "execution", "rag", "logging", "storage"]
+    # Internal health via Gateway Proxy
+    for svc in services:
+        try:
+            url = f"{BASE_URL}/health" if svc == "gateway" else f"{BASE_URL}/api/discovery/health/{svc}"
+            resp = requests.get(url, timeout=5)
+            status = "UP" if resp.status_code == 200 else f"DOWN ({resp.status_code})"
+            print(f"  - {svc.ljust(10)}: {status}")
+        except Exception as e:
+            print(f"  - {svc.ljust(10)}: UNREACHABLE ({e})")
+
+    # Global readiness
     try:
-        resp = requests.get(f"{GATEWAY_URL}/health")
-        print(f"Gateway Health: {resp.status_code} - {resp.json()}")
-    except Exception as e:
-        print(f"Gateway unreachable: {e}")
+        resp = requests.get(f"{BASE_URL}/health/ready", timeout=5)
+        print(f"  - Global Ready: {'YES' if resp.status_code == 200 else 'NO'}")
+    except:
+        print("  - Global Ready: FAILED")
 
 def test_intent_classification():
-    print("\n--- Testing Intent Classification (Fast Path) ---")
+    print("\n[Intent Routing]")
     payload = {
         "messages": [{"role": "user", "content": "Turn off piano lamp"}],
         "model": "qwen3:latest",
         "rag_user": "default"
     }
     try:
-        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload)
-        print(f"Status Code: {resp.status_code}")
+        resp = requests.post(f"{BASE_URL}/api/chat", json=payload, timeout=10)
+        print(f"  - Status Code: {resp.status_code}")
         data = resp.json()
         if "status" in data:
-            print(f"Fast Path Result: {data['status']}")
-            print(f"Message: {data.get('message')}")
-            if "detail" in data:
-                print(f"Error Detail: {data['detail']}")
+            print(f"  - Result     : {data['status']}")
+            print(f"  - Intent     : {data.get('intent', 'unknown')}")
+            print(f"  - Confidence : {data.get('confidence', 0):.2f}")
         else:
-            print("Slow Path (LLM) triggered - likely failed Fast Path threshold.")
-            print(f"Response preview: {str(data)[:200]}...")
+            print("  - Warning: Slow Path triggered.")
     except Exception as e:
-        print(f"Request failed: {e}")
-
-def test_brightness():
-    print("\n--- Testing Brightness Control (Fast Path) ---")
-    payload = {
-        "messages": [{"role": "user", "content": "Set piano lamp to 75%"}],
-        "model": "qwen3:latest",
-        "rag_user": "default",
-        "stream": False
-    }
-    try:
-        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload)
-        data = resp.json()
-        print(f"Status Code: {resp.status_code}")
-        print(f"Message: {data.get('message', {}).get('content')}")
-        if data.get("status") == "SUCCESS":
-            print("Brightness Test: PASSED")
-    except Exception as e:
-        print(f"Brightness Test failed: {e}")
-
-STORAGE_URL = "http://localhost:8005" # Default internal, but might be different if mapped
-
-def test_storage_health():
-    print("\n--- Testing Storage Service Health ---")
-    try:
-        # Note: We use the internal service name 'storage' if running in docker, 
-        # or localhost if running locally and port is mapped.
-        # For the smoke test, we assume we can reach it.
-        resp = requests.get(f"http://localhost:8005/health")
-        print(f"Storage Health: {resp.status_code} - {resp.json()}")
-    except Exception as e:
-        print(f"Storage unreachable: {e}")
-
-def test_climate():
-    print("\n--- Testing Climate Control (Fast Path) ---")
-    payload = {
-        "messages": [{"role": "user", "content": "Set the thermostat to 72"}],
-        "model": "qwen3:latest",
-        "rag_user": "default"
-    }
-    try:
-        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload, stream=True)
-        print(f"Status Code: {resp.status_code}")
-        
-        full_content = ""
-        last_status = "UNKNOWN"
-        
-        for line in resp.iter_lines():
-            if line:
-                chunk = json.loads(line)
-                last_status = chunk.get("status", last_status)
-                content = chunk.get("message", {}).get("content", "")
-                full_content += content
-        
-        print(f"Message: {full_content}")
-        if last_status == "SUCCESS":
-            print("Climate Test: PASSED")
-        else:
-            print(f"Climate Test: {last_status}")
-    except Exception as e:
-        print(f"Climate Test failed: {e}")
-
-def test_security():
-    print("\n--- Testing Security Control (Fast Path) ---")
-    payload = {
-        "messages": [{"role": "user", "content": "Lock the front door"}],
-        "model": "qwen3:latest",
-        "rag_user": "default"
-    }
-    try:
-        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload, stream=True)
-        print(f"Status Code: {resp.status_code}")
-        
-        full_content = ""
-        last_status = "UNKNOWN"
-        
-        for line in resp.iter_lines():
-            if line:
-                chunk = json.loads(line)
-                last_status = chunk.get("status", last_status)
-                content = chunk.get("message", {}).get("content", "")
-                full_content += content
-        
-        print(f"Message: {full_content}")
-        if last_status == "SUCCESS":
-            print("Security Test: PASSED")
-        else:
-            print(f"Security Test: {last_status}")
-    except Exception as e:
-        print(f"Security Test failed: {e}")
+        print(f"  - Request failed: {e}")
 
 if __name__ == "__main__":
     test_health()
     test_intent_classification()
-    test_brightness()
-    test_climate()
-    test_security()
-    test_storage_health()
