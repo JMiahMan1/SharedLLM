@@ -106,112 +106,115 @@ async def chat_handler(request: Request):
     3. OpenAI-style chat (messages: list)
     """
     body = await request.json()
+    is_native_proxy = "messages" in body
     
-    # CASE 1: Ollama/OpenAI native proxy
-    if "messages" in body:
-        log.info(f"[gateway] Proxying native chat request to Ollama")
+    # Extract query
+    query = ""
+    if is_native_proxy:
+        messages = body.get("messages", [])
+        if messages:
+            query = messages[-1].get("content", "")
+    else:
+        query = body.get("query") or body.get("prompt") or ""
+
+    if not query:
+        # Fallback for non-chat requests misrouted here
+        if is_native_proxy:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=60.0)
+                return resp.json()
+        raise HTTPException(status_code=400, detail="No query found")
+
+    # 1. Intent Classification (Semantic Router)
+    intent, confidence = engine.classify(query)
+    log.info(f"[gateway] Classified '{query}' -> {intent} ({confidence:.2f})")
+
+    # 2. Fast Path Evaluation
+    is_fast_path = confidence >= FAST_PATH_THRESHOLD and intent in ("turn_on", "turn_off", "toggle", "play_media", "pause_media", "announce")
+
+    if is_fast_path:
+        log.info(f"[gateway] FAST PATH triggered for {intent}")
+        # Resolve Identity first
+        try:
+            req_for_id = ChatRequest(query=query, rag_user=body.get("rag_user"), voice_id=body.get("voice_id"))
+            creds = await resolve_identity(req_for_id)
+            user_context = {
+                "user": creds["user"],
+                "ha_url": creds.get("ha_url", ""),
+                "ha_token": creds.get("ha_token", "")
+            }
+        except:
+            user_context = {"user": "admin", "ha_url": "", "ha_token": ""}
+
+        entity_id = extract_entity_heuristic(query, intent)
+        
+        # Execute
+        if intent in ("turn_on", "turn_off", "toggle"):
+            exec_payload = {"user_context": user_context, "entity_id": entity_id, "action": intent}
+            exec_res = await execute_command("/execute/light", exec_payload)
+        elif intent in ("play_media", "pause_media"):
+            if intent == "play_media":
+                exec_payload = {"user_context": user_context, "entity_id": entity_id, "query": query.replace("play", "").strip()}
+                exec_res = await execute_command("/execute/media/play", exec_payload)
+            else:
+                exec_payload = {"user_context": user_context, "entity_id": entity_id, "command": "pause"}
+                exec_res = await execute_command("/execute/media/transport", exec_payload)
+        elif intent == "announce":
+            exec_payload = {"user_context": user_context, "entity_id": entity_id, "message": query.replace("announce", "").replace("say", "").strip()}
+            exec_res = await execute_command("/execute/announce", exec_payload)
+        else:
+            exec_res = {"status": "FAILURE", "message": "Unknown intent"}
+
+        # Format Response based on request type
+        success_msg = f"OK. I've processed the {intent} command for {entity_id}."
+        if exec_res.get("status") == "SUCCESS":
+            msg = success_msg
+        else:
+            msg = f"Attempted to {intent} {entity_id}, but: {exec_res.get('message')}"
+
+        if is_native_proxy:
+            # Return Ollama-style response
+            resp_data = {
+                "model": body.get("model", "gateway-fast-path"),
+                "created_at": "2024-01-01T00:00:00Z", # Mock
+                "message": {"role": "assistant", "content": msg},
+                "done": True
+            }
+            if body.get("stream", False):
+                async def _gen():
+                    yield json.dumps(resp_data) + "\n"
+                return StreamingResponse(_gen(), media_type="application/x-ndjson")
+            return resp_data
+        else:
+            return ChatResponse(
+                status=exec_res.get("status", "FAILURE"),
+                message=msg,
+                intent=intent,
+                confidence=confidence,
+                execution_result=exec_res
+            )
+
+    # 3. Slow Path / Proxy
+    if is_native_proxy:
+        log.info(f"[gateway] Proxying to Ollama")
         async def _proxy_stream():
             async with httpx.AsyncClient() as client:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body, timeout=None) as r:
                     async for chunk in r.aiter_bytes():
                         yield chunk
-        
         if body.get("stream", True):
             return StreamingResponse(_proxy_stream(), media_type="application/x-ndjson")
-        
         async with httpx.AsyncClient() as client:
             resp = await client.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=60.0)
             return resp.json()
 
-    # CASE 2: RAG / Intent Pipeline
-    # Convert body to ChatRequest (allow missing fields for legacy compatibility)
-    try:
-        # Extract query from various possible fields
-        query = body.get("query") or body.get("prompt") or ""
-        if not query and "messages" not in body:
-             # If no query and no messages, we can't do much.
-             # But let's try to be helpful if it's a legacy pull or something else misrouted.
-             pass
-        
-        req = ChatRequest(
-            query=query,
-            voice_id=body.get("voice_id"),
-            device_id=body.get("device_id"),
-            rag_user=body.get("rag_user"),
-            model=body.get("model"),
-            stream=body.get("stream", False)
-        )
-    except Exception as e:
-        log.error(f"Failed to parse ChatRequest: {e}")
-        raise HTTPException(status_code=422, detail=f"Invalid request format: {e}")
-
-    # --- Start original chat logic ---
-    # 1. Identity Resolution
-    creds = await resolve_identity(req)
-    user_context = {
-        "user": creds["user"],
-        "ha_url": creds.get("ha_url", ""),
-        "ha_token": creds.get("ha_token", "")
-    }
-
-    # 2. Intent Classification (Semantic Router)
-    intent, confidence = engine.classify(req.query)
-    log.info(f"[gateway] Classified '{req.query}' -> {intent} ({confidence:.2f})")
-
-    # 3. Fast Path Evaluation
-    is_fast_path = confidence >= FAST_PATH_THRESHOLD and intent in ("turn_on", "turn_off", "toggle", "play_media", "pause_media", "announce")
-
-    if is_fast_path:
-        log.info(f"[gateway] FAST PATH triggered for {intent}")
-        entity_id = extract_entity_heuristic(req.query, intent)
-        
-        if intent in ("turn_on", "turn_off", "toggle"):
-            exec_payload = {
-                "user_context": user_context,
-                "entity_id": entity_id,
-                "action": intent
-            }
-            exec_res = await execute_command("/execute/light", exec_payload)
-            
-        elif intent in ("play_media", "pause_media"):
-            if intent == "play_media":
-                exec_payload = {
-                    "user_context": user_context,
-                    "entity_id": entity_id,
-                    "query": req.query.replace("play", "").strip()
-                }
-                exec_res = await execute_command("/execute/media/play", exec_payload)
-            else:
-                exec_payload = {
-                    "user_context": user_context,
-                    "entity_id": entity_id,
-                    "command": "pause"
-                }
-                exec_res = await execute_command("/execute/media/transport", exec_payload)
-                
-        elif intent == "announce":
-            exec_payload = {
-                "user_context": user_context,
-                "entity_id": entity_id,
-                "message": req.query.replace("announce", "").replace("say", "").strip()
-            }
-            exec_res = await execute_command("/execute/announce", exec_payload)
-            
-        return ChatResponse(
-            status=exec_res.get("status", "FAILURE"),
-            message=exec_res.get("message", "Execution completed"),
-            intent=intent,
-            confidence=confidence,
-            execution_result=exec_res
-        )
-
-    # 4. Slow Path (LLM + RAG)
+    # RAG / Slow Path (Original logic)
     log.info(f"[gateway] SLOW PATH for intent {intent} ({confidence:.2f})")
     
     # Simulate RAG call
     async with httpx.AsyncClient() as client:
         try:
-            rag_payload = {"query": req.query, "user_id": creds["user"], "k": 3}
+            rag_payload = {"query": query, "user_id": body.get("rag_user", "admin"), "k": 3}
             rag_resp = await client.post(
                 f"{RAG_SVC}/rag/search",
                 json=rag_payload,
@@ -224,7 +227,7 @@ async def chat_handler(request: Request):
 
     return ChatResponse(
         status="SUCCESS",
-        message=f"I am processing your request. Simulated LLM response for: {req.query}",
+        message=f"I am processing your request. Simulated LLM response for: {query}",
         intent=intent,
         confidence=confidence
     )
