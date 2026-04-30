@@ -30,6 +30,7 @@ def call_service(
     if service_data:
         payload.update(service_data)
     try:
+        log.info(f"[ha_client] POST {url}")
         resp = requests.post(url, headers=headers, json=payload, timeout=_TIMEOUT)
         resp.raise_for_status()
         log.info(f"[ha_client] {domain}.{service} → {entity_id} OK (HTTP {resp.status_code})")
@@ -51,6 +52,7 @@ def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states/{entity_id}"
     try:
+        log.debug(f"[ha_client] GET {url}")
         resp = requests.get(url, headers=headers, timeout=_TIMEOUT)
         if resp.status_code == 404:
             return None
@@ -59,3 +61,20 @@ def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
     except Exception as e:
         log.error(f"[ha_client] get_state({entity_id}) failed: {e}")
         return None
+
+def get_states(ha_url: str, ha_token: str) -> list:
+    """Retrieve all states from HA."""
+    if not ha_url:
+        log.error("[ha_client] ha_url is None or empty. Cannot get states.")
+        return []
+        
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    url = f"{ha_url.rstrip('/')}/api/states"
+    try:
+        log.info(f"[ha_client] GET {url}")
+        resp = requests.get(url, headers=headers, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        log.error(f"[ha_client] get_states failed: {e}")
+        return []
