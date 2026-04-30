@@ -1,7 +1,11 @@
 # services/execution/handlers/climate.py
 import logging
-from .. import ha_client
-from ..schemas import UserContext, ExecutionResult
+try:
+    from .. import ha_client
+    from ..schemas import UserContext, ExecutionResult
+except ImportError:
+    import ha_client
+    from schemas import UserContext, ExecutionResult
 from pydantic import BaseModel
 
 log = logging.getLogger("execution.climate")
