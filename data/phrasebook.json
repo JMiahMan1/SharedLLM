@@ -47,6 +47,14 @@
         "let me in",
         "unlock the back door"
     ],
+    "check_security_status": [
+        "is the garage door open?",
+        "check the front door",
+        "is the house secure?",
+        "check the gate",
+        "is the back door locked?",
+        "status of the garage"
+    ],
     "open_cover": [
         "open the garage door",
         "open the blinds",
