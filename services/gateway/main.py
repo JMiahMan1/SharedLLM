@@ -280,19 +280,45 @@ async def chat_handler(request: Request):
     device_context = ""
     if real_entities:
         q_low = query.lower()
+        mentioned_eids = set()
+        
+        # 1. Find Primary Entities
         for e in real_entities:
-            fname = e.get("attributes", {}).get("friendly_name", "").lower()
             eid = e.get("entity_id", "").lower()
+            fname = e.get("attributes", {}).get("friendly_name", "").lower()
             if (fname and fname in q_low) or (eid.split(".")[1].replace("_", " ") in q_low):
+                mentioned_eids.add(eid)
+        
+        # 2. Find Related Entities (Sensors, Info)
+        prefixes = set()
+        for eid in mentioned_eids:
+            parts = eid.split(".")
+            if len(parts) > 1:
+                prefixes.add(parts[1].split("_")[0]) 
+
+        # 3. Compile full context
+        for e in real_entities:
+            eid = e.get("entity_id", "")
+            fname = e.get("attributes", {}).get("friendly_name", "").lower()
+            is_mentioned = eid.lower() in mentioned_eids
+            is_related = any(p in eid.lower() for p in prefixes) if prefixes else False
+            
+            if is_mentioned or is_related:
                 state = e.get("state", "unknown")
                 actual_name = e.get("attributes", {}).get("friendly_name") or eid
                 attrs = e.get("attributes", {})
-                # Filter out bulky or useless attributes to save tokens
                 filtered_attrs = {k: v for k, v in attrs.items() if k not in ("icon", "entity_picture", "templates")}
-                device_context += f"- {actual_name}: {state} (Capabilities/Attributes: {filtered_attrs})\n"
+                device_context += f"- {actual_name} ({eid}): {state} (Attributes: {filtered_attrs})\n"
     
     if device_context:
-        ctx_msg = f"## Home Assistant Device Context\nThe following devices were mentioned and their current status is:\n{device_context}\nUse this information to answer the user's question accurately."
+        ctx_msg = (
+            "## Home Assistant Device Context\n"
+            "The following devices and related sensors were found in the user's setup. "
+            "IMPORTANT: If an attribute like 'brightness' or 'color_temp' is None, it usually means the device is currently OFF. "
+            "Check 'supported_color_modes' or 'supported_features' to determine if it CAN support those features.\n\n"
+            f"{device_context}\n"
+            "Use this information to answer accurately. If you don't see a capability, do not assume it doesn't exist if the device is off."
+        )
         log.info(f"[gateway] Injecting device context for {len(device_context.splitlines())} devices")
         log.info(f"[gateway] Injected Context: {ctx_msg}")
         if is_native_proxy:
