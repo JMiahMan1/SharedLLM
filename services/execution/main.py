@@ -11,13 +11,22 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException, Header, status
 
-from schemas import (
-    MediaPlayRequest, MediaTransportRequest,
-    LightControlRequest, HAServiceRequest,
-    AnnouncementRequest, TVCastRequest,
-    ExecutionResult,
-)
-import ha_client
+try:
+    from .schemas import (
+        MediaPlayRequest, MediaTransportRequest,
+        LightControlRequest, HAServiceRequest,
+        AnnouncementRequest, TVCastRequest,
+        ExecutionResult,
+    )
+    from . import ha_client
+except ImportError:
+    from schemas import (
+        MediaPlayRequest, MediaTransportRequest,
+        LightControlRequest, HAServiceRequest,
+        AnnouncementRequest, TVCastRequest,
+        ExecutionResult,
+    )
+    import ha_client
 
 log = logging.getLogger("execution")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")

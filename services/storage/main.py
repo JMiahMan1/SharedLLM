@@ -2,7 +2,10 @@
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
 import logging
-from .nextcloud_client import NextCloudClient
+try:
+    from .nextcloud_client import NextCloudClient
+except ImportError:
+    from nextcloud_client import NextCloudClient
 
 app = FastAPI(title="SharedLLM Storage Bridge")
 logging.basicConfig(level=logging.INFO)

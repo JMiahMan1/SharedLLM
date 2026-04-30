@@ -11,13 +11,22 @@ from typing import List
 from fastapi import FastAPI, Depends, HTTPException, Header, status
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from models import User, DeviceAssignment
-from schemas import (
-    ResolveRequest, ResolvedCredentials,
-    UserCreate, UserRead,
-    DeviceAssignmentCreate, DeviceAssignmentRead,
-)
-from crypto import encrypt, decrypt
+try:
+    from .models import User, DeviceAssignment
+    from .schemas import (
+        ResolveRequest, ResolvedCredentials,
+        UserCreate, UserRead,
+        DeviceAssignmentCreate, DeviceAssignmentRead,
+    )
+    from .crypto import encrypt, decrypt
+except ImportError:
+    from models import User, DeviceAssignment
+    from schemas import (
+        ResolveRequest, ResolvedCredentials,
+        UserCreate, UserRead,
+        DeviceAssignmentCreate, DeviceAssignmentRead,
+    )
+    from crypto import encrypt, decrypt
 from seed import seed_from_env
 
 # ─── Config ────────────────────────────────────────────────────────────────────

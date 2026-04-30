@@ -33,6 +33,7 @@ jobs:
         pip install -r services/identity/requirements.txt
         pip install -r services/execution/requirements.txt
         pip install -r services/gateway/requirements.txt
+        pip install -r services/storage/requirements.txt
         # RAG has huge deps (Torch), so we mock it for CI unit tests
         # The tests are designed to bypass heavy ML loads via mocker.
 
