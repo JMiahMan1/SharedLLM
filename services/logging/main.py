@@ -9,6 +9,19 @@ from typing import List, Optional
 
 app = FastAPI(title="SOA Logging Service")
 
+from fastapi.responses import JSONResponse
+import traceback
+import logging as py_logging
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    err_msg = f"Logging Service Error: {type(exc).__name__}: {str(exc)}"
+    py_logging.error(f"{err_msg}\n{traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={"status": "ERROR", "message": "Internal Logging Error", "detail": str(exc)}
+    )
+
 DB_PATH = "/app/data/logs.db"
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 

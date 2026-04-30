@@ -42,6 +42,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SharedLLM RAG Service", version="1.0.0", lifespan=lifespan)
 
+from fastapi.responses import JSONResponse
+import traceback
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    err_msg = f"RAG Error: {type(exc).__name__}: {str(exc)}"
+    log.error(f"{err_msg}\n{traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={"status": "ERROR", "message": "Internal RAG Error", "detail": str(exc)}
+    )
+
 def require_internal(x_internal_secret: str = Header(...)):
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
