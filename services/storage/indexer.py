@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from pathlib import PurePosixPath
 
-from .models import ContentIndexItem, StorageEntry
+try:
+    from .models import ContentIndexItem, StorageEntry
+except ImportError:
+    from models import ContentIndexItem, StorageEntry
+
 
 
 FILE_RULES = {
