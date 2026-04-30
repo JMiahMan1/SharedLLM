@@ -1,42 +1,23 @@
 # services/execution/main.py
-"""
-Microservice 3: HA & Media Execution Bridge
-Strictly validates and executes commands against Home Assistant.
-All endpoints require X-Internal-Secret.
-"""
 import os
-import asyncio
 import logging
+import asyncio
 from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends, HTTPException, status, Header
+from . import ha_client
+from .schemas import (
+    LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+    TVCastRequest, HAServiceRequest, AnnouncementRequest, ExecutionResult
+)
+from .handlers import light, media, climate, security
 
-from fastapi import FastAPI, Depends, HTTPException, Header, status
-
-try:
-    from .schemas import (
-        MediaPlayRequest, MediaTransportRequest,
-        LightControlRequest, HAServiceRequest,
-        AnnouncementRequest, TVCastRequest,
-        ExecutionResult,
-    )
-    from . import ha_client
-except ImportError:
-    from schemas import (
-        MediaPlayRequest, MediaTransportRequest,
-        LightControlRequest, HAServiceRequest,
-        AnnouncementRequest, TVCastRequest,
-        ExecutionResult,
-    )
-    import ha_client
-
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 log = logging.getLogger("execution")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
-
-# ─── Security ──────────────────────────────────────────────────────────────────
-
-def require_internal(x_internal_secret: str = Header(...)):
+async def require_internal(x_internal_secret: str = Header(...)):
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -54,7 +35,7 @@ import traceback
 
 app = FastAPI(
     title="SharedLLM Execution Bridge",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
     dependencies=[Depends(require_internal)],
 )
@@ -68,204 +49,64 @@ async def global_exception_handler(request, exc):
         content={"status": "FAILURE", "message": err_msg, "service": "execution", "detail": traceback.format_exc().splitlines()[-3:]}
     )
 
-
-# ─── Helpers ───────────────────────────────────────────────────────────────────
-
-async def _run(func, *args, **kwargs):
-    """Run a blocking HA client call in a thread pool."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
-
-
 def _ok(message: str, service: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service=service, detail=detail)
-
 
 def _fail(message: str, service: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=message, service=service, detail=detail)
 
 
-# ─── Media Endpoints ───────────────────────────────────────────────────────────
-
-@app.post("/execute/media/play", response_model=ExecutionResult)
-async def execute_media_play(req: MediaPlayRequest):
-    ctx = req.user_context
-    log.info(f"[media/play] user={ctx.user} entity={req.entity_id} query={req.media_content_id or req.query}")
-
-    service_data: dict = {}
-    if req.media_content_id:
-        service_data["media_content_id"] = req.media_content_id
-        service_data["media_content_type"] = req.media_content_type
-    if req.enqueue:
-        service_data["enqueue"] = req.enqueue
-
-    result = await _run(
-        ha_client.call_service,
-        ctx.ha_url, ctx.ha_token,
-        "media_player", "play_media",
-        req.entity_id, service_data,
-    )
-    if result.get("ok"):
-        return _ok(f"Playing on {req.entity_id}.", "media_play")
-    return _fail(f"Failed to play on {req.entity_id}: {result.get('error')}", "media_play", result)
-
-
-@app.post("/execute/media/transport", response_model=ExecutionResult)
-async def execute_media_transport(req: MediaTransportRequest):
-    ctx = req.user_context
-    log.info(f"[media/transport] user={ctx.user} entity={req.entity_id} cmd={req.command}")
-
-    # Volume commands use a different HA service
-    if req.command in ("volume_up", "volume_down") and req.volume_level is not None:
-        result = await _run(
-            ha_client.call_service,
-            ctx.ha_url, ctx.ha_token,
-            "media_player", "volume_set",
-            req.entity_id, {"volume_level": req.volume_level},
-        )
-    else:
-        ha_service_map = {
-            "pause": "media_pause",
-            "resume": "media_play",
-            "stop": "media_stop",
-            "next": "media_next_track",
-            "previous": "media_previous_track",
-            "volume_up": "volume_up",
-            "volume_down": "volume_down",
-        }
-        service = ha_service_map.get(req.command, req.command)
-        result = await _run(
-            ha_client.call_service,
-            ctx.ha_url, ctx.ha_token,
-            "media_player", service,
-            req.entity_id,
-        )
-
-    if result.get("ok"):
-        return _ok(f"Transport '{req.command}' executed on {req.entity_id}.", "media_transport")
-    return _fail(f"Transport command failed: {result.get('error')}", "media_transport", result)
-
-
-# ─── Light Endpoints ───────────────────────────────────────────────────────────
+# ─── Domain Endpoints ──────────────────────────────────────────────────────────
 
 @app.post("/execute/light", response_model=ExecutionResult)
 async def execute_light(req: LightControlRequest):
-    ctx = req.user_context
-    log.info(f"[light] user={ctx.user} entity={req.entity_id} action={req.action}")
+    return await light.handle_light(req)
 
-    service_data: dict = {}
-    if req.brightness_pct is not None:
-        service_data["brightness_pct"] = req.brightness_pct
-    if req.color_temp is not None:
-        service_data["color_temp"] = req.color_temp
-    if req.rgb_color is not None:
-        service_data["rgb_color"] = list(req.rgb_color)
+@app.post("/execute/media/play", response_model=ExecutionResult)
+async def execute_media_play(req: MediaPlayRequest):
+    return await media.handle_media_play(req)
 
-    log.info(f"[light] Calling HA service '{req.action}' on {req.entity_id} with data: {service_data}")
+@app.post("/execute/media/transport", response_model=ExecutionResult)
+async def execute_media_transport(req: MediaTransportRequest):
+    return await media.handle_media_transport(req)
 
-    result = await _run(
-        ha_client.call_service,
-        ctx.ha_url, ctx.ha_token,
-        "light", req.action,
-        req.entity_id, service_data or None,
-    )
-    if result.get("ok"):
-        return _ok(f"Light '{req.action}' executed on {req.entity_id}.", "light_control")
-    return _fail(f"Light command failed: {result.get('error')}", "light_control", result)
+@app.post("/execute/tv_cast", response_model=ExecutionResult)
+async def execute_tv_cast(req: TVCastRequest):
+    return await media.handle_tv_cast(req)
 
+@app.post("/execute/climate", response_model=ExecutionResult)
+async def execute_climate(req: climate.ClimateRequest):
+    return await climate.handle_climate(req)
 
-# ─── Generic HA Service ────────────────────────────────────────────────────────
-
-@app.post("/execute/ha_service", response_model=ExecutionResult)
-async def execute_ha_service(req: HAServiceRequest):
-    ctx = req.user_context
-    log.info(f"[ha_service] user={ctx.user} {req.domain}.{req.service} → {req.entity_id}")
-
-    result = await _run(
-        ha_client.call_service,
-        ctx.ha_url, ctx.ha_token,
-        req.domain, req.service,
-        req.entity_id, req.service_data,
-    )
-    if result.get("ok"):
-        return _ok(f"{req.domain}.{req.service} on {req.entity_id} executed.", "ha_service")
-    return _fail(f"Service call failed: {result.get('error')}", "ha_service", result)
+@app.post("/execute/security", response_model=ExecutionResult)
+async def execute_security(req: security.SecurityRequest):
+    return await security.handle_security(req)
 
 
-# ─── Announcements ─────────────────────────────────────────────────────────────
+# ─── Infrastructure Endpoints ───────────────────────────────────────────────────
 
 @app.post("/execute/announce", response_model=ExecutionResult)
 async def execute_announce(req: AnnouncementRequest):
+    # Announcements are currently cross-domain (Volume + TTS)
     ctx = req.user_context
-    log.info(f"[announce] user={ctx.user} entity={req.entity_id} msg={req.message[:60]}")
-
-    # 1. Set volume
-    await _run(
-        ha_client.call_service,
-        ctx.ha_url, ctx.ha_token,
-        "media_player", "volume_set",
-        req.entity_id, {"volume_level": req.volume},
-    )
-
-    # 2. Play TTS
-    result = await _run(
-        ha_client.call_service,
-        ctx.ha_url, ctx.ha_token,
-        "tts", "speak",
-        req.entity_id, {
-            "message": req.message,
-            "media_player_entity_id": req.entity_id,
-        },
-    )
+    log.info(f"[announce] user={ctx.user} entity={req.entity_id}")
+    await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", req.entity_id, {"volume_level": req.volume})
+    result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "speak", req.entity_id, {"message": req.message, "media_player_entity_id": req.entity_id})
     if result.get("ok"):
         return _ok(f"Announcement sent to {req.entity_id}.", "announce")
     return _fail(f"Announcement failed: {result.get('error')}", "announce", result)
 
-
-# ─── SmartPowerSync TV Cast ────────────────────────────────────────────────────
-
-@app.post("/execute/tv_cast", response_model=ExecutionResult)
-async def execute_tv_cast(req: TVCastRequest):
-    """
-    SmartPowerSync: power the TV on (if off), wait, then cast.
-    """
+@app.post("/execute/ha_service", response_model=ExecutionResult)
+async def execute_ha_service(req: HAServiceRequest):
     ctx = req.user_context
-    log.info(f"[tv_cast] user={ctx.user} entity={req.media_player_entity_id}")
-
-    # Check power state
-    state = await _run(ha_client.get_state, ctx.ha_url, ctx.ha_token, req.media_player_entity_id)
-    if state and state.get("state") not in ("on", "playing", "paused", "idle"):
-        log.info(f"[tv_cast] Device is off — powering on first.")
-        await _run(
-            ha_client.call_service,
-            ctx.ha_url, ctx.ha_token,
-            "media_player", "turn_on",
-            req.media_player_entity_id,
-        )
-        await asyncio.sleep(req.power_on_wait_ms / 1000)
-
-    result = await _run(
-        ha_client.call_service,
-        ctx.ha_url, ctx.ha_token,
-        "media_player", "play_media",
-        req.media_player_entity_id,
-        {"media_content_id": req.media_content_id, "media_content_type": req.media_content_type},
-    )
+    result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, req.domain, req.service, req.entity_id, req.service_data)
     if result.get("ok"):
-        return _ok(f"TV cast started on {req.media_player_entity_id}.", "tv_cast")
-    return _fail(f"TV cast failed: {result.get('error')}", "tv_cast", result)
-
-
-# ─── Discovery Endpoints ───────────────────────────────────────────────────────
+        return _ok(f"{req.domain}.{req.service} executed.", "ha_service")
+    return _fail(f"Service call failed: {result.get('error')}", "ha_service", result)
 
 @app.get("/discovery/entities")
 async def discovery_entities(ha_url: str, ha_token: str):
-    """Fetch all entity states from HA for service discovery."""
-    log.info(f"[discovery] Fetching all entities from {ha_url}")
-    result = await _run(ha_client.get_states, ha_url, ha_token)
-    return result
-
-# ─── Health ────────────────────────────────────────────────────────────────────
+    return await ha_client.get_states(ha_url, ha_token)
 
 @app.get("/health")
 def health():
