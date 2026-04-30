@@ -5,11 +5,10 @@ import json
 import asyncio
 import httpx
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, status, Request
-from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 import re
-from datetime import datetime
+import traceback
 
 # --- Imports from internal modules ---
 try:
@@ -22,7 +21,6 @@ except (ImportError, ValueError):
         from gateway.intent_engine import engine
         from gateway.history import get_history, update_history, ping_redis
     except ImportError:
-        from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
         from intent_engine import engine
         from history import get_history, update_history, ping_redis
 
@@ -98,8 +96,8 @@ async def readiness():
                 else:
                     results["services"][name] = f"ERROR ({resp.status_code})"
                     all_ok = False
-            except Exception as e:
-                results["services"][name] = f"UNREACHABLE"
+            except Exception:
+                results["services"][name] = "UNREACHABLE"
                 all_ok = False
                 
     if ping_redis():
@@ -123,7 +121,8 @@ async def emit_log(level: str, message: str, context: dict = None):
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=1.0
             )
-    except: pass
+    except Exception:
+        pass
 
 @app.get("/api/logs")
 async def get_api_logs(limit: int = 50):
@@ -134,7 +133,8 @@ async def get_api_logs(limit: int = 50):
 # --- Contextualization Logic ---
 async def contextualize_query(query: str, history: list) -> str:
     """Uses history to rewrite ambiguous queries like 'yes' or 'do it'."""
-    if not history: return query
+    if not history:
+        return query
     
     q_lower = query.lower().strip().strip("!.")
     if len(q_lower.split()) > 4 and q_lower not in ["play the first one"]:
@@ -153,7 +153,8 @@ async def contextualize_query(query: str, history: list) -> str:
             rewritten = resp.json().get("response", query).strip().strip('"')
             log.info(f"[Context] '{query}' -> '{rewritten}'")
             return rewritten
-    except: pass
+    except Exception:
+        pass
     return query
 
 
@@ -425,7 +426,8 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
 async def chat_handler(request: Request):
     body = await request.json()
     query = body.get("query") or (body.get("messages", [{}])[-1].get("content") if "messages" in body else "")
-    if not query: return JSONResponse({"status": "ERROR", "message": "No query"}, status_code=400)
+    if not query:
+        return JSONResponse({"status": "ERROR", "message": "No query"}, status_code=400)
 
     # 1. Resolve Identity & Context
     creds = await resolve_identity(body)
@@ -493,10 +495,12 @@ async def chat_handler(request: Request):
             if target_entity == "auto":
                 if "media" in intent:
                     players = [e for e in real_entities if e['entity_id'].startswith('media_player.')]
-                    if players: target_entity = players[0]['entity_id']
+                    if players:
+                        target_entity = players[0]['entity_id']
                 elif "light" in intent or "turn" in intent:
                     lights = [e for e in real_entities if e['entity_id'].startswith('light.')]
-                    if lights: target_entity = lights[0]['entity_id']
+                    if lights:
+                        target_entity = lights[0]['entity_id']
 
             if intent in {"play_media", "media_transport", "pause_media"} and (media_query or media_transport_command) and not is_video_request:
                 target_entity = resolve_media_target(refined_query, real_entities)
@@ -540,48 +544,90 @@ async def chat_handler(request: Request):
                 "execution_result": exec_res
             })
     
-    # 4. Proxy to Ollama (Slow Path)
-    # 4. LLM Proxy (Slow Path)
-    await emit_log("INFO", f"Slow path triggered for: {refined_query}")
-    try:
-        selected_model = select_model_for_query(refined_query)
-        log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}'")
+        # 4. Context Injection (RAG + Storage)
+        rag_context = ""
+        try:
+            selected_model = select_model_for_query(refined_query)
+            log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}'")
+            
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                # HA Entity Context
+                rag_resp = await client.post(
+                    f"{RAG_SVC}/rag/search",
+                    json={
+                        "query": refined_query,
+                        "user_id": user_id,
+                        "collection_name": "ha_entities",
+                        "k": 5
+                    },
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if rag_resp.status_code == 200:
+                    results = rag_resp.json().get("results", [])
+                    if results:
+                        rag_context = "Relevant Device Context:\n" + "\n".join([r["content"] for r in results])
+                
+                # Storage Context for Librarian
+                if selected_model == LIBRARIAN_MODEL:
+                    storage_resp = await client.post(
+                        f"{STORAGE_SVC}/nextcloud/search",
+                        params={"query": refined_query},
+                        json={
+                            "nc_url": creds.get("nextcloud_url"),
+                            "nc_user": creds.get("nextcloud_user"),
+                            "nc_pass": creds.get("nextcloud_pass")
+                        },
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                    if storage_resp.status_code == 200:
+                        matches = storage_resp.json().get("matches", [])
+                        if matches:
+                            storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
+                            rag_context += f"\n\nNextCloud Files found:\n{storage_text}"
+                            
+        except Exception as e:
+            await emit_log("ERROR", "Context injection failed (check internal logs)")
+            log.error(f"Context injection failed: {e}")
 
-        # Try /api/chat first (Ollama standard)
-        ollama_payload = {
-            "model": selected_model,
-            "messages": history + [{"role": "user", "content": refined_query}],
-            "stream": False
-        }
-        resp = await call_ollama(ollama_payload, use_chat=True)
+        # 5. Proxy to Ollama (Slow Path)
+        try:
+            await emit_log("INFO", f"Slow path triggered for: {refined_query}")
         
-        if resp.status_code == 404:
-            # Fallback to /api/generate for older Ollama versions
-            log.warning("Ollama /api/chat not found, falling back to /api/generate")
-            gen_payload = {
+            # Try /api/chat first (Ollama standard)
+            ollama_payload = {
                 "model": selected_model,
-                "prompt": f"{refined_query}", # Simplified
+                "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
                 "stream": False
             }
-            resp = await call_ollama(gen_payload, use_chat=False)
+            resp = await call_ollama(ollama_payload, use_chat=True)
             
-        if resp.status_code != 200:
-            err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
-            log.error(err_msg)
-            return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
+            if resp.status_code == 404:
+                # Fallback to /api/generate for older Ollama versions
+                log.warning("Ollama /api/chat not found, falling back to /api/generate")
+                gen_payload = {
+                    "model": selected_model,
+                    "prompt": f"{refined_query}", # Simplified
+                    "stream": False
+                }
+                resp = await call_ollama(gen_payload, use_chat=False)
+                
+            if resp.status_code != 200:
+                err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
+                log.error(err_msg)
+                return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
+                
+            data = resp.json()
+            answer = data.get("message", {}).get("content") or data.get("response", "I encountered an error.")
             
-        data = resp.json()
-        answer = data.get("message", {}).get("content") or data.get("response", "I encountered an error.")
+            # Save to history
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", answer)
+            
+            return JSONResponse({"status": "SUCCESS", "message": answer})
         
-        # Save to history
-        await update_history(user_id, "user", query)
-        await update_history(user_id, "assistant", answer)
-        
-        return JSONResponse({"status": "SUCCESS", "message": answer})
-        
-    except Exception as e:
-        log.error(f"LLM Proxy Error: {e}")
-        raise HTTPException(status_code=502, detail="Upstream LLM error")
+        except Exception as e:
+            log.error(f"LLM Proxy Error: {e}")
+            raise HTTPException(status_code=502, detail="Upstream LLM error")
 
 # --- Ollama Proxy ---
 @app.post("/api/generate")
