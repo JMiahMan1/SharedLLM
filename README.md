@@ -9,7 +9,7 @@ SharedLLM has been migrated from a monolithic application to a robust microservi
 ### Core Services
 
 | Service | Port | Description |
-|---------|------|-------------|
+| ------- | ---- | ----------- |
 | **Gateway** | 11435 | Orchestrator & Intent Classifier. Routes requests to specialized services. |
 | **Identity** | 8001 | Secure credential management and device-to-user resolution. |
 | **Execution** | 8003 | Home Assistant bridge for lights, media, climate, and security. |
@@ -29,6 +29,7 @@ bash scripts/deploy.sh
 ```
 
 Or manually:
+
 ```bash
 docker compose up -d --build
 ```
