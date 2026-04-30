@@ -555,7 +555,7 @@ async def chat_handler(request: Request):
         selected_model = select_model_for_query(refined_query)
         log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}'")
         
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             # HA Entity Context
             rag_resp = await client.post(
                 f"{RAG_SVC}/rag/search",
