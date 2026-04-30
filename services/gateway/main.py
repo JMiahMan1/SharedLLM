@@ -589,6 +589,7 @@ async def chat_handler(request: Request):
                     if matches:
                         storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
                         rag_context += f"\n\nNextCloud Files found:\n{storage_text}"
+        log.info(f"FINAL CONTEXT SENT TO LLM:\n{rag_context}")
                             
     except Exception as e:
         await emit_log("ERROR", f"Context injection failed: {str(e)}")
