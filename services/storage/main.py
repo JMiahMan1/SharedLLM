@@ -1,53 +1,99 @@
 # services/storage/main.py
-from fastapi import FastAPI, HTTPException, Header
-from pydantic import BaseModel
 import logging
+
+from fastapi import FastAPI, HTTPException
+
 try:
-    from .nextcloud_client import NextCloudClient
+    from .indexer import build_content_index, summarize_index
+    from .models import IndexScanRequest, ProviderListRequest
+    from .providers import build_provider
 except ImportError:
-    from nextcloud_client import NextCloudClient
+    from indexer import build_content_index, summarize_index
+    from models import IndexScanRequest, ProviderListRequest
+    from providers import build_provider
 
 app = FastAPI(title="SharedLLM Storage Bridge")
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("storage")
 
-class StorageRequest(BaseModel):
-    nc_url: str
-    nc_user: str
-    nc_pass: str
-    path: str = "/"
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "storage"}
 
+
+@app.post("/providers/list")
+async def list_provider_entries(req: ProviderListRequest):
+    """List entries from a configured storage provider."""
+    try:
+        provider = build_provider(req.provider)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    entries = provider.list_entries(path=req.path, recursive=req.recursive)
+    return {"status": "SUCCESS", "provider": req.provider.kind, "entries": [entry.model_dump() for entry in entries]}
+
+
+@app.post("/index/scan")
+async def scan_content_index(req: IndexScanRequest):
+    """Build a generic content capability index for a provider path."""
+    try:
+        provider = build_provider(req.provider)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    entries = provider.list_entries(path=req.path, recursive=req.recursive)
+    items = build_content_index(entries)
+    summary = summarize_index(items)
+    return {
+        "status": "SUCCESS",
+        "provider": req.provider.kind,
+        "root_path": req.path,
+        "summary": summary,
+        "items": [item.model_dump() for item in items],
+    }
+
+
 @app.post("/nextcloud/list")
-async def list_nextcloud(req: StorageRequest):
-    """List files in NextCloud."""
-    client = NextCloudClient(req.nc_url, req.nc_user, req.nc_pass)
-    files = client.list_files(req.path)
-    
-    # Format files for the LLM
-    result = []
-    for f in files:
-        # easywebdav returns File objects
-        result.append({
-            "name": f.name,
-            "size": f.size,
-            "mtime": f.mtime,
-            "content_type": f.contenttype
-        })
-    return {"status": "SUCCESS", "files": result}
+async def list_nextcloud_compat(req: dict):
+    """Compatibility shim for existing NextCloud list callers."""
+    provider_req = ProviderListRequest(
+        provider={
+            "kind": "nextcloud",
+            "settings": {
+                "url": req["nc_url"],
+                "username": req["nc_user"],
+                "password": req["nc_pass"],
+            },
+        },
+        path=req.get("path", "/"),
+        recursive=req.get("recursive", False),
+    )
+    response = await list_provider_entries(provider_req)
+    return {"status": response["status"], "files": response["entries"]}
+
 
 @app.post("/nextcloud/search")
-async def search_nextcloud(req: StorageRequest, query: str):
-    """Search for files matching a query (stub)."""
-    # For now, just list and filter by name
-    client = NextCloudClient(req.nc_url, req.nc_user, req.nc_pass)
-    files = client.list_files(req.path)
-    matches = [f for f in files if query.lower() in f.name.lower()]
+async def search_nextcloud_compat(req: dict, query: str):
+    """Compatibility shim for existing NextCloud search callers."""
+    provider_req = ProviderListRequest(
+        provider={
+            "kind": "nextcloud",
+            "settings": {
+                "url": req["nc_url"],
+                "username": req["nc_user"],
+                "password": req["nc_pass"],
+            },
+        },
+        path=req.get("path", "/"),
+        recursive=True,
+    )
+    response = await list_provider_entries(provider_req)
+    matches = [entry for entry in response["entries"] if query.lower() in entry["name"].lower()]
     return {"status": "SUCCESS", "matches": matches}
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8005)

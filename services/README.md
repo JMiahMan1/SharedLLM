@@ -23,10 +23,14 @@ This directory contains the microservices refactor of the SharedLLM system.
 ## Future Vision: Omni-Source Expansion
 
 ### 4. Storage Bridge (`services/storage`)
-- **NextCloud**: WebDAV integration for document and media indexing.
-- **Librarian Engine**: Categorization of literature vs. technical data.
-- **Multimedia**: Whisper-based transcription for MP3/MP4 indexing.
-- **Agentic Git**: Semantic code understanding and self-modification capabilities.
+- **Provider Layer**: Normalizes multiple file stores behind a shared interface.
+- **Initial Backend**: Nextcloud via WebDAV.
+- **Content Indexer**: Classifies repositories, notes, documents, ebooks, images,
+  audio, and video into capability-aware index entries.
+- **Librarian Engine**: Uses that index to decide which tools can summarize,
+  parse, transcribe, preview, or search each item.
+- **Future Backends**: Designed to extend to other open-source and proprietary
+  file stores without changing downstream consumers.
 
 ## Testing & Diagnostics
 
