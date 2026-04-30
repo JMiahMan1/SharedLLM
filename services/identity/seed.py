@@ -94,10 +94,9 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             return 0
     else:
         log.info("[seed] Forced re-seed: Clearing existing users/assignments.")
-        from models import DeviceAssignment
-        session.exec(select(DeviceAssignment)).all() # Just to be safe
-        session.execute("DELETE FROM deviceassignment")
-        session.execute("DELETE FROM user")
+        from sqlalchemy import text
+        session.execute(text("DELETE FROM deviceassignment"))
+        session.execute(text("DELETE FROM user"))
         session.commit()
 
     env_users = _parse_env_users()
