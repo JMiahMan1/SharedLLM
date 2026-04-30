@@ -36,11 +36,11 @@ def _parse_env_users() -> dict:
         "nextcloud_url": os.getenv("NEXTCLOUD_URL"),
         "nextcloud_user": os.getenv("NEXTCLOUD_USER"),
         "nextcloud_pass": os.getenv("NEXTCLOUD_PASS"),
-        "ha_url": os.getenv("HA_URL"),
-        "ha_token": os.getenv("HA_TOKEN"),
-        "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL"),
-        "audiobookshelf_user": os.getenv("AUDIOBOOKSHELF_USER"),
-        "audiobookshelf_pass": os.getenv("AUDIOBOOKSHELF_PASS"),
+        "ha_url": os.getenv("HA_URL") or os.getenv("HOME_ASSISTANT_URL"),
+        "ha_token": os.getenv("HA_TOKEN") or os.getenv("HOME_ASSISTANT_TOKEN"),
+        "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL") or os.getenv("ABS_URL"),
+        "audiobookshelf_user": os.getenv("AUDIOBOOKSHELF_USER") or os.getenv("ABS_USER"),
+        "audiobookshelf_pass": os.getenv("AUDIOBOOKSHELF_PASS") or os.getenv("ABS_PASS"),
     }
     users["default"] = default
 
@@ -82,15 +82,23 @@ def _parse_env_users() -> dict:
     return users
 
 
-def seed_from_env(session: Session) -> int:
+def seed_from_env(session: Session, force: bool = False) -> int:
     """
     Seed the database from environment variables.
-    Only runs when the users table is empty. Returns the count of users seeded.
+    If force is True, clears existing users/assignments first.
     """
-    existing = session.exec(select(User)).first()
-    if existing:
-        log.info("[seed] Database already seeded — skipping.")
-        return 0
+    if not force:
+        existing = session.exec(select(User)).first()
+        if existing:
+            log.info("[seed] Database already seeded — skipping.")
+            return 0
+    else:
+        log.info("[seed] Forced re-seed: Clearing existing users/assignments.")
+        from models import DeviceAssignment
+        session.exec(select(DeviceAssignment)).all() # Just to be safe
+        session.execute("DELETE FROM deviceassignment")
+        session.execute("DELETE FROM user")
+        session.commit()
 
     env_users = _parse_env_users()
     count = 0
