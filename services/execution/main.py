@@ -2,22 +2,25 @@
 import os
 import logging
 import asyncio
+from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status, Header
+from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
 try:
     from . import ha_client
     from .schemas import (
         LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-        TVCastRequest, HAServiceRequest, AnnouncementRequest, ExecutionResult
+        TVCastRequest, HAServiceRequest, AnnouncementRequest,
+        CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
     )
-    from .handlers import light, media, climate, security
+    from .handlers import light, media, climate, security, calendar, note, timer
 except ImportError:
-    import ha_client
-    from schemas import (
+    from execution import ha_client
+    from execution.schemas import (
         LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-        TVCastRequest, HAServiceRequest, AnnouncementRequest, ExecutionResult
+        TVCastRequest, HAServiceRequest, AnnouncementRequest,
+        CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
     )
-    from handlers import light, media, climate, security
+    from execution.handlers import light, media, climate, security, calendar, note, timer
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -25,7 +28,9 @@ log = logging.getLogger("execution")
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
-async def require_internal(x_internal_secret: str = Header(...)):
+async def require_internal(request: Request, x_internal_secret: str = Header(None)):
+    if request.url.path == "/health":
+        return
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -89,6 +94,26 @@ async def execute_climate(req: climate.ClimateRequest):
 @app.post("/execute/security", response_model=ExecutionResult)
 async def execute_security(req: security.SecurityRequest):
     return await security.handle_security(req)
+
+@app.post("/execute/calendar", response_model=ExecutionResult)
+async def execute_calendar(req: CalendarRequest):
+    return await calendar.handle_calendar(req)
+
+@app.post("/execute/note", response_model=ExecutionResult)
+async def execute_note(req: NoteRequest):
+    return await note.handle_note(req)
+
+@app.post("/execute/timer", response_model=ExecutionResult)
+async def execute_timer(req: TimerRequest):
+    return await timer.handle_timer(req)
+
+@app.post("/execute/trigger", response_model=ExecutionResult)
+async def execute_trigger(payload: Dict[str, Any]):
+    """Internal endpoint for Automation scheduler."""
+    timer_data = payload.get("timer", {})
+    log.info(f"ALARM TRIGGERED: {timer_data.get('title')}")
+    # Legacy: This is where we'd play audio on target_device
+    return _ok(f"Triggered {timer_data.get('title')}", "automation_trigger")
 
 
 # ─── Infrastructure Endpoints ───────────────────────────────────────────────────

@@ -21,14 +21,14 @@ try:
     from .crypto import encrypt, decrypt
     from .seed import seed_from_env
 except ImportError:
-    from models import User, DeviceAssignment
-    from schemas import (
+    from identity.models import User, DeviceAssignment
+    from identity.schemas import (
         ResolveRequest, ResolvedCredentials,
         UserCreate, UserRead,
         DeviceAssignmentCreate, DeviceAssignmentRead,
     )
-    from crypto import encrypt, decrypt
-    from seed import seed_from_env
+    from identity.crypto import encrypt, decrypt
+    from identity.seed import seed_from_env
 
 # ─── Config ────────────────────────────────────────────────────────────────────
 
