@@ -258,9 +258,9 @@ def remove_device(device_id: str, session: Session = Depends(get_session), _: Us
 # ─── Admin ─────────────────────────────────────────────────────────────────────
 
 @app.post("/api/admin/seed", dependencies=[Depends(require_internal)])
-def manual_seed(session: Session = Depends(get_session)):
-    count = seed_from_env(session)
-    return {"seeded": count}
+def manual_seed(force: bool = False, session: Session = Depends(get_session)):
+    count = seed_from_env(session, force=force)
+    return {"seeded": count, "forced": force}
 
 
 @app.get("/health")

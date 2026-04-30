@@ -20,6 +20,10 @@ def call_service(
     service_data: dict | None = None,
 ) -> dict:
     """Call a Home Assistant service and return the response JSON."""
+    if not ha_url:
+        log.error("[ha_client] ha_url is None or empty. Cannot call service.")
+        return {"ok": False, "error": "Home Assistant URL not configured for this user."}
+    
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     url = f"{ha_url.rstrip('/')}/api/services/{domain}/{service}"
     payload = {"entity_id": entity_id}
@@ -40,6 +44,10 @@ def call_service(
 
 def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
     """Retrieve the current state of an HA entity."""
+    if not ha_url:
+        log.error("[ha_client] ha_url is None or empty. Cannot get state.")
+        return None
+        
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states/{entity_id}"
     try:
