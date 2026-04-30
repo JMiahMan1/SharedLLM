@@ -36,6 +36,24 @@ def test_intent_classification():
     except Exception as e:
         print(f"Request failed: {e}")
 
+def test_brightness():
+    print("\n--- Testing Brightness Control (Fast Path) ---")
+    payload = {
+        "messages": [{"role": "user", "content": "Set piano lamp to 75%"}],
+        "model": "qwen3:latest",
+        "rag_user": "default"
+    }
+    try:
+        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload)
+        data = resp.json()
+        print(f"Status Code: {resp.status_code}")
+        print(f"Message: {data.get('message', {}).get('content')}")
+        if data.get("status") == "SUCCESS":
+            print("Brightness Test: PASSED")
+    except Exception as e:
+        print(f"Brightness Test failed: {e}")
+
 if __name__ == "__main__":
     test_health()
     test_intent_classification()
+    test_brightness()
