@@ -40,6 +40,9 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:8b")
+ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", DEFAULT_MODEL)
+CODING_MODEL = os.getenv("CODING_MODEL", ASSISTANT_MODEL)
+LIBRARIAN_MODEL = os.getenv("LIBRARIAN_MODEL", ASSISTANT_MODEL)
 
 # --- Global Clients ---
 _global_http_client: httpx.AsyncClient = None
@@ -143,7 +146,7 @@ async def contextualize_query(query: str, history: list) -> str:
 
     prompt = f"Given history:\n{hist_str}\nRewrite follow-up to standalone command.\nFollow-up: {query}\nCommand:"
     try:
-        payload = {"model": DEFAULT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
+        payload = {"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
         resp = await _global_http_client.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
         if resp.status_code == 200:
             rewritten = resp.json().get("response", query).strip().strip('"')
@@ -151,6 +154,29 @@ async def contextualize_query(query: str, history: list) -> str:
             return rewritten
     except: pass
     return query
+
+
+def select_model_for_query(query: str) -> str:
+    """Route obvious coding and librarian tasks to specialized models."""
+    q = (query or "").lower()
+
+    coding_signals = (
+        "python", "javascript", "typescript", "node", "react", "fastapi", "sql", "regex",
+        "docker", "dockerfile", "bash", "shell", "pytest", "bug", "fix", "refactor",
+        "implement", "function", "class", "stack trace", "traceback", "code", "script",
+        "compile", "syntax", "test", "unit test", "integration test", "git"
+    )
+    librarian_signals = (
+        "summarize", "summary", "recap", "search my", "find in", "look up", "what do i have",
+        "list my", "notes", "calendar", "documents", "document", "playlist", "playlists",
+        "radio stations", "audiobook", "audiobooks", "library", "catalog", "catalogue"
+    )
+
+    if any(token in q for token in coding_signals):
+        return CODING_MODEL
+    if any(token in q for token in librarian_signals):
+        return LIBRARIAN_MODEL
+    return ASSISTANT_MODEL
 
 # --- Helper Functions ---
 async def decompose_command_query(query: str) -> list[str]:
@@ -317,9 +343,12 @@ async def chat_handler(request: Request):
     # 4. LLM Proxy (Slow Path)
     await emit_log("INFO", f"Slow path triggered for: {refined_query}")
     try:
+        selected_model = select_model_for_query(refined_query)
+        log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}'")
+
         # Try /api/chat first (Ollama standard)
         ollama_payload = {
-            "model": DEFAULT_MODEL,
+            "model": selected_model,
             "messages": history + [{"role": "user", "content": refined_query}],
             "stream": False
         }
@@ -329,7 +358,7 @@ async def chat_handler(request: Request):
             # Fallback to /api/generate for older Ollama versions
             log.warning("Ollama /api/chat not found, falling back to /api/generate")
             gen_payload = {
-                "model": DEFAULT_MODEL,
+                "model": selected_model,
                 "prompt": f"{refined_query}", # Simplified
                 "stream": False
             }
