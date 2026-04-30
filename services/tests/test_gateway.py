@@ -46,8 +46,8 @@ def test_fast_path_light_control(mock_identity, mock_intent, mocker):
     
     # We need a separate mock specifically for the execution call since httpx.post is called twice
     # First for identity, second for execution
-    # We need to mock both POST (identity, execution) and GET (entities)
-    async def mock_http_side_effect(method, url, *args, **kwargs):
+    # We use AsyncMock for the base request method. httpx.AsyncClient.post/get call this internally.
+    async def mock_http_side_effect(method, url, **kwargs):
         resp = mocker.Mock()
         resp.status_code = 200
         if method == "POST":
@@ -64,9 +64,6 @@ def test_fast_path_light_control(mock_identity, mock_intent, mocker):
         return resp
         
     mocker.patch("httpx.AsyncClient.request", side_effect=mock_http_side_effect)
-    # Also patch specific methods if they are used directly
-    mocker.patch("httpx.AsyncClient.post", side_effect=lambda url, **kwargs: mock_http_side_effect("POST", url, **kwargs))
-    mocker.patch("httpx.AsyncClient.get", side_effect=lambda url, **kwargs: mock_http_side_effect("GET", url, **kwargs))
 
     resp = client.post("/api/chat", json={
         "query": "Turn on the living room lights",
@@ -85,17 +82,19 @@ def test_slow_path_conversational(mock_intent, mocker):
     """Test the Gateway Slow Path when confidence is low or intent is unknown."""
     mock_intent.return_value = ("unknown", 0.40)
     
-    async def mock_post_side_effect(url, *args, **kwargs):
+    async def mock_request(method, url, *args, **kwargs):
         resp = mocker.Mock()
         resp.status_code = 200
         if "resolve" in url:
             resp.json.return_value = {"user": "alice", "ha_url": "http", "ha_token": "tok"}
         elif "rag/search" in url:
             resp.json.return_value = {"results": [{"content": "Doc 1", "metadata": {}}]}
+        elif "entities" in url:
+            resp.json.return_value = []
         resp.raise_for_status = mocker.Mock()
         return resp
         
-    mocker.patch("httpx.AsyncClient.post", side_effect=mock_post_side_effect)
+    mocker.patch("httpx.AsyncClient.request", side_effect=mock_request)
 
     resp = client.post("/api/chat", json={
         "query": "What is the meaning of life?",
@@ -111,13 +110,13 @@ def test_slow_path_conversational(mock_intent, mocker):
 
 def test_identity_resolution_failure(mocker):
     """Test Gateway rejects chat if Identity Service fails to resolve user."""
-    async def mock_post_side_effect(url, *args, **kwargs):
+    async def mock_request(method, url, *args, **kwargs):
         resp = mocker.Mock()
         resp.status_code = 404
         resp.json.return_value = {"detail": "User not found"}
         return resp
         
-    mocker.patch("httpx.AsyncClient.post", side_effect=mock_post_side_effect)
+    mocker.patch("httpx.AsyncClient.request", side_effect=mock_request)
     
     resp = client.post("/api/chat", json={
         "query": "Turn on the lights",
