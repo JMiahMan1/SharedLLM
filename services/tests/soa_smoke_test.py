@@ -16,23 +16,18 @@ print(f"--- SharedLLM Smoke Test Targeting: {BASE_URL} ---")
 
 def test_health():
     print("\n[Health Checks]")
-    services = ["gateway", "identity", "execution", "rag", "logging", "storage"]
-    # Internal health via Gateway Proxy
-    for svc in services:
-        try:
-            url = f"{BASE_URL}/health" if svc == "gateway" else f"{BASE_URL}/api/discovery/health/{svc}"
-            resp = requests.get(url, timeout=5)
-            status = "UP" if resp.status_code == 200 else f"DOWN ({resp.status_code})"
-            print(f"  - {svc.ljust(10)}: {status}")
-        except Exception as e:
-            print(f"  - {svc.ljust(10)}: UNREACHABLE ({e})")
-
-    # Global readiness
+    # Global readiness (this checks all downstream services via Gateway)
     try:
         resp = requests.get(f"{BASE_URL}/health/ready", timeout=5)
-        print(f"  - Global Ready: {'YES' if resp.status_code == 200 else 'NO'}")
-    except:
-        print("  - Global Ready: FAILED")
+        if resp.status_code == 200:
+            data = resp.json()
+            print(f"  - Global Ready: YES")
+            for svc, status in data.get("services", {}).items():
+                print(f"    - {svc.ljust(10)}: {status}")
+        else:
+            print(f"  - Global Ready: NO ({resp.status_code})")
+    except Exception as e:
+        print(f"  - Global Ready: FAILED ({e})")
 
 def test_intent_classification():
     print("\n[Intent Routing]")
