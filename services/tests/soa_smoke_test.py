@@ -80,12 +80,24 @@ def test_climate():
         "rag_user": "default"
     }
     try:
-        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload)
+        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload, stream=True)
         print(f"Status Code: {resp.status_code}")
-        data = resp.json()
-        print(f"Message: {data.get('message', {}).get('content')}")
-        if data.get("status") == "SUCCESS":
+        
+        full_content = ""
+        last_status = "UNKNOWN"
+        
+        for line in resp.iter_lines():
+            if line:
+                chunk = json.loads(line)
+                last_status = chunk.get("status", last_status)
+                content = chunk.get("message", {}).get("content", "")
+                full_content += content
+        
+        print(f"Message: {full_content}")
+        if last_status == "SUCCESS":
             print("Climate Test: PASSED")
+        else:
+            print(f"Climate Test: {last_status}")
     except Exception as e:
         print(f"Climate Test failed: {e}")
 
@@ -97,12 +109,24 @@ def test_security():
         "rag_user": "default"
     }
     try:
-        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload)
+        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload, stream=True)
         print(f"Status Code: {resp.status_code}")
-        data = resp.json()
-        print(f"Message: {data.get('message', {}).get('content')}")
-        if data.get("status") == "SUCCESS":
+        
+        full_content = ""
+        last_status = "UNKNOWN"
+        
+        for line in resp.iter_lines():
+            if line:
+                chunk = json.loads(line)
+                last_status = chunk.get("status", last_status)
+                content = chunk.get("message", {}).get("content", "")
+                full_content += content
+        
+        print(f"Message: {full_content}")
+        if last_status == "SUCCESS":
             print("Security Test: PASSED")
+        else:
+            print(f"Security Test: {last_status}")
     except Exception as e:
         print(f"Security Test failed: {e}")
 
