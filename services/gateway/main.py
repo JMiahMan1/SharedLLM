@@ -438,14 +438,18 @@ async def chat_handler(request: Request):
     await emit_log("INFO", f"Chat request from {user_id}", {"query": query, "entities_count": len(real_entities)})
 
     # 2. Contextualize & Decompose
+    log.info(f"Contextualizing query: {query}")
     refined_query = await contextualize_query(query, history)
+    log.info(f"Refined query: {refined_query}")
     sub_commands = await decompose_command_query(refined_query)
     media_query, _ = extract_media_request(refined_query)
     media_transport_command = extract_media_transport_command(refined_query)
     is_video_request = is_likely_video_request(refined_query)
     
     # 3. Fast Path (Semantic Routing)
+    log.info(f"Classifying intent for: {refined_query}")
     intent, confidence = engine.classify(refined_query)
+    log.info(f"Intent classified: {intent} ({confidence})")
     if media_transport_command:
         intent = "media_transport"
         confidence = 1.0
@@ -545,6 +549,7 @@ async def chat_handler(request: Request):
             })
     
     # 4. Context Injection (RAG + Storage)
+    log.info("Starting context injection...")
     rag_context = ""
     try:
         selected_model = select_model_for_query(refined_query)
