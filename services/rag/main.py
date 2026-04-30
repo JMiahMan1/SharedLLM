@@ -6,7 +6,7 @@ Manages ChromaDB for vector search and ingestion.
 import os
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Header, status
+from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
