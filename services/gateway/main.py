@@ -205,6 +205,9 @@ async def chat_handler(request: Request):
             "ha_token": creds.get("ha_token", "")
         }
         real_entities = await fetch_ha_entities(creds)
+    except HTTPException as he:
+        # Re-raise explicit HTTP errors (like 401 from resolve_identity)
+        raise he
     except Exception as e:
         log.warning(f"Resolution error: {e}")
         user_context = {"user": "admin", "ha_url": "", "ha_token": ""}

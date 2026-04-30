@@ -4,7 +4,7 @@ import time
 
 GATEWAY_URL = "http://localhost:11435"
 
-def test_query(title, payload):
+def _run_query(title, payload):
     print(f"\n=== {title} ===")
     try:
         start_time = time.time()
@@ -18,25 +18,25 @@ def test_query(title, payload):
 if __name__ == "__main__":
     # 1. Fast Path - Light Control
     # 'Turn on' usually triggers the turn_on intent with high confidence.
-    test_query("FAST PATH: Light Control", {
+    _run_query("FAST PATH: Light Control", {
         "query": "Turn on the living room lights",
         "voice_id": "default"
     })
 
     # 2. Fast Path - Media Play
-    test_query("FAST PATH: Media Play", {
+    _run_query("FAST PATH: Media Play", {
         "query": "play some jazz in the kitchen",
         "voice_id": "default"
     })
 
     # 3. Slow Path - Conversational
-    test_query("SLOW PATH: Conversational", {
+    _run_query("SLOW PATH: Conversational", {
         "query": "How many states are in the USA?",
         "voice_id": "default"
     })
 
     # 4. Error Case - Unknown User
-    test_query("ERROR: Unknown User", {
+    _run_query("ERROR: Unknown User", {
         "query": "hello",
         "voice_id": "intruder_alert"
     })

@@ -7,24 +7,34 @@ client = TestClient(app)
 
 def test_history_aware_matching(mocker):
     # Mock the execution bridge response
-    mock_ha = mocker.patch("httpx.AsyncClient.get")
-    mock_ha.return_value.status_code = 200
-    mock_ha.return_value.json.return_value = [
-        {
-            "entity_id": "light.piano_lamp",
-            "state": "off",
-            "attributes": {
-                "friendly_name": "Piano Lamp",
-                "supported_color_modes": ["brightness"],
-                "brightness": None
+    async def mock_get_resp(*args, **kwargs):
+        r = mocker.Mock()
+        r.status_code = 200
+        r.json.return_value = [
+            {
+                "entity_id": "light.piano_lamp",
+                "state": "off",
+                "attributes": {
+                    "friendly_name": "Piano Lamp",
+                    "supported_color_modes": ["brightness"],
+                    "brightness": None
+                }
             }
-        }
-    ]
+        ]
+        r.raise_for_status = mocker.Mock()
+        return r
+
+    mocker.patch("httpx.AsyncClient.get", side_effect=mock_get_resp)
 
     # Mock Ollama response
-    mock_ollama = mocker.patch("httpx.AsyncClient.post")
-    mock_ollama.return_value.status_code = 200
-    mock_ollama.return_value.json.return_value = {"message": {"content": "Yes, it can be dimmed."}}
+    async def mock_post_resp(*args, **kwargs):
+        r = mocker.Mock()
+        r.status_code = 200
+        r.json.return_value = {"message": {"content": "Yes, it can be dimmed."}}
+        r.raise_for_status = mocker.Mock()
+        return r
+
+    mocker.patch("httpx.AsyncClient.post", side_effect=mock_post_resp)
 
     # Multi-turn payload
     payload = {
