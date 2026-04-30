@@ -40,12 +40,24 @@ async def lifespan(app: FastAPI):
     yield
     log.info("Execution Bridge shutting down.")
 
+from fastapi.responses import JSONResponse
+import traceback
+
 app = FastAPI(
     title="SharedLLM Execution Bridge",
     version="1.0.0",
     lifespan=lifespan,
     dependencies=[Depends(require_internal)],
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    err_msg = f"Execution Error: {type(exc).__name__}: {str(exc)}"
+    log.error(f"{err_msg}\n{traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={"status": "FAILURE", "message": err_msg, "service": "execution", "detail": traceback.format_exc().splitlines()[-3:]}
+    )
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
