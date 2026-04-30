@@ -126,14 +126,19 @@ def extract_entity_heuristic(query: str, intent: str, entities: list = None) -> 
                 continue
                 
             fname = e.get("attributes", {}).get("friendly_name", "").lower()
-            # Match "Piano-Lamp" (light.hall_light)
-            if fname and (fname in q or q.replace("-", " ") in fname.replace("-", " ")):
+            q_clean = q.lower().replace("-", " ")
+            f_clean = fname.replace("-", " ")
+            
+            if fname and (f_clean in q_clean or q_clean in f_clean):
+                log.info(f"[heuristic] Matched '{q}' to '{entity_id}' via friendly_name '{fname}'")
                 return entity_id
-            if entity_id.split(".")[1].replace("_", " ") in q:
+                
+            if entity_id.split(".")[1].replace("_", " ") in q_clean:
+                log.info(f"[heuristic] Matched '{q}' to '{entity_id}' via ID part")
                 return entity_id
 
-    # 2. Last Resort Fallback
-    return "light.dummy_light"
+    # 2. No match found - Return None to trigger Slow Path/Error
+    return None
 
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
@@ -192,52 +197,56 @@ async def chat_handler(request: Request):
         log.info(f"[gateway] FAST PATH triggered for {intent}")
         entity_id = extract_entity_heuristic(query, intent, real_entities)
         
-        # Execute
-        if intent in ("turn_on", "turn_off", "toggle"):
-            exec_payload = {"user_context": user_context, "entity_id": entity_id, "action": intent}
-            exec_res = await execute_command("/execute/light", exec_payload)
-        elif intent in ("play_media", "pause_media"):
-            if intent == "play_media":
-                exec_payload = {"user_context": user_context, "entity_id": entity_id, "query": query.replace("play", "").strip()}
-                exec_res = await execute_command("/execute/media/play", exec_payload)
+        if not entity_id:
+            log.warning(f"[gateway] Fast path failed: No entity matched for '{query}'. Falling back to Slow Path.")
+            is_fast_path = False
+        else:
+            # Execute
+            if intent in ("turn_on", "turn_off", "toggle"):
+                exec_payload = {"user_context": user_context, "entity_id": entity_id, "action": intent}
+                exec_res = await execute_command("/execute/light", exec_payload)
+            elif intent in ("play_media", "pause_media"):
+                if intent == "play_media":
+                    exec_payload = {"user_context": user_context, "entity_id": entity_id, "query": query.replace("play", "").strip()}
+                    exec_res = await execute_command("/execute/media/play", exec_payload)
+                else:
+                    exec_payload = {"user_context": user_context, "entity_id": entity_id, "command": "pause"}
+                    exec_res = await execute_command("/execute/media/transport", exec_payload)
+            elif intent == "announce":
+                exec_payload = {"user_context": user_context, "entity_id": entity_id, "message": query.replace("announce", "").replace("say", "").strip()}
+                exec_res = await execute_command("/execute/announce", exec_payload)
             else:
-                exec_payload = {"user_context": user_context, "entity_id": entity_id, "command": "pause"}
-                exec_res = await execute_command("/execute/media/transport", exec_payload)
-        elif intent == "announce":
-            exec_payload = {"user_context": user_context, "entity_id": entity_id, "message": query.replace("announce", "").replace("say", "").strip()}
-            exec_res = await execute_command("/execute/announce", exec_payload)
-        else:
-            exec_res = {"status": "FAILURE", "message": "Unknown intent"}
+                exec_res = {"status": "FAILURE", "message": "Unknown intent"}
 
-        # Format Response based on request type
-        success_msg = f"OK. I've processed the {intent} command for {entity_id}."
-        if exec_res.get("status") == "SUCCESS":
-            msg = success_msg
-        else:
-            msg = f"Attempted to {intent} {entity_id}, but: {exec_res.get('message')}"
+            # Format Response based on request type
+            success_msg = f"OK. I've processed the {intent} command for {entity_id}."
+            if exec_res.get("status") == "SUCCESS":
+                msg = success_msg
+            else:
+                msg = f"Attempted to {intent} {entity_id}, but: {exec_res.get('message')}"
 
-        if is_native_proxy:
-            # Return Ollama-style response
-            resp_data = {
-                "model": body.get("model", "gateway-fast-path"),
-                "created_at": "2024-01-01T00:00:00Z", # Mock
-                "message": {"role": "assistant", "content": msg},
-                "status": exec_res.get("status", "SUCCESS"),
-                "done": True
-            }
-            if body.get("stream", False):
-                async def _gen():
-                    yield json.dumps(resp_data) + "\n"
-                return StreamingResponse(_gen(), media_type="application/x-ndjson")
-            return resp_data
-        else:
-            return ChatResponse(
-                status=exec_res.get("status", "FAILURE"),
-                message=msg,
-                intent=intent,
-                confidence=confidence,
-                execution_result=exec_res
-            )
+            if is_native_proxy:
+                # Return Ollama-style response
+                resp_data = {
+                    "model": body.get("model", "gateway-fast-path"),
+                    "created_at": "2024-01-01T00:00:00Z", # Mock
+                    "message": {"role": "assistant", "content": msg},
+                    "status": exec_res.get("status", "SUCCESS"),
+                    "done": True
+                }
+                if body.get("stream", False):
+                    async def _gen():
+                        yield json.dumps(resp_data) + "\n"
+                    return StreamingResponse(_gen(), media_type="application/x-ndjson")
+                return resp_data
+            else:
+                return ChatResponse(
+                    status=exec_res.get("status", "FAILURE"),
+                    message=msg,
+                    intent=intent,
+                    confidence=confidence,
+                    execution_result=exec_res
+                )
 
     # Build Device Context for LLM
     device_context = ""
