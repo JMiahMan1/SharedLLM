@@ -73,5 +73,7 @@ services:
     restart: unless-stopped
     networks:
       - sharedllm_internal
+    ports:
+      - "8005:8005"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
