@@ -14,12 +14,39 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     ctx = req.user_context
     log.info(f"[media/play] user={ctx.user} entity={req.entity_id}")
 
+    # --- LEGACY PORT: YouTube Deep Linking ---
+    import re
+    url = req.media_content_id or ""
+    yt_match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11}).*", url)
+    
     service_data: dict = {}
-    if req.media_content_id:
-        service_data["media_content_id"] = req.media_content_id
-        service_data["media_content_type"] = req.media_content_type
+    if ("youtube" in url or "youtu.be" in url) and yt_match:
+        video_id = yt_match.group(1)
+        log.info(f"[media/play] Detected YouTube URL. Deep-linking to video {video_id}")
+        # If it's a Roku, use the native deep-link format
+        if "roku" in req.entity_id:
+             service_data = {
+                "media_content_id": "837", # YouTube App ID
+                "media_content_type": "app",
+                "extra": {"content_id": video_id, "media_type": "live"}
+             }
+        else:
+             service_data["media_content_id"] = video_id
+             service_data["media_content_type"] = "youtube"
+    else:
+        if req.media_content_id:
+            service_data["media_content_id"] = req.media_content_id
+            service_data["media_content_type"] = req.media_content_type or "url"
+
     if req.enqueue:
         service_data["enqueue"] = req.enqueue
+
+    # Auto-power-on check
+    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, req.entity_id)
+    if state and state.get("state") == "off":
+        log.info(f"[media/play] Device {req.entity_id} is off. Turning on...")
+        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", req.entity_id)
+        await asyncio.sleep(2)
 
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
@@ -33,26 +60,40 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
 
 async def handle_media_transport(req: MediaTransportRequest) -> ExecutionResult:
     ctx = req.user_context
-    ha_service_map = {
-        "pause": "media_pause",
-        "resume": "media_play",
-        "stop": "media_stop",
-        "next": "media_next_track",
-        "previous": "media_previous_track",
-        "volume_up": "volume_up",
-        "volume_down": "volume_down",
-    }
-    service = ha_service_map.get(req.command, req.command)
     
-    data = {}
+    # --- LEGACY PORT: Remote Button Mapping ---
+    button_map = {
+        "home": "HOME", "back": "BACK", "up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT",
+        "select": "SELECT", "enter": "SELECT", "ok": "SELECT", "info": "INFO", "replay": "INSTANT_REPLAY",
+        "pause": "media_pause", "resume": "media_play", "stop": "media_stop", 
+        "next": "media_next_track", "previous": "media_previous_track",
+        "volume_up": "volume_up", "volume_down": "volume_down", "mute": "volume_mute"
+    }
+    
+    service = button_map.get(req.command.lower(), req.command)
+    domain = "media_player"
+    target_entity = req.entity_id
+    
+    # If it's a "button" command (Remote), switch to remote domain
+    if service.isupper():
+        domain = "remote"
+        service_cmd = "send_command"
+        data = {"command": service}
+        # Roku: media_player.roku -> remote.roku
+        if "media_player" in target_entity:
+            target_entity = target_entity.replace("media_player.", "remote.")
+    else:
+        service_cmd = service
+        data = {}
+
     if req.command in ("volume_up", "volume_down") and req.volume_level is not None:
-        service = "volume_set"
+        service_cmd = "volume_set"
         data = {"volume_level": req.volume_level}
 
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
-        "media_player", service,
-        req.entity_id, data or None,
+        domain, service_cmd,
+        target_entity, data or None,
     )
     
     if result.get("ok"):
@@ -60,20 +101,14 @@ async def handle_media_transport(req: MediaTransportRequest) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)
 
 async def handle_tv_cast(req: TVCastRequest) -> ExecutionResult:
+    # This is now largely redundant with refined handle_media_play, but keeping for specialized casting
     ctx = req.user_context
-    # Power on logic
-    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, req.media_player_entity_id)
-    if state and state.get("state") not in ("on", "playing", "paused", "idle"):
-        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", req.media_player_entity_id)
-        await asyncio.sleep(req.power_on_wait_ms / 1000)
-
-    result = await ha_client.call_service(
-        ctx.ha_url, ctx.ha_token,
-        "media_player", "play_media",
-        req.media_player_entity_id,
-        {"media_content_id": req.media_content_id, "media_content_type": req.media_content_type},
-    )
+    log.info(f"[tv/cast] entity={req.media_player_entity_id} content={req.media_content_id}")
     
-    if result.get("ok"):
-        return ExecutionResult(status="SUCCESS", message="TV cast started.", service="tv_cast")
-    return ExecutionResult(status="FAILURE", message=f"TV cast failed: {result.get('error')}", service="tv_cast", detail=result)
+    play_req = MediaPlayRequest(
+        user_context=ctx,
+        entity_id=req.media_player_entity_id,
+        media_content_id=req.media_content_id,
+        media_content_type=req.media_content_type
+    )
+    return await handle_media_play(play_req)

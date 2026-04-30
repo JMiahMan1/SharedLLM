@@ -1,6 +1,3 @@
-fastembed
-redis
 fastapi
 uvicorn
-httpx
 pydantic

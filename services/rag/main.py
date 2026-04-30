@@ -110,6 +110,62 @@ async def ingest(req: IngestRequest):
         log.error(f"Ingest failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to ingest document")
 
+@app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
+async def sync_ha(payload: dict):
+    """
+    Enriches and indexes HA entities for RAG.
+    Ported from legacy ha_ingest.py
+    """
+    entities = payload.get("entities", [])
+    user_id = payload.get("user_id", "admin")
+    collection = get_collection("ha_entities")
+    
+    ids = []
+    docs = []
+    metas = []
+    
+    for e in entities:
+        eid = e.get("entity_id", "")
+        if not eid: continue
+        
+        state = e.get("state", "unknown")
+        attrs = e.get("attributes", {})
+        fname = attrs.get("friendly_name", eid)
+        area = attrs.get("area_id", "unknown")
+        
+        # Enrichment: Create a descriptive string for the vector DB
+        content = f"The {fname} ({eid}) is in the {area} and is currently {state}."
+        if "brightness" in attrs:
+            content += f" It supports brightness (current: {attrs['brightness']})."
+        if "current_temperature" in attrs:
+            content += f" The current temperature is {attrs['current_temperature']}."
+            
+        ids.append(f"ha:{eid}")
+        docs.append(content)
+        metas.append({
+            "entity_id": eid,
+            "friendly_name": fname,
+            "area": area,
+            "user_id": user_id,
+            "type": "ha_entity"
+        })
+    
+    if docs:
+        try:
+            # Clear old and add new (or upsert)
+            collection.upsert(
+                ids=ids,
+                documents=docs,
+                metadatas=metas
+            )
+            log.info(f"Synced {len(docs)} HA entities for user {user_id}")
+            return {"status": "SUCCESS", "count": len(docs)}
+        except Exception as e:
+            log.error(f"HA Sync failed: {e}")
+            raise HTTPException(status_code=500, detail="Sync failed")
+    
+    return {"status": "SUCCESS", "count": 0}
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "rag"}
