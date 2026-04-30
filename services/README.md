@@ -20,6 +20,14 @@ This directory contains the microservices refactor of the SharedLLM system.
 - **Role**: Manages user profiles and secure credential resolution.
 - **Resolution**: Maps `voice_id`, `rag_user`, or `device_id` to decrypted HA/Nextcloud credentials.
 
+## Future Vision: Omni-Source Expansion
+
+### 4. Storage Bridge (`services/storage`)
+- **NextCloud**: WebDAV integration for document and media indexing.
+- **Librarian Engine**: Categorization of literature vs. technical data.
+- **Multimedia**: Whisper-based transcription for MP3/MP4 indexing.
+- **Agentic Git**: Semantic code understanding and self-modification capabilities.
+
 ## Testing & Diagnostics
 
 ### Integration Smoke Test
