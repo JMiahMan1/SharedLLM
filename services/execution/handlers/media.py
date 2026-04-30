@@ -14,6 +14,42 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     ctx = req.user_context
     log.info(f"[media/play] user={ctx.user} entity={req.entity_id}")
 
+    # Music Assistant library lookup path.
+    if req.query:
+        fallback_types = [req.media_content_type or "artist", "search", "music"]
+        seen = set()
+        ordered_types = []
+        for media_type in fallback_types:
+            if media_type and media_type not in seen:
+                ordered_types.append(media_type)
+                seen.add(media_type)
+
+        for media_type in ordered_types:
+            result = await ha_client.call_service(
+                ctx.ha_url,
+                ctx.ha_token,
+                "music_assistant",
+                "play_media",
+                req.entity_id,
+                {
+                    "media_id": req.query,
+                    "media_type": media_type,
+                    "enqueue": "play" if req.enqueue == "replace" else req.enqueue,
+                },
+            )
+            if result.get("ok"):
+                return ExecutionResult(
+                    status="SUCCESS",
+                    message=f"Music Assistant playback started for '{req.query}' ({media_type}).",
+                    service="media_play",
+                )
+
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Music Assistant playback failed for '{req.query}'.",
+            service="media_play",
+        )
+
     # --- LEGACY PORT: YouTube Deep Linking ---
     import re
     url = req.media_content_id or ""

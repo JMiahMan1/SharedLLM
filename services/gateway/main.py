@@ -39,6 +39,7 @@ LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://logging:8006")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "60.0"))
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:8b")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", DEFAULT_MODEL)
 CODING_MODEL = os.getenv("CODING_MODEL", ASSISTANT_MODEL)
@@ -177,6 +178,114 @@ def select_model_for_query(query: str) -> str:
     if any(token in q for token in librarian_signals):
         return LIBRARIAN_MODEL
     return ASSISTANT_MODEL
+
+
+def extract_media_request(query: str) -> tuple[str | None, str | None]:
+    """
+    Pull a likely media search string and target device name from commands like:
+    - Play Brandon Lake on Office TV
+    - Listen to jazz on the kitchen speaker
+    """
+    cleaned = (query or "").strip().strip("?.!")
+    if not cleaned:
+        return None, None
+
+    # Capture common "play/listen/resume <content> on <device>" phrasing.
+    match = re.match(
+        r"^(?:play|listen to|listen|resume)\s+(.+?)(?:\s+on\s+(.+))?$",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+
+    media_query = match.group(1).strip(" \"'")
+    device_name = match.group(2).strip(" \"'") if match.group(2) else None
+    if device_name:
+        device_name = re.sub(r"^(?:the)\s+", "", device_name, flags=re.IGNORECASE)
+    return (media_query or None, device_name or None)
+
+
+def resolve_media_target(query: str, entities: list[dict]) -> str:
+    """
+    Prefer a Music Assistant queue/speaker entity for music playback on named targets.
+    Fall back to the first media_player entity if nothing better is found.
+    """
+    _, requested_device = extract_media_request(query)
+    requested_lower = requested_device.lower() if requested_device else ""
+    fallback = "auto"
+
+    def _score(entity: dict) -> tuple[int, str]:
+        eid = entity.get("entity_id", "")
+        attrs = entity.get("attributes") or {}
+        friendly = str(attrs.get("friendly_name") or "").lower()
+        source = str(attrs.get("source") or "").lower()
+        device_class = str(attrs.get("device_class") or "").lower()
+        state = str(entity.get("state") or "").lower()
+
+        score = 0
+        if requested_lower and requested_lower in friendly:
+            score += 100
+        if "music assistant queue" in source:
+            score += 50
+        if device_class == "speaker":
+            score += 20
+        if state not in {"unavailable", "unknown"}:
+            score += 10
+        if "chrome" in eid or "cast" in friendly:
+            score -= 25
+        if "remote" in friendly:
+            score -= 25
+        return score, eid
+
+    candidates = [e for e in entities if e.get("entity_id", "").startswith("media_player.")]
+    if not candidates:
+        return fallback
+
+    ranked = sorted((_score(e) for e in candidates), reverse=True)
+    best_score, best_eid = ranked[0]
+    return best_eid if best_score > 0 else candidates[0]["entity_id"]
+
+
+async def call_ollama(payload: dict, use_chat: bool = True) -> httpx.Response:
+    endpoint = "/api/chat" if use_chat else "/api/generate"
+    return await _global_http_client.post(
+        f"{OLLAMA_URL}{endpoint}",
+        json=payload,
+        timeout=OLLAMA_TIMEOUT,
+    )
+
+
+async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
+    prompt = (
+        "You are troubleshooting a failed music playback request.\n"
+        "Return only JSON with keys: query, media_type.\n"
+        "media_type must be one of: artist, search, music.\n"
+        f"User request: {query}\n"
+        f"Failure: {failure}\n"
+        "Prefer the simplest library lookup that is most likely to succeed."
+    )
+    try:
+        resp = await call_ollama(
+            {"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False},
+            use_chat=False,
+        )
+        if resp.status_code != 200:
+            return None
+        raw = resp.json().get("response", "").strip()
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        data = json.loads(raw[start:end + 1])
+        query_value = str(data.get("query") or "").strip()
+        media_type = str(data.get("media_type") or "").strip().lower()
+        if not query_value or media_type not in {"artist", "search", "music"}:
+            return None
+        return {"query": query_value, "media_type": media_type}
+    except Exception as exc:
+        log.warning(f"[MediaFallback] Troubleshooting fallback failed: {exc}")
+        return None
 
 # --- Helper Functions ---
 async def decompose_command_query(query: str) -> list[str]:
@@ -319,6 +428,10 @@ async def chat_handler(request: Request):
                     lights = [e for e in real_entities if e['entity_id'].startswith('light.')]
                     if lights: target_entity = lights[0]['entity_id']
 
+            media_query, _ = extract_media_request(refined_query)
+            if intent == "play_media" and media_query:
+                target_entity = resolve_media_target(refined_query, real_entities)
+
             exec_payload = {
                 "user_context": creds,
                 "entity_id": target_entity,
@@ -327,10 +440,22 @@ async def chat_handler(request: Request):
             
             # For media, add default content
             if intent == "play_media":
-                exec_payload["media_content_id"] = "http://stream.radioparadise.com/flac"
-                exec_payload["media_content_type"] = "music"
+                if media_query:
+                    exec_payload["query"] = media_query
+                    exec_payload["media_content_type"] = "artist"
+                else:
+                    exec_payload["media_content_id"] = "http://stream.radioparadise.com/flac"
+                    exec_payload["media_content_type"] = "music"
 
             exec_res = await execute_command(endpoint, exec_payload)
+            if intent == "play_media" and exec_res.get("status") == "FAILURE":
+                fallback = await troubleshoot_media_failure(refined_query, exec_res.get("message", "unknown failure"))
+                if fallback:
+                    retry_payload = dict(exec_payload)
+                    retry_payload["query"] = fallback["query"]
+                    retry_payload["media_content_type"] = fallback["media_type"]
+                    retry_payload.pop("media_content_id", None)
+                    exec_res = await execute_command(endpoint, retry_payload)
             return JSONResponse({
                 "status": "SUCCESS",
                 "message": exec_res.get("message", "Executed"),
@@ -352,7 +477,7 @@ async def chat_handler(request: Request):
             "messages": history + [{"role": "user", "content": refined_query}],
             "stream": False
         }
-        resp = await _global_http_client.post(f"{OLLAMA_URL}/api/chat", json=ollama_payload)
+        resp = await call_ollama(ollama_payload, use_chat=True)
         
         if resp.status_code == 404:
             # Fallback to /api/generate for older Ollama versions
@@ -362,7 +487,7 @@ async def chat_handler(request: Request):
                 "prompt": f"{refined_query}", # Simplified
                 "stream": False
             }
-            resp = await _global_http_client.post(f"{OLLAMA_URL}/api/generate", json=gen_payload)
+            resp = await call_ollama(gen_payload, use_chat=False)
             
         if resp.status_code != 200:
             err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
