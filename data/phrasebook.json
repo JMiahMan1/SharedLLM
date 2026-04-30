@@ -26,6 +26,39 @@
         "set the light to 10 percent",
         "brightness 80%"
     ],
+    "set_temperature": [
+        "set the thermostat to 72 degrees",
+        "make it 70 in here",
+        "adjust temperature to 68",
+        "turn up the heat",
+        "cool it down to 75",
+        "set climate to 71"
+    ],
+    "lock_security": [
+        "lock the front door",
+        "secure the house",
+        "lock the back door",
+        "is the door locked",
+        "lock up"
+    ],
+    "unlock_security": [
+        "unlock the front door",
+        "open the door",
+        "let me in",
+        "unlock the back door"
+    ],
+    "open_cover": [
+        "open the garage door",
+        "open the blinds",
+        "raise the shades",
+        "open the gate"
+    ],
+    "close_cover": [
+        "close the garage door",
+        "close the blinds",
+        "lower the shades",
+        "close the gate"
+    ],
     "play_media": [
         "play music",
         "start playing",
