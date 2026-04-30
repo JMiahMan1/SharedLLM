@@ -30,12 +30,12 @@ log "========================================="
 
 # --- Step 1: Check if Dockerfile or requirements changed ---
 # If so, we need a full rebuild; otherwise just restart.
-CHANGED_FILES=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || echo "")
+CODE_CHANGE=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -E "^services/|^docker-compose|^scripts/|^Dockerfile" || true)
 NEEDS_REBUILD=false
 
-if echo "$CHANGED_FILES" | grep -qE "(Dockerfile|requirements\.txt|docker-compose\.yml)$"; then
+if [ -n "$CODE_CHANGE" ]; then
     NEEDS_REBUILD=true
-    log "Core infrastructure files changed — full rebuild required."
+    log "Code or infra changes detected — full rebuild required."
 else
     log "No infrastructure changes — fast restart only."
 fi
