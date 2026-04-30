@@ -16,3 +16,18 @@ class ChatResponse(BaseModel):
     intent: Optional[str] = None
     confidence: Optional[float] = None
     execution_result: Optional[Dict[str, Any]] = None
+
+class OllamaPullRequest(BaseModel):
+    model: Optional[str] = None
+    name: Optional[str] = None
+    stream: bool = False
+    insecure: bool = False
+
+class OllamaGenerateRequest(BaseModel):
+    model: str
+    prompt: str
+    stream: bool = False
+    system: Optional[str] = None
+    template: Optional[str] = None
+    context: Optional[list[int]] = None
+    options: Optional[Dict[str, Any]] = None

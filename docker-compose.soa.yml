@@ -1,5 +1,3 @@
-version: "3.8"
-
 networks:
   sharedllm_internal:
     driver: bridge
@@ -15,6 +13,8 @@ services:
     restart: unless-stopped
     networks:
       - sharedllm_internal
+    env_file:
+      - .env
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
@@ -53,12 +53,15 @@ services:
       - sharedllm_internal
     ports:
       - "11435:8002" # Only the Gateway is exposed externally
+    env_file:
+      - .env
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
