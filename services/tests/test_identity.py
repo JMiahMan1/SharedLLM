@@ -1,3 +1,8 @@
+"""
+Test suite for the Identity Microservice (services/identity).
+Tests user resolution, credential decryption, and device-to-user mapping.
+Related code: services/identity/main.py, services/identity/models.py, services/identity/crypto.py
+"""
 import os
 import pytest
 from fastapi.testclient import TestClient

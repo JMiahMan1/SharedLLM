@@ -1,3 +1,8 @@
+"""
+Test suite for the RAG Microservice (services/rag).
+Tests document ingestion into ChromaDB and semantic search functionality.
+Related code: services/rag/main.py, services/rag/schemas.py
+"""
 import os
 import sys
 from unittest.mock import MagicMock

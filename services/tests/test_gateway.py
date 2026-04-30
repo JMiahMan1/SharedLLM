@@ -1,3 +1,8 @@
+"""
+Test suite for the Intent Gateway Microservice (services/gateway).
+Tests semantic routing (Fast Path vs Slow Path), identity integration, and error propagation.
+Related code: services/gateway/main.py, services/gateway/intent_engine.py, services/gateway/schemas.py
+"""
 import os
 import pytest
 from fastapi.testclient import TestClient

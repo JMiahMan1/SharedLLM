@@ -1,0 +1,54 @@
+{
+    "turn_on": [
+        "turn on the lights",
+        "power on",
+        "switch on",
+        "turn on the lamp",
+        "activate the lights",
+        "lights on",
+        "turn on piano lamp"
+    ],
+    "turn_off": [
+        "turn off the lights",
+        "power off",
+        "switch off",
+        "turn off the lamp",
+        "deactivate the lights",
+        "lights off",
+        "turn off piano lamp"
+    ],
+    "set_brightness": [
+        "set brightness to 50%",
+        "dim the lights to 20%",
+        "make the lamp brighter",
+        "set the piano lamp to 75%",
+        "adjust brightness to 100",
+        "set the light to 10 percent",
+        "brightness 80%"
+    ],
+    "play_media": [
+        "play music",
+        "start playing",
+        "resume music",
+        "play some jazz",
+        "start the radio",
+        "play the speaker"
+    ],
+    "pause_media": [
+        "pause music",
+        "stop playing",
+        "pause the speaker",
+        "stop the music"
+    ],
+    "toggle": [
+        "toggle the lights",
+        "flip the switch",
+        "toggle the lamp"
+    ],
+    "announce": [
+        "announce dinner is ready",
+        "broadcast a message",
+        "tell everyone it is time to go",
+        "make an announcement"
+    ]
+}

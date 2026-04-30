@@ -1,3 +1,8 @@
+"""
+SOA Smoke Test Script.
+Performs end-to-end health checks and basic functional verification across multiple microservices.
+Related code: All microservices in services/
+"""
 import requests
 import os
 import sys
