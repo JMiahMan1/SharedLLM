@@ -1,75 +1,122 @@
 services:
-  # --- 1. Main Unified RAG API Service ---
-  rag-api:
-    # Renamed service to 'rag-api' for clear internal service linking
-    build: .
-    container_name: unified_rag_api
+  identity:
+    build: ./services/identity
+    container_name: sharedllm_identity
     restart: unless-stopped
+    network_mode: "host"
     env_file:
       - .env
     environment:
-      # CRITICAL: Configure Redis to use Localhost since we are in Host Mode
-      - REDIS_URL=redis://127.0.0.1:6379/0
-      # CRITICAL: Preserve the OLLAMA_URL configuration passed from .env
-      - OLLAMA_URL=${OLLAMA_URL}
-      - DEFAULT_MODEL=${DEFAULT_MODEL}
-      - DOCKER_ENV=1
-      - DEBUG_RAG_CONTEXT=true
-      - DEBUG=1
-      # Pass through remaining variables
-      - HA_URL=${HA_URL}
-      - HA_TOKEN=${HA_TOKEN}
-      - NEXTCLOUD_URL=${NEXTCLOUD_URL}
-      - NEXTCLOUD_USER=${NEXTCLOUD_USER}
-      - NEXTCLOUD_PASS=${NEXTCLOUD_PASS}
-      - WHOOGLE_URL=${WHOOGLE_URL}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
+      - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - FERNET_KEY=${FERNET_KEY}
       - TZ=America/Phoenix
-      # Update System Prompt path for mapped structure
-      - SYSTEM_PROMPT_FILE=/app/data/system_prompt.txt
+    volumes:
+      - identity_db:/data
+      - ./.env:/app/.env.legacy:ro
+      - /etc/localtime:/etc/localtime:ro
 
+  execution:
+    build: ./services/execution
+    container_name: sharedllm_execution
+    restart: unless-stopped
+    network_mode: "host"
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - REDIS_URL=redis://127.0.0.1:6379/0
+      - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ./app:/app:z
-      - ./data:/data:z
-      - ./tools:/tools:z
-      - rag_chroma:/data/chroma_db:z
-      - huggingface_cache:/root/.cache/huggingface:z
-      # Adding the necessary temp dir for Nextcloud ingestion
-      - ./data/nextcloud_temp:/data/nextcloud_temp:z
 
-    working_dir: /
-    entrypoint: []
-    command: bash -c "umask 022 && touch /data/app.log /data/shared_llm.log && chmod 644 /data/app.log /data/shared_llm.log && python -m uvicorn app.main:app --host 0.0.0.0 --port 11435 --workers 1 --reload --reload-dir /app --log-level debug 2>&1 | tee -a /data/shared_llm.log"
-    depends_on:
-      - redis # CRITICAL: Depend on Redis service
-    network_mode: "host" # Use Host Networking for Cast Discovery
-    # networks:
-    #   - ragnet
+  rag:
+    build: ./services/rag
+    container_name: sharedllm_rag
+    restart: unless-stopped
+    network_mode: "host"
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - CHROMA_PERSIST_DIR=/data/chroma_db
+      - TZ=America/Phoenix
+    volumes:
+      - chroma_data:/data
+      - huggingface_cache:/root/.cache/huggingface
+      - /etc/localtime:/etc/localtime:ro
 
-    # --- 2. Redis Service (Shared Cache/Memory) ---
+  gateway:
+    build: ./services/gateway
+    container_name: sharedllm_gateway
+    restart: unless-stopped
+    network_mode: "host"
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - IDENTITY_SVC_URL=http://127.0.0.1:8001
+      - EXECUTION_SVC_URL=http://127.0.0.1:8003
+      - RAG_SVC_URL=http://127.0.0.1:8004
+      - STORAGE_SVC_URL=http://127.0.0.1:8005
+      - LOGGING_SVC_URL=http://127.0.0.1:8006
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
+      - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
+      - TZ=America/Phoenix
+    volumes:
+      - ./data/phrasebook.json:/app/data/phrasebook.json:ro
+      - /etc/localtime:/etc/localtime:ro
+
+  logging:
+    build: ./services/logging
+    container_name: sharedllm_logging
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - TZ=America/Phoenix
+    volumes:
+      - logging_data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+
+  storage:
+    build: ./services/storage
+    container_name: sharedllm_storage
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - TZ=America/Phoenix
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+
   redis:
     image: redis:7-alpine
-    container_name: unified_rag_redis
+    container_name: sharedllm_redis
     restart: unless-stopped
     command: redis-server --appendonly yes
+    network_mode: "host"
     volumes:
-      - rag_redis:/data # Volume for Redis persistence
-    ports:
-      - "6379:6379" # Expose to Host so successful Host Mode API can reach it
-    networks:
-      - ragnet
+      - redis_data:/data
 
-# --- Volumes ---
+  automation:
+    build: ./services/automation
+    container_name: sharedllm_automation
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - REDIS_URL=redis://127.0.0.1:6379/0
+      - EXECUTION_SVC_URL=http://127.0.0.1:8003
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - TZ=America/Phoenix
+    depends_on:
+      - redis
+      - execution
+
 volumes:
-  rag_chroma:
-  rag_redis:
+  identity_db:
+  chroma_data:
+  logging_data:
+  redis_data:
   huggingface_cache:
-    # ADDED: Volume for Redis persistence
-
-    # --- Networks ---
-networks:
-  ragnet:
-    driver: bridge

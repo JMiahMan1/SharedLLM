@@ -1,195 +1,74 @@
-# SharedLLM - Unified RAG Middleware AI
+# SharedLLM - Modular SOA AI Middleware
 
-A central intelligence layer that unifies smart home control, personal cloud
-services, and knowledge systems into a single conversational AI interface.
+A high-performance, modular Service-Oriented Architecture (SOA) that unifies smart home control, personal cloud services, and semantic memory into a single conversational AI interface.
 
-## Purpose
+## 🏗 Architecture Overview
 
-This project implements a Unified RAG Middleware AI, serving as the central
-intelligence layer between:
+SharedLLM has been migrated from a monolithic application to a robust microservices stack for improved stability, scalability, and observability.
 
-### Smart Home
+### Core Services
 
-- **Home Assistant** - Device control, sensors, timers, alarms
-- **Music Assistant**
-  - Music playback (play, pause, stop, next, previous)
-  - Playlist selection
-  - Artist/album/track search
-  - Radio station listing
-  - Podcasts (using Audio Bookshelf provider in Music Assistant)
-  - Audiobooks (using Audio Bookshelf provider in Music Assistant)
+| Service | Port | Description |
+|---------|------|-------------|
+| **Gateway** | 11435 | Orchestrator & Intent Classifier. Routes requests to specialized services. |
+| **Identity** | 8001 | Secure credential management and device-to-user resolution. |
+| **Execution** | 8003 | Home Assistant bridge for lights, media, climate, and security. |
+| **RAG** | 8004 | Semantic memory layer using ChromaDB for knowledge retrieval. |
+| **Storage** | 8005 | Shared persistence for documents and configuration. |
+| **Logging** | 8006 | Centralized observability hub for all microservices. |
+| **Automation** | - | Background task processor for polling and scheduled events. |
+| **Redis** | 6379 | High-speed cache for session state and history. |
 
-### Personal Cloud
+## 🚀 Deployment
 
-- **Nextcloud Calendar** - Create, read, update, delete events
-- **Nextcloud Notes** - Create, read, append, delete notes
-- **Nextcloud Files** - Document ingestion and RAG search
-- **Nextcloud Media** - Ebooks, PDFs, MP3 metadata, audiobooks
-- **Audio Bookshelf** - Used as provider in Music Assistant for podcasts and
-  audiobooks
+The system is designed to run in Docker with host networking for seamless device discovery (Google Cast, DLNA).
 
-### Knowledge Systems
-
-- **Vector RAG DB** (ChromaDB) - Long-term knowledge storage
-- **Whoogle/SearXNG** - Search engine integration
-- **Local LLMs** (Ollama) - Preferred LLM backend
-- **Cloud LLMs** (OpenAI/compatible) - Fallback option
-
-### Unified Persona Across All Interfaces
-
-All interfaces share the same memory, context, and personality:
-
-- Home Assistant Assist
-- OpenWebUI
-- REST API clients
-- Future CLI / mobile clients
-
-## Documentation
-
-- [Architecture Overview](docs/architecture.md)
-- [Integrations Guide](docs/integrations.md)
-- [Roadmap](docs/roadmap.md)
-- [API Reference](docs/api_reference.md)
-
-## Current Code Structure
-
-```text
-app/
-  data/
-    system_prompt.txt      # Unified personality prompt
-    phrasebook.json        # Intent training phrases
-    alarm_keywords.json    # Alarm sound mappings
-  ha_ingest.py             # Home Assistant data ingestion
-  ingest_nextcloud.py      # Nextcloud document ingestion
-  intent_engine.py         # Vector-based intent classification
-  logic/
-    ha_websocket.py        # Async Home Assistant event listener
-    pipeline.py            # Main request processing pipeline
-    media_ops.py           # Media/device control
-    music_assistant_ops.py # Music Assistant integration
-    calendar_ops.py        # Nextcloud calendar operations
-    timer_ops.py           # Timer/alarm operations
-    note_ops.py            # Nextcloud notes operations
-    web_search.py          # Web search tool
-    execution/             # Tool execution system
-      registry.py          # Tool registry
-      handlers.py          # Tool handlers
-      fast_path.py         # Fast path executor
-    intents/
-      classifier.py        # Intent classification (regex + vector)
-    discovery/             # Device discovery and grouping
-      device_grouper.py
-      integration_helper.py
-  main.py                  # FastAPI entry point
-  settings.py              # Configuration
-test/                      # Test suite
-tools/                     # Diagnostic and testing tools
-docker-compose.yml
-Dockerfile
-requirements.txt
+```bash
+# Pull latest changes and auto-deploy
+bash scripts/deploy.sh
 ```
 
-## Implemented Features
+Or manually:
+```bash
+docker compose up -d --build
+```
 
-### ✅ Core Infrastructure
+## 📂 Project Structure
 
-- **Asynchronous I/O** - Highly concurrent execution using `aiohttp` and `aiobreaker` circuit breakers.
-- **Event-Driven States** - Persistent HA Websocket listener for `<1ms` state lookups via Redis.
-- **Native Tool Calling** - Deep integration with OpenAI's strict JSON function schemas for deterministic execution.
-- RAG retrieval from ChromaDB
-- Multi-backend LLM support (Ollama/OpenAI)
-- Streaming responses (OpenAI-compatible)
-- Shared memory via Redis (chat history, context)
-- **High-Confidence Intent Caching** - Bypasses vector embeddings for >90% match rates to reduce latency.
-- **Multi-intent command parsing** ("turn off lights and play music")
-- **Conversation Context** - Robust handling of follow-up questions using history.
+```text
+services/
+  gateway/      # Semantic Routing & Proxy
+  identity/     # Auth & Credential Resolution
+  execution/    # HA Integration & Handlers
+  rag/          # Semantic Indexing & Search
+  storage/      # Persistence Logic
+  logging/      # Observability Hub
+  automation/   # Background Tasks
+  tests/        # System-wide Smoke & Unit Tests
+scripts/        # Deployment & Maintenance scripts
+data/           # Shared volume data
+docker-compose.yml
+```
 
-### ✅ Home Assistant Integration
+## ✅ Verified Features
 
-- Device control (turn on/off, toggle)
-- Device state queries
-- Volume control (set, up, down, mute)
-- Media playback control (play, pause, stop, next, previous)
-- **Android TV Support** - Button commands and App launching
-- **Infrared Proxies** - Stateless fire-and-forget IR remote controls via the `sendspin` protocol.
-- Navigation control (up, down, left, right, back, home, select)
-- Device grouping and batch operations
-- Smart device resolution with capability routing
-- **Area-based targeting** ("Turn off lights in the Office")
+- **Fast Path Routing**: Semantic intent classification bypasses LLMs for >90% match rates (<100ms latency).
+- **Smart Power Sync**: Automatically powers on TVs/Media players before executing playback commands.
+- **Identity Injection**: Transparently injects user-specific HA credentials into execution payloads.
+- **Global Observability**: Centralized logging with context-aware tracing across all services.
+- **RAG Memory**: Persistent semantic history and document context for more relevant AI responses.
 
-### ✅ Music Assistant Integration
+## 🛠 Testing
 
-- Music search (artist, album, track)
-- Playlist listing
-- Radio station listing
-- Unified `music_list` tool for browsing
-- Music playback via Music Assistant players
-- Integration with Audio Bookshelf for podcasts/audiobooks
+We maintain a 100% green-build standard for all services.
 
-### ✅ Timers & Alarms
+```bash
+# Run local test suite (requires venv)
+bash run_local_tests.sh
 
-- Create timers ("remind me in 10 minutes")
-- Create alarms ("wake me up at 7am")
-- **Absolute Alarms** - Reliable parsing of specific times.
-- List active timers/alarms
-- Pause/Resume/Delete timers
-- Natural language time parsing
-- Redis-backed persistence
+# Run remote smoke test
+python3 services/tests/soa_smoke_test.py http://ai.local:11435 [SECRET]
+```
 
-### ✅ Nextcloud Calendar, Notes, & Documents
-
-- **Calendar**: Create, List, Update, and Delete events.
-- **Notes**: Create, Read, Append (with checkboxes), Update, and Delete.
-- **List Management**: "Check off" items in notes via `note_check_off`.
-- **Document Indexing**: Save text snippets or PDF contents directly into
-  Nextcloud AI Uploads directory via chat (`document_index`).
-- **Large RAG Queries**: Automatically extracts intent from massive copy/pasted
-  text blocks to perform RAG without blowing up the context window.
-
-### ✅ Documentation & Testing
-
-- **100% Test Coverage** - Automated suite for all core tool handlers.
-- **Unified Test Runner** - `MasterRunner` with console and JSON reporting.
-
-## Testing
-
-The system includes a comprehensive automated test suite located in `app/tests/`.
-
-### Automated Verification
-
-- **Run All Tests**: `python3 -m app.tests.runner --url [API_URL]`
-- **REST API**: Trigger tests via `POST /api/admin/run_tests` (returns JSON
-  report).
-
-### Coverage Areas
-
-- **Media**: Volume, Transport, Library Browsing.
-- **Productivity**: Calendar/Note CRUD and list management.
-- **Hardware**: Lights (Color/Brightness), Android TV.
-- **Pipeline**: Compound commands, context persistence.
-- **Search**: Web Query, Music Assistant Library.
-
-## End Goal
-
-A single self-hosted AI layer that:
-
-- Controls the smart home
-- Plays music, podcasts, and audiobooks
-- Manages Nextcloud calendar, contacts, and messaging
-- Searches and summarizes personal documents
-- Understands Git repos and code
-- Uses RAG intelligently
-- Shares memory across all interfaces
-- Responds quickly
-- Never breaks when upgraded
-- Offers similar functionality to Google Home or Alexa
-
-## Unified Persona
-
-All interfaces use `/app/data/system_prompt.txt` for consistent personality:
-
-- Witty, helpful, grounded in Biblical Christian worldview
-- Context-aware brevity (efficient for commands, conversational for inquiries)
-- Quality humor (clever Dad jokes, sparingly)
-- Scripture and wisdom when appropriate
-- Honest about limitations
+---
+*SharedLLM: The decentralized brain for your smart home.*
