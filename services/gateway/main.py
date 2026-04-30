@@ -78,21 +78,54 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
             log.error(f"Execution Bridge unreachable: {e}")
             return {"status": "FAILURE", "message": f"Execution service error: {str(e)}"}
 
-def extract_entity_heuristic(query: str, intent: str) -> str:
+async def fetch_ha_entities(creds: dict) -> list:
+    """Fetch real entities from Execution service."""
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/discovery/entities",
+                params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=5.0
+            )
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as e:
+            log.warning(f"Failed to fetch real entities: {e}")
+    return []
+
+def extract_entity_heuristic(query: str, intent: str, entities: list = None) -> str:
     """
-    Very basic heuristic entity extraction for Fast Path.
-    In a real system, this might use a lightweight NER model or regex.
+    Enhanced heuristic entity extraction using real HA data if available.
     """
     q = query.lower()
-    # Simple mock extraction based on known devices
+    
+    # 1. If we have real entities, try to match friendly names or IDs
+    if entities:
+        # Sort by length descending to match more specific names first
+        for e in sorted(entities, key=lambda x: len(x.get("attributes", {}).get("friendly_name", "")), reverse=True):
+            entity_id = e.get("entity_id", "")
+            domain = entity_id.split(".")[0]
+            
+            # Check if domain matches intent type
+            if intent in ("turn_on", "turn_off", "toggle") and domain not in ("light", "switch", "media_player"):
+                continue
+            if intent in ("play_media", "pause_media") and domain != "media_player":
+                continue
+                
+            fname = e.get("attributes", {}).get("friendly_name", "").lower()
+            if fname and fname in q:
+                return entity_id
+            if entity_id.split(".")[1].replace("_", " ") in q:
+                return entity_id
+
+    # 2. Hardcoded Fallbacks (Legacy/Common)
     if "piano" in q or "lamp" in q:
         return "light.piano_lamp"
     if "tv" in q:
         return "media_player.living_room_tv"
-    if "kitchen" in q:
-        return "media_player.kitchen_speaker"
     
-    # Fallback dummy entity
+    # 3. Last Resort Fallback
     return "light.dummy_light"
 
 @app.post("/api/chat")
@@ -134,7 +167,7 @@ async def chat_handler(request: Request):
 
     if is_fast_path:
         log.info(f"[gateway] FAST PATH triggered for {intent}")
-        # Resolve Identity first
+        # Resolve Identity and Entities
         try:
             req_for_id = ChatRequest(query=query, rag_user=body.get("rag_user"), voice_id=body.get("voice_id"))
             creds = await resolve_identity(req_for_id)
@@ -143,10 +176,14 @@ async def chat_handler(request: Request):
                 "ha_url": creds.get("ha_url", ""),
                 "ha_token": creds.get("ha_token", "")
             }
-        except:
+            # FETCH REAL ENTITIES HERE
+            real_entities = await fetch_ha_entities(creds)
+        except Exception as e:
+            log.warning(f"Fast path resolution error: {e}")
             user_context = {"user": "admin", "ha_url": "", "ha_token": ""}
+            real_entities = []
 
-        entity_id = extract_entity_heuristic(query, intent)
+        entity_id = extract_entity_heuristic(query, intent, real_entities)
         
         # Execute
         if intent in ("turn_on", "turn_off", "toggle"):
