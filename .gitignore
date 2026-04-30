@@ -14,3 +14,4 @@ app/static/temp/audio/*.mp3
 app.log
 temp_output/
 *.log*
+.codex
