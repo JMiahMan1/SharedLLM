@@ -296,16 +296,17 @@ async def chat_handler(request: Request):
         
         if not mentioned_eids and is_broad:
             log.info("[gateway] Broad query detected - injecting controllable entity summary")
-            # Inject a sample of each controllable domain
             domains = ["light", "switch", "media_player", "climate", "lock", "cover", "vacuum"]
+            total_injected = 0
             for domain in domains:
+                if total_injected >= 30: break
                 matches = [e for e in real_entities if e.get("entity_id", "").startswith(domain + ".")]
                 if matches:
-                    # Take up to 10 from each domain to avoid token bloat
-                    for e in matches[:10]:
+                    for e in matches[:5]:
                         mentioned_eids.add(e["entity_id"])
+                        total_injected += 1
 
-        # 3. Find Related Entities (Sensors, Info) for the mentioned ones
+        # 3. Find Related Entities
         prefixes = set()
         for eid in mentioned_eids:
             parts = eid.split(".")
@@ -323,21 +324,29 @@ async def chat_handler(request: Request):
                 state = e.get("state", "unknown")
                 actual_name = e.get("attributes", {}).get("friendly_name") or eid
                 attrs = e.get("attributes", {})
-                filtered_attrs = {k: v for k, v in attrs.items() if k not in ("icon", "entity_picture", "templates")}
+                
+                # Deep sanitize attributes
+                filtered_attrs = {}
+                for k, v in attrs.items():
+                    if k in ("icon", "entity_picture", "templates", "friendly_name"): continue
+                    # Truncate long strings
+                    if isinstance(v, str) and len(v) > 100: v = v[:97] + "..."
+                    filtered_attrs[k] = v
+                    
                 device_context += f"- {actual_name} ({eid}): {state} (Attributes: {filtered_attrs})\n"
     
     if device_context:
-        # Truncate if too long
-        if len(device_context) > 15000:
-            device_context = device_context[:15000] + "... [Truncated for brevity]"
+        # Final safety truncation
+        if len(device_context) > 10000:
+            device_context = device_context[:10000] + "... [Truncated]"
 
         ctx_msg = (
             "## Home Assistant Device Context\n"
-            "The following devices and related sensors were found in the user's setup. "
-            "Use this information to answer accurately. \n\n"
+            "The following devices and sensors were found. Use this info to answer. "
+            "Note: If an attribute is None, the device is likely OFF but may still support that feature.\n\n"
             f"{device_context}\n"
         )
-        log.info(f"[gateway] Injecting device context for {len(device_context.splitlines())} entities")
+        log.info(f"[gateway] Injecting device context ({len(device_context)} chars)")
         if is_native_proxy:
             # Inject into messages for Ollama/OpenAI
             body["messages"].insert(0, {"role": "system", "content": ctx_msg})
