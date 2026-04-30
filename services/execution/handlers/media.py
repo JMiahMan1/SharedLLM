@@ -1,8 +1,12 @@
 # services/execution/handlers/media.py
 import logging
 import asyncio
-from .. import ha_client
-from ..schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
+try:
+    from .. import ha_client
+    from ..schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
+except ImportError:
+    import ha_client
+    from schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
 
 log = logging.getLogger("execution.media")
 

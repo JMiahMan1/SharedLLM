@@ -4,12 +4,20 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status, Header
-from . import ha_client
-from .schemas import (
-    LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-    TVCastRequest, HAServiceRequest, AnnouncementRequest, ExecutionResult
-)
-from .handlers import light, media, climate, security
+try:
+    from . import ha_client
+    from .schemas import (
+        LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+        TVCastRequest, HAServiceRequest, AnnouncementRequest, ExecutionResult
+    )
+    from .handlers import light, media, climate, security
+except ImportError:
+    import ha_client
+    from schemas import (
+        LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+        TVCastRequest, HAServiceRequest, AnnouncementRequest, ExecutionResult
+    )
+    from handlers import light, media, climate, security
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
