@@ -6,11 +6,12 @@ Entry point for all clients. Coordinates Identity, RAG, Execution, and LLM.
 import os
 import logging
 from contextlib import asynccontextmanager
-import httpx
-from fastapi import FastAPI, HTTPException, status
+import json
+from fastapi import FastAPI, HTTPException, status, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from schemas import ChatRequest, ChatResponse
+from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
 from intent_engine import engine
 
 log = logging.getLogger("gateway")
@@ -21,6 +22,7 @@ EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
 RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 
 # LLM Config (simplified for gateway)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -182,3 +184,91 @@ async def chat(req: ChatRequest):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "gateway"}
+
+# --- Ollama Proxy Endpoints ---
+
+@app.post("/api/pull")
+async def api_pull(req: OllamaPullRequest):
+    """Proxy to Ollama with local check bypass."""
+    model_name = req.model or req.name or ""
+    log.info(f"[/api/pull] Request for model: '{model_name}'")
+
+    # Check local tags first to avoid unnecessary pulls
+    async with httpx.AsyncClient() as client:
+        try:
+            tags_resp = await client.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
+            if tags_resp.status_code == 200:
+                local_models = [m.get("name", "") for m in tags_resp.json().get("models", [])]
+                for local in local_models:
+                    if local == model_name or local.split(":")[0] == model_name.split(":")[0]:
+                        log.info(f"[/api/pull] Model '{model_name}' already present. Skipping.")
+                        return {"status": "success"}
+        except Exception as e:
+            log.warning(f"[/api/pull] Could not check local models: {e}")
+
+    # Proxy the pull
+    async def _proxy_stream():
+        async with httpx.AsyncClient() as client:
+            async with client.stream(
+                "POST", 
+                f"{OLLAMA_URL}/api/pull", 
+                json=req.model_dump(), 
+                timeout=None
+            ) as r:
+                async for chunk in r.aiter_bytes():
+                    yield chunk
+
+    if req.stream:
+        return StreamingResponse(_proxy_stream(), media_type="application/x-ndjson")
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{OLLAMA_URL}/api/pull", json=req.model_dump(), timeout=600)
+        return resp.json()
+
+@app.post("/api/generate")
+@app.post("/generate")
+async def api_generate(req: OllamaGenerateRequest):
+    """Proxy generate requests to Ollama."""
+    if req.stream:
+        async def _proxy_stream():
+            async with httpx.AsyncClient() as client:
+                async with client.stream("POST", f"{OLLAMA_URL}/api/generate", json=req.model_dump(), timeout=None) as r:
+                    async for chunk in r.aiter_bytes():
+                        yield chunk
+        return StreamingResponse(_proxy_stream(), media_type="application/x-ndjson")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{OLLAMA_URL}/api/generate", json=req.model_dump(), timeout=60.0)
+        return resp.json()
+
+@app.get("/api/tags")
+@app.get("/api/models")
+async def api_tags():
+    """Proxy tags requests to Ollama."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
+        return resp.json()
+
+@app.post("/api/chat")
+async def api_ollama_chat(request: Request):
+    """Proxy Ollama's native chat endpoint if it's not the RAG chat."""
+    # We differentiate by content-type or if it has 'messages' instead of 'query'
+    body = await request.json()
+    if "messages" in body:
+        # This is an Ollama-native chat request, proxy it
+        async def _proxy_stream():
+            async with httpx.AsyncClient() as client:
+                async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body, timeout=None) as r:
+                    async for chunk in r.aiter_bytes():
+                        yield chunk
+        if body.get("stream", True):
+            return StreamingResponse(_proxy_stream(), media_type="application/x-ndjson")
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=60.0)
+            return resp.json()
+    
+    # If it reached here but didn't have messages, it might be our own ChatRequest
+    # (but /api/chat is overloaded, so we handle it based on schema)
+    # Actually, ChatRequest has 'query'. 
+    # If we have both, we need to be careful.
+    return await chat(ChatRequest(**body))
