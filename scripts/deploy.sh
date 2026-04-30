@@ -33,7 +33,7 @@ log "========================================="
 CHANGED_FILES=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || echo "")
 NEEDS_REBUILD=false
 
-if echo "$CHANGED_FILES" | grep -qE "(Dockerfile|requirements\.txt|docker-compose\.soa\.yml)$"; then
+if echo "$CHANGED_FILES" | grep -qE "(Dockerfile|requirements\.txt|docker-compose\.yml)$"; then
     NEEDS_REBUILD=true
     log "Core infrastructure files changed — full rebuild required."
 else
@@ -74,7 +74,7 @@ done
 
 if [ "$HEALTHY" = false ]; then
     log "ERROR: API did not become healthy after $MAX_ATTEMPTS attempts. Check logs."
-    log "Run: docker compose logs --tail 50 rag-api"
+    log "Run: docker compose logs --tail 50 gateway"
     exit 1
 fi
 
