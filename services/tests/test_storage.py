@@ -1,3 +1,8 @@
+"""
+Test suite for the Storage Bridge Microservice (services/storage).
+Tests NextCloud integration, file listing, and metadata retrieval.
+Related code: services/storage/main.py, services/storage/nextcloud_client.py
+"""
 import pytest
 from fastapi.testclient import TestClient
 from storage.main import app

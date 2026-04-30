@@ -1,4 +1,9 @@
 import os
+"""
+Test suite for the Execution Bridge Microservice (services/execution).
+Tests Home Assistant integration, command dispatching, and entity state fetching.
+Related code: services/execution/main.py, services/execution/ha_client.py
+"""
 import pytest
 from fastapi.testclient import TestClient
 
