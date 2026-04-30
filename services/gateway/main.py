@@ -7,6 +7,7 @@ import os
 import logging
 from contextlib import asynccontextmanager
 import json
+import httpx
 from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
