@@ -15,6 +15,10 @@ class StorageProvider(ABC):
     def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
         raise NotImplementedError
 
+    @abstractmethod
+    def get_content(self, path: str) -> str | None:
+        raise NotImplementedError
+
 
 class NextcloudStorageProvider(StorageProvider):
     def __init__(self, settings: dict):
@@ -26,6 +30,9 @@ class NextcloudStorageProvider(StorageProvider):
 
     def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
         return self.client.list_entries(path=path, recursive=recursive)
+
+    def get_content(self, path: str) -> str | None:
+        return self.client.get_file_content(path)
 
 
 def build_provider(config: ProviderConfig) -> StorageProvider:

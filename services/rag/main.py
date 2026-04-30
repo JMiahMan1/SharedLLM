@@ -122,6 +122,88 @@ async def ingest(req: IngestRequest):
         log.error(f"Ingest failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to ingest document")
 
+@app.post("/rag/sync/files", dependencies=[Depends(require_internal)])
+async def sync_files(payload: dict):
+    """
+    Ingests file chunks for a specific provider/user.
+    """
+    chunks = payload.get("chunks", [])
+    user_id = payload.get("user_id", "admin")
+    collection_name = payload.get("collection_name", "nextcloud_files")
+    collection = get_collection(collection_name)
+    
+    if not chunks:
+        return {"status": "SUCCESS", "count": 0}
+        
+    ids = []
+    docs = []
+    metas = []
+    
+    import hashlib
+    for c in chunks:
+        content = c.get("content")
+        metadata = c.get("metadata", {})
+        if not content:
+            continue
+            
+        path = metadata.get("path", "unknown")
+        chunk_idx = metadata.get("chunk_index", 0)
+        
+        # Unique ID per chunk
+        # Using hash of path to avoid special character issues in IDs
+        path_hash = hashlib.md5(path.encode()).hexdigest()
+        cid = f"file:{user_id}:{path_hash}:{chunk_idx}"
+        
+        # Enforce user_id in meta
+        meta = metadata.copy()
+        meta["user_id"] = user_id
+        
+        ids.append(cid)
+        docs.append(content)
+        metas.append(meta)
+        
+    if docs:
+        try:
+            collection.upsert(
+                ids=ids,
+                documents=docs,
+                metadatas=metas
+            )
+            log.info(f"Synced {len(docs)} file chunks for user {user_id} into {collection_name}")
+            return {"status": "SUCCESS", "count": len(docs)}
+        except Exception as e:
+            log.error(f"File Sync failed: {e}")
+            raise HTTPException(status_code=500, detail="Sync failed")
+            
+    return {"status": "SUCCESS", "count": 0}
+
+@app.post("/rag/purge", dependencies=[Depends(require_internal)])
+async def purge(payload: dict):
+    """
+    Purges entries from a collection based on a filter.
+    """
+    collection_name = payload.get("collection_name")
+    user_id = payload.get("user_id")
+    filter_meta = payload.get("filter", {})
+    
+    if not collection_name or not user_id:
+        raise HTTPException(status_code=400, detail="collection_name and user_id required")
+        
+    collection = get_collection(collection_name)
+    
+    # Always enforce user_id for safety
+    where_filter = {"user_id": user_id}
+    for k, v in filter_meta.items():
+        where_filter[k] = v
+        
+    try:
+        collection.delete(where=where_filter)
+        log.info(f"Purged entries from {collection_name} for user {user_id} with filter {filter_meta}")
+        return {"status": "SUCCESS", "message": f"Purged entries from {collection_name}"}
+    except Exception as e:
+        log.error(f"Purge failed: {e}")
+        raise HTTPException(status_code=500, detail="Purge failed")
+
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict):
     """

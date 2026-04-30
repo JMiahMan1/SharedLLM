@@ -1,12 +1,52 @@
 from __future__ import annotations
-
+import asyncio
+import json
+import os
+from typing import TYPE_CHECKING
 from collections import Counter, defaultdict
 from pathlib import PurePosixPath
+
+if TYPE_CHECKING:
+    from .providers import StorageProvider
 
 try:
     from .models import ContentIndexItem, StorageEntry
 except ImportError:
     from models import ContentIndexItem, StorageEntry
+
+INDEXER_PAUSED = False
+
+def set_indexer_pause(paused: bool):
+    global INDEXER_PAUSED
+    INDEXER_PAUSED = paused
+
+class CheckpointManager:
+    def __init__(self, checkpoint_file: str = "/data/index_checkpoint.json"):
+        self.checkpoint_file = checkpoint_file
+        self.data = self._load()
+
+    def _load(self):
+        if os.path.exists(self.checkpoint_file):
+            try:
+                with open(self.checkpoint_file, "r") as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def save(self):
+        try:
+            os.makedirs(os.path.dirname(self.checkpoint_file), exist_ok=True)
+            with open(self.checkpoint_file, "w") as f:
+                json.dump(self.data, f)
+        except Exception as e:
+            print(f"Failed to save checkpoint: {e}")
+
+    def is_indexed(self, path: str, mtime: str) -> bool:
+        return self.data.get(path) == mtime
+
+    def mark_indexed(self, path: str, mtime: str):
+        self.data[path] = mtime
 
 
 
@@ -556,6 +596,68 @@ def build_content_index(entries: list[StorageEntry]) -> list[ContentIndexItem]:
     for item in items:
         item.related_items = _related_items(item.path, item_map, child_map)
     return items
+
+
+def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
+    """Split text into overlapping chunks."""
+    if not text:
+        return []
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start += (chunk_size - overlap)
+    return chunks
+
+
+async def extract_and_chunk_contents(
+    provider: "StorageProvider", 
+    items: list[ContentIndexItem],
+    checkpoint: CheckpointManager | None = None
+) -> list[dict]:
+    """Extract content from files and return chunks with metadata."""
+    all_chunks = []
+    
+    # Filter for items that have 'full_text' capability and are not directories
+    text_items = [
+        item for item in items 
+        if not item.is_dir and "full_text" in item.extractable_capabilities
+    ]
+    
+    for item in text_items:
+        # 1. Check Pause
+        while INDEXER_PAUSED:
+            await asyncio.sleep(1.0)
+
+        # 2. Check Checkpoint
+        if checkpoint and checkpoint.is_indexed(item.path, str(item.mtime)):
+            continue
+
+        content = provider.get_content(item.path)
+        if content:
+            chunks = chunk_text(content)
+            for i, chunk in enumerate(chunks):
+                all_chunks.append({
+                    "content": chunk,
+                    "metadata": {
+                        "path": item.path,
+                        "name": item.name,
+                        "chunk_index": i,
+                        "item_type": item.item_type,
+                        "subtype": item.subtype
+                    }
+                })
+            
+            # 3. Update Checkpoint after successful extraction
+            if checkpoint:
+                checkpoint.mark_indexed(item.path, str(item.mtime))
+                checkpoint.save()
+        
+        # Yield to event loop
+        await asyncio.sleep(0.1)
+
+    return all_chunks
 
 
 def summarize_index(items: list[ContentIndexItem]) -> dict[str, object]:

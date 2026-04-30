@@ -453,6 +453,39 @@ async def chat_handler(request: Request):
     if confidence >= FAST_PATH_THRESHOLD:
         log.info(f"[FastPath] intent='{intent}' confidence={confidence}")
         
+        if intent == "index_storage":
+            await emit_log("INFO", "Triggering full library index...")
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                try:
+                    idx_payload = {
+                        "provider": {
+                            "kind": "nextcloud",
+                            "settings": {
+                                "url": creds.get("nextcloud_url"),
+                                "username": creds.get("nextcloud_user"),
+                                "password": creds.get("nextcloud_pass")
+                            }
+                        },
+                        "path": "/",
+                        "recursive": True
+                    }
+                    resp = await client.post(
+                        f"{STORAGE_SVC}/index/full",
+                        json=idx_payload,
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        msg = f"Library index complete! Extracted {data.get('chunks_extracted', 0)} knowledge snippets."
+                        await emit_log("SUCCESS", msg)
+                        return JSONResponse({"status": "SUCCESS", "message": msg, "intent": "index_storage"})
+                    else:
+                        await emit_log("ERROR", f"Indexing failed: {resp.text}")
+                        return JSONResponse({"status": "ERROR", "message": "I couldn't index your library at this time."}, status_code=502)
+                except Exception as e:
+                    log.error(f"Index trigger failed: {e}")
+                    return JSONResponse({"status": "ERROR", "message": "The storage service is not responding."}, status_code=502)
+
         # Simple routing map
         endpoint_map = {
             "turn_on": "/execute/light",
@@ -569,6 +602,27 @@ async def chat_handler(request: Request):
             
             # Storage Context for Librarian
             if selected_model == LIBRARIAN_MODEL:
+                # A. Semantic Content Search
+                file_rag_resp = await client.post(
+                    f"{RAG_SVC}/rag/search",
+                    json={
+                        "query": refined_query,
+                        "user_id": user_id,
+                        "collection_name": "nextcloud_files",
+                        "k": 5
+                    },
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if file_rag_resp.status_code == 200:
+                    file_results = file_rag_resp.json().get("results", [])
+                    if file_results:
+                        file_text = "\n".join([
+                            f"- {r['metadata'].get('name', 'file')} ({r['metadata'].get('path', 'unknown')}): {r['content'][:200]}..." 
+                            for r in file_results
+                        ])
+                        rag_context += f"\n\nRelevant NextCloud Content:\n{file_text}"
+
+                # B. Shallow Filename Search
                 storage_resp = await client.post(
                     f"{STORAGE_SVC}/nextcloud/search",
                     params={"query": refined_query},
@@ -591,6 +645,12 @@ async def chat_handler(request: Request):
 
     # 5. Proxy to Ollama (Slow Path)
     try:
+        # Resource Prioritization: Pause Indexer
+        async with httpx.AsyncClient() as c:
+            try:
+                await c.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
+            except: pass
+
         await emit_log("INFO", f"Slow path triggered for: {refined_query}")
         
         # Try /api/chat first (Ollama standard)
@@ -628,6 +688,12 @@ async def chat_handler(request: Request):
     except Exception as e:
         log.error(f"LLM Proxy Error: {e}")
         raise HTTPException(status_code=502, detail="Upstream LLM error")
+    finally:
+        # Resource Prioritization: Resume Indexer
+        async with httpx.AsyncClient() as c:
+            try:
+                await c.post(f"{STORAGE_SVC}/index/resume", headers={"X-Internal-Secret": INTERNAL_SECRET})
+            except: pass
 
 # --- Ollama Proxy ---
 @app.post("/api/generate")

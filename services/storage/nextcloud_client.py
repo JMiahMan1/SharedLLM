@@ -1,6 +1,7 @@
 # services/storage/nextcloud_client.py
 import easywebdav
 import logging
+import requests
 from urllib.parse import urlparse
 
 try:
@@ -65,10 +66,20 @@ class NextCloudClient:
             log.error(f"Failed to download {remote_path}: {e}")
             return False
 
-    def get_file_content(self, remote_path):
-        """Fetch content of a text file directly."""
-        # easywebdav doesn't have a direct get_content, so we might need requests for this
-        pass
+    def get_file_content(self, remote_path: str) -> str | None:
+        """Fetch content of a text file directly via HTTP."""
+        full_url = f"{self.protocol}://{self.host}{self.path}{remote_path.lstrip('/')}"
+        try:
+            resp = requests.get(
+                full_url, 
+                auth=(self.client.username, self.client.password),
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.text
+        except Exception as e:
+            log.error(f"Failed to fetch content for {remote_path}: {e}")
+            return None
 
     @staticmethod
     def _basename(path: str) -> str:

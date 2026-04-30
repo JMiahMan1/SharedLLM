@@ -1,20 +1,31 @@
 # services/storage/main.py
 import logging
+import os
+import httpx
 
 from fastapi import FastAPI, HTTPException
 
 try:
-    from .indexer import build_content_index, summarize_index
+    from .indexer import (
+        build_content_index, summarize_index, extract_and_chunk_contents, 
+        set_indexer_pause, CheckpointManager
+    )
     from .models import IndexScanRequest, ProviderListRequest
     from .providers import build_provider
 except ImportError:
-    from indexer import build_content_index, summarize_index
+    from indexer import (
+        build_content_index, summarize_index, extract_and_chunk_contents, 
+        set_indexer_pause, CheckpointManager
+    )
     from models import IndexScanRequest, ProviderListRequest
     from providers import build_provider
 
 app = FastAPI(title="SharedLLM Storage Bridge")
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("storage")
+
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+RAG_SVC = os.getenv("RAG_SVC", "http://127.0.0.1:8004")
 
 
 @app.get("/health")
@@ -51,6 +62,82 @@ async def scan_content_index(req: IndexScanRequest):
         "root_path": req.path,
         "summary": summary,
         "items": [item.model_dump() for item in items],
+    }
+
+
+@app.post("/index/pause")
+async def pause_indexer():
+    set_indexer_pause(True)
+    return {"status": "SUCCESS", "message": "Indexer paused"}
+
+
+@app.post("/index/resume")
+async def resume_indexer():
+    set_indexer_pause(False)
+    return {"status": "SUCCESS", "message": "Indexer resumed"}
+
+
+@app.post("/index/full")
+async def full_content_index(req: IndexScanRequest):
+    """Scan structure, extract content, chunk, and sync to RAG."""
+    try:
+        provider = build_provider(req.provider)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # 1. Scan structure
+    entries = provider.list_entries(path=req.path, recursive=req.recursive)
+    items = build_content_index(entries)
+    
+    # 2. Extract and chunk with checkpointing
+    checkpoint = CheckpointManager()
+    chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
+    
+    # 3. Sync to RAG
+    user_id = req.provider.settings.get("username", "admin")
+    import time
+    session_id = str(int(time.time()))
+    
+    for c in chunks:
+        c["metadata"]["session_id"] = session_id
+
+    sync_payload = {
+        "chunks": chunks,
+        "user_id": user_id,
+        "collection_name": f"{req.provider.kind}_files"
+    }
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            resp = await client.post(
+                f"{RAG_SVC}/rag/sync/files",
+                json=sync_payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            resp.raise_for_status()
+            sync_res = resp.json()
+            
+            # 4. Cleanup old entries for this provider/user NOT in this session
+            await client.post(
+                f"{RAG_SVC}/rag/purge",
+                json={
+                    "collection_name": f"{req.provider.kind}_files",
+                    "user_id": user_id,
+                    "filter": {"session_id": {"$ne": session_id}}
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+        except Exception as e:
+            log.error(f"Failed to sync to RAG: {e}")
+            sync_res = {"status": "ERROR", "message": str(e)}
+
+    return {
+        "status": "SUCCESS",
+        "provider": req.provider.kind,
+        "root_path": req.path,
+        "summary": summarize_index(items),
+        "chunks_extracted": len(chunks),
+        "rag_sync": sync_res
     }
 
 
