@@ -126,18 +126,13 @@ def extract_entity_heuristic(query: str, intent: str, entities: list = None) -> 
                 continue
                 
             fname = e.get("attributes", {}).get("friendly_name", "").lower()
-            if fname and fname in q:
+            # Match "Piano-Lamp" (light.hall_light)
+            if fname and (fname in q or q.replace("-", " ") in fname.replace("-", " ")):
                 return entity_id
             if entity_id.split(".")[1].replace("_", " ") in q:
                 return entity_id
 
-    # 2. Hardcoded Fallbacks (Legacy/Common)
-    if "piano" in q or "lamp" in q:
-        return "light.piano_lamp"
-    if "tv" in q:
-        return "media_player.living_room_tv"
-    
-    # 3. Last Resort Fallback
+    # 2. Last Resort Fallback
     return "light.dummy_light"
 
 @app.post("/api/chat")
@@ -267,10 +262,21 @@ async def chat_handler(request: Request):
     if is_native_proxy:
         log.info(f"[gateway] Proxying to Ollama (with context injection)")
         async def _proxy_stream():
-            async with httpx.AsyncClient() as client:
-                async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body, timeout=None) as r:
-                    async for chunk in r.aiter_bytes():
-                        yield chunk
+            try:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as r:
+                        if r.status_code != 200:
+                            log.error(f"Ollama returned {r.status_code}")
+                            yield json.dumps({"error": f"Ollama error: {r.status_code}"}).encode()
+                            return
+                            
+                        async for chunk in r.aiter_bytes():
+                            if chunk:
+                                yield chunk
+            except Exception as e:
+                log.error(f"Proxy stream error: {e}")
+                yield json.dumps({"error": str(e)}).encode()
+
         if body.get("stream", True):
             return StreamingResponse(_proxy_stream(), media_type="application/x-ndjson")
         async with httpx.AsyncClient() as client:
