@@ -280,13 +280,19 @@ async def chat_handler(request: Request):
     catalog_str = ""
     deep_details = ""
     if real_entities:
-        q_low = query.lower()
+        # Combine current query with recent history for context
+        history_text = ""
+        if "messages" in body:
+            # Look at last 3 messages for mentions
+            history_text = " ".join([m.get("content", "") for m in body["messages"][-3:]]).lower()
+        
+        q_low = (query + " " + history_text).lower().replace("-", " ")
         mentioned_eids = set()
         
         # 1. Primary Match (Deep Detail)
         for e in real_entities:
             eid = e.get("entity_id", "").lower()
-            fname = e.get("attributes", {}).get("friendly_name", "").lower()
+            fname = e.get("attributes", {}).get("friendly_name", "").lower().replace("-", " ")
             if (fname and fname in q_low) or (eid.split(".")[1].replace("_", " ") in q_low):
                 mentioned_eids.add(eid)
 
@@ -323,7 +329,11 @@ async def chat_handler(request: Request):
                 filtered_attrs = {}
                 keep_keys = ("supported_features", "supported_color_modes", "color_mode", "brightness", "color_temp_kelvin", "min_color_temp_kelvin", "max_color_temp_kelvin")
                 for k, v in attrs.items():
-                    if k in keep_keys: filtered_attrs[k] = v
+                    if k in keep_keys:
+                        # Clarify 'None' for brightness/color_temp
+                        if v is None and k in ("brightness", "color_temp_kelvin"):
+                            v = "Hidden (Device Off)"
+                        filtered_attrs[k] = v
                     elif k not in ("icon", "entity_picture", "templates", "friendly_name") and not isinstance(v, (dict, list)):
                         if isinstance(v, str) and len(v) > 50: v = v[:47] + "..."
                         filtered_attrs[k] = v
@@ -337,7 +347,9 @@ async def chat_handler(request: Request):
             f"{catalog_str}\n"
             "DEEP DETAILS (Full attributes for relevant devices):\n"
             f"{deep_details if deep_details else 'No specific devices mentioned in query.'}\n\n"
-            "NOTE: If 'brightness' is None but 'brightness' is in 'supported_color_modes', the device supports it but is currently OFF."
+            "FINAL RULE: If 'brightness' is listed in 'supported_color_modes', the device 100% supports dimming. "
+            "If the current 'brightness' value says 'Hidden (Device Off)', it just means the light is currently off. "
+            "Never tell the user a dimmable light cannot be dimmed."
         )
         log.info(f"[gateway] Injected Context: Catalog ({len(catalog_str)} chars), Deep ({len(deep_details)} chars)")
         if is_native_proxy:
