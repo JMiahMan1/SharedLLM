@@ -39,6 +39,7 @@ LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://logging:8006")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:8b")
 
 # --- Global Clients ---
 _global_http_client: httpx.AsyncClient = None
@@ -142,7 +143,7 @@ async def contextualize_query(query: str, history: list) -> str:
 
     prompt = f"Given history:\n{hist_str}\nRewrite follow-up to standalone command.\nFollow-up: {query}\nCommand:"
     try:
-        payload = {"model": "llama3", "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
+        payload = {"model": DEFAULT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
         resp = await _global_http_client.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
         if resp.status_code == 200:
             rewritten = resp.json().get("response", query).strip().strip('"')
@@ -318,7 +319,7 @@ async def chat_handler(request: Request):
     try:
         # Try /api/chat first (Ollama standard)
         ollama_payload = {
-            "model": "llama3",
+            "model": DEFAULT_MODEL,
             "messages": history + [{"role": "user", "content": refined_query}],
             "stream": False
         }
@@ -328,7 +329,7 @@ async def chat_handler(request: Request):
             # Fallback to /api/generate for older Ollama versions
             log.warning("Ollama /api/chat not found, falling back to /api/generate")
             gen_payload = {
-                "model": "llama3",
+                "model": DEFAULT_MODEL,
                 "prompt": f"{refined_query}", # Simplified
                 "stream": False
             }
