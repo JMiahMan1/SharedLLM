@@ -41,7 +41,8 @@ def test_brightness():
     payload = {
         "messages": [{"role": "user", "content": "Set piano lamp to 75%"}],
         "model": "qwen3:latest",
-        "rag_user": "default"
+        "rag_user": "default",
+        "stream": False
     }
     try:
         resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload)
