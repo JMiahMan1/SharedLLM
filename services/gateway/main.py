@@ -140,6 +140,27 @@ def extract_entity_heuristic(query: str, intent: str, entities: list = None) -> 
     # 2. No match found - Return None to trigger Slow Path/Error
     return None
 
+def extract_brightness(q: str) -> int | None:
+    """Try to extract a percentage (0-100) from the query."""
+    import re
+    match = re.search(r"(\d+)\s*%", q)
+    if match:
+        return int(match.group(1))
+    
+    # Check for words like "half", "full", etc.
+    q_low = q.lower()
+    if "half" in q_low: return 50
+    if "full" in q_low or "maximum" in q_low: return 100
+    if "dim" in q_low: return 10
+    
+    # Check for raw numbers
+    match = re.search(r"to\s+(\d+)", q_low)
+    if match:
+        val = int(match.group(1))
+        if 0 <= val <= 100: return val
+        
+    return None
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 @app.post("/chat/completions")
@@ -191,7 +212,7 @@ async def chat_handler(request: Request):
 
     # 3. Fast Path Evaluation
     # Skip Fast Path for queries/questions
-    is_fast_path = confidence >= FAST_PATH_THRESHOLD and intent in ("turn_on", "turn_off", "toggle", "play_media", "pause_media", "announce")
+    is_fast_path = confidence >= FAST_PATH_THRESHOLD and intent in ("turn_on", "turn_off", "toggle", "set_brightness", "play_media", "pause_media", "announce")
 
     if is_fast_path:
         log.info(f"[gateway] FAST PATH triggered for {intent}")
@@ -202,8 +223,15 @@ async def chat_handler(request: Request):
             is_fast_path = False
         else:
             # Execute
-            if intent in ("turn_on", "turn_off", "toggle"):
-                exec_payload = {"user_context": user_context, "entity_id": entity_id, "action": intent}
+            if intent in ("turn_on", "turn_off", "toggle", "set_brightness"):
+                brightness = extract_brightness(query)
+                action = "turn_on" if intent == "set_brightness" else intent
+                exec_payload = {
+                    "user_context": user_context,
+                    "entity_id": entity_id,
+                    "action": action,
+                    "brightness": brightness
+                }
                 exec_res = await execute_command("/execute/light", exec_payload)
             elif intent in ("play_media", "pause_media"):
                 if intent == "play_media":
@@ -258,7 +286,10 @@ async def chat_handler(request: Request):
             if (fname and fname in q_low) or (eid.split(".")[1].replace("_", " ") in q_low):
                 state = e.get("state", "unknown")
                 actual_name = e.get("attributes", {}).get("friendly_name") or eid
-                device_context += f"- {actual_name}: {state}\n"
+                attrs = e.get("attributes", {})
+                # Filter out bulky or useless attributes to save tokens
+                filtered_attrs = {k: v for k, v in attrs.items() if k not in ("icon", "entity_picture", "templates")}
+                device_context += f"- {actual_name}: {state} (Capabilities/Attributes: {filtered_attrs})\n"
     
     if device_context:
         ctx_msg = f"## Home Assistant Device Context\nThe following devices were mentioned and their current status is:\n{device_context}\nUse this information to answer the user's question accurately."
