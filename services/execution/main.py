@@ -233,6 +233,15 @@ async def execute_tv_cast(req: TVCastRequest):
     return _fail(f"TV cast failed: {result.get('error')}", "tv_cast", result)
 
 
+# ─── Discovery Endpoints ───────────────────────────────────────────────────────
+
+@app.get("/discovery/entities")
+async def discovery_entities(ha_url: str, ha_token: str):
+    """Fetch all entity states from HA for service discovery."""
+    log.info(f"[discovery] Fetching all entities from {ha_url}")
+    result = await _run(ha_client.get_states, ha_url, ha_token)
+    return result
+
 # ─── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
