@@ -282,21 +282,37 @@ async def chat_handler(request: Request):
         q_low = query.lower()
         mentioned_eids = set()
         
-        # 1. Find Primary Entities
+        # 1. Find Primary Entities (Direct mention)
         for e in real_entities:
             eid = e.get("entity_id", "").lower()
             fname = e.get("attributes", {}).get("friendly_name", "").lower()
             if (fname and fname in q_low) or (eid.split(".")[1].replace("_", " ") in q_low):
                 mentioned_eids.add(eid)
         
-        # 2. Find Related Entities (Sensors, Info)
+        # 2. Broad Query Handling (If no specific mention but general question)
+        # Check for broad keywords like "control", "devices", "everything", "all", "capabilities", "what can you do"
+        broad_keywords = ["control", "devices", "everything", "all", "capabilities", "list", "what can you", "status"]
+        is_broad = any(k in q_low for k in broad_keywords)
+        
+        if not mentioned_eids and is_broad:
+            log.info("[gateway] Broad query detected - injecting controllable entity summary")
+            # Inject a sample of each controllable domain
+            domains = ["light", "switch", "media_player", "climate", "lock", "cover", "vacuum"]
+            for domain in domains:
+                matches = [e for e in real_entities if e.get("entity_id", "").startswith(domain + ".")]
+                if matches:
+                    # Take up to 10 from each domain to avoid token bloat
+                    for e in matches[:10]:
+                        mentioned_eids.add(e["entity_id"])
+
+        # 3. Find Related Entities (Sensors, Info) for the mentioned ones
         prefixes = set()
         for eid in mentioned_eids:
             parts = eid.split(".")
             if len(parts) > 1:
                 prefixes.add(parts[1].split("_")[0]) 
 
-        # 3. Compile full context
+        # 4. Compile full context
         for e in real_entities:
             eid = e.get("entity_id", "")
             fname = e.get("attributes", {}).get("friendly_name", "").lower()
@@ -311,16 +327,17 @@ async def chat_handler(request: Request):
                 device_context += f"- {actual_name} ({eid}): {state} (Attributes: {filtered_attrs})\n"
     
     if device_context:
+        # Truncate if too long
+        if len(device_context) > 15000:
+            device_context = device_context[:15000] + "... [Truncated for brevity]"
+
         ctx_msg = (
             "## Home Assistant Device Context\n"
             "The following devices and related sensors were found in the user's setup. "
-            "IMPORTANT: If an attribute like 'brightness' or 'color_temp' is None, it usually means the device is currently OFF. "
-            "Check 'supported_color_modes' or 'supported_features' to determine if it CAN support those features.\n\n"
+            "Use this information to answer accurately. \n\n"
             f"{device_context}\n"
-            "Use this information to answer accurately. If you don't see a capability, do not assume it doesn't exist if the device is off."
         )
-        log.info(f"[gateway] Injecting device context for {len(device_context.splitlines())} devices")
-        log.info(f"[gateway] Injected Context: {ctx_msg}")
+        log.info(f"[gateway] Injecting device context for {len(device_context.splitlines())} entities")
         if is_native_proxy:
             # Inject into messages for Ollama/OpenAI
             body["messages"].insert(0, {"role": "system", "content": ctx_msg})
