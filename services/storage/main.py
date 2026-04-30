@@ -89,15 +89,12 @@ async def search_nextcloud_compat(req: dict, query: str):
         recursive=True,
     )
     response = await list_provider_entries(provider_req)
-    log.info(f"Searching Nextcloud: {len(response['entries'])} entries found, query='{query}'")
     
     # Try exact name match
     matches = [entry for entry in response["entries"] if query.lower() in entry["name"].lower()]
     
     # Fallback for broad listing queries
     if not matches and any(k in query.lower() for k in ["list", "files", "folders", "what", "show", "get"]):
-        sample_path = response['entries'][0]['path'] if response['entries'] else 'NONE'
-        log.info(f"No direct match, broad query fallback. Sample path: {sample_path}")
         matches = response["entries"][:15]
         
     return {"status": "SUCCESS", "matches": matches[:15]}
