@@ -586,6 +586,7 @@ async def chat_handler(request: Request):
                 )
                 if storage_resp.status_code == 200:
                     matches = storage_resp.json().get("matches", [])
+                    log.info(f"Storage matches found: {len(matches)}")
                     if matches:
                         storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
                         rag_context += f"\n\nNextCloud Files found:\n{storage_text}"
