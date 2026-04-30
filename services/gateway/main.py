@@ -264,15 +264,22 @@ async def chat_handler(request: Request):
             # 1. Try to find a match in real_entities based on the query
             query_lower = refined_query.lower()
             for e in real_entities:
-                friendly_name = e.get("attributes", {}).get("friendly_name", "").lower()
+                friendly_name = (e.get("attributes") or {}).get("friendly_name") or ""
+                fname_lower = friendly_name.lower()
                 eid = e.get("entity_id", "").lower()
                 
+                # DIAGNOSTIC
+                if "office" in fname_lower:
+                    print(f"DEBUG: Checking entity {eid} ('{fname_lower}') against query '{query_lower}'")
+
                 # If name mentioned in query, and type matches intent
-                if friendly_name and friendly_name in query_lower:
+                if fname_lower and fname_lower in query_lower:
                     if "media" in intent and eid.startswith("media_player."):
+                        print(f"DEBUG: MATCH FOUND! {eid}")
                         target_entity = e["entity_id"]
                         break
                     if ("light" in intent or "turn" in intent) and eid.startswith("light."):
+                        print(f"DEBUG: MATCH FOUND! {eid}")
                         target_entity = e["entity_id"]
                         break
             
