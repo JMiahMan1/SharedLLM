@@ -257,29 +257,52 @@ async def chat_handler(request: Request):
         
         endpoint = endpoint_map.get(intent)
         if endpoint:
-            # Prepare payload for execution
-            # This is a simplification; a real implementation would use a smarter mapper
+            # Smart-ish entity resolution for stubs
+            target_entity = "auto"
+            
+            # 1. Try to find a match in real_entities based on the query
+            query_lower = refined_query.lower()
+            for e in real_entities:
+                friendly_name = e.get("attributes", {}).get("friendly_name", "").lower()
+                eid = e.get("entity_id", "").lower()
+                
+                # If name mentioned in query, and type matches intent
+                if friendly_name and friendly_name in query_lower:
+                    if "media" in intent and eid.startswith("media_player."):
+                        target_entity = e["entity_id"]
+                        break
+                    if ("light" in intent or "turn" in intent) and eid.startswith("light."):
+                        target_entity = e["entity_id"]
+                        break
+            
+            # 2. Fallback to first available of type
+            if target_entity == "auto":
+                if "media" in intent:
+                    players = [e for e in real_entities if e['entity_id'].startswith('media_player.')]
+                    if players: target_entity = players[0]['entity_id']
+                elif "light" in intent or "turn" in intent:
+                    lights = [e for e in real_entities if e['entity_id'].startswith('light.')]
+                    if lights: target_entity = lights[0]['entity_id']
+
             exec_payload = {
                 "user_context": creds,
-                "entity_id": "auto", # RAG would resolve this normally
-                "action": "turn_on" if intent == "turn_on" else "turn_off"
+                "entity_id": target_entity,
+                "action": "turn_on" if intent == "turn_on" else ("turn_off" if intent == "turn_off" else "play")
             }
-            # For lights, we need to find the entity
-            if "light" in endpoint:
-                # Stub: find first light in real_entities
-                lights = [e for e in real_entities if e['entity_id'].startswith('light.')]
-                if lights:
-                    exec_payload["entity_id"] = lights[0]['entity_id']
             
-            result = await execute_command(endpoint, exec_payload)
-            await update_history(user_id, "assistant", result.get("message", "Executed."))
-            return {
-                "status": "SUCCESS", 
-                "message": result.get("message"), 
-                "intent": intent, 
+            # For media, add default content
+            if intent == "play_media":
+                exec_payload["media_content_id"] = "http://stream.radioparadise.com/flac"
+                exec_payload["media_content_type"] = "music"
+
+            exec_res = await execute_command(endpoint, exec_payload)
+            return JSONResponse({
+                "status": "SUCCESS",
+                "message": exec_res.get("message", "Executed"),
+                "intent": intent,
                 "confidence": confidence,
-                "execution_result": result
-            }
+                "execution_result": exec_res
+            })
     
     # 4. Proxy to Ollama (Slow Path)
     # 4. LLM Proxy (Slow Path)
