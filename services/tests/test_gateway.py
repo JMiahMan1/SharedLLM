@@ -39,20 +39,17 @@ def test_gateway_health():
     assert resp.status_code == 200
     assert resp.json()["service"] == "gateway"
 
-def test_fast_path_light_control(mock_identity, mock_intent, mocker):
+def test_fast_path_light_control(mock_intent, mocker):
     """Test the Gateway Fast Path successfully routes a turn_on intent to Execution."""
     # Mock high confidence intent
     mock_intent.return_value = ("turn_on", 0.95)
     
-    # We need a separate mock specifically for the execution call since httpx.post is called twice
-    # First for identity, second for execution
-    # We use AsyncMock for the base request method. httpx.AsyncClient.post/get call this internally.
-    async def mock_http_side_effect(method, url, **kwargs):
+    async def mock_request(method, url, **kwargs):
         resp = mocker.Mock()
         resp.status_code = 200
         if method == "POST":
             if "resolve" in url:
-                resp.json.return_value = {"user": "alice", "ha_url": "http", "ha_token": "tok"}
+                resp.json.return_value = {"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"}
             else:
                 resp.json.return_value = {"status": "SUCCESS", "message": "Lights on", "service": "light_control"}
         elif method == "GET":
@@ -63,7 +60,7 @@ def test_fast_path_light_control(mock_identity, mock_intent, mocker):
         resp.raise_for_status = mocker.Mock()
         return resp
         
-    mocker.patch("httpx.AsyncClient.request", side_effect=mock_http_side_effect)
+    mocker.patch("httpx.AsyncClient.request", side_effect=mock_request)
 
     resp = client.post("/api/chat", json={
         "query": "Turn on the living room lights",
