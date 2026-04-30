@@ -45,7 +45,8 @@ jobs:
         ASSISTANT_MODEL: qwen3:latest
         CODING_MODEL: qwen2.5-coder:7b
       run: |
-        pytest services/tests/ \
+        # Run global service tests and specific service unit tests
+        pytest services/tests/ services/storage/tests/ \
           --junitxml=pytest-report.xml \
           --cov=services/ \
           --cov-report=xml
