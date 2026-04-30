@@ -246,7 +246,30 @@ async def api_generate(req: OllamaGenerateRequest):
 async def api_tags():
     """Proxy tags requests to Ollama."""
     async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
+        try:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
+            return resp.json()
+        except Exception as e:
+            log.error(f"Failed to proxy /api/tags: {e}")
+            raise HTTPException(status_code=503, detail="Ollama unreachable")
+
+@app.get("/api/version")
+async def api_version():
+    """Proxy version requests to Ollama."""
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{OLLAMA_URL}/api/version", timeout=5.0)
+            return resp.json()
+        except Exception as e:
+            # Fallback version if Ollama is down but we want to satisfy clients
+            return {"version": "0.1.32"}
+
+@app.post("/api/show")
+async def api_show(request: Request):
+    """Proxy show requests to Ollama."""
+    body = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{OLLAMA_URL}/api/show", json=body, timeout=5.0)
         return resp.json()
 
 @app.post("/api/chat")
