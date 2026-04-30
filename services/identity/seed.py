@@ -11,8 +11,12 @@ import logging
 from sqlmodel import Session, select
 from dotenv import load_dotenv
 
-from models import User
-from crypto import encrypt
+try:
+    from .models import User
+    from .crypto import encrypt
+except ImportError:
+    from models import User
+    from crypto import encrypt
 
 # Load legacy .env if available
 if os.path.exists("/app/.env.legacy"):
