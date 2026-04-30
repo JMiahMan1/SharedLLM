@@ -60,6 +60,7 @@ services:
       - RAG_SVC_URL=http://127.0.0.1:8004
       - STORAGE_SVC_URL=http://127.0.0.1:8005
       - LOGGING_SVC_URL=http://127.0.0.1:8006
+      - REDIS_URL=redis://127.0.0.1:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
       - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
