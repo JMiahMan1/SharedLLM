@@ -21,7 +21,7 @@ def set_indexer_pause(paused: bool):
     INDEXER_PAUSED = paused
 
 class CheckpointManager:
-    def __init__(self, checkpoint_file: str = "/data/index_checkpoint.json"):
+    def __init__(self, checkpoint_file: str = "index_checkpoint.json"):
         self.checkpoint_file = checkpoint_file
         self.data = self._load()
 
@@ -36,11 +36,12 @@ class CheckpointManager:
 
     def save(self):
         try:
-            os.makedirs(os.path.dirname(self.checkpoint_file), exist_ok=True)
+            os.makedirs(os.path.dirname(os.path.abspath(self.checkpoint_file)), exist_ok=True)
             with open(self.checkpoint_file, "w") as f:
                 json.dump(self.data, f)
         except Exception as e:
-            print(f"Failed to save checkpoint: {e}")
+            import logging
+            logging.getLogger("storage").error(f"Failed to save checkpoint: {e}")
 
     def is_indexed(self, path: str, mtime: str) -> bool:
         return self.data.get(path) == mtime
