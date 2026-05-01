@@ -5,7 +5,7 @@ import json
 import sys
 
 # Configuration
-SERVER_URL = "http://192.168.2.205:11435" 
+SERVER_URL = "http://ai.local:11435" 
 CHAT_ENDPOINT = f"{SERVER_URL}/api/chat"
 HEALTH_ENDPOINT = f"{SERVER_URL}/health"
 HA_STATE_ENDPOINT = f"{SERVER_URL}/api/ha/state" # /{entity_id}

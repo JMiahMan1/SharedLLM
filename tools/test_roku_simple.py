@@ -7,7 +7,7 @@ import requests
 import os
 import time
 
-API_URL = "http://192.168.2.205:11435/api/chat"
+API_URL = "http://ai.local:11435/api/chat"
 
 print("=" * 70)
 print("SIMPLE ROKU TEST - App Should Handle Power")

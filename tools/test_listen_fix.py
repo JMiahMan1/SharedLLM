@@ -2,7 +2,7 @@
 """Quick test for 'Listen to' intent fix"""
 import requests
 
-REMOTE_URL = "http://192.168.2.205:11435/api/chat"
+REMOTE_URL = "http://ai.local:11435/api/chat"
 
 print("Testing: 'Listen to Brandon Lake on Gracies TV'")
 print("="*80)

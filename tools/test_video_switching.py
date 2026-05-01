@@ -7,7 +7,7 @@ import requests
 import time
 import os
 
-API_URL = "http://192.168.2.205:11435/api/chat"
+API_URL = "http://ai.local:11435/api/chat"
 
 def send_chat(message):
     """Send a chat message and return the response"""

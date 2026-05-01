@@ -2,7 +2,7 @@
 import requests
 import json
 
-HA_STATE_ENDPOINT = "http://192.168.2.205:11435/api/ha/state"
+HA_STATE_ENDPOINT = "http://ai.local:11435/api/ha/state"
 ENTITIES = [
     "media_player.office_tv_chrome", 
     "media_player.office_tv_chrome_2", 
