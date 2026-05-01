@@ -192,9 +192,11 @@ async def purge(payload: dict):
     collection = get_collection(collection_name)
     
     # Always enforce user_id for safety
-    where_filter = {"user_id": user_id}
+    conditions = [{"user_id": user_id}]
     for k, v in filter_meta.items():
-        where_filter[k] = v
+        conditions.append({k: v})
+        
+    where_filter = {"$and": conditions} if len(conditions) > 1 else conditions[0]
         
     try:
         collection.delete(where=where_filter)

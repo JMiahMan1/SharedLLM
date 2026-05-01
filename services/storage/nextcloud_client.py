@@ -18,6 +18,9 @@ class NextCloudClient:
         self.protocol = parsed.scheme
         self.path = parsed.path.rstrip('/') + '/remote.php/dav/files/' + username + '/'
         
+        self.username = username
+        self.password = password
+        
         self.client = easywebdav.connect(
             self.host,
             protocol=self.protocol,
@@ -72,7 +75,7 @@ class NextCloudClient:
         try:
             resp = requests.get(
                 full_url, 
-                auth=(self.client.username, self.client.password),
+                auth=(self.username, self.password),
                 timeout=10.0
             )
             resp.raise_for_status()
