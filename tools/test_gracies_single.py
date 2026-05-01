@@ -3,7 +3,7 @@
 import requests
 import json
 
-REMOTE_URL = "http://192.168.2.211:11435/api/chat"
+REMOTE_URL = "http://192.168.2.205:11435/api/chat"
 
 query = "Watch funny cat videos on Gracies TV"
 

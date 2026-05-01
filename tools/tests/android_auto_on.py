@@ -5,7 +5,7 @@ Test auto-power-on for Android TV when sending play command while device is off
 import requests
 import time
 
-BASE_URL = "http://192.168.2.211:11435"
+BASE_URL = "http://192.168.2.205:11435"
 ANDROID_TV_ENTITY = "media_player.office_tv_chrome_2"
 
 def chat(query):

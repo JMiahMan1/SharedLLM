@@ -171,7 +171,8 @@ def select_model_for_query(query: str) -> str:
     librarian_signals = (
         "summarize", "summary", "recap", "search my", "find in", "look up", "what do i have",
         "list my", "notes", "calendar", "documents", "document", "playlist", "playlists",
-        "radio stations", "audiobook", "audiobooks", "library", "catalog", "catalogue"
+        "radio stations", "audiobook", "audiobooks", "library", "catalog", "catalogue",
+        "files", "folders", "nextcloud", "storage", "cloud"
     )
 
     if any(token in q for token in coding_signals):
@@ -454,7 +455,9 @@ async def chat_handler(request: Request):
     if confidence >= FAST_PATH_THRESHOLD:
         log.info(f"[FastPath] intent='{intent}' confidence={confidence}")
         
+        log.info(f"Checking intent: '{intent}'")
         if intent == "index_storage":
+            log.info("Matched index_storage intent")
             await emit_log("INFO", "Triggering full library index...")
             async with httpx.AsyncClient(timeout=300.0) as client:
                 try:
@@ -486,6 +489,7 @@ async def chat_handler(request: Request):
                     log.error(f"Index trigger failed: {e}")
                     return JSONResponse({"status": "ERROR", "message": "The storage service is not responding."}, status_code=502)
 
+        log.info(f"Searching for endpoint for intent: '{intent}'")
         # Simple routing map
         endpoint_map = {
             "turn_on": "/execute/light",
@@ -636,6 +640,8 @@ async def chat_handler(request: Request):
     except Exception as e:
         await emit_log("ERROR", f"Context injection failed: {str(e)}")
         log.error(f"Context injection failed: {e}\n{traceback.format_exc()}")
+
+    log.info(f"Injected Context:\n{rag_context}")
 
     # 5. Proxy to Ollama (Slow Path)
     try:

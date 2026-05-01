@@ -2,7 +2,8 @@
 import logging
 import os
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+import re
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Body
 from pydantic import BaseModel
 from typing import Optional
 
@@ -56,7 +57,8 @@ async def _run_full_index_task(req: IndexScanRequest):
 
     # 1. Scan structure
     log.info(f"Starting background scan for path: {req.path}")
-    entries = provider.list_entries(path=req.path, recursive=req.recursive)
+    from starlette.concurrency import run_in_threadpool
+    entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
     log.info(f"Scan complete. Found {len(entries)} raw entries.")
     items = build_content_index(entries)
     
@@ -122,18 +124,30 @@ async def list_provider_entries(req: IndexScanRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/nextcloud/search")
-async def search_nextcloud(query: str, req: dict):
+async def search_nextcloud(query: str, req: dict = Body(...)):
     # Backward compatibility endpoint
     nc_url = req.get("nc_url")
     nc_user = req.get("nc_user")
     nc_pass = req.get("nc_pass")
     
     try:
+        from starlette.concurrency import run_in_threadpool
         from nextcloud_client import NextCloudClient
         client = NextCloudClient(nc_url, nc_user, nc_pass)
         # Deep search not implemented in client yet, just list root for now or similar
-        entries = client.list_entries(path="/", recursive=False)
-        matches = [e for e in entries if query.lower() in e.name.lower()]
+        entries = await run_in_threadpool(client.list_entries, path="/", recursive=False)
+        q_lower = query.lower()
+        matches = []
+        for e in entries:
+            name_lower = e.name.lower()
+            if name_lower in q_lower or q_lower in name_lower:
+                matches.append(e)
+            else:
+                # Check for word overlaps
+                q_words = set(re.findall(r'\w+', q_lower))
+                name_words = set(re.findall(r'\w+', name_lower))
+                if q_words & name_words:
+                    matches.append(e)
         return {"matches": [e.dict() for e in matches]}
     except Exception as e:
         log.error(f"Search failed: {e}")

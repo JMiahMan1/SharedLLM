@@ -2,7 +2,7 @@ import requests
 import json
 import os
 
-API_URL = "http://192.168.2.211:11435/api/ha/states"
+API_URL = "http://192.168.2.205:11435/api/ha/states"
 
 def scan_devices():
     try:

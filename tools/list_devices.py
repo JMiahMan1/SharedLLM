@@ -3,7 +3,7 @@ import requests
 import json
 import os
 
-API_URL = "http://192.168.2.211:11435"
+API_URL = "http://192.168.2.205:11435"
 HEADERS = {
     "Content-Type": "application/json",
     "X-RAG-User": "admin",

@@ -2,7 +2,7 @@ import requests
 import json
 import sys
 
-URL = "http://192.168.2.211:11435/api/admin/logs?lines=1000"
+URL = "http://192.168.2.205:11435/api/admin/logs?lines=1000"
 
 try:
     r = requests.get(URL, timeout=10)

@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("MetadataDump")
 
 # Remote API Configuration
-REMOTE_URL = "http://192.168.2.211:11435/api/rag/search"
+REMOTE_URL = "http://192.168.2.205:11435/api/rag/search"
 
 def dump_metadata():
     query = "Gracies TV"

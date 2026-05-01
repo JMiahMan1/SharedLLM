@@ -5,7 +5,7 @@ Diagnostic tool to trace entity resolution for specific queries
 import requests
 import json
 
-REMOTE_URL = "http://192.168.2.211:11435"
+REMOTE_URL = "http://192.168.2.205:11435"
 
 def fetch_logs(lines=1000):
     """Fetch recent logs"""

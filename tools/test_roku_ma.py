@@ -46,7 +46,7 @@ async def test_video():
     # Mock _download_and_serve_video to bypass yt-dlp issues
     async def mock_download(url):
         log.info(f"Mock download called for {url}")
-        return "http://192.168.2.211:11435/videos/test.mp4"
+        return "http://192.168.2.205:11435/videos/test.mp4"
     
     handler._download_and_serve_video = mock_download
 
