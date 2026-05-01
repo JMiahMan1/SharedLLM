@@ -8,7 +8,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(script_dir)
 load_dotenv(os.path.join(root_dir, '.env'))
 
-API_URL = os.getenv("API_URL", "http://192.168.2.205:11435")
+API_URL = os.getenv("API_URL", "http://ai.local:11435")
 HEADERS = {"Content-Type": "application/json", "X-RAG-User": "admin"}
 
 def log(msg): print(f"[SearchTest] {msg}")

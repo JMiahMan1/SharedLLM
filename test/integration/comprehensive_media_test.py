@@ -40,8 +40,8 @@ from app.settings import HA_URL, HA_ENV_TOKEN as HA_TOKEN
 from test_helpers import get_ha_state, verify_device_state
 
 # Configuration
-API_URL = os.getenv("API_URL", "http://192.168.2.205:11435")
-REMOTE_HOST = "jeremiah@192.168.2.205"
+API_URL = os.getenv("API_URL", "http://ai.local:11435")
+REMOTE_HOST = "jeremiah@ai.local"
 if not HA_URL:
     HA_URL = os.getenv("HA_URL", "https://ha.sumemail.com")
 if not HA_TOKEN:

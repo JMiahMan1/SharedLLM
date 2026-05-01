@@ -3,7 +3,7 @@ import time
 import sys
 import subprocess
 
-HEALTH_URL = "http://192.168.2.205:11435/health"
+HEALTH_URL = "http://ai.local:11435/health"
 MAX_RETRIES = 12 # 2 minutes total (10s * 12) just to be safe
 WAIT_SECONDS = 10
 
@@ -24,7 +24,7 @@ def get_remote_logs():
     print("\nXXX SERVER STARTUP FAILED - FETCHING LOGS XXX")
     try:
         # Fetch last 100 lines to catch startup errors
-        cmd = ["ssh", "jeremiah@192.168.2.205", "docker logs --tail 100 unified_rag_api"]
+        cmd = ["ssh", "jeremiah@ai.local", "docker logs --tail 100 unified_rag_api"]
         result = subprocess.run(cmd, capture_output=True, text=True)
         print("--- REMOTE LOGS START ---")
         print(result.stdout)
