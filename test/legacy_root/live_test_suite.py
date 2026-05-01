@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 
 # --- Configuration ---
-API_URL = os.getenv("API_URL", "http://192.168.2.211:11435")
+API_URL = os.getenv("API_URL", "http://192.168.2.205:11435")
 HEADERS = {"Content-Type": "application/json", "X-RAG-User": "admin_test_suite"}
 LOG_FILE = "./temp/live_test_suite_results.txt"
 

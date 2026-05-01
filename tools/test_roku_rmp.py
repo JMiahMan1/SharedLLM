@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 
 # CONFIG
 ROKU_IP = "192.168.2.166"
-SERVER_IP = "192.168.2.211"
+SERVER_IP = "192.168.2.205"
 SERVER_PORT = "11435"
 VIDEO_FILE = "1c504eb5640b.mp4"
 

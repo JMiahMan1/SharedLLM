@@ -10,7 +10,7 @@ sys.path.append(os.getcwd())
 # Configuration
 MEDIA_PLAYER_ID = "media_player.28_tcl_roku_tv"
 REMOTE_ID = "remote.28_tcl_roku_tv"
-HA_URL = os.getenv("HA_URL", "http://192.168.2.211:8123") # Default internal if env missing
+HA_URL = os.getenv("HA_URL", "http://192.168.2.205:8123") # Default internal if env missing
 HA_TOKEN = os.getenv("HA_TOKEN")
 
 if not HA_TOKEN:

@@ -11,7 +11,7 @@ from app.users import get_user_creds
 import requests
 import time
 
-BASE_URL = "http://192.168.2.211:11435"
+BASE_URL = "http://192.168.2.205:11435"
 ANDROID_TV_REMOTE = "remote.office_tv_remote"
 
 async def main():
