@@ -63,6 +63,7 @@ docker-compose.yml
 - **Identity Injection**: Transparently injects user-specific HA credentials into execution payloads.
 - **Global Observability**: Centralized logging with context-aware tracing across all services.
 - **RAG Memory**: Persistent semantic history and document context for more relevant AI responses.
+- **Librarian (Deep Indexing)**: Context-aware document reasoning with automated NextCloud content extraction, checkpointing, and resource-prioritized background indexing.
 
 ## 🛠 Testing
 
