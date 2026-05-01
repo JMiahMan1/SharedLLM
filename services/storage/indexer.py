@@ -810,7 +810,7 @@ def _classify_file(entry: StorageEntry) -> ContentIndexItem:
         restrictions.append("large_file")
         signals.append("size over 50MB")
 
-    return ContentIndexItem(
+    item = ContentIndexItem(
         path=entry.path,
         name=entry.name,
         is_dir=False,
@@ -827,6 +827,8 @@ def _classify_file(entry: StorageEntry) -> ContentIndexItem:
         restrictions=_unique(restrictions),
         usage_hints=usage,
     )
+    log.info(f"Classified file: {item.path} -> {item.item_type}/{item.subtype} [Caps: {item.extractable_capabilities}]")
+    return item
 
 
 def _related_items(
