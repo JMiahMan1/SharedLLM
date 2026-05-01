@@ -71,12 +71,20 @@ class NextCloudClient:
 
     def get_file_content(self, remote_path: str) -> str | None:
         """Fetch content of a text file directly via HTTP."""
-        full_url = f"{self.protocol}://{self.host}{self.path}{remote_path.lstrip('/')}"
+        # Strip internal NextCloud path if present to avoid doubling
+        base_dav_path = f"/remote.php/dav/files/{self.username}/"
+        clean_path = remote_path
+        if clean_path.startswith(base_dav_path):
+            clean_path = clean_path[len(base_dav_path):]
+
+        full_url = f"{self.protocol}://{self.host}{self.path}{clean_path.lstrip('/')}"
+        log.debug(f"NextCloud GET: {full_url}")
+        
         try:
             resp = requests.get(
                 full_url, 
                 auth=(self.username, self.password),
-                timeout=10.0
+                timeout=15.0
             )
             resp.raise_for_status()
             return resp.text
