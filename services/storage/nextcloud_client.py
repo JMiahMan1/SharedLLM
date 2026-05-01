@@ -99,7 +99,7 @@ class NextCloudClient:
             clean_path = clean_path[len(self.dav_path):]
             
         full_url = f"{self.protocol}://{self.host}{self.path}{clean_path.lstrip('/')}"
-        log.debug(f"NextCloud GET: {full_url}")
+        log.info(f"NextCloud GET: {full_url}")
         
         try:
             resp = requests.get(
