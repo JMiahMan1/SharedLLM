@@ -626,6 +626,11 @@ async def extract_and_chunk_contents(
     ]
     
     for item in text_items:
+        if "full_text" not in item.extractable_capabilities:
+            continue
+            
+        log.info(f"Indexing content for: {item.path}")
+
         # 1. Check Pause
         while INDEXER_PAUSED:
             await asyncio.sleep(1.0)
