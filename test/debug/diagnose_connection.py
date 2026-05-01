@@ -15,7 +15,7 @@ def main():
     if os.path.exists(LOG_FILE):
         os.remove(LOG_FILE)
     
-    url = "http://192.168.2.211:11435/health"
+    url = "http://192.168.2.205:11435/health"
     log(f"Checking {url}...")
     try:
         r = requests.get(url, timeout=5)
@@ -29,7 +29,7 @@ def main():
     log("Running live_test.py...")
     
     env = os.environ.copy()
-    env["API_URL"] = "http://192.168.2.211:11435"
+    env["API_URL"] = "http://192.168.2.205:11435"
     
     try:
         # Run live_test.py and capture output

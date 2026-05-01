@@ -7,7 +7,7 @@ import glob
 # Configuration
 TEST_DIR = "test/integration"
 TEMP_DIR = "temp"
-API_URL = "http://192.168.2.211:11435"
+API_URL = "http://192.168.2.205:11435"
 GLOBAL_TIMEOUT = 1200 # 20 minutes max per suite run (failsafe)
 
 def run_test_script(script_name):

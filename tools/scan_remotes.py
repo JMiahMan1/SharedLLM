@@ -2,7 +2,7 @@
 import requests
 import json
 
-HA_URL = "http://192.168.2.211:11435/api/ha/states"
+HA_URL = "http://192.168.2.205:11435/api/ha/states"
 # We'll valid auth via the server's known method or just try generic if we can't get token easily.
 # Actually, the test script uses /api/ha/state/{entity_id} proxy which doesn't list all.
 # I will use the internal app code or just curl if I can.

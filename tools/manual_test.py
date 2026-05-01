@@ -3,7 +3,7 @@ import requests
 import json
 import time
 
-API_URL = "http://192.168.2.211:11435/api/chat"
+API_URL = "http://192.168.2.205:11435/api/chat"
 headers = {"Content-Type": "application/json"}
 
 query = "Play Brandon Lake on Gracies TV"

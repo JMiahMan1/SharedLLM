@@ -50,10 +50,11 @@ class LogEntry(BaseModel):
 
 @app.post("/log")
 async def add_log(entry: LogEntry):
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
-        "INSERT INTO logs (service, level, message, context) VALUES (?, ?, ?, ?)",
-        (entry.service, entry.level, entry.message, json.dumps(entry.context) if entry.context else None)
+        "INSERT INTO logs (timestamp, service, level, message, context) VALUES (?, ?, ?, ?, ?)",
+        (now, entry.service, entry.level, entry.message, json.dumps(entry.context) if entry.context else None)
     )
     conn.commit()
     conn.close()

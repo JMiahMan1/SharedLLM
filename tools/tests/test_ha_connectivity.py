@@ -233,10 +233,10 @@ cannot reach Ollama to process requests.
 
 Solutions:
 1. Verify Ollama is running at: {OLLAMA_URL}
-2. Check network connectivity between RAG server (192.168.2.211) and Ollama (192.168.1.161)
+2. Check network connectivity between RAG server (192.168.2.205) and Ollama (192.168.1.161)
 3. If Ollama moved to a new server, update OLLAMA_URL in .env
 4. Test from RAG server directly:
-   ssh jeremiah@192.168.2.211
+   ssh jeremiah@192.168.2.205
    curl http://192.168.1.161:11434/api/tags
         """.format(OLLAMA_URL=OLLAMA_URL))
     

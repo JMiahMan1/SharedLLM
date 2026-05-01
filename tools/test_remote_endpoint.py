@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("RemoteTest")
 
-REMOTE_URL = "http://192.168.2.211:11435/api/chat"
+REMOTE_URL = "http://192.168.2.205:11435/api/chat"
 HEADERS = {"Content-Type": "application/json"}
 
 def test_query(query: str, expected_device_substr: str = None, expected_intent: str = None):
@@ -51,7 +51,7 @@ def main():
     
     # 1. Ping / Connectivity
     try:
-        requests.get("http://192.168.2.211:11435/api/ping", timeout=5)
+        requests.get("http://192.168.2.205:11435/api/ping", timeout=5)
         log.info("Ping Successful.")
     except:
         log.warning("Ping Failed (Method Not Allowed or Timeout), proceeding to Chat API.")

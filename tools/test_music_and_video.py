@@ -6,7 +6,7 @@ import requests
 import json
 import time
 
-REMOTE_URL = "http://192.168.2.211:11435/api/chat"
+REMOTE_URL = "http://192.168.2.205:11435/api/chat"
 
 def test_playback(test_name, query, expected_device):
     """Test playback on a specific device"""
