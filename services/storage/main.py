@@ -3,7 +3,7 @@ import logging
 import os
 import httpx
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 
 try:
     from .indexer import (
@@ -78,12 +78,22 @@ async def resume_indexer():
 
 
 @app.post("/index/full")
-async def full_content_index(req: IndexScanRequest):
-    """Scan structure, extract content, chunk, and sync to RAG."""
+async def full_content_index(req: IndexScanRequest, background_tasks: BackgroundTasks):
+    """Scan structure, extract content, chunk, and sync to RAG in the background."""
+    background_tasks.add_task(_run_full_index_task, req)
+    return {
+        "status": "SUCCESS",
+        "message": "Indexing started in background."
+    }
+
+
+async def _run_full_index_task(req: IndexScanRequest):
+    """Internal task for background indexing."""
     try:
         provider = build_provider(req.provider)
     except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        log.error(f"Failed to build provider: {exc}")
+        return
 
     # 1. Scan structure
     entries = provider.list_entries(path=req.path, recursive=req.recursive)
@@ -115,9 +125,8 @@ async def full_content_index(req: IndexScanRequest):
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             resp.raise_for_status()
-            sync_res = resp.json()
             
-            # 4. Cleanup old entries for this provider/user NOT in this session
+            # 4. Cleanup old entries
             await client.post(
                 f"{RAG_SVC}/rag/purge",
                 json={
@@ -127,18 +136,9 @@ async def full_content_index(req: IndexScanRequest):
                 },
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
+            log.info(f"Background index complete for {user_id}. Extracted {len(chunks)} chunks.")
         except Exception as e:
-            log.error(f"Failed to sync to RAG: {e}")
-            sync_res = {"status": "ERROR", "message": str(e)}
-
-    return {
-        "status": "SUCCESS",
-        "provider": req.provider.kind,
-        "root_path": req.path,
-        "summary": summarize_index(items),
-        "chunks_extracted": len(chunks),
-        "rag_sync": sync_res
-    }
+            log.error(f"Failed to sync background index to RAG: {e}")
 
 
 @app.post("/nextcloud/list")
