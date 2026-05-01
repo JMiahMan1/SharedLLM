@@ -16,7 +16,9 @@ class NextCloudClient:
         parsed = urlparse(url)
         self.host = parsed.netloc
         self.protocol = parsed.scheme
-        self.path = parsed.path.rstrip('/') + '/remote.php/dav/files/' + username + '/'
+        # The base DAV path for this user
+        self.dav_path = f"/remote.php/dav/files/{username}/"
+        self.path = parsed.path.rstrip('/') + self.dav_path
         
         self.username = username
         self.password = password
@@ -39,25 +41,45 @@ class NextCloudClient:
 
     def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
         entries: list[StorageEntry] = []
+        seen_paths = set()
 
         def _walk(current_path: str):
-            for item in self.list_files(current_path):
-                normalized_path = self._normalize_remote_path(getattr(item, "name", current_path))
+            target = "/" + current_path.strip("/")
+            for item in self.list_files(target):
+                # Normalize path: easywebdav item.name is often the full DAV path
+                raw_path = str(getattr(item, "name", ""))
+                
+                clean_path = raw_path
+                if clean_path.startswith(self.dav_path):
+                    clean_path = clean_path[len(self.dav_path):]
+                
+                norm_path = "/" + clean_path.strip("/")
+                
+                # Skip current directory or empty names
+                if not clean_path or norm_path == target:
+                    continue
+                
+                if norm_path in seen_paths:
+                    continue
+                
                 is_dir = self._is_directory(item)
-                entries.append(
-                    StorageEntry(
-                        path=normalized_path,
-                        name=self._basename(normalized_path),
-                        is_dir=is_dir,
-                        size=getattr(item, "size", None),
-                        mtime=str(getattr(item, "mtime", "")) or None,
-                        content_type=getattr(item, "contenttype", None),
-                    )
+                
+                entry = StorageEntry(
+                    path=norm_path,
+                    name=self._basename(norm_path),
+                    is_dir=is_dir,
+                    size=getattr(item, "size", None),
+                    mtime=str(getattr(item, "mtime", "")) or None,
+                    content_type=getattr(item, "contenttype", None),
                 )
-                if recursive and is_dir and normalized_path != current_path:
-                    _walk(normalized_path)
+                
+                entries.append(entry)
+                seen_paths.add(norm_path)
+                
+                if recursive and is_dir:
+                    _walk(norm_path)
 
-        _walk(self._normalize_remote_path(path))
+        _walk(path)
         return entries
 
     def download_file(self, remote_path, local_path):
@@ -71,12 +93,11 @@ class NextCloudClient:
 
     def get_file_content(self, remote_path: str) -> str | None:
         """Fetch content of a text file directly via HTTP."""
-        # Strip internal NextCloud path if present to avoid doubling
-        base_dav_path = f"/remote.php/dav/files/{self.username}/"
+        # Ensure we use a clean path relative to self.path
         clean_path = remote_path
-        if clean_path.startswith(base_dav_path):
-            clean_path = clean_path[len(base_dav_path):]
-
+        if clean_path.startswith(self.dav_path):
+            clean_path = clean_path[len(self.dav_path):]
+            
         full_url = f"{self.protocol}://{self.host}{self.path}{clean_path.lstrip('/')}"
         log.debug(f"NextCloud GET: {full_url}")
         
@@ -104,5 +125,10 @@ class NextCloudClient:
 
     @staticmethod
     def _is_directory(item) -> bool:
-        content_type = str(getattr(item, "contenttype", "") or "")
-        return content_type == "httpd/unix-directory" or content_type.endswith("directory")
+        content_type = str(getattr(item, "contenttype", "") or "").lower()
+        if "directory" in content_type or content_type == "httpd/unix-directory":
+            return True
+        name = str(getattr(item, "name", ""))
+        if name.endswith("/"):
+            return True
+        return False
