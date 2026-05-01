@@ -19,7 +19,7 @@ from app.users import get_user_creds
 import requests
 import time
 
-BASE_URL = "http://192.168.2.205:11435"
+BASE_URL = "http://ai.local:11435"
 ROKU_ENTITY = "media_player.roku_2n0062385487"
 ROKU_REMOTE = "remote.28_tcl_roku_tv"
 

@@ -74,7 +74,7 @@ from app.domains.shared import execute_ha_service
     
     import requests
     try:
-        resp = requests.get(f"http://192.168.2.205:11435/api/ha/state/{MA_ENTITY}", timeout=5)
+        resp = requests.get(f"http://ai.local:11435/api/ha/state/{MA_ENTITY}", timeout=5)
         state_data = resp.json()
         print(f"\n[STATE] Entity: {MA_ENTITY}")
         print(f"  State: {state_data.get('state')}")

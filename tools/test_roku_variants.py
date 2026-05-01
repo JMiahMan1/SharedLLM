@@ -10,7 +10,7 @@ import sys
 
 ROKU_IP = "192.168.2.166"
 # Using the cached video we know exists
-VIDEO_URL = "http://192.168.2.205:11435/cast_video/1c504eb5640b.mp4"
+VIDEO_URL = "http://ai.local:11435/cast_video/1c504eb5640b.mp4"
 
 def test_variant(name, channel_id, endpoint, params):
     print(f"\n[{name}] Testing {endpoint}/{channel_id}...")

@@ -1,7 +1,7 @@
 import requests
 import sys
 
-REMOTE_URL = "http://192.168.2.205:11435/api/admin/logs?lines=500"
+REMOTE_URL = "http://ai.local:11435/api/admin/logs?lines=500"
 
 try:
     print(f"Fetching logs from {REMOTE_URL}...")

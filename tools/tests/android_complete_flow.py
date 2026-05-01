@@ -6,7 +6,7 @@ Tests: Watch -> Pause -> Resume -> Stop -> Turn Off
 import requests
 import time
 
-BASE_URL = "http://192.168.2.205:11435"
+BASE_URL = "http://ai.local:11435"
 # Use specific entity ID to check state
 ANDROID_TV_ENTITY = "media_player.office_tv_chrome_2"
 

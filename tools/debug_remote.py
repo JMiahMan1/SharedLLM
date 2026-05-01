@@ -1,7 +1,7 @@
 import requests
 import sys
 
-URL = "http://192.168.2.205:11435"
+URL = "http://ai.local:11435"
 
 def check(endpoint, method="GET", payload=None):
     print(f"\n--- Checking {method} {URL}{endpoint} ---")

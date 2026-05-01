@@ -3,7 +3,7 @@
 # SharedLLM Deploy Script
 # Runs after every successful git pull to restart the application stack.
 # Can also be run manually: bash scripts/deploy.sh
-# Server: 192.168.2.205 (ai.local)
+# Server: ai.local (ai.local)
 # =============================================================================
 set -euo pipefail
 

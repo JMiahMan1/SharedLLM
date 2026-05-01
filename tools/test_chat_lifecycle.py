@@ -7,7 +7,7 @@ import argparse
 from typing import Dict, Any, Optional
 
 # Constants
-API_URL = os.getenv("SERVER_URL", "http://192.168.2.205:11435")
+API_URL = os.getenv("SERVER_URL", "http://ai.local:11435")
 HA_URL = os.getenv("HA_URL") # Must be provided or read from env if available
 HA_TOKEN = os.getenv("HA_TOKEN") 
 DEVICE_NAME = "TCL Roku TV" # Default target

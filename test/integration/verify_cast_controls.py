@@ -15,7 +15,7 @@ if not HA_TOKEN:
      HA_TOKEN = os.getenv("HA_TOKEN", "")
 
 # --- CONFIGURATION ---
-API_URL = os.getenv("API_URL", "http://192.168.2.205:11435")
+API_URL = os.getenv("API_URL", "http://ai.local:11435")
 
 DEVICE_ENTITY = "media_player.office_tv_chrome_2"
 DEVICE_NAME = "Office TV"

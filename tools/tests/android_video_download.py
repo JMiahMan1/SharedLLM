@@ -5,7 +5,7 @@ Test Android TV Watch with video download
 import requests
 import time
 
-BASE_URL = "http://192.168.2.205:11435"
+BASE_URL = "http://ai.local:11435"
 ANDROID_TV_ENTITY = "media_player.office_tv_chrome_2"
 
 def chat(query):

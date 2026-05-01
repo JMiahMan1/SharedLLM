@@ -12,7 +12,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("RemoteTest")
 
-REMOTE_URL = "http://192.168.2.205:11435/api/chat"
+REMOTE_URL = "http://ai.local:11435/api/chat"
 
 def remote_query(query: str):
     """Sends a query to the remote API and returns the full response content."""

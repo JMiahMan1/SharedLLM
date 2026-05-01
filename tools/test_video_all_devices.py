@@ -6,7 +6,7 @@ import requests
 import json
 import time
 
-REMOTE_URL = "http://192.168.2.205:11435/api/chat"
+REMOTE_URL = "http://ai.local:11435/api/chat"
 
 def test_video_playback(device_name, query):
     """Test video playback on a specific device"""

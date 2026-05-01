@@ -27,20 +27,19 @@ HEADERS = {
 
 def fetch_logs():
     try:
-        url = f"{API_URL}/api/admin/logs?lines=200"
+        url = f"{API_URL}/api/logs?limit=200"
         print(f"Fetching logs from {url}...")
         resp = requests.get(url, headers=HEADERS, timeout=10)
         
         if resp.status_code == 200:
             data = resp.json()
-            if "logs" in data:
-                print("Logs retrieved successfully.")
-                with open("temp/remote_server_logs.txt", "w") as f:
-                    for line in data["logs"]:
-                        f.write(line + "\n")
-                print("Saved to temp/remote_server_logs.txt")
-            else:
-                print("No 'logs' key in response:", data)
+            print("Logs retrieved successfully.")
+            os.makedirs("temp", exist_ok=True)
+            with open("temp/remote_server_logs.txt", "w") as f:
+                for entry in data:
+                    line = f"{entry.get('timestamp')} [{entry.get('level')}] [{entry.get('service')}] {entry.get('message')}"
+                    f.write(line + "\n")
+            print("Saved to temp/remote_server_logs.txt")
         else:
             print(f"Failed to fetch logs. Status: {resp.status_code}")
             print(resp.text)
