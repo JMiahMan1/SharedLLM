@@ -2,80 +2,39 @@
 import logging
 import os
 import httpx
-
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from typing import Optional
 
 try:
     from .indexer import (
         build_content_index, summarize_index, extract_and_chunk_contents, 
         set_indexer_pause, CheckpointManager
     )
-    from .models import IndexScanRequest, ProviderListRequest
-    from .providers import build_provider
-except ImportError:
+    from .providers import build_provider, ProviderConfig
+except (ImportError, ValueError):
     from indexer import (
         build_content_index, summarize_index, extract_and_chunk_contents, 
         set_indexer_pause, CheckpointManager
     )
-    from models import IndexScanRequest, ProviderListRequest
-    from providers import build_provider
+    from providers import build_provider, ProviderConfig
 
-app = FastAPI(title="SharedLLM Storage Bridge")
-logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("storage")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
+app = FastAPI(title="Librarian Storage Service")
+
+RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
-RAG_SVC = os.getenv("RAG_SVC", "http://127.0.0.1:8004")
 
+class IndexScanRequest(BaseModel):
+    provider: ProviderConfig
+    path: str = "/"
+    recursive: bool = True
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "storage"}
-
-
-@app.post("/providers/list")
-async def list_provider_entries(req: ProviderListRequest):
-    """List entries from a configured storage provider."""
-    try:
-        provider = build_provider(req.provider)
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    entries = provider.list_entries(path=req.path, recursive=req.recursive)
-    return {"status": "SUCCESS", "provider": req.provider.kind, "entries": [entry.model_dump() for entry in entries]}
-
-
-@app.post("/index/scan")
-async def scan_content_index(req: IndexScanRequest):
-    """Build a generic content capability index for a provider path."""
-    try:
-        provider = build_provider(req.provider)
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    entries = provider.list_entries(path=req.path, recursive=req.recursive)
-    items = build_content_index(entries)
-    summary = summarize_index(items)
-    return {
-        "status": "SUCCESS",
-        "provider": req.provider.kind,
-        "root_path": req.path,
-        "summary": summary,
-        "items": [item.model_dump() for item in items],
-    }
-
-
-@app.post("/index/pause")
-async def pause_indexer():
-    set_indexer_pause(True)
-    return {"status": "SUCCESS", "message": "Indexer paused"}
-
-
-@app.post("/index/resume")
-async def resume_indexer():
-    set_indexer_pause(False)
-    return {"status": "SUCCESS", "message": "Indexer resumed"}
-
 
 @app.post("/index/full")
 async def full_content_index(req: IndexScanRequest, background_tasks: BackgroundTasks):
@@ -86,9 +45,9 @@ async def full_content_index(req: IndexScanRequest, background_tasks: Background
         "message": "Indexing started in background."
     }
 
-
 async def _run_full_index_task(req: IndexScanRequest):
     """Internal task for background indexing."""
+    log.info(f"Background indexing started for user: {req.provider.settings.get('username')} at {req.provider.settings.get('url')}")
     try:
         provider = build_provider(req.provider)
     except (KeyError, ValueError) as exc:
@@ -96,7 +55,9 @@ async def _run_full_index_task(req: IndexScanRequest):
         return
 
     # 1. Scan structure
+    log.info(f"Starting background scan for path: {req.path}")
     entries = provider.list_entries(path=req.path, recursive=req.recursive)
+    log.info(f"Scan complete. Found {len(entries)} raw entries.")
     items = build_content_index(entries)
     
     # 2. Extract and chunk with checkpointing
@@ -140,54 +101,40 @@ async def _run_full_index_task(req: IndexScanRequest):
         except Exception as e:
             log.error(f"Failed to sync background index to RAG: {e}")
 
+@app.post("/index/pause")
+def pause_indexing():
+    set_indexer_pause(True)
+    return {"status": "PAUSED"}
 
-@app.post("/nextcloud/list")
-async def list_nextcloud_compat(req: dict):
-    """Compatibility shim for existing NextCloud list callers."""
-    provider_req = ProviderListRequest(
-        provider={
-            "kind": "nextcloud",
-            "settings": {
-                "url": req["nc_url"],
-                "username": req["nc_user"],
-                "password": req["nc_pass"],
-            },
-        },
-        path=req.get("path", "/"),
-        recursive=req.get("recursive", False),
-    )
-    response = await list_provider_entries(provider_req)
-    return {"status": response["status"], "files": response["entries"]}
+@app.post("/index/resume")
+def resume_indexing():
+    set_indexer_pause(False)
+    return {"status": "RESUMED"}
 
+@app.post("/providers/list")
+async def list_provider_entries(req: IndexScanRequest):
+    try:
+        provider = build_provider(req.provider)
+        entries = provider.list_entries(path=req.path, recursive=req.recursive)
+        return {"status": "SUCCESS", "count": len(entries), "entries": [e.dict() for e in entries]}
+    except Exception as e:
+        log.error(f"List failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/nextcloud/search")
-async def search_nextcloud_compat(req: dict, query: str):
-    """Compatibility shim for existing NextCloud search callers."""
-    provider_req = ProviderListRequest(
-        provider={
-            "kind": "nextcloud",
-            "settings": {
-                "url": req["nc_url"],
-                "username": req["nc_user"],
-                "password": req["nc_pass"],
-            },
-        },
-        path=req.get("path", "/"),
-        recursive=True,
-    )
-    response = await list_provider_entries(provider_req)
+async def search_nextcloud(query: str, req: dict):
+    # Backward compatibility endpoint
+    nc_url = req.get("nc_url")
+    nc_user = req.get("nc_user")
+    nc_pass = req.get("nc_pass")
     
-    # Try exact name match
-    matches = [entry for entry in response["entries"] if query.lower() in entry["name"].lower()]
-    
-    # Fallback for broad listing queries
-    if not matches and any(k in query.lower() for k in ["list", "files", "folders", "what", "show", "get"]):
-        matches = response["entries"][:15]
-        
-    return {"status": "SUCCESS", "matches": matches[:15]}
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8005)
+    try:
+        from nextcloud_client import NextCloudClient
+        client = NextCloudClient(nc_url, nc_user, nc_pass)
+        # Deep search not implemented in client yet, just list root for now or similar
+        entries = client.list_entries(path="/", recursive=False)
+        matches = [e for e in entries if query.lower() in e.name.lower()]
+        return {"matches": [e.dict() for e in matches]}
+    except Exception as e:
+        log.error(f"Search failed: {e}")
+        return {"matches": []}

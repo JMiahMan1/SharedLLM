@@ -220,6 +220,7 @@ def is_likely_video_request(query: str) -> bool:
         "hulu",
         "disney",
         "prime video",
+        "vimeo",
     )
     return any(signal in q for signal in video_signals)
 
@@ -475,8 +476,7 @@ async def chat_handler(request: Request):
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
                     if resp.status_code == 200:
-                        data = resp.json()
-                        msg = f"Library index complete! Extracted {data.get('chunks_extracted', 0)} knowledge snippets."
+                        msg = "I have started indexing your library in the background. It may take a moment to process everything."
                         await emit_log("SUCCESS", msg)
                         return JSONResponse({"status": "SUCCESS", "message": msg, "intent": "index_storage"})
                     else:
@@ -509,18 +509,12 @@ async def chat_handler(request: Request):
                 fname_lower = friendly_name.lower()
                 eid = e.get("entity_id", "").lower()
                 
-                # DIAGNOSTIC
-                if "office" in fname_lower:
-                    print(f"DEBUG: Checking entity {eid} ('{fname_lower}') against query '{query_lower}'")
-
                 # If name mentioned in query, and type matches intent
                 if fname_lower and fname_lower in query_lower:
                     if "media" in intent and eid.startswith("media_player."):
-                        print(f"DEBUG: MATCH FOUND! {eid}")
                         target_entity = e["entity_id"]
                         break
                     if ("light" in intent or "turn" in intent) and eid.startswith("light."):
-                        print(f"DEBUG: MATCH FOUND! {eid}")
                         target_entity = e["entity_id"]
                         break
             
