@@ -209,17 +209,20 @@ truth for Git repositories. The better split is:
 ### Recommended Architecture
 
 * **Workspace Registry**
-  * Add a user-scoped registry of known code folders, starting with
-    `/Code/SharedLLM`.
-  * Each entry should map the Nextcloud folder to a local checkout path.
+  * A first-pass registry now exists as `config/workspaces.json`.
+  * It maps a durable storage path such as `/Code/SharedLLM` to a mounted local
+    checkout path and records sync metadata.
+  * The long-term target is a user-scoped registry API rather than a static
+    file.
 
 * **Capability Split**
   * **Storage service**: list/search registered workspace folders and retrieve
     non-code companion documents from Nextcloud.
   * **Gateway**: detect coding intent and route code questions to the coding
     model.
-  * **Local agent/runtime**: inspect the mapped local checkout for `git status`,
-    file reads, diffs, and test execution.
+  * **Workspace Runtime service**: inspect the mapped local checkout for
+    `git status`, file reads, diffs, and test execution inside the Docker
+    stack.
 
 * **Trigger Behavior**
   * If the user asks about code in a registered repo, prefer the local mapped
@@ -236,6 +239,20 @@ truth for Git repositories. The better split is:
 * Nextcloud remains useful for personal organization and cross-device discovery.
 * The assistant can answer both "what changed in this branch?" and "what design
   note did I save next to this repo?" without conflating the two storage models.
+
+### Current Implementation Status
+
+The current `workspace_runtime` microservice is intentionally narrow. It
+already exposes:
+
+* workspace registry listing and resolution
+* safe file reads inside mounted workspaces
+* `git status` and `git diff`
+* targeted `pytest` execution
+
+It does **not** yet perform file mutations, Git commit/push operations, or
+provider writeback. Those remain the next implementation steps rather than
+implied capabilities.
 
 ---
 

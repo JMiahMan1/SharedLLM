@@ -49,6 +49,7 @@ services/
   execution/    # HA Integration & Handlers
   rag/          # Semantic Indexing & Search
   storage/      # Persistence Logic
+  workspace_runtime/ # Sandboxed workspace inspection and agentic runtime substrate
   logging/      # Observability Hub
   automation/   # Background Tasks
   tests/        # System-wide Smoke & Unit Tests
@@ -65,6 +66,7 @@ docker-compose.yml
 - **Global Observability**: Centralized logging with context-aware tracing across all services.
 - **RAG Memory**: Persistent semantic history and document context for more relevant AI responses.
 - **Librarian (Deep Indexing)**: Context-aware document reasoning with automated NextCloud content extraction, checkpointing, and resource-prioritized background indexing.
+- **Workspace Runtime**: Mounted local workspaces can now be resolved and inspected through a dedicated service for file reads, `git status`/`git diff`, and targeted `pytest` execution.
 
 ## 🛠 Testing
 
