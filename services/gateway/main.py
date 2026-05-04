@@ -552,6 +552,11 @@ async def chat_handler(request: Request):
         body = {}
     if not isinstance(body, dict): body = {}
     
+    # Standardized API flags
+    is_openai = "/v1/chat/completions" in str(request.url)
+    should_stream = body.get("stream", False)
+    selected_model = body.get("model", "qwen3:latest")
+
     # 2. Extract Query
     query = body.get("query")
     if not query and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
@@ -884,9 +889,6 @@ async def chat_handler(request: Request):
     await emit_log("INFO", f"Context gathered for {user_id}", {"query": refined_query, "context_len": len(rag_context), "context_preview": rag_context[:200]})
 
     # 5. Proxy to Ollama (Slow Path)
-    should_stream = body.get("stream", False)
-    is_openai = "/v1/chat/completions" in str(request.url)
-    
     try:
         try:
             await client.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
