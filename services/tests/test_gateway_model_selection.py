@@ -92,6 +92,34 @@ def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     assert "No live local Git workspace is attached to this gateway path." in captured["payload"]["messages"][-1]["content"]
 
 
+def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies(client):
+    captured = {}
+
+    async def mock_call_ollama(payload, use_chat=True):
+        captured["payload"] = payload
+        return MockOllamaResponse("```python\npass\n```")
+
+    async def passthrough_query(query, history):
+        return query
+
+    with patch("gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
+         patch("gateway.main.get_history", new=AsyncMock(return_value=[])), \
+         patch("gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
+         patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
+         patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
+         patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
+         patch("gateway.main.engine.classify", return_value=("media_transport", 0.99)), \
+         patch("gateway.main.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+        response = client.post(
+            "/api/chat",
+            json={"query": "Fix this Python code bug in math_utils.py", "voice_id": "alice", "model": "qwen2.5-coder:7b"},
+        )
+
+    assert response.status_code == 200
+    assert captured["payload"]["model"] == "qwen2.5-coder:7b"
+    assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
+
+
 def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
     captured = {}
 

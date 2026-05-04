@@ -654,6 +654,7 @@ async def chat_handler(request: Request):
     media_query, _ = extract_media_request(refined_query)
     media_transport_command = extract_media_transport_command(refined_query)
     is_video_request = is_likely_video_request(refined_query)
+    is_code_request = is_coding_query(refined_query)
     explicit_action_request = has_explicit_action_request(refined_query)
     wants_status_followup = requests_status_followup(refined_query)
     
@@ -662,6 +663,11 @@ async def chat_handler(request: Request):
     if media_transport_command:
         intent = "media_transport"
         confidence = 1.0
+
+    if is_code_request and intent != "unknown":
+        log.info(f"Bypassing fast-path intent '{intent}' for coding query.")
+        intent = "unknown"
+        confidence = 0.0
 
     if confidence >= FAST_PATH_THRESHOLD:
         log.info(f"[FastPath] intent='{intent}' confidence={confidence}")
