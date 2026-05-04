@@ -260,13 +260,17 @@ async def sync_ha(payload: dict):
         state = e.get("state", "unknown")
         attrs = e.get("attributes", {})
         fname = attrs.get("friendly_name", eid)
-        area = attrs.get("area_id", "unknown")
+        area = attrs.get("area_id") or "unassigned area"
         
-        content = f"The {fname} ({eid}) is in the {area} and is currently {state}."
+        content = f"Device: {fname} (ID: {eid}) | Area: {area} | Current State: {state}."
         if "brightness" in attrs:
-            content += f" It supports brightness (current: {attrs['brightness']})."
+            # Convert 0-255 to percentage
+            bright_pct = round((attrs['brightness'] / 255) * 100)
+            content += f" Brightness is at {bright_pct}% ({attrs['brightness']}/255)."
         if "current_temperature" in attrs:
-            content += f" The current temperature is {attrs['current_temperature']}."
+            content += f" Temperature: {attrs['current_temperature']}."
+        if "unit_of_measurement" in attrs:
+            content += f" {attrs['unit_of_measurement']}."
             
         cid = f"ha:{eid}"
         if cid not in existing_ids:
