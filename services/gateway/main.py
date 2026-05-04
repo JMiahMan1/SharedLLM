@@ -766,76 +766,76 @@ async def chat_handler(request: Request):
             await client.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
         except: pass
 
-    await emit_log("INFO", f"Slow path triggered for: {refined_query}")
-    
-    # Try /api/chat first (Ollama standard)
-    ollama_payload = {
-        "model": selected_model,
-        "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
-        "stream": False
-    }
-    resp = await call_ollama(ollama_payload, use_chat=True)
-    
-    if resp.status_code == 404:
-        # Fallback to /api/generate for older Ollama versions
-        log.warning("Ollama /api/chat not found, falling back to /api/generate")
-        gen_payload = {
+        await emit_log("INFO", f"Slow path triggered for: {refined_query}")
+        
+        # Try /api/chat first (Ollama standard)
+        ollama_payload = {
             "model": selected_model,
-            "prompt": f"{refined_query}", # Simplified
+            "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
             "stream": False
         }
-        resp = await call_ollama(gen_payload, use_chat=False)
+        resp = await call_ollama(ollama_payload, use_chat=True)
         
-    if resp.status_code != 200:
-        err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
-        log.error(err_msg)
-        return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
-        
-    data = resp.json()
-    if not isinstance(data, dict):
-        answer = str(data)
-    else:
-        msg_obj = data.get("message")
-        if isinstance(msg_obj, dict):
-            answer = msg_obj.get("content")
+        if resp.status_code == 404:
+            # Fallback to /api/generate for older Ollama versions
+            log.warning("Ollama /api/chat not found, falling back to /api/generate")
+            gen_payload = {
+                "model": selected_model,
+                "prompt": f"{refined_query}", # Simplified
+                "stream": False
+            }
+            resp = await call_ollama(gen_payload, use_chat=False)
+            
+        if resp.status_code != 200:
+            err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
+            log.error(err_msg)
+            return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
+            
+        data = resp.json()
+        if not isinstance(data, dict):
+            answer = str(data)
         else:
-            answer = data.get("response", "I encountered an error.")
-    
-    if not answer:
-        answer = "I received an empty response from the brain."
-    # 6. Format Response
-    final_answer = answer if answer else "I encountered an error while processing your request."
-    
-    # Save to history
-    await update_history(user_id, "user", query)
-    await update_history(user_id, "assistant", final_answer)
-    
-    # Log Success
-    await emit_log("INFO", f"Chat successful: {query[:50]}...")
+            msg_obj = data.get("message")
+            if isinstance(msg_obj, dict):
+                answer = msg_obj.get("content")
+            else:
+                answer = data.get("response", "I encountered an error.")
+        
+        if not answer:
+            answer = "I received an empty response from the brain."
+        # 6. Format Response
+        final_answer = answer if answer else "I encountered an error while processing your request."
+        
+        # Save to history
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", final_answer)
+        
+        # Log Success
+        await emit_log("INFO", f"Chat successful: {query[:50]}...")
 
-    # Detect if it was an OpenAI-style request
-    is_openai = "/v1/chat/completions" in str(request.url)
-    
-    if is_openai:
-        import time
-        return {
-            "id": f"chatcmpl-{int(time.time())}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": selected_model,
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": final_answer
-                    },
-                    "finish_reason": "stop",
-                    "index": 0
-                }
-            ]
-        }
-    
-    return {"status": "SUCCESS", "message": final_answer}
+        # Detect if it was an OpenAI-style request
+        is_openai = "/v1/chat/completions" in str(request.url)
+        
+        if is_openai:
+            import time
+            return {
+                "id": f"chatcmpl-{int(time.time())}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": selected_model,
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": final_answer
+                        },
+                        "finish_reason": "stop",
+                        "index": 0
+                    }
+                ]
+            }
+        
+        return {"status": "SUCCESS", "message": final_answer}
     
 except Exception as e:
     log.error(f"LLM Proxy Error: {e}")
