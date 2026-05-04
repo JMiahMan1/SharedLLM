@@ -3,8 +3,10 @@ import logging
 import os
 import subprocess
 import hashlib
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -17,6 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
+STORAGE_SVC_URL = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
 WORKSPACE_REGISTRY_PATH = os.getenv("WORKSPACE_REGISTRY_PATH", "/app/config/workspaces.json")
 WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
 DEFAULT_PYTEST_TIMEOUT_SECONDS = int(os.getenv("WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "90"))
@@ -63,6 +66,40 @@ class PytestRequest(WorkspaceRef):
 class DiffRequest(WorkspaceRef):
     ref: str = "HEAD"
     pathspecs: list[str] = Field(default_factory=list)
+
+
+class GitAddRequest(WorkspaceRef):
+    pathspecs: list[str] = Field(default_factory=list)
+
+
+class GitCommitRequest(WorkspaceRef):
+    message: str
+    pathspecs: list[str] = Field(default_factory=list)
+    author_name: Optional[str] = None
+    author_email: Optional[str] = None
+    allow_empty: bool = False
+
+
+class GitBranchCreateRequest(WorkspaceRef):
+    branch_name: str
+    from_ref: Optional[str] = None
+    checkout: bool = True
+
+
+class GitPushRequest(WorkspaceRef):
+    remote: Optional[str] = None
+    branch: Optional[str] = None
+    set_upstream: bool = False
+
+
+class ProviderScanRequest(WorkspaceRef):
+    recursive: bool = True
+
+
+class ProviderSyncFileRequest(WorkspaceRef):
+    relative_path: str
+    create_parents: bool = True
+    verify: bool = True
 
 
 def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
@@ -125,7 +162,7 @@ def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
     user = str(data.get("user") or "").strip() if isinstance(data, dict) else ""
     if not user:
         raise HTTPException(status_code=500, detail="Identity resolution did not return a user")
-    return {"user": user, "is_admin": bool(data.get("is_admin"))}
+    return data
 
 
 def _safe_workspace_path(local_path: str) -> Path:
@@ -189,7 +226,7 @@ def _workspace_capabilities(workspace: dict[str, Any]) -> list[str]:
     scope = str(workspace.get("scope") or "user").strip().lower()
     if scope == "system":
         return ["read", "git_status", "git_diff"]
-    return ["read", "write", "git_status", "git_diff", "pytest"]
+    return ["read", "write", "git_status", "git_diff", "git_write", "pytest"]
 
 
 def _require_workspace_capability(workspace: dict[str, Any], capability: str) -> None:
@@ -271,6 +308,152 @@ def _sanitize_targets(targets: list[str]) -> list[str]:
             raise HTTPException(status_code=400, detail=f"Parent traversal not allowed in pytest target: {target}")
         cleaned.append(target)
     return cleaned
+
+
+def _derive_git_author(identity: dict[str, Any], author_name: Optional[str], author_email: Optional[str]) -> tuple[str, str]:
+    name = (author_name or identity.get("user") or "sharedllm").strip()
+    email = (author_email or "").strip()
+    if email:
+        return name, email
+
+    github_user = str(identity.get("github_user") or "").strip()
+    gitlab_user = str(identity.get("gitlab_user") or "").strip()
+    resolved_user = str(identity.get("user") or "sharedllm").strip()
+    if github_user:
+        return name, f"{github_user}@users.noreply.github.com"
+    if gitlab_user:
+        return name, f"{gitlab_user}@users.noreply.gitlab.local"
+    return name, f"{resolved_user}@sharedllm.local"
+
+
+def _validate_branch_name(branch_name: str) -> str:
+    branch = branch_name.strip()
+    if not branch:
+        raise HTTPException(status_code=400, detail="branch_name is required")
+    result = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise HTTPException(status_code=400, detail=f"Invalid branch name: {branch}")
+    return branch
+
+
+def _git_remote_url(workspace_path: Path, remote_name: str) -> str:
+    result = _run_command(workspace_path, ["git", "config", "--get", f"remote.{remote_name}.url"])
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=f"Git remote '{remote_name}' is not configured")
+    remote_url = result["stdout"].strip()
+    if not remote_url:
+        raise HTTPException(status_code=400, detail=f"Git remote '{remote_name}' is empty")
+    return remote_url
+
+
+def _workspace_provider_binding(workspace: dict[str, Any], identity: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
+    provider_kind = str(workspace.get("provider_kind") or "").strip().lower()
+    nextcloud_path = str(workspace.get("nextcloud_path") or "").strip()
+    if not provider_kind and nextcloud_path:
+        provider_kind = "nextcloud"
+
+    if provider_kind == "nextcloud":
+        url = str(identity.get("nextcloud_url") or "").strip()
+        username = str(identity.get("nextcloud_user") or "").strip()
+        password = str(identity.get("nextcloud_pass") or "").strip()
+        if not (url and username and password):
+            raise HTTPException(status_code=400, detail="Resolved identity does not include Nextcloud credentials")
+        if not nextcloud_path:
+            raise HTTPException(status_code=400, detail="Workspace does not define a nextcloud_path")
+        return (
+            "nextcloud",
+            {"url": url, "username": username, "password": password},
+            nextcloud_path,
+        )
+
+    raise HTTPException(status_code=400, detail="Workspace does not define a supported provider binding")
+
+
+def _provider_child_path(base_path: str, relative_path: str) -> str:
+    clean_base = "/" + str(base_path).strip("/")
+    clean_relative = str(relative_path).strip("/")
+    return clean_base if not clean_relative else f"{clean_base}/{clean_relative}"
+
+
+def _storage_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        resp = httpx.post(path, json=payload, timeout=30.0)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail=f"Storage service unreachable: {exc}") from exc
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=f"Storage request failed: {resp.text}")
+    data = resp.json()
+    if data.get("status") != "SUCCESS":
+        raise HTTPException(status_code=500, detail=f"Storage request failed: {data}")
+    return data
+
+
+def _git_https_credentials(identity: dict[str, Any], remote_url: str) -> Optional[tuple[str, str]]:
+    parsed = urlparse(remote_url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+
+    remote_host = (parsed.hostname or "").lower()
+    github_host = urlparse(str(identity.get("github_url") or "")).hostname or ""
+    gitlab_host = urlparse(str(identity.get("gitlab_url") or "")).hostname or ""
+    github_host = github_host.lower()
+    gitlab_host = gitlab_host.lower()
+
+    github_user = str(identity.get("github_user") or "").strip()
+    github_token = str(identity.get("github_token") or "").strip()
+    gitlab_user = str(identity.get("gitlab_user") or "").strip()
+    gitlab_token = str(identity.get("gitlab_token") or "").strip()
+
+    if github_token and ("github" in remote_host or (github_host and remote_host == github_host)):
+        return (github_user or "x-access-token", github_token)
+    if gitlab_token and ("gitlab" in remote_host or (gitlab_host and remote_host == gitlab_host)):
+        return (gitlab_user or "oauth2", gitlab_token)
+    return None
+
+
+def _run_git_with_optional_askpass(
+    workspace_path: Path,
+    args: list[str],
+    identity: dict[str, Any],
+    remote_url: str,
+    timeout_seconds: int = 60,
+) -> dict[str, Any]:
+    credentials = _git_https_credentials(identity, remote_url)
+    if not credentials:
+        return _run_command(workspace_path, args, timeout_seconds=timeout_seconds)
+
+    username, password = credentials
+    askpass_file = tempfile.NamedTemporaryFile("w", delete=False, prefix="sharedllm-git-askpass-", suffix=".sh")
+    try:
+        askpass_file.write("#!/bin/sh\n")
+        askpass_file.write('case "$1" in\n')
+        askpass_file.write('  *Username*) printf \'%s\\n\' \"$SHAREDLLM_GIT_USERNAME\" ;;\n')
+        askpass_file.write('  *) printf \'%s\\n\' \"$SHAREDLLM_GIT_PASSWORD\" ;;\n')
+        askpass_file.write("esac\n")
+        askpass_file.flush()
+        askpass_file.close()
+        os.chmod(askpass_file.name, 0o700)
+        return _run_command(
+            workspace_path,
+            args,
+            timeout_seconds=timeout_seconds,
+            env_overrides={
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ASKPASS": askpass_file.name,
+                "SHAREDLLM_GIT_USERNAME": username,
+                "SHAREDLLM_GIT_PASSWORD": password,
+            },
+        )
+    finally:
+        try:
+            os.unlink(askpass_file.name)
+        except FileNotFoundError:
+            pass
 
 
 @app.get("/health")
@@ -387,6 +570,62 @@ def write_file(req: FileWriteRequest, x_internal_secret: Optional[str] = Header(
     }
 
 
+@app.post("/provider/scan")
+def provider_scan(req: ProviderScanRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "read")
+    identity = workspace.get("resolved_identity") or {}
+    provider_kind, provider_settings, provider_path = _workspace_provider_binding(workspace, identity)
+    data = _storage_post(
+        f"{STORAGE_SVC_URL}/providers/list",
+        {
+            "provider": {"kind": provider_kind, "settings": provider_settings},
+            "path": provider_path,
+            "recursive": req.recursive,
+        },
+    )
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "provider_kind": provider_kind,
+        "provider_path": provider_path,
+        "count": data.get("count", 0),
+        "entries": data.get("entries", []),
+    }
+
+
+@app.post("/provider/sync/file")
+def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "write")
+    workspace_path = Path(workspace["resolved_path"])
+    local_file = _safe_file_path(workspace_path, req.relative_path)
+    identity = workspace.get("resolved_identity") or {}
+    provider_kind, provider_settings, provider_root = _workspace_provider_binding(workspace, identity)
+    provider_path = _provider_child_path(provider_root, req.relative_path)
+    content = local_file.read_text(errors="replace")
+    data = _storage_post(
+        f"{STORAGE_SVC_URL}/providers/write",
+        {
+            "provider": {"kind": provider_kind, "settings": provider_settings},
+            "path": provider_path,
+            "content": content,
+            "create_parents": req.create_parents,
+            "verify": req.verify,
+        },
+    )
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "relative_path": req.relative_path,
+        "provider_kind": provider_kind,
+        "provider_path": provider_path,
+        "result": data.get("result"),
+    }
+
+
 @app.post("/git/status")
 def git_status(req: WorkspaceRef, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
@@ -417,6 +656,141 @@ def git_diff(req: DiffRequest, x_internal_secret: Optional[str] = Header(default
     if result["returncode"] != 0:
         raise HTTPException(status_code=400, detail=result["stderr"].strip() or "git diff failed")
     return {"status": "SUCCESS", "workspace": workspace, "diff": result["stdout"]}
+
+
+@app.post("/git/add")
+def git_add(req: GitAddRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+    pathspecs = _sanitize_targets(req.pathspecs)
+    args = ["git", "add", "--", *pathspecs] if pathspecs else ["git", "add", "-A"]
+    result = _run_command(workspace_path, args)
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or "git add failed")
+    status_result = _run_command(workspace_path, ["git", "status", "--short"])
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "command": result["args"],
+        "porcelain": status_result["stdout"].splitlines(),
+    }
+
+
+@app.post("/git/commit")
+def git_commit(req: GitCommitRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+    identity = workspace.get("resolved_identity") or {}
+    if req.pathspecs:
+        add_req = GitAddRequest(
+            workspace_id=req.workspace_id,
+            local_path=req.local_path,
+            rag_user=req.rag_user,
+            voice_id=req.voice_id,
+            device_id=req.device_id,
+            pathspecs=req.pathspecs,
+        )
+        git_add(add_req, x_internal_secret)
+
+    author_name, author_email = _derive_git_author(identity, req.author_name, req.author_email)
+    args = ["git", "commit", "-m", req.message]
+    if req.allow_empty:
+        args.append("--allow-empty")
+    result = _run_command(
+        workspace_path,
+        args,
+        env_overrides={
+            "GIT_AUTHOR_NAME": author_name,
+            "GIT_AUTHOR_EMAIL": author_email,
+            "GIT_COMMITTER_NAME": author_name,
+            "GIT_COMMITTER_EMAIL": author_email,
+        },
+    )
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git commit failed")
+    commit_ref = _run_command(workspace_path, ["git", "rev-parse", "HEAD"])
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "command": result["args"],
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+        "commit": commit_ref["stdout"].strip() if commit_ref["returncode"] == 0 else None,
+        "author_name": author_name,
+        "author_email": author_email,
+    }
+
+
+@app.post("/git/branch/create")
+def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+    branch_name = _validate_branch_name(req.branch_name)
+    if req.checkout:
+        args = ["git", "checkout", "-b", branch_name]
+        if req.from_ref:
+            args.append(req.from_ref)
+    else:
+        args = ["git", "branch", branch_name]
+        if req.from_ref:
+            args.append(req.from_ref)
+    result = _run_command(workspace_path, args)
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git branch create failed")
+    current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "command": result["args"],
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+        "branch": branch_name,
+        "current_branch": current_branch["stdout"].strip(),
+    }
+
+
+@app.post("/git/push")
+def git_push(req: GitPushRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+    identity = workspace.get("resolved_identity") or {}
+    remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
+    current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
+    branch_name = (req.branch or current_branch["stdout"].strip()).strip()
+    if not branch_name:
+        raise HTTPException(status_code=400, detail="Unable to determine branch to push")
+    remote_url = _git_remote_url(workspace_path, remote_name)
+    args = ["git", "push"]
+    if req.set_upstream:
+        args.append("-u")
+    args.extend([remote_name, branch_name])
+    result = _run_git_with_optional_askpass(
+        workspace_path,
+        args,
+        identity=identity,
+        remote_url=remote_url,
+    )
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git push failed")
+    upstream = _run_command(workspace_path, ["git", "rev-parse", "--abbrev-ref", "@{upstream}"])
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "command": args,
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+        "remote": remote_name,
+        "branch": branch_name,
+        "upstream": upstream["stdout"].strip() if upstream["returncode"] == 0 else None,
+    }
 
 
 @app.post("/tests/pytest")

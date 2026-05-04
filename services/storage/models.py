@@ -51,3 +51,11 @@ class IndexScanRequest(BaseModel):
     provider: ProviderConfig
     path: str = "/"
     recursive: bool = True
+
+
+class ProviderWriteRequest(BaseModel):
+    provider: ProviderConfig
+    path: str
+    content: str
+    create_parents: bool = True
+    verify: bool = True

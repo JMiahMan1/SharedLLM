@@ -13,12 +13,14 @@ try:
         set_indexer_pause, CheckpointManager
     )
     from .providers import build_provider, ProviderConfig
+    from .models import ProviderWriteRequest
 except (ImportError, ValueError):
     from indexer import (
         build_content_index, summarize_index, extract_and_chunk_contents, 
         set_indexer_pause, CheckpointManager
     )
     from providers import build_provider, ProviderConfig
+    from models import ProviderWriteRequest
 
 log = logging.getLogger("storage")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -152,3 +154,19 @@ async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(
     except Exception as e:
         log.error(f"Provider search failed: {e}")
         return {"status": "ERROR", "matches": []}
+
+
+@app.post("/providers/write")
+async def write_provider_content(req: ProviderWriteRequest):
+    try:
+        provider = build_provider(req.provider)
+        result = provider.write_content(
+            req.path,
+            req.content,
+            create_parents=req.create_parents,
+            verify=req.verify,
+        )
+        return {"status": "SUCCESS", "result": result}
+    except Exception as e:
+        log.error(f"Provider write failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

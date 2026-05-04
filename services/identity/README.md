@@ -93,6 +93,14 @@ flowchart TD
 - the service returns identity context, but it should not be treated as a
   general-purpose secret distribution API for arbitrary callers
 
+## Current Gaps
+
+- the service does not yet maintain a structured user action audit log
+- credential resolution and admin changes are application-logged, but not
+  stored as queryable per-user audit records
+- workspace authorization should eventually build on DB-backed roles and audit
+  trails rather than only resolved flags and service logs
+
 ## Credential Surface
 
 The current resolved credential payload can include:

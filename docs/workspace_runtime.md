@@ -27,6 +27,11 @@ Current implemented capabilities:
 - write files to authorized workspaces with optional optimistic conflict checks
 - report `git status`
 - return `git diff`
+- stage files with `git add`
+- create commits with Git author metadata derived from Identity
+- create branches for isolated changesets
+- scan a workspace's designated provider folder through the Storage service
+- sync changed local files into the designated provider path
 - run targeted `pytest` commands inside a workspace
 - expose a health endpoint so the Gateway can include it in readiness checks
 
@@ -50,7 +55,7 @@ become the runtime substrate for workspace-scoped agentic tasks, including:
 Today it does not:
 
 - mutate the workspace registry
-- create commits or push to remotes
+- push to remotes
 - write back to Nextcloud or another provider
 - replace the Storage service
 - replace the RAG service
@@ -95,6 +100,11 @@ service created specifically to fill that gap.
 - `POST /files/write`
 - `POST /git/status`
 - `POST /git/diff`
+- `POST /git/add`
+- `POST /git/commit`
+- `POST /git/branch/create`
+- `POST /provider/scan`
+- `POST /provider/sync/file`
 - `POST /tests/pytest`
 
 ## Current Safety Model
@@ -105,21 +115,29 @@ service created specifically to fill that gap.
 - admin overrides come from the Identity service's DB-backed `is_admin` flag
 - system workspaces can expose a narrower capability set than normal user
   workspaces
+- write-side Git actions require the `git_write` capability unless the caller
+  is admin
 - workspace paths must resolve under `WORKSPACE_RUNTIME_ROOT`
 - file access is blocked if it escapes the workspace
 - file writes can enforce `expected_sha256` before replacing existing content
+- provider sync requires a configured provider binding such as `nextcloud_path`
+  plus resolved provider credentials from Identity
 - pytest targets reject absolute paths, parent traversal, and option-like
   arguments
+- Git author metadata is derived from resolved GitHub or GitLab identity fields
+  when explicit author information is not supplied
 
 ## Expected Near-Term Expansion
 
 The next useful features are:
 
 1. richer file mutation support beyond direct text writes
-2. git add/commit/push endpoints with strict scope controls
+2. git push endpoints with strict remote-auth controls
 3. workspace registry APIs instead of a static JSON file
 4. gateway-level orchestration for coding tasks that need real file changes
-5. optional note/document/transcription endpoints for broader workspace
+5. provider sync expansion from single-file text writeback into broader folder
+   mirroring and non-text asset handling
+6. optional note/document/transcription endpoints for broader workspace
    operations
 
 ## Remaining Implementation Work
@@ -133,12 +151,14 @@ agentic workspace engine. The main unfinished pieces are:
 2. **Write path expansion**
    Extend mutation beyond direct text replacement into richer create/update/delete
    flows with better conflict handling and auditability.
-3. **Git lifecycle**
-   Add branch creation, staging, commit, push, and pull/rebase behavior with
-   explicit scope controls.
+3. **Git lifecycle completion**
+   Add push and later pull/rebase behavior with explicit scope controls and
+   remote credential handling.
 4. **Provider synchronization**
    Reflect authoritative local changes back to storage providers where that is
-   appropriate, instead of only using provider-backed discovery.
+   appropriate. The first thin slice now supports explicit single-file text
+   writeback to Nextcloud-backed workspace folders, but not full folder mirroring
+   or non-text assets.
 5. **Gateway orchestration**
    Let the gateway route coding and workspace tasks into this service rather
    than only using prompt-level disclaimers.

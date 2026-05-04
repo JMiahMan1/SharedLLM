@@ -1,15 +1,12 @@
 import pytest
-import os
-import json
-from unittest.mock import MagicMock, AsyncMock
-from fastapi.testclient import TestClient
+import asyncio
+from unittest.mock import MagicMock
+from fastapi import BackgroundTasks
 
 # These work with PYTHONPATH=services
-from storage.indexer import chunk_text, build_content_index, CheckpointManager, extract_and_chunk_contents
-from storage.models import StorageEntry, IndexScanRequest, ContentIndexItem
-from storage.main import app
-
-client = TestClient(app)
+from storage.indexer import chunk_text, CheckpointManager, extract_and_chunk_contents
+from storage.models import IndexScanRequest, ContentIndexItem
+from storage.main import full_content_index, pause_indexing, resume_indexing
 
 def test_advanced_chunk_text():
     text = "A" * 1500
@@ -33,8 +30,7 @@ def test_advanced_checkpoint_manager(tmp_path):
     assert mgr2.is_indexed("/file1.txt", "123")
     assert not mgr2.is_indexed("/file1.txt", "456")
 
-@pytest.mark.asyncio
-async def test_extract_and_chunk_contents_logic():
+def test_extract_and_chunk_contents_logic():
     # Mock provider
     mock_provider = MagicMock()
     mock_provider.get_content.return_value = "Hello world knowledge"
@@ -48,7 +44,7 @@ async def test_extract_and_chunk_contents_logic():
         )
     ]
     
-    chunks = await extract_and_chunk_contents(mock_provider, items)
+    chunks = asyncio.run(extract_and_chunk_contents(mock_provider, items))
     assert len(chunks) == 2
     assert chunks[0]["metadata"]["path"] == "/test.txt"
     assert chunks[0]["metadata"]["is_dir"] is False
@@ -56,29 +52,18 @@ async def test_extract_and_chunk_contents_logic():
     assert chunks[1]["metadata"]["path"] == "/test.txt"
 
 def test_storage_api_control_endpoints():
-    resp = client.post("/index/pause")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "PAUSED"
-    
-    resp = client.post("/index/resume")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "RESUMED"
+    resp = pause_indexing()
+    assert resp["status"] == "PAUSED"
 
-@pytest.mark.asyncio
-async def test_full_index_endpoint_mocks(monkeypatch):
-    monkeypatch.setattr("storage.main._run_full_index_task", AsyncMock(return_value=None))
+    resp = resume_indexing()
+    assert resp["status"] == "RESUMED"
 
-    request_payload = {
-        "provider": {
-            "kind": "nextcloud",
-            "settings": {"url": "http://x", "username": "u", "password": "p"}
-        },
-        "path": "/",
-        "recursive": True
-    }
-    
-    resp = client.post("/index/full", json=request_payload)
-    assert resp.status_code == 200
-    data = resp.json()
+def test_full_index_endpoint_mocks(monkeypatch):
+    request = IndexScanRequest(
+        provider={"kind": "nextcloud", "settings": {"url": "http://x", "username": "u", "password": "p"}},
+        path="/",
+        recursive=True,
+    )
+    data = asyncio.run(full_content_index(request, BackgroundTasks()))
     assert data["status"] == "SUCCESS"
     assert data["message"] == "Indexing started in background."

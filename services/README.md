@@ -25,6 +25,8 @@ This directory contains the microservices refactor of the SharedLLM system.
 ### 4. Storage Bridge (`services/storage`)
 - **Provider Layer**: Normalizes multiple file stores behind a shared interface.
 - **Initial Backend**: Nextcloud via WebDAV.
+- **Writeback**: Supports explicit provider writeback so local authoritative
+  workspace changes can be reflected into a designated provider folder.
 - **Content Indexer**: Classifies repositories, notes, documents, ebooks, images,
   audio, and video into capability-aware index entries.
 - **Librarian Engine**: Uses that index to decide which tools can summarize,
@@ -35,9 +37,12 @@ This directory contains the microservices refactor of the SharedLLM system.
 ### 5. Workspace Runtime (`services/workspace_runtime`)
 - **Role**: Sandboxed local workspace runtime for code, notes, documents, and related workspace tasks.
 - **Capabilities**: Resolves registered workspaces, reads files safely, reports
-  `git status`, returns diffs, and runs targeted `pytest` commands.
+  `git status`, returns diffs, stages and commits local changes, scans the
+  designated provider folder, syncs selected files back to that provider path,
+  and runs targeted `pytest` commands.
 - **Boundary**: Uses mounted local workspaces as the authoritative source for
-  code state rather than provider-synced snapshots.
+  code state rather than provider-synced snapshots, while provider sync is done
+  explicitly through the Storage provider abstraction.
 
 ## Testing & Diagnostics
 

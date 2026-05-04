@@ -1,16 +1,17 @@
 # Storage Service
 
-The Storage service is the read-only bridge between SharedLLM and external file
+The Storage service is the provider bridge between SharedLLM and external file
 stores such as Nextcloud. Its current responsibilities are:
 
 - list provider entries
 - search provider entries by filename terms
+- write content back to supported provider paths
 - classify discovered items for indexing
 - extract text content for supported file types
 - sync extracted chunks to the RAG service
 
-It does not currently edit files, write back to Nextcloud, manage git state, or
-act as the canonical runtime for repository operations.
+It does not manage git state or act as the canonical runtime for repository
+operations. Local workspaces remain authoritative for active code changes.
 
 ## Current API
 
@@ -19,6 +20,7 @@ act as the canonical runtime for repository operations.
 | `/health` | GET | Service health check. |
 | `/providers/list` | POST | List entries from a provider path. |
 | `/providers/search` | POST | Search entries by query string. |
+| `/providers/write` | POST | Write text content to a provider path. |
 | `/index/full` | POST | Start a background scan, extraction, and RAG sync job. |
 | `/index/pause` | POST | Pause active indexing work for up to 60 seconds. |
 | `/index/resume` | POST | Resume indexing work immediately. |
@@ -33,6 +35,23 @@ The provider interface is intentionally narrow today:
 
 - `list_entries(path, recursive)`
 - `get_content(path)`
+- `write_content(path, content, create_parents, verify)`
+
+## Writeback Behavior
+
+`/providers/write` is the thin writeback surface used by `workspace_runtime`
+when a local authoritative file must also be reflected into a designated
+provider folder.
+
+For `nextcloud`, the current implementation:
+
+1. ensures parent directories exist with WebDAV `MKCOL`
+2. uploads text content with `PUT`
+3. optionally re-reads the file to verify the written content matches
+
+This is intentionally modular: other providers such as Google Drive or OneDrive
+should implement the same provider method rather than introducing provider
+logic into `workspace_runtime`.
 
 ## Indexing Behavior
 
@@ -57,10 +76,10 @@ The endpoint returns immediately with:
 ## Repo-Aware Limitation
 
 The service can discover repository-shaped folders as storage content, but the
-actual source of truth for code edits should remain a local git checkout. For
-active coding workflows, use a mapped workspace and run file edits, tests,
-diffs, and git operations against that checkout rather than against synced
-Nextcloud copies.
+actual source of truth for code edits remains a local git checkout. For active
+coding workflows, use a mapped workspace and run file edits, tests, diffs, and
+git operations against that checkout, then explicitly sync selected outputs back
+to the designated provider path.
 
 ## Tests
 

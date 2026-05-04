@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 try:
     from .models import ProviderConfig, StorageEntry
@@ -19,6 +20,10 @@ class StorageProvider(ABC):
     def get_content(self, path: str) -> str | None:
         raise NotImplementedError
 
+    @abstractmethod
+    def write_content(self, path: str, content: str, create_parents: bool = True, verify: bool = True) -> dict[str, Any]:
+        raise NotImplementedError
+
 
 class NextcloudStorageProvider(StorageProvider):
     def __init__(self, settings: dict):
@@ -33,6 +38,9 @@ class NextcloudStorageProvider(StorageProvider):
 
     def get_content(self, path: str) -> str | None:
         return self.client.get_file_content(path)
+
+    def write_content(self, path: str, content: str, create_parents: bool = True, verify: bool = True) -> dict[str, Any]:
+        return self.client.write_file_content(path, content, create_parents=create_parents, verify=verify)
 
 
 def build_provider(config: ProviderConfig) -> StorageProvider:
