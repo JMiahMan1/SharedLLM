@@ -64,16 +64,16 @@ ssh "$HOST" << EOF
     
     # Check logs until success message or timeout
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
-        if docker logs --tail 200 unified_rag_api 2>&1 | grep -q "Application startup complete"; then
+        if docker logs --tail 200 sharedllm_gateway 2>&1 | grep -q "Application startup complete"; then
             echo "[OK] Application started successfully!"
             SUCCESS=1
             break
         fi
         
         # Check for immediate failure (Traceback)
-        if docker logs --tail 20 unified_rag_api 2>&1 | grep -q "Traceback"; then
+        if docker logs --tail 20 sharedllm_gateway 2>&1 | grep -q "Traceback"; then
             echo "[FAIL] Application failed to start! Traceback detected."
-            docker logs --tail 20 unified_rag_api
+            docker logs --tail 20 sharedllm_gateway
             exit 1
         fi
 
@@ -86,7 +86,7 @@ ssh "$HOST" << EOF
     if [ \$SUCCESS -eq 0 ]; then
         echo "[FAIL] Timeout waiting for application startup."
         echo "Last 20 lines of logs:"
-        docker logs --tail 20 unified_rag_api
+        docker logs --tail 20 sharedllm_gateway
         exit 1
     fi
 EOF
