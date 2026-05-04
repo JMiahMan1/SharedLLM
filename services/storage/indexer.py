@@ -23,6 +23,12 @@ def set_indexer_pause(paused: bool):
     global INDEXER_PAUSED
     INDEXER_PAUSED = paused
 
+GLOBAL_SKIP_LIST = [
+    "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
+    ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox",
+    "site-packages", "bin", "include", "lib", "lib64"
+]
+
 class CheckpointManager:
     def __init__(self, checkpoint_file: str = "index_checkpoint.json"):
         self.checkpoint_file = checkpoint_file
@@ -96,7 +102,14 @@ FILE_RULES = {
 }
 
 def build_content_index(entries: list[StorageEntry]) -> list[ContentIndexItem]:
-    normalized = entries # They should be normalized by provider
+    # Filter out skipped paths
+    normalized = []
+    for entry in entries:
+        parts = entry.path.strip("/").split("/")
+        if any(p in GLOBAL_SKIP_LIST for p in parts):
+            continue
+        normalized.append(entry)
+
     path_map = {entry.path: entry for entry in normalized}
     child_map = _build_child_map(normalized)
 
