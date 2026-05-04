@@ -246,6 +246,8 @@ The current `workspace_runtime` microservice is intentionally narrow. It
 already exposes:
 
 * workspace registry listing and resolution
+* identity-backed filtering of registry workspaces by allowed user
+* limited system-scoped workspaces with admin bypass for broader capabilities
 * safe file reads inside mounted workspaces
 * `git status` and `git diff`
 * targeted `pytest` execution

@@ -15,7 +15,12 @@ live coding environment.
 Current implemented capabilities:
 
 - load a read-only workspace registry from `config/workspaces.json`
+- resolve a caller's user identity through the Identity service when user
+  context is provided
 - resolve a workspace ID to a real mounted local path
+- restrict registry-backed workspaces to `allowed_users` where configured
+- enforce reduced capability sets for `system` workspaces unless the resolved
+  caller is admin
 - enforce that all workspace access stays under the configured workspace root
 - read files from a workspace safely
 - report `git status`
@@ -93,6 +98,10 @@ service created specifically to fill that gap.
 ## Current Safety Model
 
 - every non-health endpoint requires `X-Internal-Secret`
+- registry-backed workspaces can require user context and are filtered through
+  Identity-backed `allowed_users`
+- system workspaces can expose a narrower capability set than normal user
+  workspaces
 - workspace paths must resolve under `WORKSPACE_RUNTIME_ROOT`
 - file access is blocked if it escapes the workspace
 - pytest targets reject absolute paths, parent traversal, and option-like

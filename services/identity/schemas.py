@@ -22,6 +22,7 @@ class ResolvedCredentials(BaseModel):
     code requires zero changes.
     """
     user: str
+    is_admin: bool = False
     nextcloud_url: Optional[str] = None
     nextcloud_user: Optional[str] = None
     nextcloud_pass: Optional[str] = None   # decrypted at resolution time
@@ -37,6 +38,7 @@ class ResolvedCredentials(BaseModel):
 class UserCreate(BaseModel):
     username: str
     display_name: str = ""
+    is_admin: bool = False
     is_system_default: bool = False
     api_key: Optional[str] = None
     nextcloud_url: Optional[str] = None
@@ -53,6 +55,7 @@ class UserRead(BaseModel):
     id: int
     username: str
     display_name: str
+    is_admin: bool
     is_system_default: bool
     nextcloud_url: Optional[str] = None
     nextcloud_user: Optional[str] = None

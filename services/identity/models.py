@@ -11,6 +11,7 @@ class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(index=True, unique=True)
     display_name: str = Field(default="")
+    is_admin: bool = Field(default=False)
     is_system_default: bool = Field(default=False)
     api_key: Optional[str] = Field(default=None, index=True)
 

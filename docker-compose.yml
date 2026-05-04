@@ -101,6 +101,7 @@ services:
     network_mode: "host"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - IDENTITY_SVC_URL=http://127.0.0.1:8001
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
       - WORKSPACE_RUNTIME_ROOT=/workspace
       - TZ=America/Phoenix

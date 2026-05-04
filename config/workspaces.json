@@ -3,6 +3,19 @@
     {
       "id": "sharedllm",
       "display_name": "SharedLLM",
+      "allowed_users": ["jeremiah"],
+      "local_path": "SharedLLM",
+      "nextcloud_path": "/Code/SharedLLM",
+      "git_remote": "origin",
+      "default_branch": "microservices",
+      "sync_mode": "local_git_authoritative"
+    },
+    {
+      "id": "sharedllm_system",
+      "display_name": "SharedLLM System",
+      "scope": "system",
+      "allowed_users": ["jeremiah"],
+      "capabilities": ["read", "git_status", "git_diff"],
       "local_path": "SharedLLM",
       "nextcloud_path": "/Code/SharedLLM",
       "git_remote": "origin",
