@@ -64,6 +64,14 @@ class NextCloudClient:
                 if norm_path in seen_paths:
                     continue
                 
+                # Proactive skip of noise directories
+                if any(skip in norm_path.split("/") for skip in [
+                    "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
+                    ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox",
+                    "site-packages", "bin", "include", "lib", "lib64"
+                ]):
+                    continue
+                
                 is_dir = self._is_directory(item)
                 
                 entry = StorageEntry(
