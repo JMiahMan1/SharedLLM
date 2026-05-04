@@ -80,4 +80,26 @@ async def get_states(ha_url: str, ha_token: str) -> list:
             return resp.json()
         except Exception as e:
             log.error(f"[ha_client] get_states failed: {e}")
+async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1) -> list:
+    """Retrieve history for a specific entity from HA."""
+    if not ha_url:
+        log.error("[ha_client] ha_url is None or empty. Cannot get history.")
+        return []
+        
+    import datetime
+    start_time = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    url = f"{ha_url.rstrip('/')}/api/history/period/{start_time}"
+    params = {"filter_entity_id": entity_id, "no_attributes": ""}
+    
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            log.info(f"[ha_client] GET {url}")
+            resp = await client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            # HA returns a list of lists (one per entity)
+            return data[0] if data else []
+        except Exception as e:
+            log.error(f"[ha_client] get_history({entity_id}) failed: {e}")
             return []

@@ -116,12 +116,7 @@ async def extract_and_chunk_contents(
     checkpoint: CheckpointManager | None = None
 ) -> list[dict]:
     chunks = []
-    text_items = [i for i in items if not i.is_dir]
-    
-    for item in text_items:
-        if "full_text" not in item.extractable_capabilities:
-            continue
-            
+    for item in items:
         # Checkpoint skip
         if checkpoint and checkpoint.is_indexed(item.path, item.mtime):
             continue
@@ -130,23 +125,39 @@ async def extract_and_chunk_contents(
         while INDEXER_PAUSED:
             await asyncio.sleep(1.0)
 
-        log.info(f"Indexing content for: {item.path}")
-        content = provider.get_content(item.path)
-        if not content:
-            continue
-            
-        file_chunks = chunk_text(content)
-        for i, text in enumerate(file_chunks):
-            chunks.append({
-                "content": text,
-                "metadata": {
-                    "path": item.path,
-                    "name": item.name,
-                    "chunk_index": i,
-                    "item_type": item.item_type,
-                    "subtype": item.subtype
-                }
-            })
+        log.info(f"Indexing metadata for: {item.path}")
+        # Always index the metadata/skeleton of the item
+        chunks.append({
+            "content": f"File/Folder: {item.name}\nPath: {item.path}\nType: {item.item_type}/{item.subtype}\nRole: {item.role}",
+            "metadata": {
+                "path": item.path,
+                "name": item.name,
+                "is_dir": item.is_dir,
+                "item_type": item.item_type,
+                "subtype": item.subtype,
+                "role": item.role,
+                "session_id": "temp" # Filled by main.py
+            }
+        })
+
+        # Optionally index full text
+        if not item.is_dir and "full_text" in item.extractable_capabilities:
+            log.info(f"Extracting full text for: {item.path}")
+            content = provider.get_content(item.path)
+            if content:
+                file_chunks = chunk_text(content)
+                for i, text in enumerate(file_chunks):
+                    chunks.append({
+                        "content": text,
+                        "metadata": {
+                            "path": item.path,
+                            "name": item.name,
+                            "chunk_index": i,
+                            "item_type": item.item_type,
+                            "subtype": item.subtype,
+                            "is_chunk": True
+                        }
+                    })
             
         if checkpoint:
             checkpoint.mark_indexed(item.path, item.mtime)

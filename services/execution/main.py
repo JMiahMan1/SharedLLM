@@ -150,6 +150,10 @@ async def execute_ha_service(req: HAServiceRequest):
 async def discovery_entities(ha_url: str, ha_token: str):
     return await ha_client.get_states(ha_url, ha_token)
 
+@app.get("/discovery/history")
+async def discovery_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1):
+    return await ha_client.get_history(ha_url, ha_token, entity_id, days)
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "execution"}
