@@ -142,6 +142,8 @@ async def contextualize_query(query: str, history: list) -> str:
 
     hist_str = ""
     for m in history[-3:]:
+        if not isinstance(m, dict):
+            continue
         role = "USER" if m.get("role") == "user" else "ASSISTANT"
         hist_str += f"{role}: {m.get('content')}\n"
 
@@ -172,7 +174,8 @@ def select_model_for_query(query: str) -> str:
         "summarize", "summary", "recap", "search my", "find in", "look up", "what do i have",
         "list my", "notes", "calendar", "documents", "document", "playlist", "playlists",
         "radio stations", "audiobook", "audiobooks", "library", "catalog", "catalogue",
-        "files", "folders", "nextcloud", "storage", "cloud"
+        "files", "folders", "nextcloud", "storage", "cloud", "books", "book", "music",
+        "photos", "photo", "images", "videos", "video", "code", "scripts"
     )
 
     if any(token in q for token in coding_signals):
@@ -372,7 +375,11 @@ async def resolve_identity(body: dict) -> dict:
                 err_detail = f"Identity resolution failed: {resp.status_code} {resp.text}"
                 log.error(err_detail)
                 raise HTTPException(status_code=resp.status_code, detail=err_detail)
-            return resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                log.error(f"Identity resolution returned non-dict: {data}")
+                raise HTTPException(status_code=500, detail="Identity resolution format error")
+            return data
     except httpx.RequestError as e:
         log.error(f"Identity service unreachable: {e}")
         raise HTTPException(status_code=503, detail="Identity service unreachable")
@@ -402,6 +409,26 @@ async def fetch_ha_entities(creds: dict) -> list:
         log.error(f"Entity discovery error: {e}")
         return []
 
+async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> list:
+    try:
+        resp = await _global_http_client.get(
+            f"{EXECUTION_SVC}/discovery/history",
+            params={
+                "ha_url": creds.get("ha_url"),
+                "ha_token": creds.get("ha_token"),
+                "entity_id": entity_id,
+                "days": days
+            },
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=5.0
+        )
+        if resp.status_code != 200:
+            return []
+        return resp.json()
+    except Exception as e:
+        log.error(f"History retrieval error for {entity_id}: {e}")
+        return []
+
 @app.post("/api/discovery/sync")
 async def discovery_sync(request: Request):
     """Orchestrates HA entity discovery and RAG sync."""
@@ -418,7 +445,10 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=10.0
         )
-        return resp.json()
+        data = resp.json()
+        if not isinstance(data, dict):
+            return {"status": "FAILURE", "message": str(data)}
+        return data
     except Exception as e:
         return {"status": "FAILURE", "message": str(e)}
 
@@ -579,27 +609,38 @@ async def chat_handler(request: Request):
     rag_context = ""
     try:
         selected_model = select_model_for_query(refined_query)
-        log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}'")
+        q_lower = refined_query.lower()
+        is_librarian_task = any(token in q_lower for token in (
+            "summarize", "summary", "recap", "search my", "find in", "look up", "what do i have",
+            "list my", "notes", "calendar", "documents", "document", "playlist", "playlists",
+            "radio stations", "audiobook", "audiobooks", "library", "catalog", "catalogue",
+            "files", "folders", "nextcloud", "storage", "cloud", "books", "book", "music",
+            "photos", "photo", "images", "videos", "video", "code", "scripts"
+        ))
+        
+        log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}' librarian={is_librarian_task}")
         
         async with httpx.AsyncClient(timeout=10.0) as client:
             # HA Entity Context
-            rag_resp = await client.post(
-                f"{RAG_SVC}/rag/search",
-                json={
-                    "query": refined_query,
-                    "user_id": user_id,
-                    "collection_name": "ha_entities",
-                    "k": 5
-                },
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if rag_resp.status_code == 200:
-                results = rag_resp.json().get("results", [])
-                if results:
-                    rag_context = "Relevant Device Context:\n" + "\n".join([r["content"] for r in results])
+            ha_keywords = [r"\bstatus\b", r"\bdevice\b", r"\bhome\b", r"\bsensor\b", r"\blight\b", r"\bswitch\b", r"\bdoor\b", r"\block\b", r"\btemp\b", r"\bhumidity\b", r"\bbattery\b"]
+            if any(re.search(k, q_lower) for k in ha_keywords):
+                rag_resp = await client.post(
+                    f"{RAG_SVC}/rag/search",
+                    json={
+                        "query": refined_query,
+                        "user_id": user_id,
+                        "collection_name": "ha_entities",
+                        "k": 5
+                    },
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if rag_resp.status_code == 200:
+                    results = rag_resp.json().get("results", [])
+                    if results:
+                        rag_context = "Relevant Device Context:\n" + "\n".join([r["content"] for r in results])
             
             # Storage Context for Librarian
-            if selected_model == LIBRARIAN_MODEL:
+            if is_librarian_task:
                 # A. Semantic Content Search
                 file_rag_resp = await client.post(
                     f"{RAG_SVC}/rag/search",
@@ -620,26 +661,60 @@ async def chat_handler(request: Request):
                         ])
                         rag_context += f"\n\nRelevant NextCloud Content:\n{file_text}"
 
-                # B. Shallow Filename Search
-                storage_resp = await client.post(
-                    f"{STORAGE_SVC}/nextcloud/search",
-                    params={"query": refined_query},
-                    json={
-                        "nc_url": creds.get("nextcloud_url"),
-                        "nc_user": creds.get("nextcloud_user"),
-                        "nc_pass": creds.get("nextcloud_pass")
-                    },
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if storage_resp.status_code == 200:
-                    matches = storage_resp.json().get("matches", [])
-                    if matches:
-                        storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
-                        rag_context += f"\n\nNextCloud Files found:\n{storage_text}"
+                    # B. Shallow Filename Search
+                    storage_resp = await client.post(
+                        f"{STORAGE_SVC}/providers/search",
+                        params={"query": refined_query},
+                        json={
+                            "provider": {
+                                "kind": "nextcloud",
+                                "settings": {
+                                    "url": creds.get("nextcloud_url"),
+                                    "username": creds.get("nextcloud_user"),
+                                    "password": creds.get("nextcloud_pass")
+                                }
+                            },
+                            "path": "/",
+                            "recursive": True
+                        },
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                    if storage_resp.status_code == 200:
+                        matches = storage_resp.json().get("matches", [])
+                        if matches:
+                            storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
+                            rag_context += f"\n\nNextCloud Files found (Real-time):\n{storage_text}"
+                
+            # C. System Logging Context (Awareness) - Always available if requested
+            log_keywords = [r"\blog\b", r"\blogs\b", r"\bhealth\b", r"\bstatus\b", r"\bissue\b", r"\berror\b", r"\bbroken\b"]
+            if any(re.search(k, q_lower) for k in log_keywords):
+                try:
+                    log_resp = await client.get(f"{LOGGING_SVC_URL}/logs", params={"limit": 5})
+                    if log_resp.status_code == 200:
+                        recent_logs = log_resp.json()
+                        if recent_logs:
+                            log_text = "\n".join([f"[{l['timestamp']}] [{l['service']}] {l['message']}" for l in recent_logs])
+                            rag_context += f"\n\n### Application Internal Logs:\n{log_text}"
+                except: pass
+            
+            # D. Device History Context (Home Assistant Activity) - Always available if requested
+            history_keywords = [r"\bhistory\b", r"\blast used\b", r"\bactivity\b", r"\brecently\b", r"\bturned on\b", r"\bturned off\b"]
+            if any(re.search(k, q_lower) for k in history_keywords):
+                try:
+                    # Fetch history for the top 3 relevant entities found in RAG
+                    for r in results[:3]:
+                        eid = r["metadata"].get("entity_id")
+                        if eid:
+                            hist = await fetch_device_history(creds, eid)
+                            if hist:
+                                hist_text = "\n".join([f"- {h['last_changed']}: {h['state']}" for h in hist[-5:]])
+                                rag_context += f"\n\n### Device Usage History ({eid}):\n{hist_text}"
+                except: pass
                             
     except Exception as e:
-        await emit_log("ERROR", f"Context injection failed: {str(e)}")
-        log.error(f"Context injection failed: {e}\n{traceback.format_exc()}")
+        err_detail = f"{type(e).__name__}: {str(e)}"
+        log.error(f"Context injection failed: {err_detail}\n{traceback.format_exc()}")
+        await emit_log("ERROR", f"Context injection failed: {err_detail}")
 
     log.info(f"Injected Context:\n{rag_context}")
 
@@ -677,7 +752,17 @@ async def chat_handler(request: Request):
             return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
             
         data = resp.json()
-        answer = data.get("message", {}).get("content") or data.get("response", "I encountered an error.")
+        if not isinstance(data, dict):
+            answer = str(data)
+        else:
+            msg_obj = data.get("message")
+            if isinstance(msg_obj, dict):
+                answer = msg_obj.get("content")
+            else:
+                answer = data.get("response", "I encountered an error.")
+        
+        if not answer:
+            answer = "I received an empty response from the brain."
         
         # Save to history
         await update_history(user_id, "user", query)
