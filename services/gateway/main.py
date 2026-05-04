@@ -112,6 +112,7 @@ EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://127.0.0.1:8003")
 RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
 LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://127.0.0.1:8006")
+WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://127.0.0.1:8007")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -176,7 +177,8 @@ async def readiness():
       "execution": f"{EXECUTION_SVC}/health",
       "rag": f"{RAG_SVC}/health",
       "storage": f"{STORAGE_SVC}/health",
-      "logging": f"{LOGGING_SVC_URL}/health"
+      "logging": f"{LOGGING_SVC_URL}/health",
+      "workspace_runtime": f"{WORKSPACE_RUNTIME_SVC}/health",
     }
 
     results = {"status": "READY", "services": {}}
