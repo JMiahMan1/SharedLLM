@@ -277,6 +277,26 @@ def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     return LIBRARIAN_SYSTEM_INSTRUCTION
 
 
+def is_coding_query(query: str) -> bool:
+    q = (query or "").lower()
+    return any(token in q for token in CODING_SIGNALS)
+
+
+def is_librarian_query(query: str) -> bool:
+    q = (query or "").lower()
+    return not is_coding_query(q) and any(token in q for token in LIBRARIAN_SIGNALS)
+
+
+def should_search_storage_for_code_query(query: str) -> bool:
+    q = (query or "").lower()
+    storage_code_signals = (
+      "file", "files", "path", "module", "service", "function", "class", "repo",
+      "repository", "workspace", "branch", "commit", "diff", "readme", "architecture",
+      "design", "nextcloud", "storage", "docs", ".py", ".js", ".ts", ".md", "/"
+    )
+    return any(token in q for token in storage_code_signals)
+
+
 def extract_media_request(query: str) -> tuple[str | None, str | None]:
     """
     Pull a likely media search string and target device name from commands like:
@@ -850,14 +870,16 @@ async def chat_handler(request: Request):
     try:
         selected_model = select_model_for_query(refined_query)
         q_lower = refined_query.lower()
-        
-        is_librarian_task = any(token in q_lower for token in (
-            "summarize", "summary", "recap", "search my", "find in", "look up", "what do i have",
-            "list my", "notes", "calendar", "documents", "document", "playlist", "playlists",
-            "radio stations", "audiobook", "audiobooks", "library", "catalog", "catalogue",
-            "files", "folders", "nextcloud", "storage", "cloud", "books", "book", "music",
-            "photos", "photo", "images", "videos", "video", "code", "scripts"
-        ))
+        is_coding_task = is_coding_query(refined_query)
+        is_librarian_task = is_librarian_query(refined_query)
+
+        if is_coding_task:
+            rag_context += (
+                "\nCode Workspace Context:\n"
+                "- No live local Git workspace is attached to this gateway path.\n"
+                "- Any storage-backed repository context below is non-authoritative companion material.\n"
+                "- For authoritative code state, diffs, tests, and branch history, prefer a mapped local checkout.\n"
+            )
 
         # Optimize HA Sync: Only sync if not done recently
         sync_key = f"ha_sync_{user_id}"
@@ -915,6 +937,27 @@ async def chat_handler(request: Request):
             ))
             task_names.append("nc_realtime")
 
+        # Task 5: Code-adjacent document search
+        if is_coding_task:
+            tasks.append(client.post(
+                f"{RAG_SVC}/rag/search",
+                json={"query": refined_query, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            ))
+            task_names.append("code_rag")
+
+            if should_search_storage_for_code_query(refined_query):
+                tasks.append(client.post(
+                    f"{STORAGE_SVC}/providers/search",
+                    params={"query": refined_query},
+                    json={
+                        "provider": {"kind": "nextcloud", "settings": {"url": creds.get("nextcloud_url"), "username": creds.get("nextcloud_user"), "password": creds.get("nextcloud_pass")}},
+                        "path": "/", "recursive": False
+                    },
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                ))
+                task_names.append("code_realtime")
+
         # Execute parallel tasks
         if tasks:
             responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -951,11 +994,36 @@ async def chat_handler(request: Request):
                                 file_lines.append(f"- {name_val} ({path}): {content}...")
                             if file_lines:
                                 rag_context += f"\n\nRelevant NextCloud Content:\n" + "\n".join(file_lines)
+                    elif name == "code_rag":
+                        file_results = data.get("results", [])
+                        if isinstance(file_results, list):
+                            file_lines = []
+                            for r in file_results:
+                                if not isinstance(r, dict):
+                                    continue
+                                meta = r.get("metadata", {})
+                                name_val = meta.get("name", "file")
+                                path = meta.get("path", "unknown")
+                                content = str(r.get("content", ""))[:200]
+                                file_lines.append(f"- {name_val} ({path}): {content}...")
+                            if file_lines:
+                                rag_context += (
+                                    "\n\nRepository-Adjacent Storage Context (Non-Authoritative):\n"
+                                    + "\n".join(file_lines)
+                                )
                     elif name == "nc_realtime":
                         matches = data.get("matches", [])
                         if isinstance(matches, list) and matches:
                             storage_text = "\n".join([f"- {m.get('name', 'file')} (Path: {m.get('path', 'unknown')})" for m in matches if isinstance(m, dict)])
                             rag_context += f"\n\nNextCloud Files found (Real-time):\n{storage_text}"
+                    elif name == "code_realtime":
+                        matches = data.get("matches", [])
+                        if isinstance(matches, list) and matches:
+                            storage_text = "\n".join([f"- {m.get('name', 'file')} (Path: {m.get('path', 'unknown')})" for m in matches if isinstance(m, dict)])
+                            rag_context += (
+                                "\n\nRepository-Adjacent Storage Matches (Discovery Only):\n"
+                                f"{storage_text}"
+                            )
                 except Exception as pe:
                     log.error(f"Error parsing {name} response: {pe}")
 
@@ -990,7 +1058,7 @@ async def chat_handler(request: Request):
             "model": selected_model,
             "messages": [
                 {"role": "system", "content": system_instruction}
-            ] + history + [{"role": "user", "content": f"CONTEXT:\n{rag_context}\n\nQUERY: {refined_query}"}],
+            ] + history + [{"role": "user", "content": f"{'CODE CONTEXT' if is_coding_task else 'CONTEXT'}:\n{rag_context}\n\nQUERY: {refined_query}"}],
             "stream": should_stream
         }
 
