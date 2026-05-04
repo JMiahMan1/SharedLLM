@@ -141,6 +141,7 @@ async def sync_files(payload: dict):
     
     import hashlib
     for c in chunks:
+        if not isinstance(c, dict): continue
         content = c.get("content")
         metadata = c.get("metadata", {})
         if not content:
@@ -221,6 +222,7 @@ async def sync_ha(payload: dict):
     metas = []
     
     for e in entities:
+        if not isinstance(e, dict): continue
         eid = e.get("entity_id", "")
         if not eid: continue
         
