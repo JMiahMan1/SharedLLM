@@ -1,4 +1,7 @@
 import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
@@ -112,3 +115,25 @@ def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
     assert response.status_code == 200
     assert captured["use_chat"] is True
     assert captured["payload"]["model"] == "qwen3:latest"
+
+
+def test_gateway_top_level_import_loads_prompts():
+    gateway_dir = Path(__file__).resolve().parents[1] / "gateway"
+    env = os.environ.copy()
+    env.setdefault("INTERNAL_SECRET", "test-secret")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import main; assert hasattr(main, 'LIBRARIAN_SYSTEM_INSTRUCTION'); "
+            "assert main.LIBRARIAN_SYSTEM_INSTRUCTION",
+        ],
+        cwd=gateway_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
