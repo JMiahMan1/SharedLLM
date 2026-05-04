@@ -34,7 +34,9 @@ class NextCloudClient:
     def list_files(self, remote_path='/'):
         """List files in a directory."""
         try:
-            return self.client.ls(remote_path)
+            items = self.client.ls(remote_path)
+            log.info(f"DAV ls({remote_path}) returned {len(items)} items")
+            return items
         except Exception as e:
             log.error(f"Failed to list files in {remote_path}: {e}")
             return []
