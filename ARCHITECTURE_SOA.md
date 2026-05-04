@@ -10,9 +10,9 @@ This document defines the modular service-oriented architecture for the SharedLL
 | **Identity** | 8001 | Secure Identity Resolution | User/Device mapping, Credential decryption (AES-256), Security tokens | Storage (SQLite), Fernet Key |
 | **Execution** | 8003 | Home Assistant Bridge | Light control, Media ops, Climate, Security, Device Discovery | Home Assistant API |
 | **RAG** | 8004 | Semantic Memory Layer | HA Entity indexing, Document retrieval, Semantic search | Storage (ChromaDB), Ollama |
-| **Storage** | 8005 | Persistence Layer | SQLite for Identity, ChromaDB for RAG, Redis for session state | Local Filesystem, Redis |
+| **Storage** | 8005 | Provider Bridge & Persistence Layer | Provider list/search/write, SQLite for Identity, ChromaDB for RAG, Redis for session state | Local Filesystem, Redis |
 | **Logging** | 8006 (Host: 11436) | Observability Hub | Centralized SQLite log storage, App-ready API | Microservices (via HTTP) |
-| **Workspace Runtime** | 8007 | Sandboxed Workspace Agent Substrate | Workspace registry, Identity-backed workspace filtering, limited system workspaces, file reads, git inspection, targeted pytest execution | Mounted workspaces, Git, Identity |
+| **Workspace Runtime** | 8007 | Sandboxed Workspace Agent Substrate | Workspace registry, Identity-backed workspace filtering, limited system workspaces, local file read/write, provider-folder scan, provider file sync, git inspection/mutation, targeted pytest execution | Mounted workspaces, Git, Identity, Storage |
 | **Automation** | - | Background Tasks | Cron-like tasks, Device polling, Sync triggers | Gateway, Execution |
 
 ## Key Workflows

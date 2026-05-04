@@ -4,23 +4,38 @@ Tests provider-agnostic content indexing, capability mapping, and Nextcloud-comp
 Related code: services/storage/main.py, services/storage/indexer.py, services/storage/providers.py
 """
 
+import asyncio
+
 import pytest
 
 from storage.main import (
     health,
     list_provider_entries,
     search_provider,
+    write_provider_content,
 )
 from storage.indexer import build_content_index, summarize_index
-from storage.models import IndexScanRequest, ProviderListRequest, StorageEntry
+from storage.models import IndexScanRequest, ProviderListRequest, ProviderWriteRequest, StorageEntry
 
 
 class FakeProvider:
     def __init__(self, entries):
         self.entries = entries
+        self.writes = []
 
     def list_entries(self, path="/", recursive=False):
         return self.entries
+
+    def write_content(self, path, content, create_parents=True, verify=True):
+        self.writes.append(
+            {
+                "path": path,
+                "content": content,
+                "create_parents": create_parents,
+                "verify": verify,
+            }
+        )
+        return {"path": path, "bytes_written": len(content.encode("utf-8")), "verified": verify}
 
 
 def _fixture_entries():
@@ -90,8 +105,7 @@ def test_build_content_index_matches_current_rules():
         assert items[path]["recommended_tools"] == ["media"]
 
 
-@pytest.mark.asyncio
-async def test_provider_list_returns_generic_entries(monkeypatch):
+def test_provider_list_returns_generic_entries(monkeypatch):
     monkeypatch.setattr("storage.main.build_provider", lambda config: FakeProvider(_fixture_entries()[:3]))
 
     request = ProviderListRequest(
@@ -103,15 +117,19 @@ async def test_provider_list_returns_generic_entries(monkeypatch):
         recursive=False,
     )
 
-    data = await list_provider_entries(request)
+    data = asyncio.run(list_provider_entries(request))
     assert data["status"] == "SUCCESS"
     assert data["count"] == 3
     assert len(data["entries"]) == 3
 
 
-@pytest.mark.asyncio
-async def test_provider_search_returns_matches(monkeypatch):
+def test_provider_search_returns_matches(monkeypatch):
     monkeypatch.setattr("storage.main.build_provider", lambda config: FakeProvider(_fixture_entries()))
+    
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("starlette.concurrency.run_in_threadpool", fake_run_in_threadpool)
 
     request = IndexScanRequest(
         provider={
@@ -122,7 +140,28 @@ async def test_provider_search_returns_matches(monkeypatch):
         recursive=True,
     )
 
-    data = await search_provider(query="novel", req=request)
+    data = asyncio.run(search_provider(query="novel", req=request))
     assert data["status"] == "SUCCESS"
     assert len(data["matches"]) == 1
     assert data["matches"][0]["name"] == "novel.epub"
+
+
+def test_provider_write_returns_result(monkeypatch):
+    fake_provider = FakeProvider(_fixture_entries())
+    monkeypatch.setattr("storage.main.build_provider", lambda config: fake_provider)
+
+    request = ProviderWriteRequest(
+        provider={
+            "kind": "nextcloud",
+            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
+        },
+        path="/Code/SharedLLM/docs/example.md",
+        content="# Example\n",
+        create_parents=True,
+        verify=True,
+    )
+
+    data = asyncio.run(write_provider_content(request))
+    assert data["status"] == "SUCCESS"
+    assert data["result"]["path"] == "/Code/SharedLLM/docs/example.md"
+    assert fake_provider.writes[0]["verify"] is True

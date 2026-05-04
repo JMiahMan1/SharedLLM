@@ -2,7 +2,8 @@
 import easywebdav
 import logging
 import requests
-from urllib.parse import urlparse
+from pathlib import PurePosixPath
+from urllib.parse import quote, urlparse
 
 try:
     from .models import StorageEntry
@@ -123,6 +124,67 @@ class NextCloudClient:
             log.error(f"Failed to fetch content for {remote_path}: {e}")
             return None
 
+    def ensure_directory(self, remote_path: str) -> None:
+        normalized = self._normalize_remote_path(remote_path)
+        if normalized == "/":
+            return
+
+        current = PurePosixPath("/")
+        for part in PurePosixPath(normalized).parts[1:]:
+            current = current / part
+            full_url = self._full_url(str(current))
+            try:
+                resp = requests.request(
+                    "MKCOL",
+                    full_url,
+                    auth=(self.username, self.password),
+                    timeout=15.0,
+                )
+                if resp.status_code not in {200, 201, 204, 301, 302, 405}:
+                    raise RuntimeError(f"MKCOL {current} failed with status {resp.status_code}")
+            except Exception as e:
+                log.error(f"Failed to ensure directory {current}: {e}")
+                raise
+
+    def write_file_content(
+        self,
+        remote_path: str,
+        content: str,
+        create_parents: bool = True,
+        verify: bool = True,
+    ) -> dict:
+        normalized = self._normalize_remote_path(remote_path)
+        if create_parents:
+            parent = str(PurePosixPath(normalized).parent)
+            self.ensure_directory(parent)
+
+        full_url = self._full_url(normalized)
+        try:
+            resp = requests.put(
+                full_url,
+                auth=(self.username, self.password),
+                data=content.encode("utf-8"),
+                headers={"Content-Type": "text/plain; charset=utf-8"},
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            log.error(f"Failed to upload content for {normalized}: {e}")
+            raise
+
+        verified = False
+        if verify:
+            fetched = self.get_file_content(normalized)
+            verified = fetched == content
+            if not verified:
+                raise RuntimeError(f"Verification failed for {normalized}")
+
+        return {
+            "path": normalized,
+            "bytes_written": len(content.encode("utf-8")),
+            "verified": verified if verify else None,
+        }
+
     @staticmethod
     def _basename(path: str) -> str:
         normalized = path.rstrip("/")
@@ -132,6 +194,11 @@ class NextCloudClient:
     def _normalize_remote_path(path: str) -> str:
         normalized = "/" + str(path).strip("/")
         return normalized or "/"
+
+    def _full_url(self, remote_path: str) -> str:
+        clean_path = self._normalize_remote_path(remote_path)
+        quoted_path = quote(clean_path.lstrip("/"), safe="/")
+        return f"{self.protocol}://{self.host}{self.path}{quoted_path}"
 
     @staticmethod
     def _is_directory(item) -> bool:

@@ -11,6 +11,11 @@ It provides a safe, mounted-workspace interface for:
 - writing files inside user-authorized workspaces
 - reporting `git status`
 - returning `git diff`
+- staging files with `git add`
+- creating commits with identity-derived Git author metadata
+- creating branches for isolated workspace changes
+- scanning a workspace's designated provider folder
+- syncing a local file into that designated provider path
 - running targeted `pytest` commands
 
 ## What It Does Today
@@ -26,7 +31,8 @@ Implemented today:
 - safe workspace resolution under the mounted root
 - read-only file access
 - guarded text file writes with optional `expected_sha256` conflict checks
-- `git status` and `git diff`
+- `git status`, `git diff`, `git add`, `git commit`, and branch creation
+- provider-folder scans and explicit file sync via the Storage provider layer
 - targeted `pytest` execution
 
 ## Service Schematic
@@ -37,7 +43,10 @@ flowchart TD
     WorkspaceRuntime --> Registry[config/workspaces.json]
     WorkspaceRuntime --> Identity[Identity /api/resolve]
     WorkspaceRuntime --> MountedWorkspace[/workspace/...]
-    MountedWorkspace --> Git[git status / git diff]
+    Identity --> GitIdentity[Resolved GitHub or GitLab credentials]
+    Identity --> ProviderIdentity[Resolved Nextcloud credentials]
+    MountedWorkspace --> Git[git status / git diff / git add / git commit / git branch]
+    WorkspaceRuntime --> Storage[Storage /providers/list /providers/write]
     MountedWorkspace --> Pytest[python -m pytest]
 ```
 
@@ -50,7 +59,7 @@ flowchart TD
     LoadRegistry --> Policy[Apply access_policy and scope rules]
     Policy --> PathCheck[Resolve path under WORKSPACE_RUNTIME_ROOT]
     PathCheck --> Capability[Check requested capability]
-    Capability --> Execute[Read file / git / pytest]
+    Capability --> Execute[Read file / write file / git / pytest]
 ```
 
 ## Registry Schema
@@ -77,6 +86,11 @@ Each workspace entry can currently define:
 - `POST /files/write`
 - `POST /git/status`
 - `POST /git/diff`
+- `POST /git/add`
+- `POST /git/commit`
+- `POST /git/branch/create`
+- `POST /provider/scan`
+- `POST /provider/sync/file`
 - `POST /tests/pytest`
 
 ## Access Model
@@ -106,6 +120,9 @@ is to operate on mounted workspaces as a whole, including:
   `admin_only`, while admin status comes from the Identity service.
 - Registry entries can declare `scope: "system"` and a reduced `capabilities`
   list for more sensitive workspaces.
+- Provider sync resolves credentials through Identity and writes through the
+  Storage provider abstraction rather than embedding provider-specific logic in
+  the runtime.
 - Relative file reads and pytest targets are checked for path traversal.
 - The service is intended for internal use and requires `X-Internal-Secret`
   for non-health endpoints.
@@ -116,26 +133,30 @@ Implemented:
 
 - read/write file access
 - policy-based workspace resolution
-- git inspection
+- git inspection and controlled local git mutation
+- provider scan and explicit provider file sync for mapped workspaces
 - targeted test execution
 
 Not yet implemented:
 
-- git commit/push APIs
+- git push APIs
 - workspace registry mutation APIs
 - direct Gateway orchestration against these endpoints
 - DB-backed workspace registry records
 - document or note mutation APIs
+- provider writeback after local authoritative changes
+  only text file sync is implemented today, not broader folder mirroring
 
 ## Remaining Work
 
 - move workspace definitions from static JSON into a DB-backed registry
 - extend file mutation support beyond direct text writes
-- add Git branch/add/commit/push operations
-- sync local authoritative changes back to provider-backed storage where needed
+- add Git push/fetch/pull operations with remote-auth controls
+- expand provider sync from single-file text writeback into broader workspace mirroring where needed
 - let the Gateway orchestrate this service directly for agentic tasks
 - add note, document, metadata, and transcription operations under the same
   workspace policy model
+- add explicit audit logging for write-side workspace actions
 
 See also:
 

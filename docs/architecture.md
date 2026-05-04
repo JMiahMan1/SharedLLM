@@ -217,12 +217,13 @@ truth for Git repositories. The better split is:
 
 * **Capability Split**
   * **Storage service**: list/search registered workspace folders and retrieve
-    non-code companion documents from Nextcloud.
+    non-code companion documents from Nextcloud, plus explicit provider
+    writeback through the provider abstraction.
   * **Gateway**: detect coding intent and route code questions to the coding
     model.
   * **Workspace Runtime service**: inspect the mapped local checkout for
-    `git status`, file reads, diffs, and test execution inside the Docker
-    stack.
+    `git status`, file reads, diffs, provider-folder scans, explicit file sync,
+    and test execution inside the Docker stack.
 
 * **Trigger Behavior**
   * If the user asks about code in a registered repo, prefer the local mapped
@@ -249,12 +250,15 @@ already exposes:
 * identity-backed filtering of registry workspaces by access policy
 * limited system-scoped workspaces with admin bypass for broader capabilities
 * safe file reads inside mounted workspaces
-* `git status` and `git diff`
+* local file writes with optimistic conflict checks
+* `git status`, `git diff`, `git add`, `git commit`, and branch creation
+* designated-provider scans and explicit single-file sync to Nextcloud-backed
+  workspace folders
 * targeted `pytest` execution
 
-It does **not** yet perform file mutations, Git commit/push operations, or
-provider writeback. Those remain the next implementation steps rather than
-implied capabilities.
+It does **not** yet provide full folder mirroring, non-text provider sync,
+or Git push/pull orchestration. Those remain the next implementation steps
+rather than implied capabilities.
 
 ---
 

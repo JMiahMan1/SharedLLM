@@ -2,6 +2,7 @@ import json
 import subprocess
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -39,6 +40,7 @@ def runtime_env(tmp_path, monkeypatch):
                         "display_name": "Demo Workspace",
                         "access_policy": "authenticated",
                         "local_path": "demo",
+                        "nextcloud_path": "/Code/SharedLLM",
                         "default_branch": "main",
                     },
                     {
@@ -48,6 +50,7 @@ def runtime_env(tmp_path, monkeypatch):
                         "access_policy": "authenticated",
                         "capabilities": ["read", "git_status", "git_diff"],
                         "local_path": "demo",
+                        "nextcloud_path": "/Code/SharedLLM",
                         "default_branch": "main",
                     },
                     {
@@ -55,6 +58,7 @@ def runtime_env(tmp_path, monkeypatch):
                         "display_name": "Demo Admin Workspace",
                         "access_policy": "admin_only",
                         "local_path": "demo",
+                        "nextcloud_path": "/Code/SharedLLM",
                         "default_branch": "main",
                     }
                 ]
@@ -65,11 +69,37 @@ def runtime_env(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "INTERNAL_SECRET", "test-secret")
     monkeypatch.setattr(runtime, "WORKSPACE_ROOT", workspace_root.resolve())
     monkeypatch.setattr(runtime, "WORKSPACE_REGISTRY_PATH", str(registry_path))
-    monkeypatch.setattr(
-        runtime,
-        "_resolve_identity_context",
-        lambda ref: {"user": ref.rag_user, "is_admin": ref.rag_user == "admin"} if ref.rag_user else None,
-    )
+    def resolve_identity(ref):
+        if not ref.rag_user:
+            return None
+        if ref.rag_user == "admin":
+            return {
+                "user": "admin",
+                "is_admin": True,
+                "github_user": "admin-gh",
+                "nextcloud_url": "https://cloud.local",
+                "nextcloud_user": "admin",
+                "nextcloud_pass": "secret",
+            }
+        if ref.rag_user == "gitlab-user":
+            return {
+                "user": "gitlab-user",
+                "is_admin": False,
+                "gitlab_user": "gitlab-handle",
+                "nextcloud_url": "https://cloud.local",
+                "nextcloud_user": "gitlab-user",
+                "nextcloud_pass": "secret",
+            }
+        return {
+            "user": ref.rag_user,
+            "is_admin": False,
+            "github_user": "jeremiah-gh",
+            "nextcloud_url": "https://cloud.local",
+            "nextcloud_user": ref.rag_user,
+            "nextcloud_pass": "secret",
+        }
+
+    monkeypatch.setattr(runtime, "_resolve_identity_context", resolve_identity)
 
     return repo_dir
 
@@ -141,6 +171,59 @@ def test_write_file_rejects_conflict():
     assert exc.value.status_code == 409
 
 
+def test_provider_scan_uses_workspace_nextcloud_binding(monkeypatch):
+    calls = []
+
+    def fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "status": "SUCCESS",
+                "count": 1,
+                "entries": [{"path": "/Code/SharedLLM/sample.py", "name": "sample.py", "is_dir": False}],
+            },
+            text="",
+        )
+
+    monkeypatch.setattr(runtime.httpx, "post", fake_post)
+    data = runtime.provider_scan(
+        runtime.ProviderScanRequest(workspace_id="demo", rag_user="jeremiah", recursive=True),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["provider_kind"] == "nextcloud"
+    assert calls[0]["url"].endswith("/providers/list")
+    assert calls[0]["json"]["path"] == "/Code/SharedLLM"
+
+
+def test_provider_sync_file_writes_local_file_to_provider(runtime_env, monkeypatch):
+    calls = []
+
+    def fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "status": "SUCCESS",
+                "result": {"path": json["path"], "bytes_written": len(json["content"].encode("utf-8")), "verified": True},
+            },
+            text="",
+        )
+
+    monkeypatch.setattr(runtime.httpx, "post", fake_post)
+    (runtime_env / "sample.py").write_text("VALUE = 11\n")
+
+    data = runtime.provider_sync_file(
+        runtime.ProviderSyncFileRequest(workspace_id="demo", rag_user="jeremiah", relative_path="sample.py"),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["provider_path"] == "/Code/SharedLLM/sample.py"
+    assert calls[0]["url"].endswith("/providers/write")
+    assert calls[0]["json"]["content"] == "VALUE = 11\n"
+
+
 def test_system_workspace_blocks_write_for_non_admin():
     with pytest.raises(HTTPException) as exc:
         runtime.write_file(
@@ -162,6 +245,91 @@ def test_git_status_reports_dirty_workspace(runtime_env):
     assert data["status"] == "SUCCESS"
     assert data["dirty"] is True
     assert any("sample.py" in line for line in data["porcelain"])
+
+
+def test_git_add_stages_specific_paths(runtime_env):
+    (runtime_env / "sample.py").write_text("VALUE = 7\n")
+
+    data = runtime.git_add(
+        runtime.GitAddRequest(workspace_id="demo", rag_user="jeremiah", pathspecs=["sample.py"]),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert any(line.endswith("sample.py") for line in data["porcelain"])
+
+
+def test_git_commit_stages_and_commits_with_github_derived_author(runtime_env):
+    (runtime_env / "sample.py").write_text("VALUE = 8\n")
+
+    data = runtime.git_commit(
+        runtime.GitCommitRequest(
+            workspace_id="demo",
+            rag_user="jeremiah",
+            message="Update sample value",
+            pathspecs=["sample.py"],
+        ),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["author_name"] == "jeremiah"
+    assert data["author_email"] == "jeremiah-gh@users.noreply.github.com"
+
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an <%ae>"],
+        cwd=runtime_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert author.stdout.strip() == "jeremiah <jeremiah-gh@users.noreply.github.com>"
+
+
+def test_git_commit_derives_gitlab_author_when_github_missing(runtime_env):
+    data = runtime.git_commit(
+        runtime.GitCommitRequest(
+            workspace_id="demo",
+            rag_user="gitlab-user",
+            message="Empty commit for author test",
+            allow_empty=True,
+        ),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["author_name"] == "gitlab-user"
+    assert data["author_email"] == "gitlab-handle@users.noreply.gitlab.local"
+
+
+def test_git_branch_create_checks_out_new_branch():
+    data = runtime.git_branch_create(
+        runtime.GitBranchCreateRequest(workspace_id="demo", rag_user="jeremiah", branch_name="feature/runtime-git"),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["branch"] == "feature/runtime-git"
+    assert data["current_branch"] == "feature/runtime-git"
+
+
+def test_system_workspace_blocks_git_write_for_non_admin(runtime_env):
+    (runtime_env / "sample.py").write_text("VALUE = 9\n")
+    with pytest.raises(HTTPException) as exc:
+        runtime.git_add(
+            runtime.GitAddRequest(workspace_id="demo_system", rag_user="jeremiah", pathspecs=["sample.py"]),
+            "test-secret",
+        )
+    assert exc.value.status_code == 403
+
+
+def test_system_workspace_allows_git_write_for_admin():
+    data = runtime.git_branch_create(
+        runtime.GitBranchCreateRequest(
+            workspace_id="demo_system",
+            rag_user="admin",
+            branch_name="admin/system-maintenance",
+        ),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["current_branch"] == "admin/system-maintenance"
 
 
 def test_pytest_endpoint_runs_targeted_tests():
