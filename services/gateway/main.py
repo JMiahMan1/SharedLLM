@@ -89,18 +89,18 @@ try:
     from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
     from .intent_engine import engine
     from .history import get_history, update_history, ping_redis
-    from .prompts import LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+    from .prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 except (ImportError, ValueError):
     try:
       from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from gateway.intent_engine import engine
       from gateway.history import get_history, update_history, ping_redis
-      from gateway.prompts import LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+      from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     except ImportError:
       from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from intent_engine import engine
       from history import get_history, update_history, ping_redis
-      from prompts import LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+      from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 
 # --- Setup Logging ---
 log = logging.getLogger("gateway")
@@ -120,6 +120,20 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:8b")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", DEFAULT_MODEL)
 CODING_MODEL = os.getenv("CODING_MODEL", ASSISTANT_MODEL)
 LIBRARIAN_MODEL = os.getenv("LIBRARIAN_MODEL", ASSISTANT_MODEL)
+
+CODING_SIGNALS = (
+  "python", "javascript", "typescript", "node", "react", "fastapi", "sql", "regex",
+  "docker", "dockerfile", "bash", "shell", "pytest", "bug", "fix", "refactor",
+  "implement", "function", "class", "stack trace", "traceback", "code", "script",
+  "compile", "syntax", "test", "unit test", "integration test", "git"
+)
+LIBRARIAN_SIGNALS = (
+  "summarize", "summary", "recap", "search my", "find in", "look up", "what do i have",
+  "list my", "notes", "calendar", "documents", "document", "playlist", "playlists",
+  "radio stations", "audiobook", "audiobooks", "library", "catalog", "catalogue",
+  "files", "folders", "nextcloud", "storage", "cloud", "books", "book", "music",
+  "photos", "photo", "images", "videos", "video", "code", "scripts"
+)
 
 # --- Global Clients ---
 _global_http_client: httpx.AsyncClient = None
@@ -247,25 +261,20 @@ def select_model_for_query(query: str) -> str:
     """Route obvious coding and librarian tasks to specialized models."""
     q = (query or "").lower()
 
-    coding_signals = (
-      "python", "javascript", "typescript", "node", "react", "fastapi", "sql", "regex",
-      "docker", "dockerfile", "bash", "shell", "pytest", "bug", "fix", "refactor",
-      "implement", "function", "class", "stack trace", "traceback", "code", "script",
-      "compile", "syntax", "test", "unit test", "integration test", "git"
-    )
-    librarian_signals = (
-      "summarize", "summary", "recap", "search my", "find in", "look up", "what do i have",
-      "list my", "notes", "calendar", "documents", "document", "playlist", "playlists",
-      "radio stations", "audiobook", "audiobooks", "library", "catalog", "catalogue",
-      "files", "folders", "nextcloud", "storage", "cloud", "books", "book", "music",
-      "photos", "photo", "images", "videos", "video", "code", "scripts"
-    )
-
-    if any(token in q for token in coding_signals):
+    if any(token in q for token in CODING_SIGNALS):
       return CODING_MODEL
-    if any(token in q for token in librarian_signals):
+    if any(token in q for token in LIBRARIAN_SIGNALS):
       return LIBRARIAN_MODEL
     return ASSISTANT_MODEL
+
+
+def select_system_instruction_for_query(query: str, selected_model: str) -> str:
+    q = (query or "").lower()
+    if any(token in q for token in CODING_SIGNALS):
+      return CODE_HELPER_SYSTEM_INSTRUCTION
+    if selected_model == LIBRARIAN_MODEL or any(token in q for token in LIBRARIAN_SIGNALS):
+      return LIBRARIAN_SYSTEM_INSTRUCTION
+    return LIBRARIAN_SYSTEM_INSTRUCTION
 
 
 def extract_media_request(query: str) -> tuple[str | None, str | None]:
@@ -975,10 +984,12 @@ async def chat_handler(request: Request):
             await client.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
         except: pass
 
+        system_instruction = select_system_instruction_for_query(refined_query, selected_model)
+
         ollama_payload = {
             "model": selected_model,
             "messages": [
-                {"role": "system", "content": LIBRARIAN_SYSTEM_INSTRUCTION}
+                {"role": "system", "content": system_instruction}
             ] + history + [{"role": "user", "content": f"CONTEXT:\n{rag_context}\n\nQUERY: {refined_query}"}],
             "stream": should_stream
         }

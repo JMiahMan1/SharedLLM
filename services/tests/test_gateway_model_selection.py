@@ -15,7 +15,8 @@ os.environ.setdefault("CODING_MODEL", "qwen2.5-coder:7b")
 from fastapi.testclient import TestClient
 import pytest
 
-from gateway.main import app, select_model_for_query
+from gateway.main import app, select_model_for_query, select_system_instruction_for_query
+from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION
 
 
 @pytest.fixture
@@ -86,6 +87,7 @@ def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     assert response.status_code == 200
     assert captured["use_chat"] is True
     assert captured["payload"]["model"] == "qwen2.5-coder:7b"
+    assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
 
 
 def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
@@ -115,6 +117,23 @@ def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
     assert response.status_code == 200
     assert captured["use_chat"] is True
     assert captured["payload"]["model"] == "qwen3:latest"
+    assert captured["payload"]["messages"][0]["content"] == LIBRARIAN_SYSTEM_INSTRUCTION
+
+
+def test_select_system_instruction_for_query_uses_code_helper_prompt_for_coding_queries():
+    instruction = select_system_instruction_for_query(
+        "Help me fix this Python traceback in the gateway service",
+        "qwen2.5-coder:7b",
+    )
+    assert instruction == CODE_HELPER_SYSTEM_INSTRUCTION
+
+
+def test_select_system_instruction_for_query_uses_librarian_prompt_for_general_queries():
+    instruction = select_system_instruction_for_query(
+        "What should I make for dinner?",
+        "qwen3:latest",
+    )
+    assert instruction == LIBRARIAN_SYSTEM_INSTRUCTION
 
 
 def test_gateway_top_level_import_loads_prompts():
