@@ -794,18 +794,34 @@ async def chat_handler(request: Request):
             elif intent in {"media_transport", "pause_media"}:
                 exec_payload["command"] = media_transport_command
 
+            prior_entity = next(
+                (
+                    entity for entity in real_entities
+                    if isinstance(entity, dict) and entity.get("entity_id") == target_entity
+                ),
+                None,
+            )
+            prior_state = prior_entity.get("state") if isinstance(prior_entity, dict) else None
             exec_res = await execute_command(endpoint, exec_payload)
             response_message = exec_res.get("message", "Executed")
 
             if wants_status_followup and target_entity != "auto":
-                refreshed_entities = await fetch_ha_entities(creds)
-                refreshed_entity = next(
-                    (
-                        entity for entity in refreshed_entities
-                        if isinstance(entity, dict) and entity.get("entity_id") == target_entity
-                    ),
-                    None,
-                )
+                refreshed_entity = None
+                for _ in range(4):
+                    await asyncio.sleep(0.75)
+                    refreshed_entities = await fetch_ha_entities(creds)
+                    refreshed_entity = next(
+                        (
+                            entity for entity in refreshed_entities
+                            if isinstance(entity, dict) and entity.get("entity_id") == target_entity
+                        ),
+                        None,
+                    )
+                    if not refreshed_entity:
+                        continue
+                    if prior_state is None or refreshed_entity.get("state") != prior_state:
+                        break
+
                 if refreshed_entity:
                     attrs = refreshed_entity.get("attributes") or {}
                     friendly_name = attrs.get("friendly_name") or target_entity
