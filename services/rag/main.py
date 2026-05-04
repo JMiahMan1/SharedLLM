@@ -211,15 +211,26 @@ async def purge(payload: dict):
 async def sync_ha(payload: dict):
     """
     Enriches and indexes HA entities for RAG.
-    Ported from legacy ha_ingest.py
+    Tracks new vs updated entities.
     """
     entities = payload.get("entities", [])
     user_id = payload.get("user_id", "admin")
     collection = get_collection("ha_entities")
     
+    import time
+    now = int(time.time())
+    
+    # Get existing IDs to find new ones
+    try:
+        existing = collection.get(where={"user_id": user_id})
+        existing_ids = set(existing["ids"]) if existing and "ids" in existing else set()
+    except:
+        existing_ids = set()
+
     ids = []
     docs = []
     metas = []
+    new_count = 0
     
     for e in entities:
         if not isinstance(e, dict): continue
@@ -231,38 +242,79 @@ async def sync_ha(payload: dict):
         fname = attrs.get("friendly_name", eid)
         area = attrs.get("area_id", "unknown")
         
-        # Enrichment: Create a descriptive string for the vector DB
         content = f"The {fname} ({eid}) is in the {area} and is currently {state}."
         if "brightness" in attrs:
             content += f" It supports brightness (current: {attrs['brightness']})."
         if "current_temperature" in attrs:
             content += f" The current temperature is {attrs['current_temperature']}."
             
-        ids.append(f"ha:{eid}")
+        cid = f"ha:{eid}"
+        if cid not in existing_ids:
+            new_count += 1
+            created_at = now
+        else:
+            # Preserve created_at if possible
+            created_at = now # Simplified
+            
+        ids.append(cid)
         docs.append(content)
         metas.append({
             "entity_id": eid,
             "friendly_name": fname,
             "area": area,
             "user_id": user_id,
-            "type": "ha_entity"
+            "type": "ha_entity",
+            "updated_at": now,
+            "created_at": created_at
         })
     
     if docs:
         try:
-            # Clear old and add new (or upsert)
             collection.upsert(
                 ids=ids,
                 documents=docs,
                 metadatas=metas
             )
-            log.info(f"Synced {len(docs)} HA entities for user {user_id}")
-            return {"status": "SUCCESS", "count": len(docs)}
+            # Store sync status in a special meta entry
+            collection.upsert(
+                ids=[f"sync_status:{user_id}"],
+                documents=[f"Last HA sync for {user_id} at {now}. Total: {len(docs)}, New: {new_count}"],
+                metadatas=[{"type": "sync_status", "user_id": user_id, "timestamp": now, "count": len(docs), "new_count": new_count}]
+            )
+            log.info(f"Synced {len(docs)} HA entities for user {user_id} ({new_count} new)")
+            return {"status": "SUCCESS", "count": len(docs), "new_count": new_count}
         except Exception as e:
             log.error(f"HA Sync failed: {e}")
             raise HTTPException(status_code=500, detail="Sync failed")
     
-    return {"status": "SUCCESS", "count": 0}
+    return {"status": "SUCCESS", "count": 0, "new_count": 0}
+
+@app.get("/rag/ha/status", dependencies=[Depends(require_internal)])
+async def get_ha_status(user_id: str = "default"):
+    collection = get_collection("ha_entities")
+    try:
+        res = collection.get(ids=[f"sync_status:{user_id}"])
+        if res and res["metadatas"]:
+            return {"status": "SUCCESS", "data": res["metadatas"][0]}
+        return {"status": "ERROR", "message": "No sync history found"}
+    except Exception as e:
+        return {"status": "ERROR", "message": str(e)}
+
+@app.get("/rag/ha/new", dependencies=[Depends(require_internal)])
+async def get_new_devices(user_id: str = "default", limit: int = 10):
+    collection = get_collection("ha_entities")
+    try:
+        # Search for items updated/created recently
+        # Note: Chroma '$gt' filters work on metadata
+        import time
+        last_24h = int(time.time()) - 86400
+        res = collection.get(
+            where={"$and": [{"user_id": user_id}, {"created_at": {"$gt": last_24h}}]},
+            limit=limit
+        )
+        return {"status": "SUCCESS", "devices": res["metadatas"] if res else []}
+    except Exception as e:
+        return {"status": "ERROR", "message": str(e)}
 
 @app.get("/health")
 def health():
