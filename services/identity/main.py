@@ -55,10 +55,20 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 def _ensure_schema_upgrades() -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("user")}
-    if "is_admin" not in columns:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
-        log.info("Applied identity schema upgrade: added user.is_admin column")
+    upgrades = [
+        ("is_admin", "ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"),
+        ("github_url", "ALTER TABLE user ADD COLUMN github_url VARCHAR"),
+        ("github_user", "ALTER TABLE user ADD COLUMN github_user VARCHAR"),
+        ("github_token_enc", "ALTER TABLE user ADD COLUMN github_token_enc VARCHAR"),
+        ("gitlab_url", "ALTER TABLE user ADD COLUMN gitlab_url VARCHAR"),
+        ("gitlab_user", "ALTER TABLE user ADD COLUMN gitlab_user VARCHAR"),
+        ("gitlab_token_enc", "ALTER TABLE user ADD COLUMN gitlab_token_enc VARCHAR"),
+    ]
+    for column_name, ddl in upgrades:
+        if column_name not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(ddl))
+            log.info("Applied identity schema upgrade: added user.%s column", column_name)
 
 # ─── Lifespan ──────────────────────────────────────────────────────────────────
 
@@ -141,6 +151,12 @@ def _build_credentials(user: User, default_user: User | None) -> ResolvedCredent
         nextcloud_pass=_merge_enc("nextcloud_pass_enc"),
         ha_url=_merge("ha_url"),
         ha_token=_merge_enc("ha_token_enc"),
+        github_url=_merge("github_url"),
+        github_user=_merge("github_user"),
+        github_token=_merge_enc("github_token_enc"),
+        gitlab_url=_merge("gitlab_url"),
+        gitlab_user=_merge("gitlab_user"),
+        gitlab_token=_merge_enc("gitlab_token_enc"),
         audiobookshelf_url=_merge("audiobookshelf_url"),
         audiobookshelf_user=_merge("audiobookshelf_user"),
         audiobookshelf_pass=_merge_enc("audiobookshelf_pass_enc"),
@@ -208,6 +224,8 @@ def list_users(session: Session = Depends(get_session), _: User = Depends(requir
             is_system_default=u.is_system_default,
             nextcloud_url=u.nextcloud_url, nextcloud_user=u.nextcloud_user,
             ha_url=u.ha_url, audiobookshelf_url=u.audiobookshelf_url,
+            github_url=u.github_url, github_user=u.github_user,
+            gitlab_url=u.gitlab_url, gitlab_user=u.gitlab_user,
             audiobookshelf_user=u.audiobookshelf_user,
         )
         for u in users
@@ -229,10 +247,16 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), _: Us
         nextcloud_url=body.nextcloud_url,
         nextcloud_user=body.nextcloud_user,
         ha_url=body.ha_url,
+        github_url=body.github_url,
+        github_user=body.github_user,
+        gitlab_url=body.gitlab_url,
+        gitlab_user=body.gitlab_user,
         audiobookshelf_url=body.audiobookshelf_url,
         audiobookshelf_user=body.audiobookshelf_user,
         nextcloud_pass_enc=encrypt(body.nextcloud_pass),
         ha_token_enc=encrypt(body.ha_token),
+        github_token_enc=encrypt(body.github_token),
+        gitlab_token_enc=encrypt(body.gitlab_token),
         audiobookshelf_pass_enc=encrypt(body.audiobookshelf_pass),
     )
     session.add(user)
@@ -244,6 +268,8 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), _: Us
         is_system_default=user.is_system_default,
         nextcloud_url=user.nextcloud_url, nextcloud_user=user.nextcloud_user,
         ha_url=user.ha_url, audiobookshelf_url=user.audiobookshelf_url,
+        github_url=user.github_url, github_user=user.github_user,
+        gitlab_url=user.gitlab_url, gitlab_user=user.gitlab_user,
         audiobookshelf_user=user.audiobookshelf_user,
     )
 

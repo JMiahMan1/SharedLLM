@@ -19,12 +19,18 @@ class User(SQLModel, table=True):
     nextcloud_url: Optional[str] = None
     nextcloud_user: Optional[str] = None
     ha_url: Optional[str] = None
+    github_url: Optional[str] = None
+    github_user: Optional[str] = None
+    gitlab_url: Optional[str] = None
+    gitlab_user: Optional[str] = None
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
 
     # Encrypted at rest — stored as Fernet ciphertext (base64 string)
     nextcloud_pass_enc: Optional[str] = None
     ha_token_enc: Optional[str] = None
+    github_token_enc: Optional[str] = None
+    gitlab_token_enc: Optional[str] = None
     audiobookshelf_pass_enc: Optional[str] = None
 
     # Relationships
