@@ -49,7 +49,7 @@ _global_http_client: httpx.AsyncClient = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _global_http_client
-    _global_http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+    _global_http_client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
     log.info("Gateway starting up...")
     engine.load()
     yield
@@ -451,7 +451,7 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
             f"{EXECUTION_SVC}{endpoint}",
             json=payload,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=10.0
+            timeout=30.0
         )
         data = resp.json()
         if not isinstance(data, dict):
@@ -635,122 +635,122 @@ async def chat_handler(request: Request):
         
         log.info(f"[ModelSelect] model='{selected_model}' query='{refined_query}' librarian={is_librarian_task}")
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # HA Entity Context
-            ha_keywords = [r"\bstatus\b", r"\bdevice\b", r"\bhome\b", r"\bsensor\b", r"\blight\b", r"\bswitch\b", r"\bdoor\b", r"\block\b", r"\btemp\b", r"\bhumidity\b", r"\bbattery\b"]
-            if any(re.search(k, q_lower) for k in ha_keywords):
-                rag_resp = await client.post(
-                    f"{RAG_SVC}/rag/search",
-                    json={
-                        "query": refined_query,
-                        "user_id": user_id,
-                        "collection_name": "ha_entities",
-                        "k": 5
-                    },
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if rag_resp.status_code == 200:
-                    data = rag_resp.json()
-                    if isinstance(data, dict):
-                        results = data.get("results", [])
-                        if results:
-                            context_lines = []
-                            for r in results:
-                                if isinstance(r, dict) and "content" in r:
-                                    context_lines.append(r["content"])
-                            if context_lines:
-                                rag_context = "Relevant Device Context:\n" + "\n".join(context_lines)
+        # Use global client
+        client = _global_http_client
+        # HA Entity Context
+        ha_keywords = [r"\bstatus\b", r"\bdevice\b", r"\bhome\b", r"\bsensor\b", r"\blight\b", r"\bswitch\b", r"\bdoor\b", r"\block\b", r"\btemp\b", r"\bhumidity\b", r"\bbattery\b"]
+        if any(re.search(k, q_lower) for k in ha_keywords):
+            rag_resp = await client.post(
+                f"{RAG_SVC}/rag/search",
+                json={
+                    "query": refined_query,
+                    "user_id": user_id,
+                    "collection_name": "ha_entities",
+                    "k": 5
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if rag_resp.status_code == 200:
+                data = rag_resp.json()
+                if isinstance(data, dict):
+                    results = data.get("results", [])
+                    if results:
+                        context_lines = []
+                        for r in results:
+                            if isinstance(r, dict) and "content" in r:
+                                context_lines.append(r["content"])
+                        if context_lines:
+                            rag_context = "Relevant Device Context:\n" + "\n".join(context_lines)
             
-            # Storage Context for Librarian
-            if is_librarian_task:
-                # A. Semantic Content Search
-                file_rag_resp = await client.post(
-                    f"{RAG_SVC}/rag/search",
-                    json={
-                        "query": refined_query,
-                        "user_id": user_id,
-                        "collection_name": "nextcloud_files",
-                        "k": 5
-                    },
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if file_rag_resp.status_code == 200:
-                    data = file_rag_resp.json()
-                    if isinstance(data, dict):
-                        file_results = data.get("results", [])
-                        if file_results:
-                            file_lines = []
-                            for r in file_results:
-                                if not isinstance(r, dict): continue
-                                meta = r.get("metadata")
-                                if isinstance(meta, dict):
-                                    name = meta.get("name", "file")
-                                    path = meta.get("path", "unknown")
-                                else:
-                                    name, path = "file", "unknown"
-                                content = str(r.get("content", ""))[:200]
-                                file_lines.append(f"- {name} ({path}): {content}...")
-                            
-                            if file_lines:
-                                file_text = "\n".join(file_lines)
-                                rag_context += f"\n\nRelevant NextCloud Content:\n{file_text}"
+        # Storage Context for Librarian
+        if is_librarian_task:
+            # A. Semantic Content Search
+            file_rag_resp = await client.post(
+                f"{RAG_SVC}/rag/search",
+                json={
+                    "query": refined_query,
+                    "user_id": user_id,
+                    "collection_name": "nextcloud_files",
+                    "k": 5
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if file_rag_resp.status_code == 200:
+                data = file_rag_resp.json()
+                if isinstance(data, dict):
+                    file_results = data.get("results", [])
+                    if file_results:
+                        file_lines = []
+                        for r in file_results:
+                            if not isinstance(r, dict): continue
+                            meta = r.get("metadata")
+                            if isinstance(meta, dict):
+                                name = meta.get("name", "file")
+                                path = meta.get("path", "unknown")
+                            else:
+                                name, path = "file", "unknown"
+                            content = str(r.get("content", ""))[:200]
+                            file_lines.append(f"- {name} ({path}): {content}...")
+                        
+                        if file_lines:
+                            file_text = "\n".join(file_lines)
+                            rag_context += f"\n\nRelevant NextCloud Content:\n{file_text}"
 
-                    # B. Shallow Filename Search
-                    storage_resp = await client.post(
-                        f"{STORAGE_SVC}/providers/search",
-                        params={"query": refined_query},
-                        json={
-                            "provider": {
-                                "kind": "nextcloud",
-                                "settings": {
-                                    "url": creds.get("nextcloud_url"),
-                                    "username": creds.get("nextcloud_user"),
-                                    "password": creds.get("nextcloud_pass")
-                                }
-                            },
-                            "path": "/",
-                            "recursive": True
+                # B. Shallow Filename Search
+                storage_resp = await client.post(
+                    f"{STORAGE_SVC}/providers/search",
+                    params={"query": refined_query},
+                    json={
+                        "provider": {
+                            "kind": "nextcloud",
+                            "settings": {
+                                "url": creds.get("nextcloud_url"),
+                                "username": creds.get("nextcloud_user"),
+                                "password": creds.get("nextcloud_pass")
+                            }
                         },
-                        headers={"X-Internal-Secret": INTERNAL_SECRET}
-                    )
-                    if storage_resp.status_code == 200:
-                        matches = storage_resp.json().get("matches", [])
-                        if matches:
-                            storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
-                            rag_context += f"\n\nNextCloud Files found (Real-time):\n{storage_text}"
+                        "path": "/",
+                        "recursive": True
+                    },
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if storage_resp.status_code == 200:
+                    matches = storage_resp.json().get("matches", [])
+                    if matches:
+                        storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
+                        rag_context += f"\n\nNextCloud Files found (Real-time):\n{storage_text}"
                 
-            # C. System Logging Context (Awareness) - Always available if requested
-            log_keywords = [r"\blog\b", r"\blogs\b", r"\bhealth\b", r"\bstatus\b", r"\bissue\b", r"\berror\b", r"\bbroken\b"]
-            if any(re.search(k, q_lower) for k in log_keywords):
-                try:
-                    log_resp = await client.get(f"{LOGGING_SVC_URL}/logs", params={"limit": 5})
-                    if log_resp.status_code == 200:
-                        if isinstance(recent_logs, list):
-                            log_entries = []
-                            for l in recent_logs:
-                                if isinstance(l, dict):
-                                    log_entries.append(f"[{l.get('timestamp')}] [{l.get('service')}] {l.get('message')}")
-                            if log_entries:
-                                log_text = "\n".join(log_entries)
-                                rag_context += f"\n\n### Application Internal Logs:\n{log_text}"
-                except: pass
+        log_keywords = [r"\blog\b", r"\blogs\b", r"\bhealth\b", r"\bstatus\b", r"\bissue\b", r"\berror\b", r"\bbroken\b"]
+        if any(re.search(k, q_lower) for k in log_keywords):
+            try:
+                log_resp = await client.get(f"{LOGGING_SVC_URL}/logs", params={"limit": 5})
+                if log_resp.status_code == 200:
+                    recent_logs = log_resp.json()
+                    if isinstance(recent_logs, list):
+                        log_entries = []
+                        for l in recent_logs:
+                            if isinstance(l, dict):
+                                log_entries.append(f"[{l.get('timestamp')}] [{l.get('service')}] {l.get('message')}")
+                        if log_entries:
+                            log_text = "\n".join(log_entries)
+                            rag_context += f"\n\n### Application Internal Logs:\n{log_text}"
+            except: pass
             
-            # D. Device History Context (Home Assistant Activity) - Always available if requested
-            history_keywords = [r"\bhistory\b", r"\blast used\b", r"\bactivity\b", r"\brecently\b", r"\bturned on\b", r"\bturned off\b"]
-            if any(re.search(k, q_lower) for k in history_keywords):
-                try:
-                    # Fetch history for the top 3 relevant entities found in RAG
-                    for r in results[:3]:
-                        if not isinstance(r, dict): continue
-                        meta = r.get("metadata")
-                        if not isinstance(meta, dict): continue
-                        eid = meta.get("entity_id")
-                        if eid:
-                            hist = await fetch_device_history(creds, eid)
-                            if hist:
-                                hist_text = "\n".join([f"- {h['last_changed']}: {h['state']}" for h in hist[-5:]])
-                                rag_context += f"\n\n### Device Usage History ({eid}):\n{hist_text}"
-                except: pass
+        history_keywords = [r"\bhistory\b", r"\blast used\b", r"\bactivity\b", r"\brecently\b", r"\bturned on\b", r"\bturned off\b"]
+        if any(re.search(k, q_lower) for k in history_keywords):
+            try:
+                # Fetch history for the top 3 relevant entities found in RAG
+                for r in results[:3]:
+                    if not isinstance(r, dict): continue
+                    meta = r.get("metadata")
+                    if not isinstance(meta, dict): continue
+                    eid = meta.get("entity_id")
+                    if eid:
+                        hist = await fetch_device_history(creds, eid)
+                        if hist:
+                            hist_text = "\n".join([f"- {h['last_changed']}: {h['state']}" for h in hist[-5:]])
+                            rag_context += f"\n\n### Device Usage History ({eid}):\n{hist_text}"
+            except: pass
                             
     except Exception as e:
         err_detail = f"{type(e).__name__}: {str(e)}"
@@ -762,91 +762,89 @@ async def chat_handler(request: Request):
     # 5. Proxy to Ollama (Slow Path)
     try:
         # Resource Prioritization: Pause Indexer
-        async with httpx.AsyncClient() as c:
-            try:
-                await c.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
-            except: pass
+        try:
+            await client.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        except: pass
 
-        await emit_log("INFO", f"Slow path triggered for: {refined_query}")
-        
-        # Try /api/chat first (Ollama standard)
-        ollama_payload = {
+    await emit_log("INFO", f"Slow path triggered for: {refined_query}")
+    
+    # Try /api/chat first (Ollama standard)
+    ollama_payload = {
+        "model": selected_model,
+        "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
+        "stream": False
+    }
+    resp = await call_ollama(ollama_payload, use_chat=True)
+    
+    if resp.status_code == 404:
+        # Fallback to /api/generate for older Ollama versions
+        log.warning("Ollama /api/chat not found, falling back to /api/generate")
+        gen_payload = {
             "model": selected_model,
-            "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
+            "prompt": f"{refined_query}", # Simplified
             "stream": False
         }
-        resp = await call_ollama(ollama_payload, use_chat=True)
+        resp = await call_ollama(gen_payload, use_chat=False)
         
-        if resp.status_code == 404:
-            # Fallback to /api/generate for older Ollama versions
-            log.warning("Ollama /api/chat not found, falling back to /api/generate")
-            gen_payload = {
-                "model": selected_model,
-                "prompt": f"{refined_query}", # Simplified
-                "stream": False
-            }
-            resp = await call_ollama(gen_payload, use_chat=False)
-            
-        if resp.status_code != 200:
-            err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
-            log.error(err_msg)
-            return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
-            
-        data = resp.json()
-        if not isinstance(data, dict):
-            answer = str(data)
+    if resp.status_code != 200:
+        err_msg = f"Ollama Error {resp.status_code}: {resp.text}"
+        log.error(err_msg)
+        return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
+        
+    data = resp.json()
+    if not isinstance(data, dict):
+        answer = str(data)
+    else:
+        msg_obj = data.get("message")
+        if isinstance(msg_obj, dict):
+            answer = msg_obj.get("content")
         else:
-            msg_obj = data.get("message")
-            if isinstance(msg_obj, dict):
-                answer = msg_obj.get("content")
-            else:
-                answer = data.get("response", "I encountered an error.")
-        
-        if not answer:
-            answer = "I received an empty response from the brain."
-        # 6. Format Response
-        final_answer = answer if answer else "I encountered an error while processing your request."
-        
-        # Save to history
-        await update_history(user_id, "user", query)
-        await update_history(user_id, "assistant", final_answer)
-        
-        # Log Success
-        await emit_log("INFO", f"Chat successful: {query[:50]}...")
+            answer = data.get("response", "I encountered an error.")
+    
+    if not answer:
+        answer = "I received an empty response from the brain."
+    # 6. Format Response
+    final_answer = answer if answer else "I encountered an error while processing your request."
+    
+    # Save to history
+    await update_history(user_id, "user", query)
+    await update_history(user_id, "assistant", final_answer)
+    
+    # Log Success
+    await emit_log("INFO", f"Chat successful: {query[:50]}...")
 
-        # Detect if it was an OpenAI-style request
-        is_openai = "/v1/chat/completions" in str(request.url)
-        
-        if is_openai:
-            import time
-            return {
-                "id": f"chatcmpl-{int(time.time())}",
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": selected_model,
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": final_answer
-                        },
-                        "finish_reason": "stop",
-                        "index": 0
-                    }
-                ]
-            }
-        
-        return {"status": "SUCCESS", "message": final_answer}
-        
-    except Exception as e:
-        log.error(f"LLM Proxy Error: {e}")
-        raise HTTPException(status_code=502, detail="Upstream LLM error")
-    finally:
-        # Resource Prioritization: Resume Indexer
-        async with httpx.AsyncClient() as c:
-            try:
-                await c.post(f"{STORAGE_SVC}/index/resume", headers={"X-Internal-Secret": INTERNAL_SECRET})
-            except: pass
+    # Detect if it was an OpenAI-style request
+    is_openai = "/v1/chat/completions" in str(request.url)
+    
+    if is_openai:
+        import time
+        return {
+            "id": f"chatcmpl-{int(time.time())}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": selected_model,
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": final_answer
+                    },
+                    "finish_reason": "stop",
+                    "index": 0
+                }
+            ]
+        }
+    
+    return {"status": "SUCCESS", "message": final_answer}
+    
+except Exception as e:
+    log.error(f"LLM Proxy Error: {e}")
+    raise HTTPException(status_code=502, detail="Upstream LLM error")
+finally:
+    # Resource Prioritization: Resume Indexer
+    try:
+        await _global_http_client.post(f"{STORAGE_SVC}/index/resume", headers={"X-Internal-Secret": INTERNAL_SECRET})
+    except: pass
 
 # --- Ollama Proxy ---
 @app.post("/api/generate")
