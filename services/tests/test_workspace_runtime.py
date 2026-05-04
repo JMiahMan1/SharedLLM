@@ -35,7 +35,7 @@ def runtime_env(tmp_path, monkeypatch):
                     {
                         "id": "demo",
                         "display_name": "Demo Workspace",
-                        "allowed_users": ["jeremiah"],
+                        "access_policy": "authenticated",
                         "local_path": "demo",
                         "default_branch": "main",
                     },
@@ -43,8 +43,15 @@ def runtime_env(tmp_path, monkeypatch):
                         "id": "demo_system",
                         "display_name": "Demo System Workspace",
                         "scope": "system",
-                        "allowed_users": ["jeremiah"],
+                        "access_policy": "authenticated",
                         "capabilities": ["read", "git_status", "git_diff"],
+                        "local_path": "demo",
+                        "default_branch": "main",
+                    },
+                    {
+                        "id": "demo_admin",
+                        "display_name": "Demo Admin Workspace",
+                        "access_policy": "admin_only",
                         "local_path": "demo",
                         "default_branch": "main",
                     }
@@ -91,6 +98,17 @@ def test_list_workspaces_allows_admin_override(client):
     ids = {item["id"] for item in data["workspaces"]}
     assert "demo" in ids
     assert "demo_system" in ids
+    assert "demo_admin" in ids
+
+
+def test_list_workspaces_hides_admin_only_from_non_admin(client):
+    resp = client.get("/workspaces", params={"rag_user": "jeremiah"}, headers=_headers())
+    assert resp.status_code == 200
+    data = resp.json()
+    ids = {item["id"] for item in data["workspaces"]}
+    assert "demo" in ids
+    assert "demo_system" in ids
+    assert "demo_admin" not in ids
 
 
 def test_read_file_blocks_parent_traversal(client):
