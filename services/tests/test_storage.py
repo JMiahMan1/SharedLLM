@@ -26,16 +26,22 @@ class FakeProvider:
     def list_entries(self, path="/", recursive=False):
         return self.entries
 
-    def write_content(self, path, content, create_parents=True, verify=True):
+    def write_content(self, path, content, create_parents=True, verify=True, is_binary=False):
         self.writes.append(
             {
                 "path": path,
                 "content": content,
                 "create_parents": create_parents,
                 "verify": verify,
+                "is_binary": is_binary,
             }
         )
-        return {"path": path, "bytes_written": len(content.encode("utf-8")), "verified": verify}
+        # Content might be bytes now
+        size = len(content) if isinstance(content, bytes) else len(content.encode("utf-8"))
+        return {"path": path, "bytes_written": size, "verified": verify}
+
+    def upload_directory(self, remote_path, local_path):
+        return {"count": 1, "results": [{"path": f"{remote_path}/file.txt", "bytes_written": 10}]}
 
 
 def _fixture_entries():
@@ -165,3 +171,49 @@ def test_provider_write_returns_result(monkeypatch):
     assert data["status"] == "SUCCESS"
     assert data["result"]["path"] == "/Code/SharedLLM/docs/example.md"
     assert fake_provider.writes[0]["verify"] is True
+
+
+def test_provider_write_base64_returns_result(monkeypatch):
+    import base64
+    fake_provider = FakeProvider(_fixture_entries())
+    monkeypatch.setattr("storage.main.build_provider", lambda config: fake_provider)
+
+    content_bytes = b"\x00\x01\x02\x03"
+    content_b64 = base64.b64encode(content_bytes).decode("utf-8")
+
+    request = ProviderWriteRequest(
+        provider={
+            "kind": "nextcloud",
+            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
+        },
+        path="/Library/Media/blob.bin",
+        content_b64=content_b64,
+        create_parents=True,
+        verify=True,
+    )
+
+    data = asyncio.run(write_provider_content(request))
+    assert data["status"] == "SUCCESS"
+    assert fake_provider.writes[0]["content"] == content_bytes
+    assert fake_provider.writes[0]["is_binary"] is True
+
+
+def test_provider_mirror_returns_result(monkeypatch):
+    from storage.main import mirror_provider_directory
+    from storage.models import ProviderMirrorRequest
+    
+    fake_provider = FakeProvider(_fixture_entries())
+    monkeypatch.setattr("storage.main.build_provider", lambda config: fake_provider)
+
+    request = ProviderMirrorRequest(
+        provider={
+            "kind": "nextcloud",
+            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
+        },
+        remote_path="/Code/Remote",
+        local_path="/workspace/Local",
+    )
+
+    data = asyncio.run(mirror_provider_directory(request))
+    assert data["status"] == "SUCCESS"
+    assert data["result"]["count"] == 1

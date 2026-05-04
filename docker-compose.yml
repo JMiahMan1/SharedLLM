@@ -92,6 +92,7 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
     volumes:
+      - ./:/workspace/SharedLLM:ro
       - /etc/localtime:/etc/localtime:ro
 
   workspace_runtime:
