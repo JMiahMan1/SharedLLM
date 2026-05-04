@@ -126,6 +126,8 @@ CODING_SIGNALS = (
   "python", "javascript", "typescript", "node", "react", "fastapi", "sql", "regex",
   "docker", "dockerfile", "bash", "shell", "pytest", "bug", "fix", "refactor",
   "implement", "function", "class", "stack trace", "traceback", "code", "script",
+  "edit this file", "edit the file", "update this file", "change this file",
+  "edit this module", "update this module", ".py", ".js", ".ts", ".tsx", ".jsx",
   "compile", "syntax", "test", "unit test", "integration test", "git"
 )
 LIBRARIAN_SIGNALS = (
@@ -626,7 +628,9 @@ async def chat_handler(request: Request):
     # Standardized API flags
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
-    selected_model = body.get("model", "qwen3:latest")
+    explicit_model = str(body.get("model") or "").strip()
+    explicit_model_requested = bool(explicit_model)
+    selected_model = explicit_model or ASSISTANT_MODEL
 
     # 2. Extract Query
     query = body.get("query")
@@ -876,9 +880,10 @@ async def chat_handler(request: Request):
     results = [] 
     
     try:
-        selected_model = select_model_for_query(refined_query)
+        if not explicit_model_requested:
+            selected_model = select_model_for_query(refined_query)
         q_lower = refined_query.lower()
-        is_coding_task = is_coding_query(refined_query)
+        is_coding_task = is_coding_query(refined_query) or (explicit_model_requested and selected_model == CODING_MODEL)
         is_librarian_task = is_librarian_query(refined_query)
 
         if is_coding_task:
@@ -1061,6 +1066,8 @@ async def chat_handler(request: Request):
         except: pass
 
         system_instruction = select_system_instruction_for_query(refined_query, selected_model)
+        if explicit_model_requested and selected_model == CODING_MODEL:
+            system_instruction = CODE_HELPER_SYSTEM_INSTRUCTION
 
         ollama_payload = {
             "model": selected_model,

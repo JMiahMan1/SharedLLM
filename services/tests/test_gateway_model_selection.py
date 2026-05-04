@@ -49,6 +49,7 @@ class MockOllamaResponse:
         "Help me refactor this SQL query",
         "Why is this Docker build failing",
         "Show me the git command to squash these commits",
+        "Edit this file: greeting.py and change one string",
     ],
 )
 def test_select_model_for_query_uses_coding_model_for_code_requests(query):
@@ -127,6 +128,42 @@ def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies(c
     assert response.status_code == 200
     assert captured["payload"]["model"] == "qwen2.5-coder:7b"
     assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
+
+
+@pytest.mark.local_only
+def test_chat_slow_path_respects_explicit_coding_model_for_plain_edit_prompts(client):
+    captured = {}
+
+    async def mock_call_ollama(payload, use_chat=True):
+        captured["payload"] = payload
+        captured["use_chat"] = use_chat
+        return MockOllamaResponse('MESSAGE = "hello from SharedLLM"')
+
+    async def passthrough_query(query, history):
+        return query
+
+    with patch("gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
+         patch("gateway.main.get_history", new=AsyncMock(return_value=[])), \
+         patch("gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
+         patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
+         patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
+         patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
+         patch("gateway.main.engine.classify", return_value=("unknown", 0.10)), \
+         patch("gateway.main.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+        response = client.post(
+            "/api/chat",
+            json={
+                "query": "Edit this file: greeting.py and change one string.",
+                "voice_id": "alice",
+                "model": "qwen2.5-coder:7b",
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["use_chat"] is True
+    assert captured["payload"]["model"] == "qwen2.5-coder:7b"
+    assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
+    assert "CODE CONTEXT:" in captured["payload"]["messages"][-1]["content"]
 
 
 @pytest.mark.local_only
