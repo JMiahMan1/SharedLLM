@@ -17,6 +17,9 @@ It provides a safe, mounted-workspace interface for:
 Implemented today:
 
 - read-only workspace registry loading
+- user-scoped workspace filtering through the Identity service
+- limited `system` workspaces with capability restrictions unless the resolved
+  caller is admin
 - safe workspace resolution under the mounted root
 - read-only file access
 - `git status` and `git diff`
@@ -36,6 +39,10 @@ is to operate on mounted workspaces as a whole, including:
 ## Safety Model
 
 - All workspace paths must resolve under `WORKSPACE_RUNTIME_ROOT`.
+- Registry entries can restrict access with `allowed_users`, resolved through
+  the Identity service.
+- Registry entries can declare `scope: "system"` and a reduced `capabilities`
+  list for more sensitive workspaces.
 - Relative file reads and pytest targets are checked for path traversal.
 - The service is intended for internal use and requires `X-Internal-Secret`
   for non-health endpoints.

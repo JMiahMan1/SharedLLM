@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import List
 
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
+from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 try:
@@ -50,11 +51,21 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
+
+def _ensure_schema_upgrades() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("user")}
+    if "is_admin" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
+        log.info("Applied identity schema upgrade: added user.is_admin column")
+
 # ─── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
+    _ensure_schema_upgrades()
     with Session(engine) as session:
         seeded = seed_from_env(session)
         if seeded:
@@ -124,6 +135,7 @@ def _build_credentials(user: User, default_user: User | None) -> ResolvedCredent
 
     return ResolvedCredentials(
         user=user.username,
+        is_admin=bool(user.is_admin),
         nextcloud_url=_merge("nextcloud_url"),
         nextcloud_user=_merge("nextcloud_user"),
         nextcloud_pass=_merge_enc("nextcloud_pass_enc"),
@@ -192,6 +204,7 @@ def list_users(session: Session = Depends(get_session), _: User = Depends(requir
     return [
         UserRead(
             id=u.id, username=u.username, display_name=u.display_name,
+            is_admin=u.is_admin,
             is_system_default=u.is_system_default,
             nextcloud_url=u.nextcloud_url, nextcloud_user=u.nextcloud_user,
             ha_url=u.ha_url, audiobookshelf_url=u.audiobookshelf_url,
@@ -210,6 +223,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), _: Us
     user = User(
         username=body.username,
         display_name=body.display_name,
+        is_admin=body.is_admin,
         is_system_default=body.is_system_default,
         api_key=body.api_key,
         nextcloud_url=body.nextcloud_url,
@@ -226,6 +240,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), _: Us
     session.refresh(user)
     return UserRead(
         id=user.id, username=user.username, display_name=user.display_name,
+        is_admin=user.is_admin,
         is_system_default=user.is_system_default,
         nextcloud_url=user.nextcloud_url, nextcloud_user=user.nextcloud_user,
         ha_url=user.ha_url, audiobookshelf_url=user.audiobookshelf_url,
