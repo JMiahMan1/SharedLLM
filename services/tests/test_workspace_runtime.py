@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from workspace_runtime.main import app
 import workspace_runtime.main as runtime
 
+pytestmark = pytest.mark.local_only
+
 
 @pytest.fixture
 def runtime_env(tmp_path, monkeypatch):
