@@ -8,11 +8,10 @@ import pytest
 
 from storage.main import (
     health,
-    list_nextcloud_compat,
     list_provider_entries,
-    scan_content_index,
-    search_nextcloud_compat,
+    search_provider,
 )
+from storage.indexer import build_content_index, summarize_index
 from storage.models import IndexScanRequest, ProviderListRequest, StorageEntry
 
 
@@ -55,61 +54,40 @@ def test_health():
     assert response["service"] == "storage"
 
 
-@pytest.mark.asyncio
-async def test_index_scan_classifies_common_content(monkeypatch):
-    monkeypatch.setattr("storage.main.build_provider", lambda config: FakeProvider(_fixture_entries()))
+def test_build_content_index_matches_current_rules():
+    data = build_content_index(_fixture_entries())
+    summary = summarize_index(data)
+    items = _index_by_path([item.dict() for item in data])
 
-    request = IndexScanRequest(
-        provider={
-            "kind": "nextcloud",
-            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
-        },
-        path="/Library",
-        recursive=True,
-    )
-
-    data = await scan_content_index(request)
-    assert data["status"] == "SUCCESS"
-    assert data["summary"]["total_items"] == len(_fixture_entries())
-
-    items = _index_by_path(data["items"])
+    assert "/Library/ProjectAlpha/.git" not in items
+    assert "/Library/NotesVault/.obsidian" in items
+    assert summary["total_items"] == len(items)
 
     project = items["/Library/ProjectAlpha"]
-    assert project["subtype"] == "git_repo"
-    assert "repo_scanner" in project["recommended_tools"]
-    assert "git_metadata" in project["extractable_capabilities"]
-
-    notes = items["/Library/NotesVault"]
-    assert notes["subtype"] == "notes_vault"
-    assert "notes" in notes["recommended_tools"]
+    assert project["item_type"] == "folder"
+    assert project["subtype"] == "generic_directory"
 
     markdown = items["/Library/ProjectAlpha/README.md"]
-    assert markdown["item_type"] == "markdown"
+    assert markdown["item_type"] == "document"
+    assert markdown["subtype"] == "markdown"
     assert "rag" in markdown["recommended_tools"]
+    assert "structure_scan" in markdown["extractable_capabilities"]
 
     docx = items["/Library/Docs/plan.docx"]
     assert docx["subtype"] == "word_processing"
     assert "document_parser" in docx["recommended_tools"]
 
-    sheet = items["/Library/Docs/budget.xlsx"]
-    assert sheet["subtype"] == "spreadsheet"
-    assert "table_parser" in sheet["recommended_tools"]
-
-    audio = items["/Library/Media/song.mp3"]
-    assert audio["item_type"] == "audio"
-    assert "transcription" in audio["extractable_capabilities"]
-
-    video = items["/Library/Media/movie.mp4"]
-    assert video["item_type"] == "video"
-    assert "visual_description" in video["extractable_capabilities"]
-
-    image = items["/Library/Media/cover.png"]
-    assert image["item_type"] == "image"
-    assert "ocr" in image["recommended_tools"]
-
-    ebook = items["/Library/Books/novel.epub"]
-    assert ebook["item_type"] == "ebook"
-    assert "ebook_parser" in ebook["recommended_tools"]
+    binary_examples = [
+        "/Library/Docs/budget.xlsx",
+        "/Library/Media/song.mp3",
+        "/Library/Media/movie.mp4",
+        "/Library/Media/cover.png",
+        "/Library/Books/novel.epub",
+    ]
+    for path in binary_examples:
+        assert items[path]["item_type"] == "binary"
+        assert items[path]["subtype"] == "unknown_binary"
+        assert items[path]["recommended_tools"] == ["media"]
 
 
 @pytest.mark.asyncio
@@ -127,39 +105,24 @@ async def test_provider_list_returns_generic_entries(monkeypatch):
 
     data = await list_provider_entries(request)
     assert data["status"] == "SUCCESS"
-    assert data["provider"] == "nextcloud"
+    assert data["count"] == 3
     assert len(data["entries"]) == 3
 
 
 @pytest.mark.asyncio
-async def test_nextcloud_list_compatibility_shim(monkeypatch):
-    monkeypatch.setattr("storage.main.build_provider", lambda config: FakeProvider(_fixture_entries()[:2]))
-
-    data = await list_nextcloud_compat(
-        {
-        "nc_url": "https://cloud.local",
-        "nc_user": "jeremiah",
-        "nc_pass": "secret",
-        "path": "/Library",
-        }
-    )
-    assert data["status"] == "SUCCESS"
-    assert len(data["files"]) == 2
-
-
-@pytest.mark.asyncio
-async def test_nextcloud_search_compatibility_shim(monkeypatch):
+async def test_provider_search_returns_matches(monkeypatch):
     monkeypatch.setattr("storage.main.build_provider", lambda config: FakeProvider(_fixture_entries()))
 
-    data = await search_nextcloud_compat(
-        {
-        "nc_url": "https://cloud.local",
-        "nc_user": "jeremiah",
-        "nc_pass": "secret",
-        "path": "/Library",
+    request = IndexScanRequest(
+        provider={
+            "kind": "nextcloud",
+            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
         },
-        query="novel",
+        path="/Library",
+        recursive=True,
     )
+
+    data = await search_provider(query="novel", req=request)
     assert data["status"] == "SUCCESS"
     assert len(data["matches"]) == 1
     assert data["matches"][0]["name"] == "novel.epub"

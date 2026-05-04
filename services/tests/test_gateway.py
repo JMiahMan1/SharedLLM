@@ -88,3 +88,30 @@ def test_slow_path_conversational(client, mock_intent, mocker):
     data = resp.json()
     assert data["status"] == "SUCCESS"
     assert "Simulated LLM response" in data["message"]
+
+
+def test_action_with_status_followup_executes_and_reports_refreshed_state(client, mock_intent, mocker):
+    mock_intent.return_value = ("turn_off", 0.95)
+
+    mocker.patch("gateway.main.resolve_identity", return_value={"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"})
+    mocker.patch("gateway.main.get_history", return_value=[])
+    mocker.patch("gateway.main.update_history", return_value=None)
+    mocker.patch("gateway.main.contextualize_query", return_value="Can you power off the Piano-Lamp and recheck its status after?")
+    mocker.patch("gateway.main.execute_command", return_value={"status": "SUCCESS", "message": "Powered off Piano-Lamp."})
+
+    fetch_entities = mocker.patch("gateway.main.fetch_ha_entities")
+    fetch_entities.side_effect = [
+        [{"entity_id": "light.piano_lamp", "state": "on", "attributes": {"friendly_name": "Piano-Lamp"}}],
+        [{"entity_id": "light.piano_lamp", "state": "off", "attributes": {"friendly_name": "Piano-Lamp"}}],
+    ]
+
+    resp = client.post(
+        "/api/chat",
+        json={"query": "Can you power off the Piano-Lamp and recheck its status after?", "voice_id": "alice"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    assert "Powered off Piano-Lamp." in data["message"]["content"]
+    assert "Current status of Piano-Lamp is off." in data["message"]["content"]
