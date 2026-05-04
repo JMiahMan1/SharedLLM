@@ -100,6 +100,26 @@ async def search(req: SearchRequest):
         log.error(f"Search failed: {e}")
         return SearchResponse(results=[])
 
+@app.get("/rag/stats", dependencies=[Depends(require_internal)])
+async def get_stats(user_id: str = "default"):
+    """Return counts and metadata for collections."""
+    try:
+        collections = ["nextcloud_files", "ha_entities"]
+        stats = {}
+        for name in collections:
+            coll = chroma_client.get_or_create_collection(name=name, embedding_function=embedding_fn)
+            count = coll.count()
+            # Get 5 latest entries to show what's indexed
+            latest = coll.get(limit=5, include=["metadatas"])
+            stats[name] = {
+                "count": count,
+                "latest_previews": [m.get("path", m.get("friendly_name", "unknown")) for m in latest["metadatas"]] if latest["metadatas"] else []
+            }
+        return {"status": "SUCCESS", "stats": stats}
+    except Exception as e:
+        log.error(f"Stats failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
 @app.post("/rag/ingest", dependencies=[Depends(require_internal)])
 async def ingest(req: IngestRequest):
     collection = get_collection(req.collection_name)

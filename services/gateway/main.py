@@ -596,6 +596,29 @@ async def chat_handler(request: Request):
             
             return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
 
+        if intent == "storage_status":
+            # Library Indexing Status Check
+            stats_res = await client.get(f"{RAG_SVC}/rag/stats", params={"user_id": user_id}, headers={"X-Internal-Secret": INTERNAL_SECRET})
+            
+            msg = "Library Indexing Status:\n"
+            if stats_res.status_code == 200:
+                s_data = stats_res.json().get("stats", {})
+                nc_stats = s_data.get("nextcloud_files", {})
+                count = nc_stats.get("count", 0)
+                previews = nc_stats.get("latest_previews", [])
+                
+                msg += f"- Total Indexed Chunks: {count}\n"
+                if count > 0 and previews:
+                    msg += "\nMost Recent Files Indexed:\n"
+                    for p in previews[:5]:
+                        msg += f"- {p}\n"
+                else:
+                    msg += "- No files have been indexed yet or the scan is still in progress."
+            else:
+                msg = "Failed to retrieve storage stats. Check RAG logs."
+                
+            return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
+
         if endpoint:
             target_entity = "auto"
             query_lower = refined_query.lower()
@@ -790,9 +813,19 @@ async def chat_handler(request: Request):
             await client.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
         except: pass
 
+        system_instruction = (
+            "You are Librarian, a precise knowledge engine. "
+            "Use the provided context (Device Context, Logs, or File Metadata) to answer the user's query. "
+            "CRITICAL: If the context is empty or does not contain the answer, explicitly state that you do not have that information. "
+            "DO NOT give general advice about Nextcloud or Home Assistant internals unless specifically asked. "
+            "Always prefer specific data (states, paths, timestamps) over generalities."
+        )
+        
         ollama_payload = {
             "model": selected_model,
-            "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
+            "messages": [
+                {"role": "system", "content": system_instruction}
+            ] + history + [{"role": "user", "content": f"CONTEXT:\n{rag_context}\n\nQUERY: {refined_query}"}],
             "stream": should_stream
         }
 
