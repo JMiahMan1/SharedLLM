@@ -119,3 +119,30 @@ The next useful features are:
 4. gateway-level orchestration for coding tasks that need real file changes
 5. optional note/document/transcription endpoints for broader workspace
    operations
+
+## Remaining Implementation Work
+
+The current service is still an inspection/runtime substrate, not a full
+agentic workspace engine. The main unfinished pieces are:
+
+1. **DB-backed workspace registry**
+   Move workspace definitions and access policy out of static JSON and into a
+   service-owned or Identity-linked database model.
+2. **Write path**
+   Add file create/update/delete endpoints with path safety, conflict handling,
+   and auditability.
+3. **Git lifecycle**
+   Add branch creation, staging, commit, push, and pull/rebase behavior with
+   explicit scope controls.
+4. **Provider synchronization**
+   Reflect authoritative local changes back to storage providers where that is
+   appropriate, instead of only using provider-backed discovery.
+5. **Gateway orchestration**
+   Let the gateway route coding and workspace tasks into this service rather
+   than only using prompt-level disclaimers.
+6. **Non-code workspace actions**
+   Add note editing, document synthesis, metadata sidecars, and transcription
+   orchestration under the same workspace safety model.
+7. **Operational hardening**
+   Add better audit logs, explicit command allowlists, per-workspace policy,
+   and clearer separation between CI-safe tests and local/server-only tests.

@@ -209,12 +209,21 @@ def _safe_file_path(workspace_path: Path, relative_path: str) -> Path:
     return target
 
 
-def _run_command(workspace_path: Path, args: list[str], timeout_seconds: int = 30) -> dict[str, Any]:
+def _run_command(
+    workspace_path: Path,
+    args: list[str],
+    timeout_seconds: int = 30,
+    env_overrides: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    env = os.environ.copy()
+    if env_overrides:
+        env.update(env_overrides)
     proc = subprocess.run(
         args,
         cwd=workspace_path,
         capture_output=True,
         text=True,
+        env=env,
         timeout=timeout_seconds,
         check=False,
     )
@@ -354,7 +363,12 @@ def run_pytest(req: PytestRequest, x_internal_secret: Optional[str] = Header(def
     workspace_path = Path(workspace["resolved_path"])
     targets = _sanitize_targets(req.targets)
     args = ["python", "-m", "pytest", "-q", *targets] if targets else ["python", "-m", "pytest", "-q"]
-    result = _run_command(workspace_path, args, timeout_seconds=req.timeout_seconds)
+    result = _run_command(
+        workspace_path,
+        args,
+        timeout_seconds=req.timeout_seconds,
+        env_overrides={"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    )
     return {
         "status": "SUCCESS",
         "workspace": workspace,

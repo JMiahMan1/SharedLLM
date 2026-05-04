@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -15,12 +16,18 @@ os.environ.setdefault("CODING_MODEL", "qwen2.5-coder:7b")
 from fastapi.testclient import TestClient
 import pytest
 
+import gateway.main as gateway_main
 from gateway.main import app, select_model_for_query, select_system_instruction_for_query
 from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    @asynccontextmanager
+    async def noop_lifespan(_app):
+        yield
+
+    monkeypatch.setattr(app.router, "lifespan_context", noop_lifespan)
     with TestClient(app) as test_client:
         yield test_client
 
@@ -60,6 +67,7 @@ def test_select_model_for_query_uses_assistant_model_for_general_requests(query)
     assert select_model_for_query(query) == "qwen3:latest"
 
 
+@pytest.mark.local_only
 def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     captured = {}
 
@@ -92,6 +100,7 @@ def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     assert "No live local Git workspace is attached to this gateway path." in captured["payload"]["messages"][-1]["content"]
 
 
+@pytest.mark.local_only
 def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies(client):
     captured = {}
 
@@ -120,6 +129,7 @@ def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies(c
     assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
 
 
+@pytest.mark.local_only
 def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
     captured = {}
 
