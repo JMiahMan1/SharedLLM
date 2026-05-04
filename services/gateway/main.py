@@ -660,7 +660,7 @@ async def chat_handler(request: Request):
                 params={"query": refined_query},
                 json={
                     "provider": {"kind": "nextcloud", "settings": {"url": creds.get("nextcloud_url"), "username": creds.get("nextcloud_user"), "password": creds.get("nextcloud_pass")}},
-                    "path": "/", "recursive": True
+                    "path": "/", "recursive": False
                 },
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
