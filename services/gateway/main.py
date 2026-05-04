@@ -97,8 +97,10 @@ except (ImportError, ValueError):
       from gateway.history import get_history, update_history, ping_redis
       from gateway.prompts import LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     except ImportError:
+      from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from intent_engine import engine
       from history import get_history, update_history, ping_redis
+      from prompts import LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 
 # --- Setup Logging ---
 log = logging.getLogger("gateway")
