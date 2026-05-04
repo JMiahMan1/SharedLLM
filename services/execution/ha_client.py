@@ -103,3 +103,31 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
         except Exception as e:
             log.error(f"[ha_client] get_history({entity_id}) failed: {e}")
             return []
+async def get_areas(ha_url: str, ha_token: str) -> dict:
+    """Retrieve mapping of entity_id to area_name using HA Template API."""
+    if not ha_url:
+        return {}
+        
+    headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
+    url = f"{ha_url.rstrip('/')}/api/template"
+    
+    # This template iterates over all entities and gets their area names
+    template = """
+    {% set result = {} %}
+    {% for state in states %}
+      {% set a_name = area_name(state.entity_id) %}
+      {% if a_name %}
+        {% do result.update({state.entity_id: a_name}) %}
+      {% endif %}
+    {% endfor %}
+    {{ result | tojson }}
+    """
+    
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            resp = await client.post(url, headers=headers, json={"template": template})
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            log.error(f"[ha_client] get_areas failed: {e}")
+            return {}
