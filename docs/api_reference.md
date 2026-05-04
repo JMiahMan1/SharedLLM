@@ -2,38 +2,31 @@
 
 ## Overview
 
-The SharedLLM API provides a unified interface for interacting with the smart
-home agent using natural language. It supports both standard REST interactions
-and streaming responses (SSE/NDJSON).
+The gateway exposes an Ollama-compatible chat surface at `/api/chat` and an
+OpenAI-compatible surface at `/v1/chat/completions`.
 
-## Base URL
+Base URL:
+`http://localhost:11435`
 
-By default, the API is served at:
-`http://localhost:11435` (or the configured remote host)
+## Identity Resolution
 
----
+The gateway does not require a dedicated auth header for normal local use.
+Instead, it resolves user context from request fields such as:
 
-## Authentication
+- `voice_id`
+- `device_id`
+- `rag_user`
+- `user`
 
-**Header**: `X-RAG-User`
+Those values are passed to the Identity service, which injects the configured
+Home Assistant and Nextcloud credentials for the resolved user profile.
 
-- **Value**: Check your `settings.py` or `.env` for valid usernames
-  (default: `admin`).
-- **Description**: Identifies the user for context, specialized settings (e.g.,
-  specific calendar/note accounts), and conversation history.
+## `POST /api/chat`
 
----
+Primary chat endpoint. Accepts either a raw `query` string or an Ollama-style
+`messages` array.
 
-## Endpoints
-
-### 1. Chat Completion
-
-**POST** `/api/chat`
-
-The primary endpoint for sending natural language commands or queries to the
-agent.
-
-#### Request Body
+Example request:
 
 ```json
 {
@@ -44,70 +37,54 @@ agent.
     }
   ],
   "model": "qwen3:latest",
-  "stream": false
+  "stream": false,
+  "voice_id": "admin"
 }
 ```
 
-#### Standard Response (Default)
-
-Returns the natural language response from the assistant.
+Example non-streaming response:
 
 ```json
 {
+  "model": "qwen3:latest",
+  "created_at": "2026-05-04T13:29:25.870525Z",
   "message": {
     "role": "assistant",
     "content": "I have turned on the office light."
   },
-  "done": true
+  "done": true,
+  "status": "SUCCESS"
 }
 ```
 
----
+Notes:
 
-## Advanced Features & Testing
+- Fast-path intents can execute directly against the execution service and still
+  return the same Ollama-compatible envelope.
+- Slow-path requests gather device, storage, and log context before calling
+  Ollama.
+- When `debug: true` is present, the response may include `debug_context`.
 
-### Inspection & Verification
+## Streaming
 
-For developers and automated tests, the API can return detailed execution
-results (which device was selected, what state change occurred, technical
-success/failure).
+- `/api/chat` streams Ollama-style NDJSON when `stream` is `true`.
+- `/v1/chat/completions` streams OpenAI-style Server-Sent Events when `stream`
+  is `true`.
 
-**To enable this, you must strictly opt-in using a header.** This ensures
-backward compatibility with standard clients that may break on unknown fields.
-
-#### Header
-
-`X-Include-Tool-Results: true`
-
-#### Extended Response Format
-
-When the header is present, the response will include a `tool_results` array.
+Example streamed `/api/chat` chunks:
 
 ```json
-{
-  "message": {
-    "role": "assistant",
-    "content": "I have turned on the office light."
-  },
-  "tool_results": [
-    {
-      "service": "turn_on",
-      "entity_id": "light.office",
-      "status": "SUCCESS",
-      "new_state": "on",
-      "source": "home_assistant"
-    }
-  ],
-  "done": true
-}
+{"model":"qwen3:latest","message":{"role":"assistant","content":"Hello"},"done":false}
+{"model":"qwen3:latest","message":{"role":"assistant","content":" again"},"done":false}
+{"model":"qwen3:latest","done":true}
 ```
 
-### Live State Verification
+## Other Gateway Endpoints
 
-The Test Suite uses the extended response to verify **actual hardware state**.
-Instead of parsing the chat message ("Did the bot say it turned on?"), the tests
-check:
-`response.tool_results[0].new_state == "on"`
-
-This guarantees that the command was not only understood but successfully
-executed by the downstream integration.
+- `GET /health`: liveness check for the gateway service
+- `GET /health/ready`: downstream readiness across identity, execution, rag,
+  storage, logging, and redis
+- `POST /api/discovery/sync`: fetch Home Assistant entities and trigger RAG sync
+- `POST /api/generate`: Ollama-compatible generate proxy
+- `GET /api/tags`: model list proxy
+- `GET /api/version`: lightweight version endpoint
