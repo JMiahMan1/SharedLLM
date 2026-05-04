@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -14,6 +15,7 @@ log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
 WORKSPACE_REGISTRY_PATH = os.getenv("WORKSPACE_REGISTRY_PATH", "/app/config/workspaces.json")
 WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
 DEFAULT_PYTEST_TIMEOUT_SECONDS = int(os.getenv("WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "90"))
@@ -35,6 +37,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 class WorkspaceRef(BaseModel):
     workspace_id: Optional[str] = None
     local_path: Optional[str] = None
+    rag_user: Optional[str] = None
+    voice_id: Optional[str] = None
+    device_id: Optional[str] = None
 
 
 class FileReadRequest(WorkspaceRef):
@@ -77,6 +82,48 @@ def _load_registry() -> list[dict[str, Any]]:
     return [item for item in items if isinstance(item, dict)]
 
 
+def _normalize_allowed_users(entry: dict[str, Any]) -> list[str]:
+    raw = entry.get("allowed_users")
+    if raw is None:
+        raw = entry.get("owners")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=500, detail="Workspace registry allowed_users must be a list")
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
+    payload = {}
+    if ref.rag_user:
+        payload["rag_user"] = ref.rag_user
+    if ref.voice_id:
+        payload["voice_id"] = ref.voice_id
+    if ref.device_id:
+        payload["device_id"] = ref.device_id
+    if not payload:
+        return None
+
+    try:
+        resp = httpx.post(
+            f"{IDENTITY_SVC_URL}/api/resolve",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=5.0,
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail=f"Identity service unreachable: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=f"Identity resolution failed: {resp.text}")
+
+    data = resp.json()
+    user = str(data.get("user") or "").strip() if isinstance(data, dict) else ""
+    if not user:
+        raise HTTPException(status_code=500, detail="Identity resolution did not return a user")
+    return {"user": user, "is_admin": bool(data.get("is_admin"))}
+
+
 def _safe_workspace_path(local_path: str) -> Path:
     candidate = Path(local_path)
     if not candidate.is_absolute():
@@ -95,6 +142,9 @@ def _safe_workspace_path(local_path: str) -> Path:
 
 def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     registry = _load_registry()
+    identity = _resolve_identity_context(ref)
+    resolved_user = identity["user"] if identity else None
+    is_admin = bool(identity and identity.get("is_admin"))
     match = None
 
     if ref.workspace_id:
@@ -109,10 +159,45 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     if match is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
+    allowed_users = _normalize_allowed_users(match)
+    if allowed_users:
+        if not resolved_user:
+            raise HTTPException(status_code=400, detail="User context is required for this workspace")
+        if resolved_user not in allowed_users and not is_admin:
+            raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' is not available for user '{resolved_user}'")
+
     resolved_path = _safe_workspace_path(str(match["local_path"]))
     workspace = dict(match)
     workspace["resolved_path"] = str(resolved_path)
+    workspace["scope"] = str(workspace.get("scope") or "user")
+    workspace["capabilities"] = _workspace_capabilities(workspace)
+    if resolved_user:
+        workspace["resolved_user"] = resolved_user
+    if identity:
+        workspace["resolved_identity"] = identity
     return workspace
+
+
+def _workspace_capabilities(workspace: dict[str, Any]) -> list[str]:
+    raw = workspace.get("capabilities")
+    if isinstance(raw, list) and raw:
+        return [str(item).strip() for item in raw if str(item).strip()]
+    scope = str(workspace.get("scope") or "user").strip().lower()
+    if scope == "system":
+        return ["read", "git_status", "git_diff"]
+    return ["read", "git_status", "git_diff", "pytest"]
+
+
+def _require_workspace_capability(workspace: dict[str, Any], capability: str) -> None:
+    identity = workspace.get("resolved_identity") or {}
+    if identity.get("is_admin"):
+        return
+    capabilities = _workspace_capabilities(workspace)
+    if capability not in capabilities:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Workspace '{workspace.get('id')}' does not allow capability '{capability}'",
+        )
 
 
 def _safe_file_path(workspace_path: Path, relative_path: str) -> Path:
@@ -168,17 +253,43 @@ def health():
 
 
 @app.get("/workspaces")
-def list_workspaces(x_internal_secret: Optional[str] = Header(default=None)):
+def list_workspaces(
+    rag_user: Optional[str] = None,
+    voice_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    x_internal_secret: Optional[str] = Header(default=None),
+):
     _require_internal_secret(x_internal_secret)
+    ref = WorkspaceRef(rag_user=rag_user, voice_id=voice_id, device_id=device_id)
+    identity = _resolve_identity_context(ref)
+    resolved_user = identity["user"] if identity else None
+    is_admin = bool(identity and identity.get("is_admin"))
     items = []
     for entry in _load_registry():
         item = dict(entry)
+        allowed_users = _normalize_allowed_users(entry)
+        if allowed_users and resolved_user and resolved_user not in allowed_users and not is_admin:
+            continue
+        if allowed_users and not resolved_user:
+            item["available"] = False
+            item["resolved_path"] = None
+            item["requires_user_context"] = True
+            items.append(item)
+            continue
         try:
             item["resolved_path"] = str(_safe_workspace_path(str(entry["local_path"])))
             item["available"] = True
         except HTTPException:
             item["resolved_path"] = None
             item["available"] = False
+        item["scope"] = str(item.get("scope") or "user")
+        item["capabilities"] = _workspace_capabilities(item)
+        if allowed_users:
+            item["allowed_users"] = allowed_users
+        if resolved_user:
+            item["resolved_user"] = resolved_user
+        if identity:
+            item["resolved_identity"] = identity
         items.append(item)
     return {"status": "SUCCESS", "workspaces": items}
 
@@ -194,6 +305,7 @@ def resolve_workspace(req: WorkspaceRef, x_internal_secret: Optional[str] = Head
 def read_file(req: FileReadRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "read")
     workspace_path = Path(workspace["resolved_path"])
     target = _safe_file_path(workspace_path, req.relative_path)
     content = target.read_text(errors="replace")
@@ -210,6 +322,7 @@ def read_file(req: FileReadRequest, x_internal_secret: Optional[str] = Header(de
 def git_status(req: WorkspaceRef, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
     branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
     porcelain = _run_command(workspace_path, ["git", "status", "--short"])
@@ -228,6 +341,7 @@ def git_status(req: WorkspaceRef, x_internal_secret: Optional[str] = Header(defa
 def git_diff(req: DiffRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_diff")
     workspace_path = Path(workspace["resolved_path"])
     pathspecs = _sanitize_targets(req.pathspecs)
     result = _run_command(workspace_path, ["git", "diff", req.ref, "--", *pathspecs] if pathspecs else ["git", "diff", req.ref])
@@ -240,6 +354,7 @@ def git_diff(req: DiffRequest, x_internal_secret: Optional[str] = Header(default
 def run_pytest(req: PytestRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "pytest")
     workspace_path = Path(workspace["resolved_path"])
     targets = _sanitize_targets(req.targets)
     args = ["python", "-m", "pytest", "-q", *targets] if targets else ["python", "-m", "pytest", "-q"]

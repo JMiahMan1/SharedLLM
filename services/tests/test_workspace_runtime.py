@@ -35,6 +35,16 @@ def runtime_env(tmp_path, monkeypatch):
                     {
                         "id": "demo",
                         "display_name": "Demo Workspace",
+                        "allowed_users": ["jeremiah"],
+                        "local_path": "demo",
+                        "default_branch": "main",
+                    },
+                    {
+                        "id": "demo_system",
+                        "display_name": "Demo System Workspace",
+                        "scope": "system",
+                        "allowed_users": ["jeremiah"],
+                        "capabilities": ["read", "git_status", "git_diff"],
                         "local_path": "demo",
                         "default_branch": "main",
                     }
@@ -46,6 +56,11 @@ def runtime_env(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "INTERNAL_SECRET", "test-secret")
     monkeypatch.setattr(runtime, "WORKSPACE_ROOT", workspace_root.resolve())
     monkeypatch.setattr(runtime, "WORKSPACE_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setattr(
+        runtime,
+        "_resolve_identity_context",
+        lambda ref: {"user": ref.rag_user, "is_admin": ref.rag_user == "admin"} if ref.rag_user else None,
+    )
 
     return repo_dir
 
@@ -61,7 +76,7 @@ def _headers():
 
 
 def test_list_workspaces(client):
-    resp = client.get("/workspaces", headers=_headers())
+    resp = client.get("/workspaces", params={"rag_user": "jeremiah"}, headers=_headers())
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "SUCCESS"
@@ -69,11 +84,20 @@ def test_list_workspaces(client):
     assert data["workspaces"][0]["available"] is True
 
 
+def test_list_workspaces_allows_admin_override(client):
+    resp = client.get("/workspaces", params={"rag_user": "admin"}, headers=_headers())
+    assert resp.status_code == 200
+    data = resp.json()
+    ids = {item["id"] for item in data["workspaces"]}
+    assert "demo" in ids
+    assert "demo_system" in ids
+
+
 def test_read_file_blocks_parent_traversal(client):
     resp = client.post(
         "/files/read",
         headers=_headers(),
-        json={"workspace_id": "demo", "relative_path": "../secret.txt"},
+        json={"workspace_id": "demo", "rag_user": "jeremiah", "relative_path": "../secret.txt"},
     )
     assert resp.status_code == 400
 
@@ -81,7 +105,7 @@ def test_read_file_blocks_parent_traversal(client):
 def test_git_status_reports_dirty_workspace(client, runtime_env):
     (runtime_env / "sample.py").write_text("VALUE = 2\n")
 
-    resp = client.post("/git/status", headers=_headers(), json={"workspace_id": "demo"})
+    resp = client.post("/git/status", headers=_headers(), json={"workspace_id": "demo", "rag_user": "jeremiah"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "SUCCESS"
@@ -93,10 +117,30 @@ def test_pytest_endpoint_runs_targeted_tests(client):
     resp = client.post(
         "/tests/pytest",
         headers=_headers(),
-        json={"workspace_id": "demo", "targets": ["test_sample.py"]},
+        json={"workspace_id": "demo", "rag_user": "jeremiah", "targets": ["test_sample.py"]},
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "SUCCESS"
     assert data["passed"] is True
     assert data["returncode"] == 0
+
+
+def test_system_workspace_blocks_pytest_for_non_admin(client):
+    resp = client.post(
+        "/tests/pytest",
+        headers=_headers(),
+        json={"workspace_id": "demo_system", "rag_user": "jeremiah", "targets": ["test_sample.py"]},
+    )
+    assert resp.status_code == 403
+
+
+def test_system_workspace_allows_pytest_for_admin(client):
+    resp = client.post(
+        "/tests/pytest",
+        headers=_headers(),
+        json={"workspace_id": "demo_system", "rag_user": "admin", "targets": ["test_sample.py"]},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["passed"] is True
