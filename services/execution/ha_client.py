@@ -111,23 +111,27 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     url = f"{ha_url.rstrip('/')}/api/template"
     
-    # This template iterates over all entities and gets their area names
+    # Standard Jinja2 template to list all entity IDs and their area names
     template = """
-    {% set result = {} %}
-    {% for state in states %}
-      {% set a_name = area_name(state.entity_id) %}
-      {% if a_name %}
-        {% do result.update({state.entity_id: a_name}) %}
-      {% endif %}
-    {% endfor %}
-    {{ result | tojson }}
+    [
+      {%- for state in states %}
+      {
+        "eid": "{{ state.entity_id }}",
+        "a": "{{ area_name(state.entity_id) or '' }}"
+      }{{ "," if not loop.last }}
+      {%- endfor %}
+    ]
     """
     
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             resp = await client.post(url, headers=headers, json={"template": template})
             resp.raise_for_status()
-            return resp.json()
+            raw_data = resp.json()
+            # Convert list of dicts to a single mapping dict
+            if isinstance(raw_data, list):
+                return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
+            return {}
         except Exception as e:
             log.error(f"[ha_client] get_areas failed: {e}")
             return {}
