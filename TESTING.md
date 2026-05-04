@@ -25,3 +25,28 @@ These tests are designed to be run **locally** against live hardware and service
 
 > [!IMPORTANT]
 > These tests interact with REAL hardware. Ensure the devices specified (e.g. `light.piano_lamp`) are safe to toggle before running.
+
+## 3. Live Coding Evaluation
+
+This scenario checks whether the coding path can return a correct fix for a
+small broken repository fixture.
+
+- **Fixture**: `test/fixtures/code_helper_bug_example/`
+- **Runner**: `test/live/code_helper_fix_eval.py`
+- **What it does**:
+  1. sends the broken source file and tests to `/api/chat`
+  2. asks for only the corrected file contents
+  3. extracts the returned Python code block
+  4. writes it into a temporary workspace
+  5. runs `pytest` against the fixture tests
+
+### How to Run
+```bash
+API_URL=http://localhost:11435 python3 test/live/code_helper_fix_eval.py
+```
+
+### Expected Outcome
+
+- The fixture should fail before the model is asked to fix it.
+- The script should report `[PASS]` only if the returned candidate actually
+  passes the bundled tests.
