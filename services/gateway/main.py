@@ -6,7 +6,7 @@ import asyncio
 import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import re
 import traceback
 
@@ -702,6 +702,9 @@ async def chat_handler(request: Request):
         log.error(f"Context injection failed: {e}")
 
     # 5. Proxy to Ollama (Slow Path)
+    should_stream = body.get("stream", False)
+    is_openai = "/v1/chat/completions" in str(request.url)
+    
     try:
         try:
             await client.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
@@ -710,8 +713,60 @@ async def chat_handler(request: Request):
         ollama_payload = {
             "model": selected_model,
             "messages": history + [{"role": "user", "content": f"{rag_context}\n\nQuery: {refined_query}"}],
-            "stream": False
+            "stream": should_stream
         }
+
+        if should_stream:
+            async def stream_generator():
+                full_answer = ""
+                try:
+                    import time
+                    async with client.stream(
+                        "POST", f"{OLLAMA_URL}/api/chat", json=ollama_payload, timeout=None
+                    ) as resp:
+                        if resp.status_code != 200:
+                            yield json.dumps({"error": "Ollama error"})
+                            return
+                        
+                        async for line in resp.aiter_lines():
+                            if not line: continue
+                            try:
+                                chunk = json.loads(line)
+                                if not isinstance(chunk, dict): continue
+                                
+                                content = chunk.get("message", {}).get("content", "")
+                                if content:
+                                    full_answer += content
+                                    if is_openai:
+                                        openai_chunk = {
+                                            "id": f"chatcmpl-{int(time.time())}",
+                                            "object": "chat.completion.chunk",
+                                            "created": int(time.time()),
+                                            "model": selected_model,
+                                            "choices": [{"delta": {"content": content}, "index": 0, "finish_reason": None}]
+                                        }
+                                        yield f"data: {json.dumps(openai_chunk)}\n\n"
+                                    else:
+                                        yield line + "\n"
+                                
+                                if chunk.get("done"):
+                                    if is_openai:
+                                        yield "data: [DONE]\n\n"
+                                    break
+                            except Exception as e:
+                                log.error(f"Stream chunk error: {e}")
+                finally:
+                    # Update history and resume indexer after stream ends
+                    if full_answer:
+                        await update_history(user_id, "user", query)
+                        await update_history(user_id, "assistant", full_answer)
+                    try:
+                        await client.post(f"{STORAGE_SVC}/index/resume", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                    except: pass
+            
+            return StreamingResponse(stream_generator(), media_type="text/event-stream" if is_openai else "application/x-ndjson")
+
+        # Non-streaming Path
         resp = await call_ollama(ollama_payload, use_chat=True)
         if resp.status_code == 404:
             resp = await call_ollama({"model": selected_model, "prompt": refined_query, "stream": False}, use_chat=False)
@@ -720,17 +775,21 @@ async def chat_handler(request: Request):
             return JSONResponse({"status": "ERROR", "message": "The brain is currently unavailable."}, status_code=502)
             
         data = resp.json()
-        if not isinstance(data, dict): answer = str(data)
+        answer = ""
+        if not isinstance(data, dict): 
+            answer = str(data)
         else:
             msg_obj = data.get("message")
-            if isinstance(msg_obj, dict): answer = msg_obj.get("content")
-            else: answer = data.get("response", "I encountered an error.")
+            if isinstance(msg_obj, dict): 
+                answer = msg_obj.get("content", "")
+            else: 
+                answer = str(data.get("response", "I encountered an error."))
         
         final_answer = answer if answer else "I received an empty response from the brain."
         await update_history(user_id, "user", query)
         await update_history(user_id, "assistant", final_answer)
 
-        if "/v1/chat/completions" in str(request.url):
+        if is_openai:
             import time
             return {
                 "id": f"chatcmpl-{int(time.time())}", 
