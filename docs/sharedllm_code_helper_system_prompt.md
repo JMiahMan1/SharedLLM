@@ -207,7 +207,7 @@ To fully support this system prompt in product reality, implement:
 
 1. A user-scoped workspace registry service or storage-backed registry model.
 2. Provider writeback support in Storage or a separate sync service.
-3. A dedicated code-runtime microservice for:
+3. A dedicated workspace-runtime microservice for:
    - git status/diff/branch/commit/push
    - local test execution
    - controlled file edits in mounted workspaces

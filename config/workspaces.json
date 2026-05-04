@@ -1,0 +1,13 @@
+{
+  "workspaces": [
+    {
+      "id": "sharedllm",
+      "display_name": "SharedLLM",
+      "local_path": "SharedLLM",
+      "nextcloud_path": "/Code/SharedLLM",
+      "git_remote": "origin",
+      "default_branch": "microservices",
+      "sync_mode": "local_git_authoritative"
+    }
+  ]
+}
