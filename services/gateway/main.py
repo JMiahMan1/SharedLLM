@@ -858,7 +858,7 @@ async def chat_handler(request: Request):
 
         if is_openai:
             import time
-            return {
+            res = {
                 "id": f"chatcmpl-{int(time.time())}", 
                 "object": "chat.completion", 
                 "created": int(time.time()), 
@@ -866,7 +866,14 @@ async def chat_handler(request: Request):
                 "choices": [{"message": {"role": "assistant", "content": final_answer}, "finish_reason": "stop", "index": 0}],
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             }
-        return {"status": "SUCCESS", "message": final_answer}
+            if body.get("debug"):
+                res["debug_context"] = rag_context
+            return res
+            
+        res_payload = {"status": "SUCCESS", "message": final_answer}
+        if body.get("debug"):
+            res_payload["debug_context"] = rag_context
+        return res_payload
         
     except Exception as e:
         log.error(f"LLM Proxy Error: {e}")
