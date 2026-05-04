@@ -46,4 +46,4 @@ The **Gateway** provides a unified health endpoint:
 - `GET /health/ready`: Checks connectivity to ALL downstream microservices.
 
 ---
-*Last Updated: 2026-04-30*
+*Last Updated: 2026-05-04*
