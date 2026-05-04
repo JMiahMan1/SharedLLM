@@ -82,15 +82,11 @@ def _load_registry() -> list[dict[str, Any]]:
     return [item for item in items if isinstance(item, dict)]
 
 
-def _normalize_allowed_users(entry: dict[str, Any]) -> list[str]:
-    raw = entry.get("allowed_users")
-    if raw is None:
-        raw = entry.get("owners")
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise HTTPException(status_code=500, detail="Workspace registry allowed_users must be a list")
-    return [str(item).strip() for item in raw if str(item).strip()]
+def _workspace_access_policy(entry: dict[str, Any]) -> str:
+    policy = str(entry.get("access_policy") or "authenticated").strip().lower()
+    if policy not in {"authenticated", "admin_only"}:
+        raise HTTPException(status_code=500, detail=f"Unsupported workspace access_policy: {policy}")
+    return policy
 
 
 def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
@@ -159,17 +155,17 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     if match is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    allowed_users = _normalize_allowed_users(match)
-    if allowed_users:
-        if not resolved_user:
-            raise HTTPException(status_code=400, detail="User context is required for this workspace")
-        if resolved_user not in allowed_users and not is_admin:
-            raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' is not available for user '{resolved_user}'")
+    access_policy = _workspace_access_policy(match)
+    if access_policy == "authenticated" and not resolved_user:
+        raise HTTPException(status_code=400, detail="User context is required for this workspace")
+    if access_policy == "admin_only" and not is_admin:
+        raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' requires an admin identity")
 
     resolved_path = _safe_workspace_path(str(match["local_path"]))
     workspace = dict(match)
     workspace["resolved_path"] = str(resolved_path)
     workspace["scope"] = str(workspace.get("scope") or "user")
+    workspace["access_policy"] = access_policy
     workspace["capabilities"] = _workspace_capabilities(workspace)
     if resolved_user:
         workspace["resolved_user"] = resolved_user
@@ -267,13 +263,14 @@ def list_workspaces(
     items = []
     for entry in _load_registry():
         item = dict(entry)
-        allowed_users = _normalize_allowed_users(entry)
-        if allowed_users and resolved_user and resolved_user not in allowed_users and not is_admin:
+        access_policy = _workspace_access_policy(entry)
+        if access_policy == "admin_only" and resolved_user and not is_admin:
             continue
-        if allowed_users and not resolved_user:
+        if access_policy in {"authenticated", "admin_only"} and not resolved_user:
             item["available"] = False
             item["resolved_path"] = None
             item["requires_user_context"] = True
+            item["access_policy"] = access_policy
             items.append(item)
             continue
         try:
@@ -283,9 +280,8 @@ def list_workspaces(
             item["resolved_path"] = None
             item["available"] = False
         item["scope"] = str(item.get("scope") or "user")
+        item["access_policy"] = access_policy
         item["capabilities"] = _workspace_capabilities(item)
-        if allowed_users:
-            item["allowed_users"] = allowed_users
         if resolved_user:
             item["resolved_user"] = resolved_user
         if identity:

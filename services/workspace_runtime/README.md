@@ -18,6 +18,8 @@ Implemented today:
 
 - read-only workspace registry loading
 - user-scoped workspace filtering through the Identity service
+- policy-based workspace visibility through `access_policy` rather than
+  hardcoded usernames
 - limited `system` workspaces with capability restrictions unless the resolved
   caller is admin
 - safe workspace resolution under the mounted root
@@ -39,8 +41,8 @@ is to operate on mounted workspaces as a whole, including:
 ## Safety Model
 
 - All workspace paths must resolve under `WORKSPACE_RUNTIME_ROOT`.
-- Registry entries can restrict access with `allowed_users`, resolved through
-  the Identity service.
+- Registry entries declare access policy such as `authenticated` or
+  `admin_only`, while admin status comes from the Identity service.
 - Registry entries can declare `scope: "system"` and a reduced `capabilities`
   list for more sensitive workspaces.
 - Relative file reads and pytest targets are checked for path traversal.
