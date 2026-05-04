@@ -100,5 +100,21 @@
         "update my knowledge base",
         "index my documents",
         "scan my library"
+    ],
+    "sync_ha": [
+        "reingest my devices",
+        "sync home assistant",
+        "refresh my devices",
+        "update my home assistant knowledge",
+        "re-scan for new devices",
+        "sync my home"
+    ],
+    "ha_status": [
+        "check home assistant status",
+        "what new devices were added?",
+        "any new devices found?",
+        "home assistant sync status",
+        "tell me about new devices",
+        "give me a status update on my home"
     ]
 }
