@@ -102,6 +102,25 @@ class ProviderSyncFileRequest(WorkspaceRef):
     verify: bool = True
 
 
+class WorkflowWriteSyncCommitRequest(WorkspaceRef):
+    relative_path: str
+    content: str
+    commit_message: str
+    expected_sha256: Optional[str] = None
+    create_parents: bool = False
+    sync_to_provider: bool = True
+    verify_provider_write: bool = True
+    pytest_targets: list[str] = Field(default_factory=list)
+    pytest_timeout_seconds: int = Field(default=DEFAULT_PYTEST_TIMEOUT_SECONDS, ge=1, le=900)
+    push: bool = False
+    remote: Optional[str] = None
+    branch: Optional[str] = None
+    set_upstream: bool = False
+    author_name: Optional[str] = None
+    author_email: Optional[str] = None
+    allow_empty_commit: bool = False
+
+
 def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Invalid internal secret")
@@ -623,6 +642,104 @@ def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional
         "provider_kind": provider_kind,
         "provider_path": provider_path,
         "result": data.get("result"),
+    }
+
+
+@app.post("/workflow/write-sync-commit")
+def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+
+    write_result = write_file(
+        FileWriteRequest(
+            workspace_id=req.workspace_id,
+            local_path=req.local_path,
+            rag_user=req.rag_user,
+            voice_id=req.voice_id,
+            device_id=req.device_id,
+            relative_path=req.relative_path,
+            content=req.content,
+            expected_sha256=req.expected_sha256,
+            create_parents=req.create_parents,
+        ),
+        x_internal_secret,
+    )
+
+    provider_sync_result = None
+    if req.sync_to_provider:
+        provider_sync_result = provider_sync_file(
+            ProviderSyncFileRequest(
+                workspace_id=req.workspace_id,
+                local_path=req.local_path,
+                rag_user=req.rag_user,
+                voice_id=req.voice_id,
+                device_id=req.device_id,
+                relative_path=req.relative_path,
+                create_parents=req.create_parents,
+                verify=req.verify_provider_write,
+            ),
+            x_internal_secret,
+        )
+
+    pytest_result = None
+    if req.pytest_targets:
+        pytest_result = run_pytest(
+            PytestRequest(
+                workspace_id=req.workspace_id,
+                local_path=req.local_path,
+                rag_user=req.rag_user,
+                voice_id=req.voice_id,
+                device_id=req.device_id,
+                targets=req.pytest_targets,
+                timeout_seconds=req.pytest_timeout_seconds,
+            ),
+            x_internal_secret,
+        )
+        if not pytest_result.get("passed"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Pytest failed for workflow request on {req.relative_path}",
+            )
+
+    commit_result = git_commit(
+        GitCommitRequest(
+            workspace_id=req.workspace_id,
+            local_path=req.local_path,
+            rag_user=req.rag_user,
+            voice_id=req.voice_id,
+            device_id=req.device_id,
+            message=req.commit_message,
+            pathspecs=[req.relative_path],
+            author_name=req.author_name,
+            author_email=req.author_email,
+            allow_empty=req.allow_empty_commit,
+        ),
+        x_internal_secret,
+    )
+
+    push_result = None
+    if req.push:
+        push_result = git_push(
+            GitPushRequest(
+                workspace_id=req.workspace_id,
+                local_path=req.local_path,
+                rag_user=req.rag_user,
+                voice_id=req.voice_id,
+                device_id=req.device_id,
+                remote=req.remote,
+                branch=req.branch,
+                set_upstream=req.set_upstream,
+            ),
+            x_internal_secret,
+        )
+
+    return {
+        "status": "SUCCESS",
+        "relative_path": req.relative_path,
+        "write": write_result,
+        "provider_sync": provider_sync_result,
+        "pytest": pytest_result,
+        "commit": commit_result,
+        "push": push_result,
     }
 
 
