@@ -1,47 +1,70 @@
 # Storage Service
 
-The Storage Service acts as a bridge between SharedLLM and external data stores like NextCloud. It provides listing, searching, and deep content indexing capabilities.
+The Storage service is the read-only bridge between SharedLLM and external file
+stores such as Nextcloud. Its current responsibilities are:
 
-## Features
+- list provider entries
+- search provider entries by filename terms
+- classify discovered items for indexing
+- extract text content for supported file types
+- sync extracted chunks to the RAG service
 
-### 1. Unified Provider Interface
-Supports multiple storage providers (currently NextCloud) via a common `StorageProvider` abstraction.
+It does not currently edit files, write back to Nextcloud, manage git state, or
+act as the canonical runtime for repository operations.
 
-### 2. Deep Content Indexing
-The `/index/full` endpoint performs an end-to-end knowledge ingestion:
-1.  **Structure Scan**: Identifies all files and directories recursively.
-2.  **Classification**: Categorizes files (e.g., Markdown, PDF, Source Code) using `indexer.py`.
-3.  **Content Extraction**: Downloads and reads text-based files.
-4.  **Semantic Chunking**: Splits large files into overlapping snippets (default 1000 chars, 200 overlap).
-5.  **RAG Synchronization**: Pushes chunks to the RAG service for vector search.
-
-### 3. Checkpointing & Performance
-*   **Progress Tracking**: Uses `/data/index_checkpoint.json` to store hashes/mtimes of indexed files. It will skip unchanged files on subsequent runs.
-*   **Resource Prioritization**: Includes `/index/pause` and `/index/resume` endpoints. The Gateway automatically pauses indexing during heavy LLM inference to ensure maximum performance for user interactions.
-
-### 4. Automated Cleanup
-Uses a `session_id` strategy during indexing. Any files previously in the RAG service that are no longer present in the latest indexing session are automatically purged.
-
-## API Endpoints
+## Current API
 
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/health` | GET | Service health check. |
 | `/providers/list` | POST | List entries from a provider path. |
-| `/index/scan` | POST | Classify files without extracting content. |
-| `/index/full` | POST | Full scan, extract, and sync to RAG. |
-| `/index/pause` | POST | Pause active indexing jobs. |
-| `/index/resume` | POST | Resume paused indexing jobs. |
+| `/providers/search` | POST | Search entries by query string. |
+| `/index/full` | POST | Start a background scan, extraction, and RAG sync job. |
+| `/index/pause` | POST | Pause active indexing work for up to 60 seconds. |
+| `/index/resume` | POST | Resume indexing work immediately. |
 
-## Triggering an Index
-You can trigger a full library index via chat:
-*   *"Index my library"*
-*   *"Scan my nextcloud for new files"*
-*   *"Update my knowledge base"*
+## Provider Support
 
-## Development & Testing
-Run unit tests locally:
-```bash
-export PYTHONPATH=$PYTHONPATH:$(pwd)
-pytest tests/test_indexer.py tests/test_api.py
+Current provider support:
+
+- `nextcloud` via WebDAV
+
+The provider interface is intentionally narrow today:
+
+- `list_entries(path, recursive)`
+- `get_content(path)`
+
+## Indexing Behavior
+
+`/index/full` schedules a background task that:
+
+1. Lists entries from the provider.
+2. Filters common noise paths such as `.git`, `node_modules`, and virtualenvs.
+3. Classifies files and folders into `ContentIndexItem` records.
+4. Extracts text for supported content types.
+5. Chunks extracted text for RAG sync.
+6. Pushes chunks to the RAG service and purges stale chunks by `session_id`.
+
+The endpoint returns immediately with:
+
+```json
+{
+  "status": "SUCCESS",
+  "message": "Indexing started in background."
+}
 ```
+
+## Repo-Aware Limitation
+
+The service can discover repository-shaped folders as storage content, but the
+actual source of truth for code edits should remain a local git checkout. For
+active coding workflows, use a mapped workspace and run file edits, tests,
+diffs, and git operations against that checkout rather than against synced
+Nextcloud copies.
+
+## Tests
+
+Relevant tests live under:
+
+- `services/tests/test_storage.py`
+- `services/tests/test_storage_advanced.py`

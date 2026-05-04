@@ -330,6 +330,45 @@ def extract_media_transport_command(query: str) -> str | None:
     return None
 
 
+def has_explicit_action_request(query: str) -> bool:
+    q = (query or "").strip().lower()
+    if not q:
+      return False
+
+    action_patterns = (
+      r"\bturn on\b",
+      r"\bturn off\b",
+      r"\bswitch on\b",
+      r"\bswitch off\b",
+      r"\bpower on\b",
+      r"\bpower off\b",
+      r"\bplay\b",
+      r"\bpause\b",
+      r"\bstop\b",
+      r"\bresume\b",
+      r"\bopen\b",
+      r"\bclose\b",
+    )
+    return any(re.search(pattern, q, flags=re.IGNORECASE) for pattern in action_patterns)
+
+
+def requests_status_followup(query: str) -> bool:
+    q = (query or "").strip().lower()
+    if not q:
+      return False
+
+    followup_signals = (
+      "recheck",
+      "check again",
+      "status after",
+      "state after",
+      "afterward",
+      "afterwards",
+      "after that",
+    )
+    return any(signal in q for signal in followup_signals)
+
+
 def resolve_media_target(query: str, entities: list[dict]) -> str:
     """
     Prefer a Music Assistant queue/speaker entity for music playback on named targets.
@@ -586,6 +625,8 @@ async def chat_handler(request: Request):
     media_query, _ = extract_media_request(refined_query)
     media_transport_command = extract_media_transport_command(refined_query)
     is_video_request = is_likely_video_request(refined_query)
+    explicit_action_request = has_explicit_action_request(refined_query)
+    wants_status_followup = requests_status_followup(refined_query)
     
     # 3. Fast Path (Semantic Routing)
     intent, confidence = engine.classify(refined_query)
@@ -641,7 +682,11 @@ async def chat_handler(request: Request):
         
         # Override: Status queries should NOT be fast-pathed as actions
         status_keywords = {"state", "status", "how is", "what is", "tell me about", "check"}
-        if any(kw in refined_query.lower() for kw in status_keywords) and intent in {"turn_on", "turn_off"}:
+        if (
+            any(kw in refined_query.lower() for kw in status_keywords)
+            and intent in {"turn_on", "turn_off"}
+            and not explicit_action_request
+        ):
             endpoint = None
             log.info(f"Overriding {intent} fast-path for status inquiry.")
 
@@ -750,9 +795,28 @@ async def chat_handler(request: Request):
                 exec_payload["command"] = media_transport_command
 
             exec_res = await execute_command(endpoint, exec_payload)
+            response_message = exec_res.get("message", "Executed")
+
+            if wants_status_followup and target_entity != "auto":
+                refreshed_entities = await fetch_ha_entities(creds)
+                refreshed_entity = next(
+                    (
+                        entity for entity in refreshed_entities
+                        if isinstance(entity, dict) and entity.get("entity_id") == target_entity
+                    ),
+                    None,
+                )
+                if refreshed_entity:
+                    attrs = refreshed_entity.get("attributes") or {}
+                    friendly_name = attrs.get("friendly_name") or target_entity
+                    current_state = refreshed_entity.get("state", "unknown")
+                    response_message = (
+                        f"{response_message} Current status of {friendly_name} is {current_state}."
+                    )
+
             if is_openai:
-                return _make_openai_response(exec_res.get("message", "Executed"), selected_model, intent, stream=should_stream)
-            return _make_ollama_response(exec_res.get("message", "Executed"), selected_model, intent, stream=should_stream)
+                return _make_openai_response(response_message, selected_model, intent, stream=should_stream)
+            return _make_ollama_response(response_message, selected_model, intent, stream=should_stream)
 
     # 4. Context Injection (RAG + Storage + Logs + History)
     rag_context = ""

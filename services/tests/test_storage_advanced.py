@@ -49,35 +49,24 @@ async def test_extract_and_chunk_contents_logic():
     ]
     
     chunks = await extract_and_chunk_contents(mock_provider, items)
-    assert len(chunks) == 1
-    assert chunks[0]["content"] == "Hello world knowledge"
+    assert len(chunks) == 2
     assert chunks[0]["metadata"]["path"] == "/test.txt"
+    assert chunks[0]["metadata"]["is_dir"] is False
+    assert chunks[1]["content"] == "Hello world knowledge"
+    assert chunks[1]["metadata"]["path"] == "/test.txt"
 
 def test_storage_api_control_endpoints():
     resp = client.post("/index/pause")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "SUCCESS"
+    assert resp.json()["status"] == "PAUSED"
     
     resp = client.post("/index/resume")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "SUCCESS"
+    assert resp.json()["status"] == "RESUMED"
 
 @pytest.mark.asyncio
 async def test_full_index_endpoint_mocks(monkeypatch):
-    # Mocking the entire pipeline to test the endpoint structure
-    monkeypatch.setattr("storage.main.build_provider", lambda config: MagicMock())
-    monkeypatch.setattr("storage.main.extract_and_chunk_contents", AsyncMock(return_value=[{"content": "abc", "metadata": {"path": "a"}}]))
-    
-    # Mock httpx response for RAG sync
-    class MockResp:
-        status_code = 200
-        def json(self): return {"status": "SUCCESS"}
-        def raise_for_status(self): pass
-
-    async def mock_post(*args, **kwargs):
-        return MockResp()
-
-    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+    monkeypatch.setattr("storage.main._run_full_index_task", AsyncMock(return_value=None))
 
     request_payload = {
         "provider": {
@@ -92,4 +81,4 @@ async def test_full_index_endpoint_mocks(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "SUCCESS"
-    assert "chunks_extracted" in data
+    assert data["message"] == "Indexing started in background."
