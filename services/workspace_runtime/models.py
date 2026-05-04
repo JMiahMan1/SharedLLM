@@ -1,0 +1,16 @@
+from typing import Optional, List
+from sqlmodel import SQLModel, Field, JSON, Column
+
+
+class Workspace(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    display_name: str
+    access_policy: str = Field(default="authenticated")
+    local_path: str
+    nextcloud_path: Optional[str] = None
+    git_remote: Optional[str] = Field(default="origin")
+    default_branch: Optional[str] = Field(default="main")
+    sync_mode: str = Field(default="local_git_authoritative")
+    scope: str = Field(default="user")
+    capabilities: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    owner_user: Optional[str] = None  # Tied to Identity service user

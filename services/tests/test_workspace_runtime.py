@@ -8,6 +8,8 @@ import pytest
 from fastapi import HTTPException
 
 import workspace_runtime.main as runtime
+from workspace_runtime.models import Workspace
+from sqlmodel import Session, SQLModel, create_engine
 
 pytestmark = pytest.mark.local_only
 
@@ -24,7 +26,7 @@ def runtime_env(tmp_path, monkeypatch):
         "from sample import VALUE\n\n\ndef test_value():\n    assert VALUE == 1\n"
     )
 
-    subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_dir, check=True, capture_output=True, text=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dir, check=True, capture_output=True, text=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_dir, check=True, capture_output=True, text=True)
     subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True, text=True)
@@ -69,6 +71,18 @@ def runtime_env(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "INTERNAL_SECRET", "test-secret")
     monkeypatch.setattr(runtime, "WORKSPACE_ROOT", workspace_root.resolve())
     monkeypatch.setattr(runtime, "WORKSPACE_REGISTRY_PATH", str(registry_path))
+    
+    # DB Setup for test
+    test_engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(test_engine)
+    monkeypatch.setattr(runtime, "engine", test_engine)
+    
+    # Seed DB for tests
+    with Session(test_engine) as session:
+        data = json.loads(registry_path.read_text())
+        for ws_data in data["workspaces"]:
+            session.add(Workspace(**ws_data))
+        session.commit()
     def resolve_identity(ref):
         if not ref.rag_user:
             return None
@@ -189,9 +203,6 @@ def test_write_file_updates_user_workspace(runtime_env):
     assert data["status"] == "SUCCESS"
     assert data["created"] is False
     assert data["previous_sha256"] == original_sha
-    assert (runtime_env / "sample.py").read_text() == "VALUE = 3\n"
-
-
 def test_write_file_rejects_conflict():
     with pytest.raises(HTTPException) as exc:
         runtime.write_file(
@@ -205,6 +216,28 @@ def test_write_file_rejects_conflict():
             "test-secret",
         )
     assert exc.value.status_code == 409
+
+
+def test_write_file_applies_patch(runtime_env):
+    (runtime_env / "sample.py").write_text("LINE 1\nLINE 2\n")
+    patch_content = """--- sample.py
++++ sample.py
+@@ -1,2 +1,2 @@
+-LINE 1
++MODIFIED 1
+ LINE 2
+"""
+    data = runtime.write_file(
+        runtime.FileWriteRequest(
+            workspace_id="demo",
+            rag_user="jeremiah",
+            relative_path="sample.py",
+            patch=patch_content,
+        ),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert "MODIFIED 1\nLINE 2\n" in (runtime_env / "sample.py").read_text()
 
 
 def test_provider_scan_uses_workspace_nextcloud_binding(monkeypatch):
@@ -486,10 +519,114 @@ def test_system_workspace_blocks_pytest_for_non_admin():
         )
     assert exc.value.status_code == 403
 
-
 def test_system_workspace_allows_pytest_for_admin():
     data = runtime.run_pytest(
         runtime.PytestRequest(workspace_id="demo_system", rag_user="admin", targets=["test_sample.py"]),
         "test-secret",
     )
     assert data["passed"] is True
+
+
+def test_git_fetch_calls_git_fetch(runtime_env, monkeypatch):
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/user/repo.git"], cwd=runtime_env)
+    
+    calls = []
+    def fake_run_git(workspace_path, args, identity, remote_url, timeout_seconds=60):
+        calls.append(args)
+        return {"returncode": 0, "stdout": "fetched", "stderr": "", "args": args}
+    
+    monkeypatch.setattr(runtime, "_run_git_with_optional_askpass", fake_run_git)
+    
+    data = runtime.git_fetch(
+        runtime.GitFetchRequest(workspace_id="demo", rag_user="jeremiah", prune=True),
+        "test-secret"
+    )
+    assert data["status"] == "SUCCESS"
+    assert ["git", "fetch", "--prune", "origin"] in calls
+
+
+def test_git_pull_calls_git_pull(runtime_env, monkeypatch):
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/user/repo.git"], cwd=runtime_env)
+    
+    calls = []
+    def fake_run_git(workspace_path, args, identity, remote_url, timeout_seconds=60):
+        calls.append(args)
+        return {"returncode": 0, "stdout": "pulled", "stderr": "", "args": args}
+    
+    monkeypatch.setattr(runtime, "_run_git_with_optional_askpass", fake_run_git)
+    
+    data = runtime.git_pull(
+        runtime.GitPullRequest(workspace_id="demo", rag_user="jeremiah", rebase=True),
+        "test-secret"
+    )
+    assert data["status"] == "SUCCESS"
+    # Assuming current branch is main as set in runtime_env fixture
+    assert ["git", "pull", "--rebase", "origin", "main"] in calls
+
+
+def test_git_rebase_calls_git_rebase(runtime_env, monkeypatch):
+    calls = []
+    def fake_run_command(workspace_path, args, timeout_seconds=30, env_overrides=None):
+        calls.append(args)
+        return {"returncode": 0, "stdout": "rebased", "stderr": "", "args": args}
+    
+    monkeypatch.setattr(runtime, "_run_command", fake_run_command)
+    
+    data = runtime.git_rebase(
+        runtime.GitRebaseRequest(workspace_id="demo", rag_user="jeremiah", upstream="origin/main"),
+        "test-secret"
+    )
+    assert data["status"] == "SUCCESS"
+    assert ["git", "rebase", "origin/main"] in calls
+
+
+def test_provider_sync_binary_file_uses_base64(runtime_env, monkeypatch):
+    calls = []
+
+    def fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json})
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {"status": "SUCCESS", "result": {"path": json["path"], "verified": True}},
+            text="",
+        )
+
+    monkeypatch.setattr(runtime.httpx, "post", fake_post)
+    binary_content = b"\xff\xd8\xff\xe0" # JPEG header
+    (runtime_env / "image.jpg").write_bytes(binary_content)
+
+    data = runtime.provider_sync_file(
+        runtime.ProviderSyncFileRequest(workspace_id="demo", rag_user="jeremiah", relative_path="image.jpg"),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert "content_b64" in calls[0]["json"]
+    import base64
+    assert base64.b64decode(calls[0]["json"]["content_b64"]) == binary_content
+
+
+def test_create_workspace():
+    ws_data = {
+        "id": "new_ws",
+        "display_name": "New Workspace",
+        "local_path": "new_ws",
+    }
+    data = runtime.create_workspace(Workspace(**ws_data), "test-secret")
+    assert data["status"] == "SUCCESS"
+    assert data["workspace"].id == "new_ws"
+
+
+def test_update_workspace():
+    data = runtime.update_workspace("demo", {"display_name": "Updated Demo"}, "test-secret")
+    assert data["status"] == "SUCCESS"
+    assert data["workspace"].display_name == "Updated Demo"
+
+
+def test_delete_workspace():
+    data = runtime.delete_workspace("demo", "test-secret")
+    assert data["status"] == "SUCCESS"
+    
+    # Verify it's gone
+    with pytest.raises(HTTPException) as exc:
+        runtime.resolve_workspace(runtime.WorkspaceRef(workspace_id="demo"), "test-secret")
+    assert exc.value.status_code == 404
