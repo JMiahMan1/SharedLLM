@@ -555,6 +555,13 @@ async def chat_handler(request: Request):
         }
 
         endpoint = endpoint_map.get(intent)
+        
+        # Override: Status queries should NOT be fast-pathed as actions
+        status_keywords = {"state", "status", "how is", "what is", "tell me about", "check"}
+        if any(kw in refined_query.lower() for kw in status_keywords) and intent in {"turn_on", "turn_off"}:
+            endpoint = None
+            log.info(f"Overriding {intent} fast-path for status inquiry.")
+
         if endpoint:
             target_entity = "auto"
             query_lower = refined_query.lower()
@@ -671,7 +678,11 @@ async def chat_handler(request: Request):
         task_names = []
 
         # Task 1: HA Entity Search
-        ha_keywords = [r"\bstatus\b", r"\bdevice\b", r"\bhome\b", r"\bsensor\b", r"\blight\b", r"\bswitch\b", r"\bdoor\b", r"\block\b", r"\btemp\b", r"\bhumidity\b", r"\bbattery\b"]
+        ha_keywords = [
+            r"\bstatus\b", r"\bstate\b", r"\bdevice\b", r"\bhome\b", r"\bsensor\b", r"\blight\b", r"\bswitch\b", 
+            r"\bdoor\b", r"\block\b", r"\btemp\b", r"\bhumidity\b", r"\bbattery\b", r"\blamp\b", r"\bpiano\b",
+            r"\btv\b", r"\bplug\b", r"\bfan\b", r"\bclimate\b"
+        ]
         if any(re.search(kw, q_lower) for kw in ha_keywords):
             tasks.append(client.post(
                 f"{RAG_SVC}/rag/search",
