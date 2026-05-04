@@ -293,7 +293,7 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
           score -= 25
       return score, eid
 
-    candidates = [e for e in entities if e.get("entity_id", "").startswith("media_player.")]
+    candidates = [e for e in entities if isinstance(e, dict) and e.get("entity_id", "").startswith("media_player.")]
     if not candidates:
       return fallback
 
@@ -756,8 +756,11 @@ async def proxy_generate(request: Request):
         async with httpx.AsyncClient(timeout=None) as client:
             resp = await client.post(f"{OLLAMA_URL}/api/generate", json=body)
             if resp.status_code != 200:
-                return JSONResponse(content=resp.text, status_code=resp.status_code)
-            return resp.json()
+                return JSONResponse({"status": "ERROR", "message": resp.text}, status_code=resp.status_code)
+            data = resp.json()
+            if not isinstance(data, dict):
+                return {"status": "ERROR", "message": str(data)}
+            return data
     except Exception as e:
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
@@ -767,10 +770,13 @@ async def proxy_tags():
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{OLLAMA_URL}/api/tags")
             if resp.status_code != 200:
-                return JSONResponse(content=resp.text, status_code=resp.status_code)
-            return resp.json()
+                return JSONResponse({"models": []}, status_code=200)
+            data = resp.json()
+            if not isinstance(data, dict):
+                return {"models": []}
+            return data
     except Exception as e:
-        return JSONResponse({"models": []}, status_code=200) # Fallback for UI
+        return JSONResponse({"models": []}, status_code=200)
 
 @app.get("/api/version")
 async def proxy_version():
