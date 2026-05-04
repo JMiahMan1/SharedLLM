@@ -24,6 +24,7 @@ Current implemented capabilities:
   caller is admin
 - enforce that all workspace access stays under the configured workspace root
 - read files from a workspace safely
+- write files to authorized workspaces with optional optimistic conflict checks
 - report `git status`
 - return `git diff`
 - run targeted `pytest` commands inside a workspace
@@ -48,7 +49,6 @@ become the runtime substrate for workspace-scoped agentic tasks, including:
 
 Today it does not:
 
-- mutate files
 - mutate the workspace registry
 - create commits or push to remotes
 - write back to Nextcloud or another provider
@@ -92,6 +92,7 @@ service created specifically to fill that gap.
 - `GET /workspaces`
 - `POST /workspace/resolve`
 - `POST /files/read`
+- `POST /files/write`
 - `POST /git/status`
 - `POST /git/diff`
 - `POST /tests/pytest`
@@ -106,6 +107,7 @@ service created specifically to fill that gap.
   workspaces
 - workspace paths must resolve under `WORKSPACE_RUNTIME_ROOT`
 - file access is blocked if it escapes the workspace
+- file writes can enforce `expected_sha256` before replacing existing content
 - pytest targets reject absolute paths, parent traversal, and option-like
   arguments
 
@@ -113,7 +115,7 @@ service created specifically to fill that gap.
 
 The next useful features are:
 
-1. file write endpoints with path safety and optimistic conflict handling
+1. richer file mutation support beyond direct text writes
 2. git add/commit/push endpoints with strict scope controls
 3. workspace registry APIs instead of a static JSON file
 4. gateway-level orchestration for coding tasks that need real file changes
@@ -128,9 +130,9 @@ agentic workspace engine. The main unfinished pieces are:
 1. **DB-backed workspace registry**
    Move workspace definitions and access policy out of static JSON and into a
    service-owned or Identity-linked database model.
-2. **Write path**
-   Add file create/update/delete endpoints with path safety, conflict handling,
-   and auditability.
+2. **Write path expansion**
+   Extend mutation beyond direct text replacement into richer create/update/delete
+   flows with better conflict handling and auditability.
 3. **Git lifecycle**
    Add branch creation, staging, commit, push, and pull/rebase behavior with
    explicit scope controls.
