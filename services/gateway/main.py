@@ -49,7 +49,10 @@ _global_http_client: httpx.AsyncClient = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _global_http_client
-    _global_http_client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
+    _global_http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(60.0, connect=5.0),
+        transport=httpx.AsyncHTTPTransport(retries=3)
+    )
     log.info("Gateway starting up...")
     engine.load()
     yield
@@ -601,12 +604,14 @@ async def chat_handler(request: Request):
                 "execution_result": exec_res
             })
 
-    # 4. Context Injection (RAG + Storage)
+    # 4. Context Injection (RAG + Storage + Logs + History)
     rag_context = ""
-    results = [] # Initialize results to prevent UnboundLocalError
+    results = [] 
+    
     try:
         selected_model = select_model_for_query(refined_query)
         q_lower = refined_query.lower()
+        
         is_librarian_task = any(token in q_lower for token in (
             "summarize", "summary", "recap", "search my", "find in", "look up", "what do i have",
             "list my", "notes", "calendar", "documents", "document", "playlist", "playlists",
@@ -614,92 +619,116 @@ async def chat_handler(request: Request):
             "files", "folders", "nextcloud", "storage", "cloud", "books", "book", "music",
             "photos", "photo", "images", "videos", "video", "code", "scripts"
         ))
-        
-        client = _global_http_client
-        # HA Entity Context
-        ha_keywords = [r"\bstatus\b", r"\bdevice\b", r"\bhome\b", r"\bsensor\b", r"\blight\b", r"\bswitch\b", r"\bdoor\b", r"\block\b", r"\btemp\b", r"\bhumidity\b", r"\bbattery\b"]
-        if any(re.search(k, q_lower) for k in ha_keywords):
-            rag_resp = await client.post(
-                f"{RAG_SVC}/rag/search",
-                json={"query": refined_query, "user_id": user_id, "collection_name": "ha_entities", "k": 5},
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if rag_resp.status_code == 200:
-                data = rag_resp.json()
-                if isinstance(data, dict):
-                    results = data.get("results", [])
-                    if not isinstance(results, list): results = []
-                    context_lines = [str(r.get("content")) for r in results if isinstance(r, dict) and r.get("content")]
-                    if context_lines:
-                        rag_context = "Relevant Device Context:\n" + "\n".join(context_lines)
-            
-        if is_librarian_task:
-            file_rag_resp = await client.post(
-                f"{RAG_SVC}/rag/search",
-                json={"query": refined_query, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5},
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if file_rag_resp.status_code == 200:
-                data = file_rag_resp.json()
-                if isinstance(data, dict):
-                    if not isinstance(file_results, list): file_results = []
-                    file_lines = []
-                    for r in file_results:
-                        if not isinstance(r, dict): continue
-                        meta = r.get("metadata", {})
-                        if not isinstance(meta, dict): meta = {}
-                        name = meta.get("name", "file")
-                        path = meta.get("path", "unknown")
-                        content = str(r.get("content", ""))[:200]
-                        file_lines.append(f"- {name} ({path}): {content}...")
-                    if file_lines:
-                        rag_context += f"\n\nRelevant NextCloud Content:\n" + "\n".join(file_lines)
 
-            storage_resp = await client.post(
+        # Optimize HA Sync: Only sync if not done recently
+        sync_key = f"ha_sync_{user_id}"
+        last_sync = getattr(app.state, sync_key, 0)
+        import time
+        if time.time() - last_sync > 3600:
+            try:
+                await client.post(f"{RAG_SVC}/rag/sync/ha", json={"entities": entities, "user_id": user_id}, timeout=10.0)
+                setattr(app.state, sync_key, time.time())
+            except Exception as e:
+                log.warning(f"Background HA sync failed: {e}")
+
+        # Prepare parallel tasks
+        tasks = []
+        task_names = []
+
+        # Task 1: HA Entity Search
+        ha_keywords = [r"\bstatus\b", r"\bdevice\b", r"\bhome\b", r"\bsensor\b", r"\blight\b", r"\bswitch\b", r"\bdoor\b", r"\block\b", r"\btemp\b", r"\bhumidity\b", r"\bbattery\b"]
+        if any(re.search(kw, q_lower) for kw in ha_keywords):
+            tasks.append(client.post(
+                f"{RAG_SVC}/rag/search",
+                json={"query": refined_query, "user_id": user_id, "collection_name": "ha_entities", "k": 10}
+            ))
+            task_names.append("ha_rag")
+
+        # Task 2: Log Context
+        log_keywords = [r"\blog\b", r"\blogs\b", r"\bhealth\b", r"\bstatus\b", r"\bissue\b", r"\berror\b", r"\bbroken\b"]
+        if any(re.search(kw, q_lower) for kw in log_keywords):
+            tasks.append(client.get(f"{LOGGING_SVC_URL}/logs", params={"limit": 5}))
+            task_names.append("logs")
+
+        # Task 3: NextCloud RAG Search
+        if is_librarian_task:
+            tasks.append(client.post(
+                f"{RAG_SVC}/rag/search",
+                json={"query": refined_query, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5}
+            ))
+            task_names.append("nc_rag")
+            
+            # Task 4: NextCloud Real-time Search
+            tasks.append(client.post(
                 f"{STORAGE_SVC}/providers/search",
                 params={"query": refined_query},
                 json={
                     "provider": {"kind": "nextcloud", "settings": {"url": creds.get("nextcloud_url"), "username": creds.get("nextcloud_user"), "password": creds.get("nextcloud_pass")}},
                     "path": "/", "recursive": False
-                },
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if storage_resp.status_code == 200:
-                s_data = storage_resp.json()
-                if isinstance(s_data, dict):
-                    matches = s_data.get("matches", [])
-                    if isinstance(matches, list) and matches:
-                        storage_text = "\n".join([f"- {m.get('name', 'file')} (Path: {m.get('path', 'unknown')})" for m in matches if isinstance(m, dict)])
-                        rag_context += f"\n\nNextCloud Files found (Real-time):\n{storage_text}"
-            
-        log_keywords = [r"\blog\b", r"\blogs\b", r"\bhealth\b", r"\bstatus\b", r"\bissue\b", r"\berror\b", r"\bbroken\b"]
-        if any(re.search(k, q_lower) for k in log_keywords):
-            try:
-                log_resp = await client.get(f"{LOGGING_SVC_URL}/logs", params={"limit": 5})
-                if log_resp.status_code == 200:
-                    recent_logs = log_resp.json()
-                    if isinstance(recent_logs, list):
-                        log_entries = [f"[{l.get('timestamp', 'unknown')}] [{l.get('service', 'unknown')}] {l.get('message', 'no message')}" for l in recent_logs if isinstance(l, dict)]
-                        if log_entries:
-                            rag_context += f"\n\n### Application Internal Logs:\n" + "\n".join(log_entries)
-            except: pass
-            
-        history_keywords = [r"\bhistory\b", r"\blast used\b", r"\bactivity\b", r"\brecently\b", r"\bturned on\b", r"\bturned off\b"]
-        if any(re.search(k, q_lower) for k in history_keywords):
-            try:
-                # results comes from HA Entity Context search
-                for r in results[:3]:
-                    if not isinstance(r, dict): continue
-                    eid = r.get("metadata", {}).get("entity_id")
-                    if eid:
+                }
+            ))
+            task_names.append("nc_realtime")
+
+        # Execute parallel tasks
+        if tasks:
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            for name, resp in zip(task_names, responses):
+                if isinstance(resp, Exception):
+                    log.error(f"Context task {name} failed: {resp}")
+                    continue
+                
+                if not isinstance(resp, httpx.Response) or resp.status_code != 200:
+                    continue
+
+                try:
+                    data = resp.json()
+                    if name == "ha_rag":
+                        results = data.get("results", [])
+                        if isinstance(results, list):
+                            lines = [str(r.get("content")) for r in results if isinstance(r, dict) and r.get("content")]
+                            if lines:
+                                rag_context += "\nRelevant Device Context:\n" + "\n".join(lines)
+                    elif name == "logs":
+                        if isinstance(data, list):
+                            log_text = "\n".join([f"[{l.get('timestamp')}] {l.get('service')}: {l.get('message')}" for l in data if isinstance(l, dict)])
+                            rag_context += f"\n\nLatest Application Logs:\n{log_text}"
+                    elif name == "nc_rag":
+                        file_results = data.get("results", [])
+                        if isinstance(file_results, list):
+                            file_lines = []
+                            for r in file_results:
+                                if not isinstance(r, dict): continue
+                                meta = r.get("metadata", {})
+                                name_val = meta.get("name", "file")
+                                path = meta.get("path", "unknown")
+                                content = str(r.get("content", ""))[:200]
+                                file_lines.append(f"- {name_val} ({path}): {content}...")
+                            if file_lines:
+                                rag_context += f"\n\nRelevant NextCloud Content:\n" + "\n".join(file_lines)
+                    elif name == "nc_realtime":
+                        matches = data.get("matches", [])
+                        if isinstance(matches, list) and matches:
+                            storage_text = "\n".join([f"- {m.get('name', 'file')} (Path: {m.get('path', 'unknown')})" for m in matches if isinstance(m, dict)])
+                            rag_context += f"\n\nNextCloud Files found (Real-time):\n{storage_text}"
+                except Exception as pe:
+                    log.error(f"Error parsing {name} response: {pe}")
+
+        # Post-process: History for HA entities
+        # (This is still serial but only for 3 items)
+        if results:
+            for r in results[:3]:
+                if not isinstance(r, dict): continue
+                eid = r.get("metadata", {}).get("entity_id")
+                if eid:
+                    try:
                         hist = await fetch_device_history(creds, eid)
                         if hist:
                             hist_text = "\n".join([f"- {h.get('last_changed', 'unknown')}: {h.get('state', 'unknown')}" for h in hist[-5:] if isinstance(h, dict)])
                             rag_context += f"\n\n### Device Usage History ({eid}):\n{hist_text}"
-            except: pass
+                    except: pass
                             
     except Exception as e:
-        log.error(f"Context injection failed: {e}")
+        log.error(f"Context injection orchestration failed: {e}")
 
     # 5. Proxy to Ollama (Slow Path)
     should_stream = body.get("stream", False)
