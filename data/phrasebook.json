@@ -116,5 +116,13 @@
         "home assistant sync status",
         "tell me about new devices",
         "give me a status update on my home"
+    ],
+    "storage_status": [
+        "what files are indexed?",
+        "check indexing status",
+        "how many files have been indexed so far?",
+        "list some indexed files",
+        "show my indexed documents",
+        "what do you know about my files?"
     ]
 }
