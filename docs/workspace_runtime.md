@@ -101,6 +101,7 @@ service created specifically to fill that gap.
 - every non-health endpoint requires `X-Internal-Secret`
 - registry-backed workspaces can require authenticated or admin identities
   without embedding usernames in the registry
+- admin overrides come from the Identity service's DB-backed `is_admin` flag
 - system workspaces can expose a narrower capability set than normal user
   workspaces
 - workspace paths must resolve under `WORKSPACE_RUNTIME_ROOT`
