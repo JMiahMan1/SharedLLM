@@ -562,6 +562,40 @@ async def chat_handler(request: Request):
             endpoint = None
             log.info(f"Overriding {intent} fast-path for status inquiry.")
 
+        if intent == "sync_ha":
+            # Manual HA Sync
+            sync_res = await client.post(f"{RAG_SVC}/rag/sync/ha", json={"entities": real_entities, "user_id": user_id}, timeout=30.0, headers={"X-Internal-Secret": INTERNAL_SECRET})
+            if sync_res.status_code == 200:
+                data = sync_res.json()
+                msg = f"Successfully reingested {data.get('count', 0)} devices. Found {data.get('new_count', 0)} new devices."
+            else:
+                msg = "Failed to reingest devices. Check RAG logs."
+            return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
+
+        if intent == "ha_status":
+            # Status & New Devices Check
+            status_res = await client.get(f"{RAG_SVC}/rag/ha/status", params={"user_id": user_id}, headers={"X-Internal-Secret": INTERNAL_SECRET})
+            new_res = await client.get(f"{RAG_SVC}/rag/ha/new", params={"user_id": user_id}, headers={"X-Internal-Secret": INTERNAL_SECRET})
+            
+            msg = "Home Assistant Status Check:\n"
+            if status_res.status_code == 200:
+                s_data = status_res.json().get("data", {})
+                ts = s_data.get("timestamp", 0)
+                from datetime import datetime
+                dt_str = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') if ts else "Never"
+                msg += f"- Last Sync: {dt_str}\n- Total Devices: {s_data.get('count', 0)}\n"
+            
+            if new_res.status_code == 200:
+                n_data = new_res.json().get("devices", [])
+                if n_data:
+                    msg += f"\nRecent New Devices ({len(n_data)}):\n"
+                    for dev in n_data[:5]:
+                        msg += f"- {dev.get('friendly_name')} ({dev.get('entity_id')}) in {dev.get('area')}\n"
+                else:
+                    msg += "\nNo new devices detected in the last 24 hours."
+            
+            return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
+
         if endpoint:
             target_entity = "auto"
             query_lower = refined_query.lower()
@@ -602,40 +636,6 @@ async def chat_handler(request: Request):
                     exec_payload["media_content_type"] = "music"
             elif intent in {"media_transport", "pause_media"}:
                 exec_payload["command"] = media_transport_command
-
-            elif intent == "sync_ha":
-                # Manual HA Sync
-                sync_res = await client.post(f"{RAG_SVC}/rag/sync/ha", json={"entities": real_entities, "user_id": user_id}, timeout=30.0, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                if sync_res.status_code == 200:
-                    data = sync_res.json()
-                    msg = f"Successfully reingested {data.get('count', 0)} devices. Found {data.get('new_count', 0)} new devices."
-                else:
-                    msg = "Failed to reingest devices. Check RAG logs."
-                return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
-
-            elif intent == "ha_status":
-                # Status & New Devices Check
-                status_res = await client.get(f"{RAG_SVC}/rag/ha/status", params={"user_id": user_id}, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                new_res = await client.get(f"{RAG_SVC}/rag/ha/new", params={"user_id": user_id}, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                
-                msg = "Home Assistant Status Check:\n"
-                if status_res.status_code == 200:
-                    s_data = status_res.json().get("data", {})
-                    ts = s_data.get("timestamp", 0)
-                    from datetime import datetime
-                    dt_str = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') if ts else "Never"
-                    msg += f"- Last Sync: {dt_str}\n- Total Devices: {s_data.get('count', 0)}\n"
-                
-                if new_res.status_code == 200:
-                    n_data = new_res.json().get("devices", [])
-                    if n_data:
-                        msg += f"\nRecent New Devices ({len(n_data)}):\n"
-                        for dev in n_data[:5]:
-                            msg += f"- {dev.get('friendly_name')} ({dev.get('entity_id')}) in {dev.get('area')}\n"
-                    else:
-                        msg += "\nNo new devices detected in the last 24 hours."
-                
-                return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
 
             exec_res = await execute_command(endpoint, exec_payload)
             return JSONResponse({
