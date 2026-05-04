@@ -123,6 +123,9 @@
         "how many files have been indexed so far?",
         "list some indexed files",
         "show my indexed documents",
-        "what do you know about my files?"
+        "what do you know about my files?",
+        "What’s the current status of our storage backend?",
+        "storage status",
+        "indexing report"
     ]
 }
