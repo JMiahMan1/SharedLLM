@@ -3,7 +3,7 @@ import logging
 import os
 import httpx
 import re
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Body
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Body, Query
 from pydantic import BaseModel
 from typing import Optional
 
@@ -123,32 +123,27 @@ async def list_provider_entries(req: IndexScanRequest):
         log.error(f"List failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/nextcloud/search")
-async def search_nextcloud(query: str, req: dict = Body(...)):
-    # Backward compatibility endpoint
-    nc_url = req.get("nc_url")
-    nc_user = req.get("nc_user")
-    nc_pass = req.get("nc_pass")
-    
+@app.post("/providers/search")
+async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(...)):
     try:
         from starlette.concurrency import run_in_threadpool
-        from nextcloud_client import NextCloudClient
-        client = NextCloudClient(nc_url, nc_user, nc_pass)
-        # Deep search not implemented in client yet, just list root for now or similar
-        entries = await run_in_threadpool(client.list_entries, path="/", recursive=False)
+        provider = build_provider(req.provider)
+        # Scan root for shallow search (could be optimized)
+        entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
+        
         q_lower = query.lower()
+        q_words = set(re.findall(r'\b\w+\b', q_lower))
         matches = []
+        
         for e in entries:
             name_lower = e.name.lower()
-            if name_lower in q_lower or q_lower in name_lower:
+            name_words = set(re.findall(r'\b\w+\b', name_lower))
+            
+            if q_lower in name_lower or (q_words & name_words):
                 matches.append(e)
-            else:
-                # Check for word overlaps
-                q_words = set(re.findall(r'\w+', q_lower))
-                name_words = set(re.findall(r'\w+', name_lower))
-                if q_words & name_words:
-                    matches.append(e)
-        return {"matches": [e.dict() for e in matches]}
+                if len(matches) >= 20: break # Limit
+                
+        return {"status": "SUCCESS", "matches": [e.dict() for e in matches]}
     except Exception as e:
-        log.error(f"Search failed: {e}")
-        return {"matches": []}
+        log.error(f"Provider search failed: {e}")
+        return {"status": "ERROR", "matches": []}
