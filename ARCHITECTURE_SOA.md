@@ -12,6 +12,7 @@ This document defines the modular service-oriented architecture for the SharedLL
 | **RAG** | 8004 | Semantic Memory Layer | HA Entity indexing, Document retrieval, Semantic search | Storage (ChromaDB), Ollama |
 | **Storage** | 8005 | Persistence Layer | SQLite for Identity, ChromaDB for RAG, Redis for session state | Local Filesystem, Redis |
 | **Logging** | 8006 (Host: 11436) | Observability Hub | Centralized SQLite log storage, App-ready API | Microservices (via HTTP) |
+| **Workspace Runtime** | 8007 | Sandboxed Workspace Agent Substrate | Workspace registry, file reads, git inspection, targeted pytest execution | Mounted workspaces, Git |
 | **Automation** | - | Background Tasks | Cron-like tasks, Device polling, Sync triggers | Gateway, Execution |
 
 ## Key Workflows

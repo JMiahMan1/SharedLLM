@@ -60,6 +60,7 @@ services:
       - RAG_SVC_URL=http://127.0.0.1:8004
       - STORAGE_SVC_URL=http://127.0.0.1:8005
       - LOGGING_SVC_URL=http://127.0.0.1:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://127.0.0.1:8007
       - REDIS_URL=redis://127.0.0.1:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
@@ -91,6 +92,21 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
     volumes:
+      - /etc/localtime:/etc/localtime:ro
+
+  workspace_runtime:
+    build: ./services/workspace_runtime
+    container_name: sharedllm_workspace_runtime
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
+      - WORKSPACE_RUNTIME_ROOT=/workspace
+      - TZ=America/Phoenix
+    volumes:
+      - ./:/workspace/SharedLLM
+      - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
 
   redis:

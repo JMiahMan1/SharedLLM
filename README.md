@@ -16,6 +16,7 @@ SharedLLM has been migrated from a monolithic application to a robust microservi
 | **RAG** | 8004 | Semantic memory layer using ChromaDB for knowledge retrieval. |
 | **Storage** | 8005 | Shared persistence for documents and configuration. |
 | **Logging** | 8006 | Centralized observability hub for all microservices. |
+| **Workspace Runtime** | 8007 | Sandboxed workspace inspection for file reads, git status/diff, targeted pytest execution, and broader workspace operations. |
 | **Automation** | - | Background task processor for polling and scheduled events. |
 | **Redis** | 6379 | High-speed cache for session state and history. |
 

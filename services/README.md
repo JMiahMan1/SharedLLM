@@ -32,6 +32,13 @@ This directory contains the microservices refactor of the SharedLLM system.
 - **Future Backends**: Designed to extend to other open-source and proprietary
   file stores without changing downstream consumers.
 
+### 5. Workspace Runtime (`services/workspace_runtime`)
+- **Role**: Sandboxed local workspace runtime for code, notes, documents, and related workspace tasks.
+- **Capabilities**: Resolves registered workspaces, reads files safely, reports
+  `git status`, returns diffs, and runs targeted `pytest` commands.
+- **Boundary**: Uses mounted local workspaces as the authoritative source for
+  code state rather than provider-synced snapshots.
+
 ## Testing & Diagnostics
 
 ### Integration Smoke Test
