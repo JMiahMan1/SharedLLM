@@ -136,6 +136,42 @@ def test_read_file_blocks_parent_traversal():
     assert exc.value.status_code == 400
 
 
+def test_list_files_returns_workspace_entries(runtime_env):
+    docs_dir = runtime_env / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "note.md").write_text("# note\n")
+
+    data = runtime.list_files(
+        runtime.FileListRequest(workspace_id="demo", rag_user="jeremiah", relative_path=".", recursive=True, max_depth=2),
+        "test-secret",
+    )
+    paths = {item["path"] for item in data["entries"]}
+    assert data["status"] == "SUCCESS"
+    assert "sample.py" in paths
+    assert "test_sample.py" in paths
+    assert "docs" in paths
+    assert "docs/note.md" in paths
+
+
+def test_list_files_truncates_at_max_entries(runtime_env):
+    for idx in range(5):
+        (runtime_env / f"extra_{idx}.txt").write_text(f"{idx}\n")
+
+    data = runtime.list_files(
+        runtime.FileListRequest(
+            workspace_id="demo",
+            rag_user="jeremiah",
+            relative_path=".",
+            recursive=False,
+            max_entries=3,
+        ),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert len(data["entries"]) == 3
+    assert data["truncated"] is True
+
+
 def test_write_file_updates_user_workspace(runtime_env):
     original = (runtime_env / "sample.py").read_text()
     original_sha = hashlib.sha256(original.encode()).hexdigest()

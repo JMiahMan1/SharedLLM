@@ -51,6 +51,14 @@ class FileReadRequest(WorkspaceRef):
     max_bytes: int = Field(default=DEFAULT_FILE_READ_LIMIT, ge=1, le=200000)
 
 
+class FileListRequest(WorkspaceRef):
+    relative_path: str = "."
+    recursive: bool = False
+    max_depth: int = Field(default=2, ge=0, le=8)
+    max_entries: int = Field(default=200, ge=1, le=2000)
+    include_dirs: bool = True
+
+
 class FileWriteRequest(WorkspaceRef):
     relative_path: str
     content: str
@@ -280,6 +288,60 @@ def _safe_target_path(workspace_path: Path, relative_path: str) -> Path:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"File path escapes workspace: {relative_path}") from exc
     return target
+
+
+def _list_workspace_entries(
+    workspace_path: Path,
+    relative_path: str,
+    recursive: bool,
+    max_depth: int,
+    max_entries: int,
+    include_dirs: bool,
+) -> tuple[Path, list[dict[str, Any]], bool]:
+    root = _safe_target_path(workspace_path, relative_path)
+    if not root.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found: {relative_path}")
+    if not root.is_dir():
+        raise HTTPException(status_code=400, detail=f"Path is not a directory: {relative_path}")
+
+    entries: list[dict[str, Any]] = []
+    truncated = False
+
+    def walk(current: Path, depth: int) -> None:
+        nonlocal truncated
+        if truncated:
+            return
+        if recursive and depth > max_depth:
+            return
+
+        for child in sorted(current.iterdir(), key=lambda item: item.name.lower()):
+            try:
+                child.relative_to(workspace_path)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Listed path escapes workspace: {child}") from exc
+
+            rel_path = child.relative_to(workspace_path).as_posix()
+            is_dir = child.is_dir()
+            if include_dirs or not is_dir:
+                entries.append(
+                    {
+                        "path": rel_path,
+                        "name": child.name,
+                        "is_dir": is_dir,
+                        "size": child.stat().st_size if child.is_file() else None,
+                    }
+                )
+                if len(entries) >= max_entries:
+                    truncated = True
+                    return
+
+            if recursive and is_dir and depth < max_depth:
+                walk(child, depth + 1)
+                if truncated:
+                    return
+
+    walk(root, 0)
+    return root, entries, truncated
 
 
 def _sha256_bytes(content: bytes) -> str:
@@ -543,6 +605,30 @@ def read_file(req: FileReadRequest, x_internal_secret: Optional[str] = Header(de
         "relative_path": req.relative_path,
         "content": content[: req.max_bytes],
         "truncated": len(content) > req.max_bytes,
+    }
+
+
+@app.post("/files/list")
+def list_files(req: FileListRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "read")
+    workspace_path = Path(workspace["resolved_path"])
+    root, entries, truncated = _list_workspace_entries(
+        workspace_path,
+        req.relative_path,
+        recursive=req.recursive,
+        max_depth=req.max_depth,
+        max_entries=req.max_entries,
+        include_dirs=req.include_dirs,
+    )
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "relative_path": req.relative_path,
+        "resolved_path": root.relative_to(workspace_path).as_posix() if root != workspace_path else ".",
+        "entries": entries,
+        "truncated": truncated,
     }
 
 
