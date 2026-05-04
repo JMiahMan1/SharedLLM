@@ -661,7 +661,7 @@ async def chat_handler(request: Request):
         import time
         if time.time() - last_sync > 3600:
             try:
-                await client.post(f"{RAG_SVC}/rag/sync/ha", json={"entities": entities, "user_id": user_id}, timeout=10.0)
+                await client.post(f"{RAG_SVC}/rag/sync/ha", json={"entities": real_entities, "user_id": user_id}, timeout=10.0)
                 setattr(app.state, sync_key, time.time())
             except Exception as e:
                 log.warning(f"Background HA sync failed: {e}")
@@ -767,6 +767,8 @@ async def chat_handler(request: Request):
                             
     except Exception as e:
         log.error(f"Context injection orchestration failed: {e}")
+
+    await emit_log("INFO", f"Context gathered for {user_id}", {"query": refined_query, "context_len": len(rag_context), "context_preview": rag_context[:200]})
 
     # 5. Proxy to Ollama (Slow Path)
     should_stream = body.get("stream", False)
