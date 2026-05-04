@@ -57,8 +57,8 @@ become the runtime substrate for workspace-scoped agentic tasks, including:
 Today it does not:
 
 - mutate the workspace registry
-- push to remotes
-- write back to Nextcloud or another provider
+- perform broad folder mirroring back to providers
+- sync non-text assets back to providers
 - replace the Storage service
 - replace the RAG service
 - execute smart-home or media commands
