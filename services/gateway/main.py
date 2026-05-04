@@ -89,11 +89,13 @@ try:
     from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
     from .intent_engine import engine
     from .history import get_history, update_history, ping_redis
+    from .prompts import LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 except (ImportError, ValueError):
     try:
       from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from gateway.intent_engine import engine
       from gateway.history import get_history, update_history, ping_redis
+      from gateway.prompts import LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     except ImportError:
       from intent_engine import engine
       from history import get_history, update_history, ping_redis
@@ -405,12 +407,9 @@ async def call_ollama(payload: dict, use_chat: bool = True) -> httpx.Response:
 
 async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
     prompt = (
-      "You are troubleshooting a failed music playback request.\n"
-      "Return only JSON with keys: query, media_type.\n"
-      "media_type must be one of: artist, search, music.\n"
+      f"{MEDIA_TROUBLESHOOTING_PROMPT}\n"
       f"User request: {query}\n"
-      f"Failure: {failure}\n"
-      "Prefer the simplest library lookup that is most likely to succeed."
+      f"Failure: {failure}"
     )
     try:
       resp = await call_ollama(
@@ -894,19 +893,10 @@ async def chat_handler(request: Request):
             await client.post(f"{STORAGE_SVC}/index/pause", headers={"X-Internal-Secret": INTERNAL_SECRET})
         except: pass
 
-        system_instruction = (
-            "You are Librarian, a precise and helpful knowledge engine for this home and server environment. "
-            "Use the provided context (Device Context, Logs, or File Metadata) to answer the user's query. "
-            "IMPORTANT: You CAN perform actions (like turning lights off or playing music) via the system's execution bridge. "
-            "If a user asks for an action that matches your capabilities, confirm the intent and provide data-backed status updates. "
-            "If the context is empty, state what you can see but avoid guessing. "
-            "Always prefer specific data (states, paths, timestamps) over generalities."
-        )
-        
         ollama_payload = {
             "model": selected_model,
             "messages": [
-                {"role": "system", "content": system_instruction}
+                {"role": "system", "content": LIBRARIAN_SYSTEM_INSTRUCTION}
             ] + history + [{"role": "user", "content": f"CONTEXT:\n{rag_context}\n\nQUERY: {refined_query}"}],
             "stream": should_stream
         }
