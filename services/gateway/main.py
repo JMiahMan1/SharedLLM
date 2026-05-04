@@ -469,6 +469,7 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request):
+    client = _global_http_client
     # 1. Resolve Identity
     try:
         body = await request.json()
