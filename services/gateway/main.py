@@ -152,9 +152,11 @@ async def contextualize_query(query: str, history: list) -> str:
         payload = {"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
         resp = await _global_http_client.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
         if resp.status_code == 200:
-            rewritten = resp.json().get("response", query).strip().strip('"')
-            log.info(f"[Context] '{query}' -> '{rewritten}'")
-            return rewritten
+            data = resp.json()
+            if isinstance(data, dict):
+                rewritten = data.get("response", query).strip().strip('"')
+                log.info(f"[Context] '{query}' -> '{rewritten}'")
+                return rewritten
     except Exception:
         pass
     return query
@@ -340,7 +342,10 @@ async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
         )
         if resp.status_code != 200:
             return None
-        raw = resp.json().get("response", "").strip()
+        data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        raw = data.get("response", "").strip()
         start = raw.find("{")
         end = raw.rfind("}")
         if start == -1 or end == -1 or end <= start:
@@ -457,7 +462,14 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request):
     body = await request.json()
-    query = body.get("query") or (body.get("messages", [{}])[-1].get("content") if "messages" in body else "")
+    query = body.get("query")
+    if not query and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
+        last_msg = body["messages"][-1]
+        if isinstance(last_msg, dict):
+            query = last_msg.get("content")
+        else:
+            query = str(last_msg)
+    
     if not query:
         return JSONResponse({"status": "ERROR", "message": "No query"}, status_code=400)
 
@@ -691,10 +703,14 @@ async def chat_handler(request: Request):
                 try:
                     log_resp = await client.get(f"{LOGGING_SVC_URL}/logs", params={"limit": 5})
                     if log_resp.status_code == 200:
-                        recent_logs = log_resp.json()
-                        if recent_logs:
-                            log_text = "\n".join([f"[{l['timestamp']}] [{l['service']}] {l['message']}" for l in recent_logs])
-                            rag_context += f"\n\n### Application Internal Logs:\n{log_text}"
+                        if isinstance(recent_logs, list):
+                            log_entries = []
+                            for l in recent_logs:
+                                if isinstance(l, dict):
+                                    log_entries.append(f"[{l.get('timestamp')}] [{l.get('service')}] {l.get('message')}")
+                            if log_entries:
+                                log_text = "\n".join(log_entries)
+                                rag_context += f"\n\n### Application Internal Logs:\n{log_text}"
                 except: pass
             
             # D. Device History Context (Home Assistant Activity) - Always available if requested
@@ -703,7 +719,10 @@ async def chat_handler(request: Request):
                 try:
                     # Fetch history for the top 3 relevant entities found in RAG
                     for r in results[:3]:
-                        eid = r["metadata"].get("entity_id")
+                        if not isinstance(r, dict): continue
+                        meta = r.get("metadata")
+                        if not isinstance(meta, dict): continue
+                        eid = meta.get("entity_id")
                         if eid:
                             hist = await fetch_device_history(creds, eid)
                             if hist:
