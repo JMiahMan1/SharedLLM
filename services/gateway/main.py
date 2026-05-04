@@ -9,6 +9,80 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 import re
 import traceback
+from datetime import datetime
+
+def _make_ollama_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
+    """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
+    from fastapi.responses import JSONResponse, StreamingResponse
+    import json
+    
+    if not stream:
+        res = {
+            "model": model,
+            "created_at": datetime.now().isoformat() + "Z",
+            "message": {"role": "assistant", "content": message},
+            "done": True,
+            "status": "SUCCESS"
+        }
+        if intent: res["intent"] = intent
+        if debug_context: res["debug_context"] = debug_context
+        return res
+
+    async def gen():
+        # Yield the message content chunk
+        chunk = {
+            "model": model,
+            "created_at": datetime.now().isoformat() + "Z",
+            "message": {"role": "assistant", "content": message},
+            "done": False
+        }
+        yield json.dumps(chunk) + "\n"
+        # Yield the done chunk
+        yield json.dumps({"model": model, "done": True}) + "\n"
+    
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+def _make_openai_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
+    """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
+    from fastapi.responses import JSONResponse, StreamingResponse
+    import json
+    import time
+    
+    if not stream:
+        res = {
+            "id": f"chatcmpl-{int(time.time())}", 
+            "object": "chat.completion", 
+            "created": int(time.time()), 
+            "model": model,
+            "choices": [{"message": {"role": "assistant", "content": message}, "finish_reason": "stop", "index": 0}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        }
+        if intent: res["intent"] = intent
+        if debug_context: res["debug_context"] = debug_context
+        return res
+
+    async def gen():
+        # Yield the delta chunk
+        chunk = {
+            "id": f"chatcmpl-{int(time.time())}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{"delta": {"content": message}, "index": 0, "finish_reason": None}]
+        }
+        yield f"data: {json.dumps(chunk)}\n\n"
+        # Yield the stop chunk
+        stop_chunk = {
+            "id": f"chatcmpl-{int(time.time())}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{"delta": {}, "index": 0, "finish_reason": "stop"}]
+        }
+        yield f"data: {json.dumps(stop_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
+    
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 # --- Imports from internal modules ---
 try:
@@ -539,7 +613,9 @@ async def chat_handler(request: Request):
                     )
                     if resp.status_code == 200:
                         msg = "I have started indexing your library in the background."
-                        return JSONResponse({"status": "SUCCESS", "message": msg, "intent": "index_storage"})
+                        if is_openai:
+                            return _make_openai_response(msg, selected_model, "index_storage", stream=should_stream)
+                        return _make_ollama_response(msg, selected_model, "index_storage", stream=should_stream)
                 except Exception as e:
                     log.error(f"Index trigger failed: {e}")
                     return JSONResponse({"status": "ERROR", "message": "The storage service is not responding."}, status_code=502)
@@ -571,7 +647,9 @@ async def chat_handler(request: Request):
                 msg = f"Successfully reingested {data.get('count', 0)} devices. Found {data.get('new_count', 0)} new devices."
             else:
                 msg = "Failed to reingest devices. Check RAG logs."
-            return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
+            if is_openai:
+                return _make_openai_response(msg, selected_model, intent, stream=should_stream)
+            return _make_ollama_response(msg, selected_model, intent, stream=should_stream)
 
         if intent == "ha_status":
             # Status & New Devices Check
@@ -595,7 +673,9 @@ async def chat_handler(request: Request):
                 else:
                     msg += "\nNo new devices detected in the last 24 hours."
             
-            return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
+            if is_openai:
+                return _make_openai_response(msg, selected_model, intent, stream=should_stream)
+            return _make_ollama_response(msg, selected_model, intent, stream=should_stream)
 
         if intent == "storage_status":
             # Library Indexing Status Check
@@ -618,7 +698,9 @@ async def chat_handler(request: Request):
             else:
                 msg = "Failed to retrieve storage stats. Check RAG logs."
                 
-            return JSONResponse({"status": "SUCCESS", "message": msg, "intent": intent})
+            if is_openai:
+                return _make_openai_response(msg, selected_model, intent, stream=should_stream)
+            return _make_ollama_response(msg, selected_model, intent, stream=should_stream)
 
         if endpoint:
             target_entity = "auto"
@@ -662,13 +744,9 @@ async def chat_handler(request: Request):
                 exec_payload["command"] = media_transport_command
 
             exec_res = await execute_command(endpoint, exec_payload)
-            return JSONResponse({
-                "status": "SUCCESS",
-                "message": exec_res.get("message", "Executed"),
-                "intent": intent,
-                "confidence": confidence,
-                "execution_result": exec_res
-            })
+            if is_openai:
+                return _make_openai_response(exec_res.get("message", "Executed"), selected_model, intent, stream=should_stream)
+            return _make_ollama_response(exec_res.get("message", "Executed"), selected_model, intent, stream=should_stream)
 
     # 4. Context Injection (RAG + Storage + Logs + History)
     rag_context = ""
@@ -904,23 +982,8 @@ async def chat_handler(request: Request):
         await update_history(user_id, "assistant", final_answer)
 
         if is_openai:
-            import time
-            res = {
-                "id": f"chatcmpl-{int(time.time())}", 
-                "object": "chat.completion", 
-                "created": int(time.time()), 
-                "model": selected_model,
-                "choices": [{"message": {"role": "assistant", "content": final_answer}, "finish_reason": "stop", "index": 0}],
-                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-            }
-            if body.get("debug"):
-                res["debug_context"] = rag_context
-            return res
-            
-        res_payload = {"status": "SUCCESS", "message": final_answer}
-        if body.get("debug"):
-            res_payload["debug_context"] = rag_context
-        return res_payload
+            return _make_openai_response(final_answer, selected_model, debug_context=rag_context if body.get("debug") else None, stream=should_stream)
+        return _make_ollama_response(final_answer, selected_model, debug_context=rag_context if body.get("debug") else None, stream=should_stream)
         
     except Exception as e:
         log.error(f"LLM Proxy Error: {e}")
