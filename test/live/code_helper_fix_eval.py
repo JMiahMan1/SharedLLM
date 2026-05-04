@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = ROOT / "test" / "fixtures" / "code_helper_bug_example"
 API_URL = os.getenv("API_URL", "http://localhost:11435")
 VOICE_ID = os.getenv("VOICE_ID", "default")
+MODEL = os.getenv("CODE_HELPER_MODEL", "qwen2.5-coder:7b")
 TIMEOUT = int(os.getenv("CODE_HELPER_TIMEOUT", "180"))
 
 
@@ -24,7 +25,9 @@ def load_fixture_text() -> tuple[str, str]:
 
 
 def build_prompt(source: str, tests: str) -> str:
-    return f"""You are fixing a Python bug in a small repository.
+    return f"""Fix this Python code bug in `math_utils.py`.
+
+This is a coding task, not a device or media command.
 
 Return only the corrected contents of `math_utils.py` in a single fenced Python code block.
 Do not include explanation, diff markers, or any extra files.
@@ -62,6 +65,7 @@ def run_gateway_query(prompt: str) -> dict:
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "voice_id": VOICE_ID,
+        "model": MODEL,
     }
     resp = requests.post(f"{API_URL}/api/chat", json=payload, timeout=TIMEOUT)
     resp.raise_for_status()
@@ -92,6 +96,7 @@ def main() -> int:
     print("=== SharedLLM Code Helper Live Eval ===")
     print(f"Gateway: {API_URL}/api/chat")
     print(f"Fixture: {FIXTURE_DIR}")
+    print(f"Requested model: {MODEL}")
 
     try:
         response = run_gateway_query(prompt)
