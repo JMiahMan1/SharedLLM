@@ -263,7 +263,7 @@ async def sync_ha(payload: dict):
         area = attrs.get("area_id") or "unassigned area"
         
         content = f"Device: {fname} (ID: {eid}) | Area: {area} | Current State: {state}."
-        if "brightness" in attrs:
+        if attrs.get("brightness") is not None:
             # Convert 0-255 to percentage
             bright_pct = round((attrs['brightness'] / 255) * 100)
             content += f" Brightness is at {bright_pct}% ({attrs['brightness']}/255)."
