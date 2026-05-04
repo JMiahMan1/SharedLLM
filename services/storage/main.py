@@ -20,7 +20,7 @@ except (ImportError, ValueError):
         set_indexer_pause, CheckpointManager
     )
     from providers import build_provider, ProviderConfig
-    from models import ProviderWriteRequest
+    from models import ProviderWriteRequest, ProviderMirrorRequest
 
 log = logging.getLogger("storage")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
