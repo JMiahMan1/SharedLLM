@@ -605,7 +605,7 @@ async def chat_handler(request: Request):
 
             elif intent == "sync_ha":
                 # Manual HA Sync
-                sync_res = await client.post(f"{RAG_SVC}/rag/sync/ha", json={"entities": entities, "user_id": user_id}, timeout=30.0)
+                sync_res = await client.post(f"{RAG_SVC}/rag/sync/ha", json={"entities": real_entities, "user_id": user_id}, timeout=30.0, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 if sync_res.status_code == 200:
                     data = sync_res.json()
                     msg = f"Successfully reingested {data.get('count', 0)} devices. Found {data.get('new_count', 0)} new devices."
@@ -615,8 +615,8 @@ async def chat_handler(request: Request):
 
             elif intent == "ha_status":
                 # Status & New Devices Check
-                status_res = await client.get(f"{RAG_SVC}/rag/ha/status", params={"user_id": user_id})
-                new_res = await client.get(f"{RAG_SVC}/rag/ha/new", params={"user_id": user_id})
+                status_res = await client.get(f"{RAG_SVC}/rag/ha/status", params={"user_id": user_id}, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                new_res = await client.get(f"{RAG_SVC}/rag/ha/new", params={"user_id": user_id}, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 
                 msg = "Home Assistant Status Check:\n"
                 if status_res.status_code == 200:
