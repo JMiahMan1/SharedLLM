@@ -137,6 +137,11 @@ LIBRARIAN_SIGNALS = (
   "files", "folders", "nextcloud", "storage", "cloud", "books", "book", "music",
   "photos", "photo", "images", "videos", "video", "code", "scripts"
 )
+WORKSPACE_README_ACTION_HINTS = (
+  "write a readme", "create a readme", "generate a readme", "make a readme",
+  "write readme", "create readme", "generate readme", "make readme",
+  "readme.md", "readme file",
+)
 
 # --- Global Clients ---
 _global_http_client: httpx.AsyncClient = None
@@ -402,6 +407,223 @@ def requests_status_followup(query: str) -> bool:
     return any(signal in q for signal in followup_signals)
 
 
+def wants_workspace_readme_generation(query: str) -> bool:
+    q = (query or "").strip().lower()
+    if "readme" not in q:
+      return False
+    action_requested = any(signal in q for signal in WORKSPACE_README_ACTION_HINTS)
+    workspace_scoped = any(signal in q for signal in ("workspace", "repo", "repository", "folder", "temp", "nextcloud", "git"))
+    return action_requested and workspace_scoped
+
+
+async def workspace_runtime_request(method: str, path: str, *, json_payload: dict | None = None, params: dict | None = None) -> dict:
+    client = _global_http_client
+    if client is None:
+      raise RuntimeError("Gateway HTTP client is not initialized")
+
+    resp = await client.request(
+      method,
+      f"{WORKSPACE_RUNTIME_SVC}{path}",
+      json=json_payload,
+      params=params,
+      headers={"X-Internal-Secret": INTERNAL_SECRET},
+      timeout=30.0,
+    )
+    if resp.status_code != 200:
+      raise HTTPException(status_code=resp.status_code, detail=f"Workspace runtime request failed: {resp.text}")
+    data = resp.json()
+    if not isinstance(data, dict):
+      raise HTTPException(status_code=500, detail=f"Workspace runtime returned invalid payload for {path}")
+    return data
+
+
+async def resolve_chat_workspace(body: dict, user_id: str) -> dict | None:
+    workspace_id = str(body.get("workspace_id") or "").strip()
+    params = {"rag_user": user_id}
+    workspaces_data = await workspace_runtime_request("GET", "/workspaces", params=params)
+    workspaces = workspaces_data.get("workspaces", []) if isinstance(workspaces_data, dict) else []
+    if not isinstance(workspaces, list):
+      return None
+
+    available = [item for item in workspaces if isinstance(item, dict) and item.get("available")]
+    if workspace_id:
+      for item in available:
+          if item.get("id") == workspace_id:
+              return item
+      return None
+
+    for item in available:
+        if str(item.get("scope") or "user") == "user":
+            return item
+    return available[0] if available else None
+
+
+async def build_workspace_readme_context(workspace: dict, user_id: str) -> str:
+    workspace_id = workspace.get("id")
+    if not workspace_id:
+      raise HTTPException(status_code=500, detail="Workspace runtime did not return an id")
+
+    list_data = await workspace_runtime_request(
+      "POST",
+      "/files/list",
+      json_payload={
+        "workspace_id": workspace_id,
+        "rag_user": user_id,
+        "relative_path": ".",
+        "recursive": True,
+        "max_depth": 2,
+        "max_entries": 120,
+        "include_dirs": True,
+      },
+    )
+    entries = list_data.get("entries", []) if isinstance(list_data, dict) else []
+    listing_lines = []
+    if isinstance(entries, list):
+      for item in entries[:120]:
+          if not isinstance(item, dict):
+            continue
+          path = item.get("path")
+          if not path:
+            continue
+          suffix = "/" if item.get("is_dir") else ""
+          listing_lines.append(f"- {path}{suffix}")
+
+    read_candidates = [
+      "README.md",
+      "services/README.md",
+      "docs/architecture.md",
+      "docs/workspace_runtime.md",
+      "config/workspaces.json",
+    ]
+    file_sections = []
+    for relative_path in read_candidates:
+        try:
+          file_data = await workspace_runtime_request(
+            "POST",
+            "/files/read",
+            json_payload={
+              "workspace_id": workspace_id,
+              "rag_user": user_id,
+              "relative_path": relative_path,
+              "max_bytes": 12000,
+            },
+          )
+        except HTTPException:
+          continue
+        content = str(file_data.get("content") or "")
+        if not content:
+          continue
+        file_sections.append(f"## {relative_path}\n{content[:12000]}")
+
+    git_status = ""
+    try:
+      status_data = await workspace_runtime_request(
+        "POST",
+        "/git/status",
+        json_payload={"workspace_id": workspace_id, "rag_user": user_id},
+      )
+      branch = str(status_data.get("branch") or "").strip() or "unknown"
+      porcelain = status_data.get("porcelain") or []
+      if isinstance(porcelain, list):
+          status_lines = "\n".join(f"- {line}" for line in porcelain[:20]) or "- clean"
+      else:
+          status_lines = "- unavailable"
+      git_status = f"Current branch: {branch}\nGit status:\n{status_lines}"
+    except HTTPException:
+      git_status = "Git status unavailable."
+
+    listing_text = "\n".join(listing_lines) if listing_lines else "- no entries listed"
+    file_text = "\n\n".join(file_sections) if file_sections else "No reference files could be read."
+    return (
+      f"Workspace ID: {workspace_id}\n"
+      f"Workspace path: {workspace.get('resolved_path', 'unknown')}\n"
+      f"Top-level and nearby workspace listing:\n{listing_text}\n\n"
+      f"{git_status}\n\n"
+      f"Reference file excerpts:\n{file_text}"
+    )
+
+
+async def generate_workspace_readme_via_coding_model(
+    body: dict,
+    user_id: str,
+    refined_query: str,
+    selected_model: str,
+    should_stream: bool,
+    is_openai: bool,
+) -> JSONResponse | dict | StreamingResponse:
+    workspace = await resolve_chat_workspace(body, user_id)
+    if not workspace:
+      msg = "I could not resolve an available workspace for this README generation request."
+      if is_openai:
+        return _make_openai_response(msg, selected_model, stream=should_stream)
+      return _make_ollama_response(msg, selected_model, stream=should_stream)
+
+    workspace_context = await build_workspace_readme_context(workspace, user_id)
+    prompt = (
+      "You are generating a README.md file for temp/ inside the current workspace.\n"
+      "Use only the provided workspace context.\n"
+      "Do not invent services, files, or capabilities that are not supported by the context.\n"
+      "Write concise markdown only, with no code fences and no preamble.\n\n"
+      f"Workspace context:\n{workspace_context}\n\n"
+      f"User request:\n{refined_query}\n"
+    )
+    payload = {
+      "model": selected_model,
+      "messages": [
+        {"role": "system", "content": CODE_HELPER_SYSTEM_INSTRUCTION},
+        {"role": "user", "content": prompt},
+      ],
+      "stream": False,
+    }
+    resp = await call_ollama(payload, use_chat=True)
+    if resp.status_code != 200:
+      raise HTTPException(status_code=502, detail="Coding model did not return a README response")
+
+    data = resp.json()
+    generated = ""
+    if isinstance(data, dict):
+      msg_obj = data.get("message")
+      if isinstance(msg_obj, dict):
+        generated = str(msg_obj.get("content") or "")
+      else:
+        generated = str(data.get("response") or "")
+    if not generated.strip():
+      raise HTTPException(status_code=502, detail="Coding model returned an empty README response")
+
+    workspace_id = workspace.get("id")
+    write_data = await workspace_runtime_request(
+      "POST",
+      "/files/write",
+      json_payload={
+        "workspace_id": workspace_id,
+        "rag_user": user_id,
+        "relative_path": "temp/README.md",
+        "content": generated,
+        "create_parents": True,
+      },
+    )
+    sync_data = await workspace_runtime_request(
+      "POST",
+      "/provider/sync/file",
+      json_payload={
+        "workspace_id": workspace_id,
+        "rag_user": user_id,
+        "relative_path": "temp/README.md",
+        "create_parents": True,
+        "verify": True,
+      },
+    )
+
+    provider_path = sync_data.get("provider_path", "/Code/SharedLLM/temp/README.md")
+    response_message = (
+      f"I generated temp/README.md in workspace '{workspace_id}' and synced it to {provider_path}.\n\n"
+      f"{generated}"
+    )
+    if is_openai:
+      return _make_openai_response(response_message, selected_model, stream=should_stream)
+    return _make_ollama_response(response_message, selected_model, stream=should_stream)
+
+
 def resolve_media_target(query: str, entities: list[dict]) -> str:
     """
     Prefer a Music Assistant queue/speaker entity for music playback on named targets.
@@ -661,8 +883,21 @@ async def chat_handler(request: Request):
     media_transport_command = extract_media_transport_command(refined_query)
     is_video_request = is_likely_video_request(refined_query)
     is_code_request = is_coding_query(refined_query)
+    wants_workspace_readme = wants_workspace_readme_generation(refined_query)
     explicit_action_request = has_explicit_action_request(refined_query)
     wants_status_followup = requests_status_followup(refined_query)
+
+    if wants_workspace_readme:
+        if not explicit_model_requested:
+            selected_model = CODING_MODEL
+        return await generate_workspace_readme_via_coding_model(
+            body=body,
+            user_id=user_id,
+            refined_query=refined_query,
+            selected_model=selected_model,
+            should_stream=should_stream,
+            is_openai=is_openai,
+        )
     
     # 3. Fast Path (Semantic Routing)
     intent, confidence = engine.classify(refined_query)

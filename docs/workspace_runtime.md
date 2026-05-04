@@ -24,6 +24,7 @@ Current implemented capabilities:
   caller is admin
 - enforce that all workspace access stays under the configured workspace root
 - read files from a workspace safely
+- list workspace files safely for context gathering
 - write files to authorized workspaces with optional optimistic conflict checks
 - report `git status`
 - return `git diff`
@@ -99,6 +100,7 @@ service created specifically to fill that gap.
 - `GET /workspaces`
 - `POST /workspace/resolve`
 - `POST /files/read`
+- `POST /files/list`
 - `POST /files/write`
 - `POST /git/status`
 - `POST /git/diff`
@@ -130,6 +132,8 @@ service created specifically to fill that gap.
   arguments
 - Git author metadata is derived from resolved GitHub or GitLab identity fields
   when explicit author information is not supplied
+- chat-driven README generation is handled in the Gateway and uses
+  `workspace_runtime` for workspace inspection, file writes, and provider sync
 
 ## Expected Near-Term Expansion
 
@@ -172,3 +176,17 @@ agentic workspace engine. The main unfinished pieces are:
 7. **Operational hardening**
    Add better audit logs, explicit command allowlists, per-workspace policy,
    and clearer separation between CI-safe tests and local/server-only tests.
+
+## Current Progress
+
+The next thin slice is underway and partially working:
+
+- `workspace_runtime` now exposes safe workspace file listing in addition to
+  read/write, git, and provider sync.
+- The gateway now has a README-generation path that can resolve a workspace,
+  gather local repo context, call the coding model, write `temp/README.md`, and
+  sync it to the mapped Nextcloud folder.
+- Live remote validation has already confirmed workspace writeback and
+  Nextcloud sync for temp files on the hosted `SharedLLM` machine.
+- The remaining blocker is test harness stability for the new gateway
+  orchestration path; the runtime and provider pieces are already exercised.

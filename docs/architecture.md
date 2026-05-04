@@ -252,9 +252,12 @@ already exposes:
 * safe file reads inside mounted workspaces
 * local file writes with optimistic conflict checks
 * `git status`, `git diff`, `git add`, `git commit`, and branch creation
+* safe workspace file listing for context gathering
 * designated-provider scans and explicit single-file sync to Nextcloud-backed
   workspace folders
 * single-file orchestrated write -> sync -> commit -> optional push workflows
+* chat-driven README generation that can inspect the mounted workspace, call
+  the coding model, write `temp/README.md`, and sync it to the mapped provider
 * targeted `pytest` execution
 
 It does **not** yet provide full folder mirroring, non-text provider sync,
