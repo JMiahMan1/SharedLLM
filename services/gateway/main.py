@@ -429,7 +429,10 @@ async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> li
         )
         if resp.status_code != 200:
             return []
-        return resp.json()
+        data = resp.json()
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+        return []
     except Exception as e:
         log.error(f"History retrieval error for {entity_id}: {e}")
         return []
@@ -782,12 +785,39 @@ async def chat_handler(request: Request):
         
         if not answer:
             answer = "I received an empty response from the brain."
+        # 6. Format Response
+        final_answer = answer if answer else "I encountered an error while processing your request."
         
         # Save to history
         await update_history(user_id, "user", query)
-        await update_history(user_id, "assistant", answer)
+        await update_history(user_id, "assistant", final_answer)
         
-        return JSONResponse({"status": "SUCCESS", "message": answer})
+        # Log Success
+        await emit_log("INFO", f"Chat successful: {query[:50]}...")
+
+        # Detect if it was an OpenAI-style request
+        is_openai = "/v1/chat/completions" in str(request.url)
+        
+        if is_openai:
+            import time
+            return {
+                "id": f"chatcmpl-{int(time.time())}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": selected_model,
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": final_answer
+                        },
+                        "finish_reason": "stop",
+                        "index": 0
+                    }
+                ]
+            }
+        
+        return {"status": "SUCCESS", "message": final_answer}
         
     except Exception as e:
         log.error(f"LLM Proxy Error: {e}")
