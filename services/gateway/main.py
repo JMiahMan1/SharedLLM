@@ -709,12 +709,12 @@ async def chat_handler(request: Request):
 
         if endpoint:
             target_entity = "auto"
-            query_lower = refined_query.lower()
+            query_normalized = refined_query.lower().replace("-", " ")
             for e in real_entities:
                 friendly_name = (e.get("attributes") or {}).get("friendly_name") or ""
-                fname_lower = friendly_name.lower()
+                fname_normalized = friendly_name.lower().replace("-", " ")
                 eid = e.get("entity_id", "").lower()
-                if fname_lower and fname_lower in query_lower:
+                if fname_normalized and fname_normalized in query_normalized:
                     if "media" in intent and eid.startswith("media_player."):
                         target_entity = e["entity_id"]
                         break
@@ -895,10 +895,11 @@ async def chat_handler(request: Request):
         except: pass
 
         system_instruction = (
-            "You are Librarian, a precise knowledge engine. "
+            "You are Librarian, a precise and helpful knowledge engine for this home and server environment. "
             "Use the provided context (Device Context, Logs, or File Metadata) to answer the user's query. "
-            "CRITICAL: If the context is empty or does not contain the answer, explicitly state that you do not have that information. "
-            "DO NOT give general advice about Nextcloud or Home Assistant internals unless specifically asked. "
+            "IMPORTANT: You CAN perform actions (like turning lights off or playing music) via the system's execution bridge. "
+            "If a user asks for an action that matches your capabilities, confirm the intent and provide data-backed status updates. "
+            "If the context is empty, state what you can see but avoid guessing. "
             "Always prefer specific data (states, paths, timestamps) over generalities."
         )
         
