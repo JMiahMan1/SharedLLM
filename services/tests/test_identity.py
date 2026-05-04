@@ -39,14 +39,20 @@ def setup_db():
             is_system_default=True,
             nextcloud_url="https://cloud.local",
             nextcloud_user="admin",
-            nextcloud_pass_enc=encrypt("shared-cloud-pass")
+            nextcloud_pass_enc=encrypt("shared-cloud-pass"),
+            github_url="https://github.example.com",
+            github_user="shared-gh",
+            github_token_enc=encrypt("shared-gh-token"),
+            gitlab_url="https://gitlab.example.com",
+            gitlab_user="shared-gl",
+            gitlab_token_enc=encrypt("shared-gl-token"),
         )
         # Personal user lacking nextcloud creds
         alice = User(
             username="alice",
             is_system_default=False,
             ha_url="http://ha.local",
-            ha_token_enc=encrypt("alice-ha-token")
+            ha_token_enc=encrypt("alice-ha-token"),
         )
         session.add(default_user)
         session.add(alice)
@@ -75,6 +81,12 @@ def test_resolve_credential_merging():
     assert data["user"] == "alice"
     assert data["nextcloud_url"] == "https://cloud.local" # Inherited
     assert data["nextcloud_pass"] == "shared-cloud-pass"  # Inherited & Decrypted
+    assert data["github_url"] == "https://github.example.com"
+    assert data["github_user"] == "shared-gh"
+    assert data["github_token"] == "shared-gh-token"
+    assert data["gitlab_url"] == "https://gitlab.example.com"
+    assert data["gitlab_user"] == "shared-gl"
+    assert data["gitlab_token"] == "shared-gl-token"
 
 def test_resolve_device_id():
     with Session(test_engine) as session:
@@ -102,3 +114,33 @@ def test_set_user_admin_flag():
     with Session(test_engine) as session:
         resolved = resolve_user(ResolveRequest(rag_user="alice"), session).model_dump()
     assert resolved["is_admin"] is True
+
+
+def test_create_user_stores_git_provider_credentials():
+    from identity.main import create_user
+    from identity.schemas import UserCreate
+
+    with Session(test_engine) as session:
+        created = create_user(
+            UserCreate(
+                username="bob",
+                github_url="https://github.com",
+                github_user="bob-gh",
+                github_token="bob-gh-token",
+                gitlab_url="https://gitlab.com",
+                gitlab_user="bob-gl",
+                gitlab_token="bob-gl-token",
+            ),
+            session,
+            User(username="admin"),
+        )
+
+    assert created.github_url == "https://github.com"
+    assert created.github_user == "bob-gh"
+    assert created.gitlab_url == "https://gitlab.com"
+    assert created.gitlab_user == "bob-gl"
+
+    with Session(test_engine) as session:
+        resolved = resolve_user(ResolveRequest(rag_user="bob"), session).model_dump()
+    assert resolved["github_token"] == "bob-gh-token"
+    assert resolved["gitlab_token"] == "bob-gl-token"

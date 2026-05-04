@@ -10,7 +10,7 @@ can trust.
 ## What It Does Today
 
 - stores user records in SQLite
-- encrypts HA, Nextcloud, and Audiobookshelf secrets at rest
+- encrypts HA, Nextcloud, GitHub, GitLab, and Audiobookshelf secrets at rest
 - resolves callers by `voice_id`, `rag_user`, `device_id`, or system-default
   fallback
 - returns decrypted service credentials to trusted internal callers
@@ -55,6 +55,8 @@ flowchart TD
 - `is_admin`: DB-backed admin flag for policy decisions
 - `is_system_default`: fallback identity when no caller-specific match exists
 - `api_key`: optional external API key for CRUD-style user access
+- `github_*` fields: optional GitHub or GitHub Enterprise credentials
+- `gitlab_*` fields: optional GitLab credentials
 - `*_enc` fields: encrypted secrets stored at rest
 
 ### `DeviceAssignment`
@@ -90,6 +92,17 @@ flowchart TD
 - secrets are encrypted at rest and only decrypted during trusted resolution
 - the service returns identity context, but it should not be treated as a
   general-purpose secret distribution API for arbitrary callers
+
+## Credential Surface
+
+The current resolved credential payload can include:
+
+- Home Assistant: `ha_url`, `ha_token`
+- Nextcloud: `nextcloud_url`, `nextcloud_user`, `nextcloud_pass`
+- GitHub: `github_url`, `github_user`, `github_token`
+- GitLab: `gitlab_url`, `gitlab_user`, `gitlab_token`
+- Audiobookshelf: `audiobookshelf_url`, `audiobookshelf_user`,
+  `audiobookshelf_pass`
 
 ## What It Is Meant To Do
 
