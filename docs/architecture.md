@@ -254,11 +254,12 @@ already exposes:
 * `git status`, `git diff`, `git add`, `git commit`, and branch creation
 * designated-provider scans and explicit single-file sync to Nextcloud-backed
   workspace folders
+* single-file orchestrated write -> sync -> commit -> optional push workflows
 * targeted `pytest` execution
 
 It does **not** yet provide full folder mirroring, non-text provider sync,
-or Git push/pull orchestration. Those remain the next implementation steps
-rather than implied capabilities.
+or pull/rebase orchestration. Those remain the next implementation steps rather
+than implied capabilities.
 
 ---
 
