@@ -48,60 +48,65 @@ async def full_content_index(req: IndexScanRequest, background_tasks: Background
 
 async def _run_full_index_task(req: IndexScanRequest):
     """Internal task for background indexing."""
-    log.info(f"Background indexing started for user: {req.provider.settings.get('username')} at {req.provider.settings.get('url')}")
     try:
-        provider = build_provider(req.provider)
-    except (KeyError, ValueError) as exc:
-        log.error(f"Failed to build provider: {exc}")
-        return
-
-    # 1. Scan structure
-    log.info(f"Starting background scan for path: {req.path}")
-    from starlette.concurrency import run_in_threadpool
-    entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
-    log.info(f"Scan complete. Found {len(entries)} raw entries.")
-    items = build_content_index(entries)
-    
-    # 2. Extract and chunk with checkpointing
-    checkpoint = CheckpointManager()
-    chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
-    
-    # 3. Sync to RAG
-    user_id = req.provider.settings.get("username", "admin")
-    import time
-    session_id = str(int(time.time()))
-    
-    for c in chunks:
-        c["metadata"]["session_id"] = session_id
-
-    sync_payload = {
-        "chunks": chunks,
-        "user_id": user_id,
-        "collection_name": f"{req.provider.kind}_files"
-    }
-    
-    async with httpx.AsyncClient(timeout=60.0) as client:
+        log.info(f"Background indexing started for user: {req.provider.settings.get('username')} at {req.provider.settings.get('url')}")
         try:
-            resp = await client.post(
-                f"{RAG_SVC}/rag/sync/files",
-                json=sync_payload,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            resp.raise_for_status()
-            
-            # 4. Cleanup old entries
-            await client.post(
-                f"{RAG_SVC}/rag/purge",
-                json={
-                    "collection_name": f"{req.provider.kind}_files",
-                    "user_id": user_id,
-                    "filter": {"session_id": {"$ne": session_id}}
-                },
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            log.info(f"Background index complete for {user_id}. Extracted {len(chunks)} chunks.")
-        except Exception as e:
-            log.error(f"Failed to sync background index to RAG: {e}")
+            provider = build_provider(req.provider)
+        except (KeyError, ValueError) as exc:
+            log.error(f"Failed to build provider: {exc}")
+            return
+
+        # 1. Scan structure
+        log.info(f"Starting background scan for path: {req.path}")
+        from starlette.concurrency import run_in_threadpool
+        entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
+        log.info(f"Scan complete. Found {len(entries)} raw entries.")
+        items = build_content_index(entries)
+        
+        # 2. Extract and chunk with checkpointing
+        checkpoint = CheckpointManager()
+        chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
+        
+        # 3. Sync to RAG
+        user_id = req.provider.settings.get("username", "admin")
+        import time
+        session_id = str(int(time.time()))
+        
+        for c in chunks:
+            c["metadata"]["session_id"] = session_id
+
+        sync_payload = {
+            "chunks": chunks,
+            "user_id": user_id,
+            "collection_name": f"{req.provider.kind}_files"
+        }
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                resp = await client.post(
+                    f"{RAG_SVC}/rag/sync/files",
+                    json=sync_payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                resp.raise_for_status()
+                
+                # 4. Cleanup old entries
+                await client.post(
+                    f"{RAG_SVC}/rag/purge",
+                    json={
+                        "collection_name": f"{req.provider.kind}_files",
+                        "user_id": user_id,
+                        "filter": {"session_id": {"$ne": session_id}}
+                    },
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                log.info(f"Background index complete for {user_id}. Extracted {len(chunks)} chunks.")
+            except Exception as e:
+                log.error(f"Failed to sync background index to RAG: {e}")
+    except Exception as e:
+        log.error(f"Background index task failed: {e}")
+        import traceback
+        log.error(traceback.format_exc())
 
 @app.post("/index/pause")
 def pause_indexing():
