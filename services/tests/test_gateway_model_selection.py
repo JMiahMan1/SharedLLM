@@ -88,6 +88,8 @@ def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     assert captured["use_chat"] is True
     assert captured["payload"]["model"] == "qwen2.5-coder:7b"
     assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
+    assert "CODE CONTEXT:" in captured["payload"]["messages"][-1]["content"]
+    assert "No live local Git workspace is attached to this gateway path." in captured["payload"]["messages"][-1]["content"]
 
 
 def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
@@ -118,6 +120,7 @@ def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
     assert captured["use_chat"] is True
     assert captured["payload"]["model"] == "qwen3:latest"
     assert captured["payload"]["messages"][0]["content"] == LIBRARIAN_SYSTEM_INSTRUCTION
+    assert captured["payload"]["messages"][-1]["content"].startswith("CONTEXT:\n")
 
 
 def test_select_system_instruction_for_query_uses_code_helper_prompt_for_coding_queries():
