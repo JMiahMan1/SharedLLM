@@ -148,7 +148,18 @@ async def execute_ha_service(req: HAServiceRequest):
 
 @app.get("/discovery/entities")
 async def discovery_entities(ha_url: str, ha_token: str):
-    return await ha_client.get_states(ha_url, ha_token)
+    states = await ha_client.get_states(ha_url, ha_token)
+    areas = await ha_client.get_areas(ha_url, ha_token)
+    
+    # Merge area_name into attributes for each entity
+    for s in states:
+        eid = s.get("entity_id")
+        if eid in areas:
+            if "attributes" not in s:
+                s["attributes"] = {}
+            s["attributes"]["area_id"] = areas[eid] # Overwrite area_id with human name for RAG
+            
+    return {"entities": states}
 
 @app.get("/discovery/history")
 async def discovery_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1):

@@ -406,7 +406,8 @@ async def fetch_ha_entities(creds: dict) -> list:
           log.warning(f"Failed to fetch entities: {resp.status_code}")
           return []
 
-      entities = resp.json()
+      data = resp.json()
+      entities = data.get("entities", []) if isinstance(data, dict) else []
       if entities:
           # Async sync task
           asyncio.create_task(_global_http_client.post(
