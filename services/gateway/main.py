@@ -134,31 +134,31 @@ async def get_api_logs(limit: int = 50):
 async def contextualize_query(query: str, history: list) -> str:
     """Uses history to rewrite ambiguous queries like 'yes' or 'do it'."""
     if not history:
-      return query
+        return query
 
     q_lower = query.lower().strip().strip("!.")
     if len(q_lower.split()) > 4 and q_lower not in ["play the first one"]:
-      return query
+        return query
 
     hist_str = ""
     for m in history[-3:]:
-      if not isinstance(m, dict):
-          continue
-      role = "USER" if m.get("role") == "user" else "ASSISTANT"
-      hist_str += f"{role}: {m.get('content')}\n"
+        if not isinstance(m, dict):
+            continue
+        role = "USER" if m.get("role") == "user" else "ASSISTANT"
+        hist_str += f"{role}: {m.get('content')}\n"
 
     prompt = f"Given history:\n{hist_str}\nRewrite follow-up to standalone command.\nFollow-up: {query}\nCommand:"
     try:
-      payload = {"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
-      resp = await _global_http_client.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
-      if resp.status_code == 200:
-          data = resp.json()
-          if isinstance(data, dict):
-            rewritten = data.get("response", query).strip().strip('"')
-            log.info(f"[Context] '{query}' -> '{rewritten}'")
-            return rewritten
-    except Exception:
-      pass
+        payload = {"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
+        resp = await _global_http_client.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict):
+                rewritten = str(data.get("response", query)).strip().strip('"')
+                log.info(f"[Context] '{query}' -> '{rewritten}'")
+                return rewritten
+    except Exception as e:
+        log.warning(f"Contextualization failed: {e}")
     return query
 
 
@@ -345,14 +345,16 @@ async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
       data = resp.json()
       if not isinstance(data, dict):
           return None
-      raw = data.get("response", "").strip()
+      raw = str(data.get("response", "")).strip()
       start = raw.find("{")
       end = raw.rfind("}")
       if start == -1 or end == -1 or end <= start:
           return None
-      data = json.loads(raw[start:end + 1])
-      query_value = str(data.get("query") or "").strip()
-      media_type = str(data.get("media_type") or "").strip().lower()
+      json_data = json.loads(raw[start:end + 1])
+      if not isinstance(json_data, dict):
+          return None
+      query_value = str(json_data.get("query") or "").strip()
+      media_type = str(json_data.get("media_type") or "").strip().lower()
       if not query_value or media_type not in {"artist", "search", "music"}:
           return None
       return {"query": query_value, "media_type": media_type}
@@ -464,7 +466,14 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request):
-    body = await request.json()
+    # 1. Resolve Identity
+    try:
+        body = await request.json()
+    except:
+        body = {}
+    if not isinstance(body, dict): body = {}
+    
+    # 2. Extract Query
     query = body.get("query")
     if not query and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
         last_msg = body["messages"][-1]
@@ -474,10 +483,12 @@ async def chat_handler(request: Request):
             query = str(last_msg)
     
     if not query:
-        return JSONResponse({"status": "ERROR", "message": "No query"}, status_code=400)
+        return JSONResponse({"status": "ERROR", "message": "No query provided."}, status_code=400)
 
-    # 1. Resolve Identity & Context
     creds = await resolve_identity(body)
+    if not isinstance(creds, dict):
+        return JSONResponse({"status": "ERROR", "message": "Identity resolution failed."}, status_code=500)
+    
     user_id = creds.get("user", "admin")
     history = await get_history(user_id)
     real_entities = await fetch_ha_entities(creds)
@@ -592,6 +603,7 @@ async def chat_handler(request: Request):
 
     # 4. Context Injection (RAG + Storage)
     rag_context = ""
+    results = [] # Initialize results to prevent UnboundLocalError
     try:
         selected_model = select_model_for_query(refined_query)
         q_lower = refined_query.lower()
@@ -616,7 +628,8 @@ async def chat_handler(request: Request):
                 data = rag_resp.json()
                 if isinstance(data, dict):
                     results = data.get("results", [])
-                    context_lines = [r["content"] for r in results if isinstance(r, dict) and "content" in r]
+                    if not isinstance(results, list): results = []
+                    context_lines = [str(r.get("content")) for r in results if isinstance(r, dict) and r.get("content")]
                     if context_lines:
                         rag_context = "Relevant Device Context:\n" + "\n".join(context_lines)
             
@@ -629,11 +642,12 @@ async def chat_handler(request: Request):
             if file_rag_resp.status_code == 200:
                 data = file_rag_resp.json()
                 if isinstance(data, dict):
-                    file_results = data.get("results", [])
+                    if not isinstance(file_results, list): file_results = []
                     file_lines = []
                     for r in file_results:
                         if not isinstance(r, dict): continue
                         meta = r.get("metadata", {})
+                        if not isinstance(meta, dict): meta = {}
                         name = meta.get("name", "file")
                         path = meta.get("path", "unknown")
                         content = str(r.get("content", ""))[:200]
@@ -651,10 +665,12 @@ async def chat_handler(request: Request):
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if storage_resp.status_code == 200:
-                matches = storage_resp.json().get("matches", [])
-                if matches:
-                    storage_text = "\n".join([f"- {m['name']} (Path: {m['path']})" for m in matches])
-                    rag_context += f"\n\nNextCloud Files found (Real-time):\n{storage_text}"
+                s_data = storage_resp.json()
+                if isinstance(s_data, dict):
+                    matches = s_data.get("matches", [])
+                    if isinstance(matches, list) and matches:
+                        storage_text = "\n".join([f"- {m.get('name', 'file')} (Path: {m.get('path', 'unknown')})" for m in matches if isinstance(m, dict)])
+                        rag_context += f"\n\nNextCloud Files found (Real-time):\n{storage_text}"
             
         log_keywords = [r"\blog\b", r"\blogs\b", r"\bhealth\b", r"\bstatus\b", r"\bissue\b", r"\berror\b", r"\bbroken\b"]
         if any(re.search(k, q_lower) for k in log_keywords):
@@ -662,9 +678,10 @@ async def chat_handler(request: Request):
                 log_resp = await client.get(f"{LOGGING_SVC_URL}/logs", params={"limit": 5})
                 if log_resp.status_code == 200:
                     recent_logs = log_resp.json()
-                    log_entries = [f"[{l.get('timestamp')}] [{l.get('service')}] {l.get('message')}" for l in recent_logs if isinstance(l, dict)]
-                    if log_entries:
-                        rag_context += f"\n\n### Application Internal Logs:\n" + "\n".join(log_entries)
+                    if isinstance(recent_logs, list):
+                        log_entries = [f"[{l.get('timestamp', 'unknown')}] [{l.get('service', 'unknown')}] {l.get('message', 'no message')}" for l in recent_logs if isinstance(l, dict)]
+                        if log_entries:
+                            rag_context += f"\n\n### Application Internal Logs:\n" + "\n".join(log_entries)
             except: pass
             
         history_keywords = [r"\bhistory\b", r"\blast used\b", r"\bactivity\b", r"\brecently\b", r"\bturned on\b", r"\bturned off\b"]
@@ -677,7 +694,7 @@ async def chat_handler(request: Request):
                     if eid:
                         hist = await fetch_device_history(creds, eid)
                         if hist:
-                            hist_text = "\n".join([f"- {h['last_changed']}: {h['state']}" for h in hist[-5:]])
+                            hist_text = "\n".join([f"- {h.get('last_changed', 'unknown')}: {h.get('state', 'unknown')}" for h in hist[-5:] if isinstance(h, dict)])
                             rag_context += f"\n\n### Device Usage History ({eid}):\n{hist_text}"
             except: pass
                             
@@ -716,8 +733,12 @@ async def chat_handler(request: Request):
         if "/v1/chat/completions" in str(request.url):
             import time
             return {
-                "id": f"chatcmpl-{int(time.time())}", "object": "chat.completion", "created": int(time.time()), "model": selected_model,
-                "choices": [{"message": {"role": "assistant", "content": final_answer}, "finish_reason": "stop", "index": 0}]
+                "id": f"chatcmpl-{int(time.time())}", 
+                "object": "chat.completion", 
+                "created": int(time.time()), 
+                "model": selected_model,
+                "choices": [{"message": {"role": "assistant", "content": final_answer}, "finish_reason": "stop", "index": 0}],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             }
         return {"status": "SUCCESS", "message": final_answer}
         
@@ -729,18 +750,27 @@ async def chat_handler(request: Request):
             await client.post(f"{STORAGE_SVC}/index/resume", headers={"X-Internal-Secret": INTERNAL_SECRET})
         except: pass
 @app.post("/api/generate")
-# --- Ollama Proxy ---
 async def proxy_generate(request: Request):
-    body = await request.json()
-    async with httpx.AsyncClient(timeout=None) as client:
-      resp = await client.post(f"{OLLAMA_URL}/api/generate", json=body)
-      return resp.json()
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=None) as client:
+            resp = await client.post(f"{OLLAMA_URL}/api/generate", json=body)
+            if resp.status_code != 200:
+                return JSONResponse(content=resp.text, status_code=resp.status_code)
+            return resp.json()
+    except Exception as e:
+        return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
 @app.get("/api/tags")
 async def proxy_tags():
-    async with httpx.AsyncClient() as client:
-      resp = await client.get(f"{OLLAMA_URL}/api/tags")
-      return resp.json()
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            if resp.status_code != 200:
+                return JSONResponse(content=resp.text, status_code=resp.status_code)
+            return resp.json()
+    except Exception as e:
+        return JSONResponse({"models": []}, status_code=200) # Fallback for UI
 
 @app.get("/api/version")
 async def proxy_version():

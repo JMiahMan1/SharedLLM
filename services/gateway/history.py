@@ -23,7 +23,9 @@ async def get_history(user_id: str) -> list:
         msgs = []
         for m in raw_msgs:
             try:
-                msgs.append(json.loads(m))
+                data = json.loads(m)
+                if isinstance(data, dict):
+                    msgs.append(data)
             except Exception as e:
                 log.debug(f"Failed to parse history message: {e}")
         return msgs
