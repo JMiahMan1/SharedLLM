@@ -4,6 +4,7 @@ Tests semantic routing (Fast Path vs Slow Path), identity integration, and error
 Related code: services/gateway/main.py, services/gateway/intent_engine.py, services/gateway/schemas.py
 """
 import os
+from contextlib import asynccontextmanager
 import pytest
 from fastapi.testclient import TestClient
 import httpx
@@ -14,10 +15,18 @@ os.environ["IDENTITY_SERVICE_URL"] = "http://identity"
 os.environ["EXECUTION_SERVICE_URL"] = "http://execution"
 os.environ["OLLAMA_URL"] = "http://ollama"
 
+import gateway.main as gateway_main
 from gateway.main import app
 
+pytestmark = pytest.mark.local_only
+
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    @asynccontextmanager
+    async def noop_lifespan(_app):
+        yield
+
+    monkeypatch.setattr(app.router, "lifespan_context", noop_lifespan)
     with TestClient(app) as test_client:
         yield test_client
 

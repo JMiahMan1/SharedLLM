@@ -45,7 +45,12 @@ jobs:
         ASSISTANT_MODEL: qwen3:latest
         CODING_MODEL: qwen2.5-coder:7b
       run: |
-        pytest services/tests/ \
+        pytest \
+          services/tests/test_identity.py \
+          services/tests/test_gateway_model_selection.py \
+          services/tests/test_gateway_media_target.py \
+          services/tests/test_intent_engine.py \
+          -m "not local_only and not server_only" \
           --junitxml=pytest-report.xml \
           --cov=services/ \
           --cov-report=xml

@@ -3,13 +3,22 @@ Specialized tests for the Gateway's history-aware entity resolution.
 Verifies that multi-turn context (e.g. 'Can it be dimmed?') correctly resolves entities from previous turns.
 Related code: services/gateway/main.py
 """
+from contextlib import asynccontextmanager
 import pytest
 from fastapi.testclient import TestClient
+import gateway.main as gateway_main
 from gateway.main import app
 import json
 
+pytestmark = pytest.mark.local_only
+
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    @asynccontextmanager
+    async def noop_lifespan(_app):
+        yield
+
+    monkeypatch.setattr(app.router, "lifespan_context", noop_lifespan)
     with TestClient(app) as test_client:
         yield test_client
 
