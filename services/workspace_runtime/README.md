@@ -8,6 +8,7 @@ It provides a safe, mounted-workspace interface for:
 - listing registered workspaces
 - resolving a workspace to a real local path
 - reading files inside that workspace
+- listing files inside that workspace for context gathering
 - writing files inside user-authorized workspaces
 - reporting `git status`
 - returning `git diff`
@@ -87,6 +88,7 @@ Each workspace entry can currently define:
 - `GET /workspaces`
 - `POST /workspace/resolve`
 - `POST /files/read`
+- `POST /files/list`
 - `POST /files/write`
 - `POST /git/status`
 - `POST /git/diff`
@@ -143,6 +145,7 @@ Implemented:
 - provider scan and explicit provider file sync for mapped workspaces
 - orchestrated workflow execution for single-file edit/sync/commit/push flows
 - targeted test execution
+- safe workspace file listing for chat-driven context gathering
 
 Not yet implemented:
 

@@ -3,6 +3,7 @@ import subprocess
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
@@ -27,9 +28,22 @@ def client(monkeypatch):
     async def noop_lifespan(_app):
         yield
 
+    async def fake_request(*args, **kwargs):
+        return SimpleNamespace(status_code=200, json=lambda: {"status": "SUCCESS"}, text="")
+
+    async def fake_post(*args, **kwargs):
+        return SimpleNamespace(status_code=200, json=lambda: {"status": "SUCCESS"}, text="")
+
+    async def fake_get(*args, **kwargs):
+        return SimpleNamespace(status_code=200, json=lambda: {"status": "SUCCESS"}, text="")
+
     monkeypatch.setattr(app.router, "lifespan_context", noop_lifespan)
-    with TestClient(app) as test_client:
+    monkeypatch.setattr(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request, post=fake_post, get=fake_get))
+    test_client = TestClient(app)
+    try:
         yield test_client
+    finally:
+        test_client.close()
 
 
 class MockOllamaResponse:
@@ -196,6 +210,111 @@ def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
     assert captured["payload"]["model"] == "qwen3:latest"
     assert captured["payload"]["messages"][0]["content"] == LIBRARIAN_SYSTEM_INSTRUCTION
     assert captured["payload"]["messages"][-1]["content"].startswith("CONTEXT:\n")
+
+
+@pytest.mark.local_only
+@pytest.mark.asyncio
+async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_model():
+    captured = {"requests": []}
+
+    class FakeRuntimeResponse:
+        def __init__(self, payload):
+            self.status_code = 200
+            self._payload = payload
+            self.text = ""
+
+        def json(self):
+            return self._payload
+
+    async def fake_request(method, url, json=None, params=None, headers=None, timeout=None):
+        captured["requests"].append({"method": method, "url": url, "json": json, "params": params})
+        if url.endswith("/workspaces"):
+            return FakeRuntimeResponse(
+                {
+                    "status": "SUCCESS",
+                    "workspaces": [
+                        {
+                            "id": "sharedllm",
+                            "available": True,
+                            "scope": "user",
+                            "resolved_path": "/workspace/SharedLLM",
+                        }
+                    ],
+                }
+            )
+        if url.endswith("/files/list"):
+            return FakeRuntimeResponse(
+                {
+                    "status": "SUCCESS",
+                    "entries": [
+                        {"path": "README.md", "name": "README.md", "is_dir": False},
+                        {"path": "services", "name": "services", "is_dir": True},
+                    ],
+                }
+            )
+        if url.endswith("/files/read"):
+            relative_path = json["relative_path"]
+            return FakeRuntimeResponse(
+                {
+                    "status": "SUCCESS",
+                    "content": f"content from {relative_path}",
+                }
+            )
+        if url.endswith("/git/status"):
+            return FakeRuntimeResponse(
+                {
+                    "status": "SUCCESS",
+                    "branch": "microservices",
+                    "porcelain": [],
+                }
+            )
+        if url.endswith("/files/write"):
+            return FakeRuntimeResponse({"status": "SUCCESS", "relative_path": json["relative_path"]})
+        if url.endswith("/provider/sync/file"):
+            return FakeRuntimeResponse({"status": "SUCCESS", "provider_path": "/Code/SharedLLM/temp/README.md"})
+        return FakeRuntimeResponse({"status": "SUCCESS"})
+
+    async def fake_post(*args, **kwargs):
+        return FakeRuntimeResponse({"status": "SUCCESS"})
+
+    async def fake_get(*args, **kwargs):
+        return FakeRuntimeResponse({"status": "SUCCESS"})
+
+    async def mock_call_ollama(payload, use_chat=True):
+        captured["ollama_payload"] = payload
+        return MockOllamaResponse("# Generated README\n")
+
+    async def passthrough_query(query, history):
+        return query
+
+    with patch("gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
+         patch("gateway.main.get_history", new=AsyncMock(return_value=[])), \
+         patch("gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
+         patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
+         patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
+         patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
+         patch("gateway.main.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)), \
+         patch.object(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request, post=fake_post, get=fake_get)):
+        response = await gateway_main.generate_workspace_readme_via_coding_model(
+            body={
+                "query": "Analyze this git repo and generate a README.md in temp for the workspace.",
+                "voice_id": "alice",
+            },
+            user_id="alice",
+            refined_query="Analyze this git repo and generate a README.md in temp for the workspace.",
+            selected_model="qwen2.5-coder:7b",
+            should_stream=False,
+            is_openai=False,
+        )
+
+    assert response["model"] == "qwen2.5-coder:7b"
+    assert response["message"]["content"].startswith("I generated temp/README.md")
+    assert "# Generated README" in response["message"]["content"]
+    assert captured["ollama_payload"]["model"] == "qwen2.5-coder:7b"
+    request_urls = [item["url"] for item in captured["requests"]]
+    assert any(url.endswith("/files/list") for url in request_urls)
+    assert any(url.endswith("/files/write") for url in request_urls)
+    assert any(url.endswith("/provider/sync/file") for url in request_urls)
 
 
 def test_select_system_instruction_for_query_uses_code_helper_prompt_for_coding_queries():
