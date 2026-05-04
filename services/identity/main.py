@@ -248,6 +248,23 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), _: Us
     )
 
 
+@app.post("/api/admin/users/{username}/admin", dependencies=[Depends(require_internal)])
+def set_user_admin(username: str, is_admin: bool = True, session: Session = Depends(get_session)):
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    user.is_admin = is_admin
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return {
+        "status": "SUCCESS",
+        "username": user.username,
+        "is_admin": user.is_admin,
+    }
+
+
 @app.delete("/api/users/{username}", status_code=204)
 def delete_user(username: str, session: Session = Depends(get_session), _: User = Depends(require_api_key)):
     user = session.exec(select(User).where(User.username == username)).first()
