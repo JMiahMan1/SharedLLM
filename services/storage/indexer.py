@@ -18,10 +18,22 @@ except ImportError:
 
 log = logging.getLogger("storage.indexer")
 INDEXER_PAUSED = False
+PAUSE_EXPIRY = 0
 
 def set_indexer_pause(paused: bool):
-    global INDEXER_PAUSED
+    global INDEXER_PAUSED, PAUSE_EXPIRY
     INDEXER_PAUSED = paused
+    if paused:
+        import time
+        PAUSE_EXPIRY = time.time() + 60.0
+
+def is_indexer_paused():
+    global INDEXER_PAUSED, PAUSE_EXPIRY
+    if INDEXER_PAUSED:
+        import time
+        if time.time() > PAUSE_EXPIRY:
+            INDEXER_PAUSED = False
+    return INDEXER_PAUSED
 
 GLOBAL_SKIP_LIST = [
     "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
@@ -135,7 +147,7 @@ async def extract_and_chunk_contents(
             continue
 
         # Resource Prioritization: Pause
-        while INDEXER_PAUSED:
+        while is_indexer_paused():
             await asyncio.sleep(1.0)
 
         log.info(f"Indexing metadata for: {item.path}")
