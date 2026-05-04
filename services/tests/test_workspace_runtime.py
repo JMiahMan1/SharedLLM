@@ -1,17 +1,17 @@
 import json
 import subprocess
+import hashlib
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
-from workspace_runtime.main import app
 import workspace_runtime.main as runtime
 
 pytestmark = pytest.mark.local_only
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def runtime_env(tmp_path, monkeypatch):
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -74,93 +74,118 @@ def runtime_env(tmp_path, monkeypatch):
     return repo_dir
 
 
-@pytest.fixture
-def client(runtime_env):
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-def _headers():
-    return {"X-Internal-Secret": "test-secret"}
-
-
-def test_list_workspaces(client):
-    resp = client.get("/workspaces", params={"rag_user": "jeremiah"}, headers=_headers())
-    assert resp.status_code == 200
-    data = resp.json()
+def test_list_workspaces():
+    data = runtime.list_workspaces(rag_user="jeremiah", x_internal_secret="test-secret")
     assert data["status"] == "SUCCESS"
     assert data["workspaces"][0]["id"] == "demo"
     assert data["workspaces"][0]["available"] is True
 
 
-def test_list_workspaces_allows_admin_override(client):
-    resp = client.get("/workspaces", params={"rag_user": "admin"}, headers=_headers())
-    assert resp.status_code == 200
-    data = resp.json()
+def test_list_workspaces_allows_admin_override():
+    data = runtime.list_workspaces(rag_user="admin", x_internal_secret="test-secret")
     ids = {item["id"] for item in data["workspaces"]}
     assert "demo" in ids
     assert "demo_system" in ids
     assert "demo_admin" in ids
 
 
-def test_list_workspaces_hides_admin_only_from_non_admin(client):
-    resp = client.get("/workspaces", params={"rag_user": "jeremiah"}, headers=_headers())
-    assert resp.status_code == 200
-    data = resp.json()
+def test_list_workspaces_hides_admin_only_from_non_admin():
+    data = runtime.list_workspaces(rag_user="jeremiah", x_internal_secret="test-secret")
     ids = {item["id"] for item in data["workspaces"]}
     assert "demo" in ids
     assert "demo_system" in ids
     assert "demo_admin" not in ids
 
 
-def test_read_file_blocks_parent_traversal(client):
-    resp = client.post(
-        "/files/read",
-        headers=_headers(),
-        json={"workspace_id": "demo", "rag_user": "jeremiah", "relative_path": "../secret.txt"},
+def test_read_file_blocks_parent_traversal():
+    with pytest.raises(HTTPException) as exc:
+        runtime.read_file(
+            runtime.FileReadRequest(workspace_id="demo", rag_user="jeremiah", relative_path="../secret.txt"),
+            "test-secret",
+        )
+    assert exc.value.status_code == 400
+
+
+def test_write_file_updates_user_workspace(runtime_env):
+    original = (runtime_env / "sample.py").read_text()
+    original_sha = hashlib.sha256(original.encode()).hexdigest()
+
+    data = runtime.write_file(
+        runtime.FileWriteRequest(
+            workspace_id="demo",
+            rag_user="jeremiah",
+            relative_path="sample.py",
+            content="VALUE = 3\n",
+            expected_sha256=original_sha,
+        ),
+        "test-secret",
     )
-    assert resp.status_code == 400
+    assert data["status"] == "SUCCESS"
+    assert data["created"] is False
+    assert data["previous_sha256"] == original_sha
+    assert (runtime_env / "sample.py").read_text() == "VALUE = 3\n"
 
 
-def test_git_status_reports_dirty_workspace(client, runtime_env):
+def test_write_file_rejects_conflict():
+    with pytest.raises(HTTPException) as exc:
+        runtime.write_file(
+            runtime.FileWriteRequest(
+                workspace_id="demo",
+                rag_user="jeremiah",
+                relative_path="sample.py",
+                content="VALUE = 4\n",
+                expected_sha256="deadbeef",
+            ),
+            "test-secret",
+        )
+    assert exc.value.status_code == 409
+
+
+def test_system_workspace_blocks_write_for_non_admin():
+    with pytest.raises(HTTPException) as exc:
+        runtime.write_file(
+            runtime.FileWriteRequest(
+                workspace_id="demo_system",
+                rag_user="jeremiah",
+                relative_path="sample.py",
+                content="VALUE = 5\n",
+            ),
+            "test-secret",
+        )
+    assert exc.value.status_code == 403
+
+
+def test_git_status_reports_dirty_workspace(runtime_env):
     (runtime_env / "sample.py").write_text("VALUE = 2\n")
 
-    resp = client.post("/git/status", headers=_headers(), json={"workspace_id": "demo", "rag_user": "jeremiah"})
-    assert resp.status_code == 200
-    data = resp.json()
+    data = runtime.git_status(runtime.WorkspaceRef(workspace_id="demo", rag_user="jeremiah"), "test-secret")
     assert data["status"] == "SUCCESS"
     assert data["dirty"] is True
     assert any("sample.py" in line for line in data["porcelain"])
 
 
-def test_pytest_endpoint_runs_targeted_tests(client):
-    resp = client.post(
-        "/tests/pytest",
-        headers=_headers(),
-        json={"workspace_id": "demo", "rag_user": "jeremiah", "targets": ["test_sample.py"]},
+def test_pytest_endpoint_runs_targeted_tests():
+    data = runtime.run_pytest(
+        runtime.PytestRequest(workspace_id="demo", rag_user="jeremiah", targets=["test_sample.py"]),
+        "test-secret",
     )
-    assert resp.status_code == 200
-    data = resp.json()
     assert data["status"] == "SUCCESS"
     assert data["passed"] is True
     assert data["returncode"] == 0
 
 
-def test_system_workspace_blocks_pytest_for_non_admin(client):
-    resp = client.post(
-        "/tests/pytest",
-        headers=_headers(),
-        json={"workspace_id": "demo_system", "rag_user": "jeremiah", "targets": ["test_sample.py"]},
-    )
-    assert resp.status_code == 403
+def test_system_workspace_blocks_pytest_for_non_admin():
+    with pytest.raises(HTTPException) as exc:
+        runtime.run_pytest(
+            runtime.PytestRequest(workspace_id="demo_system", rag_user="jeremiah", targets=["test_sample.py"]),
+            "test-secret",
+        )
+    assert exc.value.status_code == 403
 
 
-def test_system_workspace_allows_pytest_for_admin(client):
-    resp = client.post(
-        "/tests/pytest",
-        headers=_headers(),
-        json={"workspace_id": "demo_system", "rag_user": "admin", "targets": ["test_sample.py"]},
+def test_system_workspace_allows_pytest_for_admin():
+    data = runtime.run_pytest(
+        runtime.PytestRequest(workspace_id="demo_system", rag_user="admin", targets=["test_sample.py"]),
+        "test-secret",
     )
-    assert resp.status_code == 200
-    data = resp.json()
     assert data["passed"] is True

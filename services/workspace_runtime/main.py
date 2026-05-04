@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import subprocess
+import hashlib
 from pathlib import Path
 from typing import Any, Optional
 
@@ -45,6 +46,13 @@ class WorkspaceRef(BaseModel):
 class FileReadRequest(WorkspaceRef):
     relative_path: str
     max_bytes: int = Field(default=DEFAULT_FILE_READ_LIMIT, ge=1, le=200000)
+
+
+class FileWriteRequest(WorkspaceRef):
+    relative_path: str
+    content: str
+    expected_sha256: Optional[str] = None
+    create_parents: bool = False
 
 
 class PytestRequest(WorkspaceRef):
@@ -181,7 +189,7 @@ def _workspace_capabilities(workspace: dict[str, Any]) -> list[str]:
     scope = str(workspace.get("scope") or "user").strip().lower()
     if scope == "system":
         return ["read", "git_status", "git_diff"]
-    return ["read", "git_status", "git_diff", "pytest"]
+    return ["read", "write", "git_status", "git_diff", "pytest"]
 
 
 def _require_workspace_capability(workspace: dict[str, Any], capability: str) -> None:
@@ -207,6 +215,19 @@ def _safe_file_path(workspace_path: Path, relative_path: str) -> Path:
     if not target.is_file():
         raise HTTPException(status_code=400, detail=f"Path is not a file: {relative_path}")
     return target
+
+
+def _safe_target_path(workspace_path: Path, relative_path: str) -> Path:
+    target = (workspace_path / relative_path).resolve()
+    try:
+        target.relative_to(workspace_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"File path escapes workspace: {relative_path}") from exc
+    return target
+
+
+def _sha256_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
 
 
 def _run_command(
@@ -320,6 +341,49 @@ def read_file(req: FileReadRequest, x_internal_secret: Optional[str] = Header(de
         "relative_path": req.relative_path,
         "content": content[: req.max_bytes],
         "truncated": len(content) > req.max_bytes,
+    }
+
+
+@app.post("/files/write")
+def write_file(req: FileWriteRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "write")
+    workspace_path = Path(workspace["resolved_path"])
+    target = _safe_target_path(workspace_path, req.relative_path)
+
+    if target.exists() and not target.is_file():
+        raise HTTPException(status_code=400, detail=f"Path is not a file: {req.relative_path}")
+
+    created = not target.exists()
+    previous_sha256 = None
+    if target.exists():
+        current_bytes = target.read_bytes()
+        previous_sha256 = _sha256_bytes(current_bytes)
+        if req.expected_sha256 and req.expected_sha256 != previous_sha256:
+            raise HTTPException(
+                status_code=409,
+                detail=f"File contents changed for {req.relative_path}; expected {req.expected_sha256}, found {previous_sha256}",
+            )
+    elif req.expected_sha256 not in (None, "", "new"):
+        raise HTTPException(status_code=409, detail=f"File does not yet exist: {req.relative_path}")
+
+    parent = target.parent
+    if not parent.exists():
+        if not req.create_parents:
+            raise HTTPException(status_code=400, detail=f"Parent directory does not exist: {parent.relative_to(workspace_path)}")
+        parent.mkdir(parents=True, exist_ok=True)
+
+    target.write_text(req.content)
+    written_bytes = req.content.encode()
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "relative_path": req.relative_path,
+        "created": created,
+        "bytes_written": len(written_bytes),
+        "sha256": _sha256_bytes(written_bytes),
+        "previous_sha256": previous_sha256,
     }
 
 

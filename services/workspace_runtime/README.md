@@ -8,6 +8,7 @@ It provides a safe, mounted-workspace interface for:
 - listing registered workspaces
 - resolving a workspace to a real local path
 - reading files inside that workspace
+- writing files inside user-authorized workspaces
 - reporting `git status`
 - returning `git diff`
 - running targeted `pytest` commands
@@ -24,6 +25,7 @@ Implemented today:
   caller is admin
 - safe workspace resolution under the mounted root
 - read-only file access
+- guarded text file writes with optional `expected_sha256` conflict checks
 - `git status` and `git diff`
 - targeted `pytest` execution
 
@@ -72,6 +74,7 @@ Each workspace entry can currently define:
 - `GET /workspaces`
 - `POST /workspace/resolve`
 - `POST /files/read`
+- `POST /files/write`
 - `POST /git/status`
 - `POST /git/diff`
 - `POST /tests/pytest`
@@ -111,14 +114,13 @@ is to operate on mounted workspaces as a whole, including:
 
 Implemented:
 
-- read-only file access
+- read/write file access
 - policy-based workspace resolution
 - git inspection
 - targeted test execution
 
 Not yet implemented:
 
-- file writes
 - git commit/push APIs
 - workspace registry mutation APIs
 - direct Gateway orchestration against these endpoints
@@ -128,7 +130,7 @@ Not yet implemented:
 ## Remaining Work
 
 - move workspace definitions from static JSON into a DB-backed registry
-- add file mutation endpoints with safety and conflict controls
+- extend file mutation support beyond direct text writes
 - add Git branch/add/commit/push operations
 - sync local authoritative changes back to provider-backed storage where needed
 - let the Gateway orchestrate this service directly for agentic tasks
