@@ -62,10 +62,13 @@ def _parse_env_users() -> dict:
             users[username] = {
                 "username": username,
                 "display_name": f"User: {username}",
+                "is_admin": False,
                 "is_system_default": False,
             }
 
         mapping = {
+            "is_admin": "is_admin",
+            "admin": "is_admin",
             "display_name": "display_name",
             "name": "display_name",
             "nextcloud_user": "nextcloud_user",
@@ -81,7 +84,11 @@ def _parse_env_users() -> dict:
             "api_key": "api_key",
         }
         if setting in mapping:
-            users[username][mapping[setting]] = value
+            mapped = mapping[setting]
+            if mapped == "is_admin":
+                users[username][mapped] = str(value).strip().lower() in {"1", "true", "yes", "on"}
+            else:
+                users[username][mapped] = value
 
     return users
 
@@ -110,6 +117,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         user = User(
             username=udata["username"],
             display_name=udata.get("display_name", ""),
+            is_admin=udata.get("is_admin", False),
             is_system_default=udata.get("is_system_default", False),
             api_key=udata.get("api_key"),
             nextcloud_url=udata.get("nextcloud_url"),
