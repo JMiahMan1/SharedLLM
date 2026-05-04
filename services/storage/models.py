@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -56,6 +56,13 @@ class IndexScanRequest(BaseModel):
 class ProviderWriteRequest(BaseModel):
     provider: ProviderConfig
     path: str
-    content: str
+    content: Optional[str] = None
+    content_b64: Optional[str] = None
     create_parents: bool = True
     verify: bool = True
+
+
+class ProviderMirrorRequest(BaseModel):
+    provider: ProviderConfig
+    remote_path: str
+    local_path: str  # Only works if storage svc has access to local fs

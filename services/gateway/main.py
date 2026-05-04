@@ -624,6 +624,89 @@ async def generate_workspace_readme_via_coding_model(
     return _make_ollama_response(response_message, selected_model, stream=should_stream)
 
 
+async def orchestrate_code_change(
+    body: dict,
+    user_id: str,
+    refined_query: str,
+    selected_model: str,
+    should_stream: bool,
+    is_openai: bool,
+) -> JSONResponse | dict | StreamingResponse:
+    workspace = await resolve_chat_workspace(body, user_id)
+    if not workspace:
+      msg = "I could not resolve an available workspace for this code orchestration request."
+      if is_openai: return _make_openai_response(msg, selected_model, stream=should_stream)
+      return _make_ollama_response(msg, selected_model, stream=should_stream)
+
+    workspace_id = workspace.get("id")
+    workspace_context = await build_workspace_readme_context(workspace, user_id)
+    
+    prompt = (
+      "You are an expert software engineer agent.\n"
+      "Identify the file to change and the new content based on the request.\n"
+      "Return ONLY a JSON object with: 'relative_path', 'content', 'reasoning', 'test_cmd' (optional).\n\n"
+      f"Workspace context:\n{workspace_context}\n\n"
+      f"User request: {refined_query}\n"
+    )
+    
+    payload = {
+      "model": selected_model,
+      "messages": [
+        {"role": "system", "content": CODE_HELPER_SYSTEM_INSTRUCTION},
+        {"role": "user", "content": prompt},
+      ],
+      "stream": False,
+      "format": "json"
+    }
+    
+    resp = await call_ollama(payload, use_chat=True)
+    if resp.status_code != 200:
+      raise HTTPException(status_code=502, detail="Coding model failed to generate a plan")
+      
+    try:
+        plan = resp.json().get("message", {}).get("content") or resp.json().get("response")
+        plan_data = json.loads(plan)
+    except Exception as e:
+        log.error(f"Failed to parse coding plan: {e}\nRaw: {plan}")
+        raise HTTPException(status_code=500, detail="Invalid JSON plan from coding model")
+
+    rel_path = plan_data.get("relative_path")
+    content = plan_data.get("content")
+    reasoning = plan_data.get("reasoning", "No reasoning provided.")
+    test_cmd = plan_data.get("test_cmd")
+    
+    if not rel_path or content is None:
+        raise HTTPException(status_code=400, detail="Coding plan missing relative_path or content")
+
+    # Call the workflow endpoint
+    workflow_payload = {
+        "workspace_id": workspace_id,
+        "rag_user": user_id,
+        "relative_path": rel_path,
+        "content": content,
+        "commit_message": f"feat: {refined_query[:50]}",
+        "run_tests": True if test_cmd else False,
+        "test_command": test_cmd,
+        "sync_to_provider": True
+    }
+    
+    result = await workspace_runtime_request("POST", "/workflow/write-sync-commit", json_payload=workflow_payload)
+    
+    summary = (
+        f"### Code Orchestration Success\n\n"
+        f"**File**: `{rel_path}`\n"
+        f"**Reasoning**: {reasoning}\n\n"
+        f"**Workflow Result**:\n"
+        f"- Commit: `{result.get('commit_sha', 'N/A')}`\n"
+        f"- Sync: {result.get('sync_status', 'N/A')}\n"
+        f"- Tests: {result.get('test_status', 'N/A')}\n"
+    )
+    
+    if is_openai:
+      return _make_openai_response(summary, selected_model, stream=should_stream)
+    return _make_ollama_response(summary, selected_model, stream=should_stream)
+
+
 def resolve_media_target(query: str, entities: list[dict]) -> str:
     """
     Prefer a Music Assistant queue/speaker entity for music playback on named targets.
@@ -1003,6 +1086,9 @@ async def chat_handler(request: Request):
             if is_openai:
                 return _make_openai_response(msg, selected_model, intent, stream=should_stream)
             return _make_ollama_response(msg, selected_model, intent, stream=should_stream)
+
+        if intent == "code_orchestrate":
+            return await orchestrate_code_change(body, user_id, refined_query, selected_model, should_stream, is_openai)
 
         if intent == "storage_status":
             # Library Indexing Status Check

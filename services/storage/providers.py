@@ -21,7 +21,9 @@ class StorageProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def write_content(self, path: str, content: str, create_parents: bool = True, verify: bool = True) -> dict[str, Any]:
+    def write_content(
+        self, path: str, content: str | bytes, create_parents: bool = True, verify: bool = True, is_binary: bool = False
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -39,8 +41,20 @@ class NextcloudStorageProvider(StorageProvider):
     def get_content(self, path: str) -> str | None:
         return self.client.get_file_content(path)
 
-    def write_content(self, path: str, content: str, create_parents: bool = True, verify: bool = True) -> dict[str, Any]:
-        return self.client.write_file_content(path, content, create_parents=create_parents, verify=verify)
+    def write_content(
+        self,
+        path: str,
+        content: str | bytes,
+        create_parents: bool = True,
+        verify: bool = True,
+        is_binary: bool = False,
+    ) -> dict[str, Any]:
+        return self.client.write_file_content(
+            path, content, create_parents=create_parents, verify=verify, is_binary=is_binary
+        )
+
+    def upload_directory(self, remote_path: str, local_path: str) -> dict[str, Any]:
+        return self.client.upload_directory(remote_path, local_path)
 
 
 def build_provider(config: ProviderConfig) -> StorageProvider:

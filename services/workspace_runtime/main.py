@@ -9,9 +9,17 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlmodel import Session, select
+
+try:
+    from .models import Workspace
+    from .database import engine, init_db, get_session
+except (ImportError, ValueError):
+    from models import Workspace
+    from database import engine, init_db, get_session
 
 
 log = logging.getLogger("workspace_runtime")
@@ -61,7 +69,8 @@ class FileListRequest(WorkspaceRef):
 
 class FileWriteRequest(WorkspaceRef):
     relative_path: str
-    content: str
+    content: Optional[str] = None
+    patch: Optional[str] = None
     expected_sha256: Optional[str] = None
     create_parents: bool = False
 
@@ -100,6 +109,22 @@ class GitPushRequest(WorkspaceRef):
     set_upstream: bool = False
 
 
+class GitFetchRequest(WorkspaceRef):
+    remote: Optional[str] = None
+    prune: bool = False
+
+
+class GitPullRequest(WorkspaceRef):
+    remote: Optional[str] = None
+    branch: Optional[str] = None
+    rebase: bool = False
+
+
+class GitRebaseRequest(WorkspaceRef):
+    upstream: str
+    branch: Optional[str] = None
+
+
 class ProviderScanRequest(WorkspaceRef):
     recursive: bool = True
 
@@ -108,6 +133,11 @@ class ProviderSyncFileRequest(WorkspaceRef):
     relative_path: str
     create_parents: bool = True
     verify: bool = True
+
+
+class ProviderSyncDirectoryRequest(WorkspaceRef):
+    relative_path: str = "."
+    recursive: bool = True
 
 
 class WorkflowWriteSyncCommitRequest(WorkspaceRef):
@@ -135,23 +165,38 @@ def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
 
 
 def _load_registry() -> list[dict[str, Any]]:
+    with Session(engine) as session:
+        items = session.exec(select(Workspace)).all()
+        return [item.dict() for item in items]
+
+
+def _seed_db_from_json():
     registry_path = Path(WORKSPACE_REGISTRY_PATH)
     if not registry_path.exists():
-        log.warning("Workspace registry not found at %s", registry_path)
-        return []
-    try:
-        data = json.loads(registry_path.read_text())
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to load workspace registry: {exc}")
+        return
 
-    if isinstance(data, dict):
-        items = data.get("workspaces", [])
-    elif isinstance(data, list):
-        items = data
-    else:
-        raise HTTPException(status_code=500, detail="Workspace registry format is invalid")
+    with Session(engine) as session:
+        # Only seed if DB is empty
+        if session.exec(select(Workspace)).first():
+            return
 
-    return [item for item in items if isinstance(item, dict)]
+        log.info("Seeding DB from %s", registry_path)
+        try:
+            data = json.loads(registry_path.read_text())
+            workspaces_data = data.get("workspaces", []) if isinstance(data, dict) else data
+            for ws_data in workspaces_data:
+                ws = Workspace(**ws_data)
+                session.add(ws)
+            session.commit()
+            log.info("Successfully seeded %d workspaces", len(workspaces_data))
+        except Exception as exc:
+            log.error("Failed to seed DB: %s", exc)
+
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+    _seed_db_from_json()
 
 
 def _workspace_access_policy(entry: dict[str, Any]) -> str:
@@ -656,21 +701,33 @@ def write_file(req: FileWriteRequest, x_internal_secret: Optional[str] = Header(
     elif req.expected_sha256 not in (None, "", "new"):
         raise HTTPException(status_code=409, detail=f"File does not yet exist: {req.relative_path}")
 
-    parent = target.parent
-    if not parent.exists():
-        if not req.create_parents:
-            raise HTTPException(status_code=400, detail=f"Parent directory does not exist: {parent.relative_to(workspace_path)}")
-        parent.mkdir(parents=True, exist_ok=True)
+    target.parent.mkdir(parents=True, exist_ok=True) if req.create_parents else None
 
-    target.write_text(req.content)
-    written_bytes = req.content.encode()
+    if req.patch:
+        # Apply patch
+        with tempfile.NamedTemporaryFile("w", suffix=".patch") as patch_file:
+            patch_file.write(req.patch)
+            patch_file.flush()
+            args = ["patch", "-u", str(target), "-i", patch_file.name]
+            result = _run_command(workspace_path, args)
+            if result["returncode"] != 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to apply patch to {req.relative_path}: {result['stderr'] or result['stdout']}",
+                )
+    elif req.content is not None:
+        target.write_text(req.content)
+    else:
+        raise HTTPException(status_code=400, detail="Either 'content' or 'patch' must be provided")
+
+    new_bytes = target.read_bytes()
     return {
         "status": "SUCCESS",
         "workspace": workspace,
         "relative_path": req.relative_path,
         "created": created,
-        "bytes_written": len(written_bytes),
-        "sha256": _sha256_bytes(written_bytes),
+        "bytes_written": len(new_bytes),
+        "sha256": _sha256_bytes(new_bytes),
         "previous_sha256": previous_sha256,
     }
 
@@ -710,17 +767,30 @@ def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional
     identity = workspace.get("resolved_identity") or {}
     provider_kind, provider_settings, provider_root = _workspace_provider_binding(workspace, identity)
     provider_path = _provider_child_path(provider_root, req.relative_path)
-    content = local_file.read_text(errors="replace")
-    data = _storage_post(
-        f"{STORAGE_SVC_URL}/providers/write",
-        {
+    
+    # Try text first, fallback to base64 for binary
+    try:
+        content = local_file.read_text()
+        payload = {
             "provider": {"kind": provider_kind, "settings": provider_settings},
             "path": provider_path,
             "content": content,
             "create_parents": req.create_parents,
             "verify": req.verify,
-        },
-    )
+        }
+    except UnicodeDecodeError:
+        import base64
+        content_bytes = local_file.read_bytes()
+        content_b64 = base64.b64encode(content_bytes).decode("utf-8")
+        payload = {
+            "provider": {"kind": provider_kind, "settings": provider_settings},
+            "path": provider_path,
+            "content_b64": content_b64,
+            "create_parents": req.create_parents,
+            "verify": req.verify,
+        }
+
+    data = _storage_post(f"{STORAGE_SVC_URL}/providers/write", payload)
     return {
         "status": "SUCCESS",
         "workspace": workspace,
@@ -729,6 +799,86 @@ def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional
         "provider_path": provider_path,
         "result": data.get("result"),
     }
+
+
+@app.post("/provider/sync/directory")
+def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "write")
+    workspace_path = Path(workspace["resolved_path"])
+    
+    target_dir = _safe_target_path(workspace_path, req.relative_path)
+    if not target_dir.exists() or not target_dir.is_dir():
+        raise HTTPException(status_code=400, detail=f"Path is not a directory: {req.relative_path}")
+        
+    identity = workspace.get("resolved_identity") or {}
+    provider_kind, provider_settings, provider_root = _workspace_provider_binding(workspace, identity)
+    provider_path = _provider_child_path(provider_root, req.relative_path)
+    
+    # In this SOA, storage service might not have access to the same mount.
+    # If storage and workspace_runtime share /workspace, we can use /providers/mirror.
+    # Otherwise we'd have to stream files.
+    # Assuming they share /workspace mount as per typical dev setups or we can use the absolute path.
+    
+    payload = {
+        "provider": {"kind": provider_kind, "settings": provider_settings},
+        "remote_path": provider_path,
+        "local_path": str(target_dir),
+    }
+    
+    data = _storage_post(f"{STORAGE_SVC_URL}/providers/mirror", payload)
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "relative_path": req.relative_path,
+        "provider_kind": provider_kind,
+        "provider_path": provider_path,
+        "result": data.get("result"),
+    }
+
+
+@app.post("/workspaces/create")
+def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        existing = session.get(Workspace, ws.id)
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Workspace with id '{ws.id}' already exists")
+        session.add(ws)
+        session.commit()
+        session.refresh(ws)
+        return {"status": "SUCCESS", "workspace": ws}
+
+
+@app.put("/workspaces/{workspace_id}")
+def update_workspace(workspace_id: str, updates: dict, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        ws = session.get(Workspace, workspace_id)
+        if not ws:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        
+        for key, value in updates.items():
+            if hasattr(ws, key):
+                setattr(ws, key, value)
+        
+        session.add(ws)
+        session.commit()
+        session.refresh(ws)
+        return {"status": "SUCCESS", "workspace": ws}
+
+
+@app.delete("/workspaces/{workspace_id}")
+def delete_workspace(workspace_id: str, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        ws = session.get(Workspace, workspace_id)
+        if not ws:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        session.delete(ws)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Workspace '{workspace_id}' deleted"}
 
 
 @app.post("/workflow/write-sync-commit")
@@ -1018,4 +1168,98 @@ def run_pytest(req: PytestRequest, x_internal_secret: Optional[str] = Header(def
         "stdout": result["stdout"],
         "stderr": result["stderr"],
         "passed": result["returncode"] == 0,
+    }
+
+
+@app.post("/git/fetch")
+def git_fetch(req: GitFetchRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+    identity = workspace.get("resolved_identity") or {}
+    remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
+    remote_url = _git_remote_url(workspace_path, remote_name)
+
+    args = ["git", "fetch"]
+    if req.prune:
+        args.append("--prune")
+    args.append(remote_name)
+
+    result = _run_git_with_optional_askpass(
+        workspace_path,
+        args,
+        identity=identity,
+        remote_url=remote_url,
+    )
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git fetch failed")
+
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "command": args,
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+    }
+
+
+@app.post("/git/pull")
+def git_pull(req: GitPullRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+    identity = workspace.get("resolved_identity") or {}
+    remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
+
+    current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
+    branch_name = (req.branch or current_branch["stdout"].strip()).strip()
+
+    remote_url = _git_remote_url(workspace_path, remote_name)
+
+    args = ["git", "pull"]
+    if req.rebase:
+        args.append("--rebase")
+    args.extend([remote_name, branch_name])
+
+    result = _run_git_with_optional_askpass(
+        workspace_path,
+        args,
+        identity=identity,
+        remote_url=remote_url,
+    )
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git pull failed")
+
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "command": args,
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+    }
+
+
+@app.post("/git/rebase")
+def git_rebase(req: GitRebaseRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+
+    args = ["git", "rebase", req.upstream]
+    if req.branch:
+        args.append(req.branch)
+
+    result = _run_command(workspace_path, args)
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git rebase failed")
+
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "command": args,
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
     }
