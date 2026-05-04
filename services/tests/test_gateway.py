@@ -98,6 +98,7 @@ def test_action_with_status_followup_executes_and_reports_refreshed_state(client
     mocker.patch("gateway.main.update_history", return_value=None)
     mocker.patch("gateway.main.contextualize_query", return_value="Can you power off the Piano-Lamp and recheck its status after?")
     mocker.patch("gateway.main.execute_command", return_value={"status": "SUCCESS", "message": "Powered off Piano-Lamp."})
+    mocker.patch("gateway.main.asyncio.sleep", new=mocker.AsyncMock(return_value=None))
 
     fetch_entities = mocker.patch("gateway.main.fetch_ha_entities")
     fetch_entities.side_effect = [
