@@ -224,6 +224,106 @@ def test_provider_sync_file_writes_local_file_to_provider(runtime_env, monkeypat
     assert calls[0]["json"]["content"] == "VALUE = 11\n"
 
 
+def test_workflow_write_sync_commit_updates_file_and_commits(runtime_env, monkeypatch):
+    calls = []
+
+    def fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        if url.endswith("/providers/write"):
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {
+                    "status": "SUCCESS",
+                    "result": {"path": json["path"], "bytes_written": len(json["content"].encode("utf-8")), "verified": True},
+                },
+                text="",
+            )
+        raise AssertionError(f"Unexpected URL {url}")
+
+    monkeypatch.setattr(runtime.httpx, "post", fake_post)
+    data = runtime.workflow_write_sync_commit(
+        runtime.WorkflowWriteSyncCommitRequest(
+            workspace_id="demo",
+            rag_user="jeremiah",
+            relative_path="sample.py",
+            content="VALUE = 21\n",
+            commit_message="Workflow update sample",
+            sync_to_provider=True,
+        ),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert (runtime_env / "sample.py").read_text() == "VALUE = 21\n"
+    assert data["provider_sync"]["provider_path"] == "/Code/SharedLLM/sample.py"
+    assert data["commit"]["author_email"] == "jeremiah-gh@users.noreply.github.com"
+    assert calls[0]["url"].endswith("/providers/write")
+
+    commit_subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s"],
+        cwd=runtime_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert commit_subject.stdout.strip() == "Workflow update sample"
+
+
+def test_workflow_write_sync_commit_can_push_to_local_remote(runtime_env, monkeypatch, tmp_path):
+    remote_dir = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote_dir)], check=True, capture_output=True, text=True)
+    current_branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=runtime_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote_dir)],
+        cwd=runtime_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    def fake_post(url, json=None, timeout=None):
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "status": "SUCCESS",
+                "result": {"path": json["path"], "bytes_written": len(json["content"].encode("utf-8")), "verified": True},
+            },
+            text="",
+        )
+
+    monkeypatch.setattr(runtime.httpx, "post", fake_post)
+    data = runtime.workflow_write_sync_commit(
+        runtime.WorkflowWriteSyncCommitRequest(
+            workspace_id="demo",
+            rag_user="jeremiah",
+            relative_path="sample.py",
+            content="VALUE = 22\n",
+            commit_message="Workflow push sample",
+            sync_to_provider=True,
+            push=True,
+            set_upstream=True,
+        ),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["push"]["remote"] == "origin"
+    assert data["push"]["branch"] == current_branch
+    assert data["push"]["upstream"] == f"origin/{current_branch}"
+
+    remote_head = subprocess.run(
+        ["git", "--git-dir", str(remote_dir), "rev-parse", f"refs/heads/{current_branch}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert remote_head.stdout.strip() == data["commit"]["commit"]
+
+
 def test_system_workspace_blocks_write_for_non_admin():
     with pytest.raises(HTTPException) as exc:
         runtime.write_file(

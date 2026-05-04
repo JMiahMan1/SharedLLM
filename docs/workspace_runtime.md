@@ -30,8 +30,10 @@ Current implemented capabilities:
 - stage files with `git add`
 - create commits with Git author metadata derived from Identity
 - create branches for isolated changesets
+- push branches through configured Git remotes using resolved provider credentials
 - scan a workspace's designated provider folder through the Storage service
 - sync changed local files into the designated provider path
+- execute a single-file write -> sync -> test -> commit -> push workflow
 - run targeted `pytest` commands inside a workspace
 - expose a health endpoint so the Gateway can include it in readiness checks
 
@@ -103,8 +105,10 @@ service created specifically to fill that gap.
 - `POST /git/add`
 - `POST /git/commit`
 - `POST /git/branch/create`
+- `POST /git/push`
 - `POST /provider/scan`
 - `POST /provider/sync/file`
+- `POST /workflow/write-sync-commit`
 - `POST /tests/pytest`
 
 ## Current Safety Model
@@ -132,7 +136,7 @@ service created specifically to fill that gap.
 The next useful features are:
 
 1. richer file mutation support beyond direct text writes
-2. git push endpoints with strict remote-auth controls
+2. richer multi-file workflow endpoints with strict remote-auth controls
 3. workspace registry APIs instead of a static JSON file
 4. gateway-level orchestration for coding tasks that need real file changes
 5. provider sync expansion from single-file text writeback into broader folder
@@ -152,8 +156,8 @@ agentic workspace engine. The main unfinished pieces are:
    Extend mutation beyond direct text replacement into richer create/update/delete
    flows with better conflict handling and auditability.
 3. **Git lifecycle completion**
-   Add push and later pull/rebase behavior with explicit scope controls and
-   remote credential handling.
+   Add pull/rebase behavior with explicit scope controls and remote credential
+   handling.
 4. **Provider synchronization**
    Reflect authoritative local changes back to storage providers where that is
    appropriate. The first thin slice now supports explicit single-file text

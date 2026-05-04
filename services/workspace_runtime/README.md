@@ -14,8 +14,10 @@ It provides a safe, mounted-workspace interface for:
 - staging files with `git add`
 - creating commits with identity-derived Git author metadata
 - creating branches for isolated workspace changes
+- pushing branches with identity-resolved Git credentials when needed
 - scanning a workspace's designated provider folder
 - syncing a local file into that designated provider path
+- executing an orchestrated write -> sync -> test -> commit -> push workflow
 - running targeted `pytest` commands
 
 ## What It Does Today
@@ -31,8 +33,10 @@ Implemented today:
 - safe workspace resolution under the mounted root
 - read-only file access
 - guarded text file writes with optional `expected_sha256` conflict checks
-- `git status`, `git diff`, `git add`, `git commit`, and branch creation
+- `git status`, `git diff`, `git add`, `git commit`, branch creation, and push
 - provider-folder scans and explicit file sync via the Storage provider layer
+- workflow orchestration for incremental local edit -> provider sync -> git
+  lifecycle execution
 - targeted `pytest` execution
 
 ## Service Schematic
@@ -45,7 +49,7 @@ flowchart TD
     WorkspaceRuntime --> MountedWorkspace[/workspace/...]
     Identity --> GitIdentity[Resolved GitHub or GitLab credentials]
     Identity --> ProviderIdentity[Resolved Nextcloud credentials]
-    MountedWorkspace --> Git[git status / git diff / git add / git commit / git branch]
+    MountedWorkspace --> Git[git status / git diff / git add / git commit / git branch / git push]
     WorkspaceRuntime --> Storage[Storage /providers/list /providers/write]
     MountedWorkspace --> Pytest[python -m pytest]
 ```
@@ -59,7 +63,7 @@ flowchart TD
     LoadRegistry --> Policy[Apply access_policy and scope rules]
     Policy --> PathCheck[Resolve path under WORKSPACE_RUNTIME_ROOT]
     PathCheck --> Capability[Check requested capability]
-    Capability --> Execute[Read file / write file / git / pytest]
+    Capability --> Execute[Read file / write file / provider sync / git / pytest]
 ```
 
 ## Registry Schema
@@ -89,8 +93,10 @@ Each workspace entry can currently define:
 - `POST /git/add`
 - `POST /git/commit`
 - `POST /git/branch/create`
+- `POST /git/push`
 - `POST /provider/scan`
 - `POST /provider/sync/file`
+- `POST /workflow/write-sync-commit`
 - `POST /tests/pytest`
 
 ## Access Model
@@ -135,11 +141,11 @@ Implemented:
 - policy-based workspace resolution
 - git inspection and controlled local git mutation
 - provider scan and explicit provider file sync for mapped workspaces
+- orchestrated workflow execution for single-file edit/sync/commit/push flows
 - targeted test execution
 
 Not yet implemented:
 
-- git push APIs
 - workspace registry mutation APIs
 - direct Gateway orchestration against these endpoints
 - DB-backed workspace registry records
@@ -151,7 +157,7 @@ Not yet implemented:
 
 - move workspace definitions from static JSON into a DB-backed registry
 - extend file mutation support beyond direct text writes
-- add Git push/fetch/pull operations with remote-auth controls
+- add Git fetch/pull/rebase operations with remote-auth controls
 - expand provider sync from single-file text writeback into broader workspace mirroring where needed
 - let the Gateway orchestrate this service directly for agentic tasks
 - add note, document, metadata, and transcription operations under the same
