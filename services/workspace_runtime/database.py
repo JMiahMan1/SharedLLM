@@ -1,6 +1,9 @@
 import os
 from sqlmodel import Session, SQLModel, create_engine, select
-from .models import Workspace
+try:
+    from .models import Workspace
+except (ImportError, ValueError):
+    from models import Workspace
 
 DATABASE_URL = os.getenv("WORKSPACE_DATABASE_URL", "sqlite:///./workspace_runtime.db")
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
