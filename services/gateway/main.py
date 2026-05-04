@@ -675,7 +675,8 @@ async def chat_handler(request: Request):
         if any(re.search(kw, q_lower) for kw in ha_keywords):
             tasks.append(client.post(
                 f"{RAG_SVC}/rag/search",
-                json={"query": refined_query, "user_id": user_id, "collection_name": "ha_entities", "k": 10}
+                json={"query": refined_query, "user_id": user_id, "collection_name": "ha_entities", "k": 10},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
             ))
             task_names.append("ha_rag")
 
@@ -689,7 +690,8 @@ async def chat_handler(request: Request):
         if is_librarian_task:
             tasks.append(client.post(
                 f"{RAG_SVC}/rag/search",
-                json={"query": refined_query, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5}
+                json={"query": refined_query, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
             ))
             task_names.append("nc_rag")
             
@@ -700,7 +702,8 @@ async def chat_handler(request: Request):
                 json={
                     "provider": {"kind": "nextcloud", "settings": {"url": creds.get("nextcloud_url"), "username": creds.get("nextcloud_user"), "password": creds.get("nextcloud_pass")}},
                     "path": "/", "recursive": False
-                }
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
             ))
             task_names.append("nc_realtime")
 
