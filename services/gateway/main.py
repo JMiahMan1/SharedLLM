@@ -650,9 +650,16 @@ async def chat_handler(request: Request):
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if rag_resp.status_code == 200:
-                    results = rag_resp.json().get("results", [])
-                    if results:
-                        rag_context = "Relevant Device Context:\n" + "\n".join([r["content"] for r in results])
+                    data = rag_resp.json()
+                    if isinstance(data, dict):
+                        results = data.get("results", [])
+                        if results:
+                            context_lines = []
+                            for r in results:
+                                if isinstance(r, dict) and "content" in r:
+                                    context_lines.append(r["content"])
+                            if context_lines:
+                                rag_context = "Relevant Device Context:\n" + "\n".join(context_lines)
             
             # Storage Context for Librarian
             if is_librarian_task:
@@ -668,13 +675,25 @@ async def chat_handler(request: Request):
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if file_rag_resp.status_code == 200:
-                    file_results = file_rag_resp.json().get("results", [])
-                    if file_results:
-                        file_text = "\n".join([
-                            f"- {r['metadata'].get('name', 'file')} ({r['metadata'].get('path', 'unknown')}): {r['content'][:200]}..." 
-                            for r in file_results
-                        ])
-                        rag_context += f"\n\nRelevant NextCloud Content:\n{file_text}"
+                    data = file_rag_resp.json()
+                    if isinstance(data, dict):
+                        file_results = data.get("results", [])
+                        if file_results:
+                            file_lines = []
+                            for r in file_results:
+                                if not isinstance(r, dict): continue
+                                meta = r.get("metadata")
+                                if isinstance(meta, dict):
+                                    name = meta.get("name", "file")
+                                    path = meta.get("path", "unknown")
+                                else:
+                                    name, path = "file", "unknown"
+                                content = str(r.get("content", ""))[:200]
+                                file_lines.append(f"- {name} ({path}): {content}...")
+                            
+                            if file_lines:
+                                file_text = "\n".join(file_lines)
+                                rag_context += f"\n\nRelevant NextCloud Content:\n{file_text}"
 
                     # B. Shallow Filename Search
                     storage_resp = await client.post(
