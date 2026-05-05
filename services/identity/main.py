@@ -124,6 +124,9 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     user = None
     if req.rag_user:
         user = session.exec(select(User).where(User.username == req.rag_user.lower())).first()
+    elif req.voice_id:
+        # Search for user by voice_id (username or biometric match)
+        user = session.exec(select(User).where(User.username == req.voice_id.lower())).first()
     elif req.device_id:
         assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == req.device_id)).first()
         if assignment:
