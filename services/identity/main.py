@@ -13,22 +13,24 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 try:
-    from .models import User, DeviceAssignment
+    from .models import User, DeviceAssignment, GlobalSetting
     from .schemas import (
         ResolveRequest, ResolvedCredentials, 
         UserCreate, UserRead, UserUpdate,
         DeviceAssignmentRead, DeviceAssignmentCreate,
-        LoginRequest, LoginResponse, DiscoverUser
+        LoginRequest, LoginResponse, DiscoverUser,
+        GlobalSettingRead, GlobalSettingUpdate
     )
     from .crypto import encrypt, decrypt
     from .seed import seed_from_env, pwd_context
 except (ImportError, ModuleNotFoundError):
-    from models import User, DeviceAssignment
+    from models import User, DeviceAssignment, GlobalSetting
     from schemas import (
         ResolveRequest, ResolvedCredentials, 
         UserCreate, UserRead, UserUpdate,
         DeviceAssignmentRead, DeviceAssignmentCreate,
-        LoginRequest, LoginResponse, DiscoverUser
+        LoginRequest, LoginResponse, DiscoverUser,
+        GlobalSettingRead, GlobalSettingUpdate
     )
     from crypto import encrypt, decrypt
     from seed import seed_from_env, pwd_context
@@ -486,6 +488,38 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
 
 
 # ─── Admin ─────────────────────────────────────────────────────────────────────
+
+@app.get("/api/settings", response_model=list[GlobalSettingRead])
+def get_settings(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    # Everyone can read settings, but maybe filter?
+    return session.exec(select(GlobalSetting)).all()
+
+
+@app.get("/api/settings/{key}", response_model=GlobalSettingRead)
+def get_setting(key: str, session: Session = Depends(get_session)):
+    setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+    if not setting:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    return setting
+
+
+@app.patch("/api/settings/{key}", response_model=GlobalSettingRead)
+def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+    if not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+    if not setting:
+        # Create it if it doesn't exist
+        setting = GlobalSetting(key=key, value=body.value)
+    else:
+        setting.value = body.value
+        
+    session.add(setting)
+    session.commit()
+    session.refresh(setting)
+    return setting
+
 
 @app.post("/api/admin/seed", dependencies=[Depends(require_internal)])
 def manual_seed(force: bool = False, session: Session = Depends(get_session)):

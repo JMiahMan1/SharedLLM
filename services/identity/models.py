@@ -44,3 +44,10 @@ class DeviceAssignment(SQLModel, table=True):
     device_id: str = Field(index=True, unique=True)  # e.g. "media_player.kitchen_speaker"
     user_id: int = Field(foreign_key="user.id")
     user: Optional[User] = Relationship(back_populates="devices")
+
+class GlobalSetting(SQLModel, table=True):
+    """System-wide configuration settings."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    key: str = Field(index=True, unique=True)
+    value: str
+    description: Optional[str] = None

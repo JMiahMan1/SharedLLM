@@ -100,6 +100,24 @@ export const api = {
     return resp.json();
   },
 
+  async getSettings(): Promise<any[]> {
+    const resp = await fetch(`${BASE_URL}/api/settings`, {
+      headers: getHeaders(),
+    });
+    if (!resp.ok) throw new Error('Failed to fetch settings');
+    return resp.json();
+  },
+
+  async updateSetting(key: string, value: string): Promise<any> {
+    const resp = await fetch(`${BASE_URL}/api/settings/${key}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify({ value }),
+    });
+    if (!resp.ok) throw new Error('Failed to update setting');
+    return resp.json();
+  },
+
   async getWorkspaces(): Promise<Workspace[]> {
     const resp = await fetch(`${BASE_URL}/api/workspaces`, {
       headers: getHeaders(),
