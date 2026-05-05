@@ -24,10 +24,13 @@ def run_coding_task(description, expected_markers, workspace_id="SharedLLM", rel
         content = data.get("message", {}).get("content", "") if "message" in data else data.get("choices", [{}])[0].get("message", {}).get("content", "")
         
         # Verify LLM response quality
-        print(f"Response: {content[:150]}...")
-        success = all(m in content for m in expected_markers)
-        if not success:
-            print(f"RESULT: FAILURE (Missing markers: {[m for m in expected_markers if m not in content]})")
+        print(f"Response (truncated): {content[:150]}...")
+        missing = [m for m in expected_markers if m not in content]
+        if missing:
+            print(f"RESULT: FAILURE (Missing markers: {missing})")
+            print("--- FULL RESPONSE ---")
+            print(content)
+            print("---------------------")
             return False
 
         # ACCURACY CHECK: Verify the file actually exists and has content
