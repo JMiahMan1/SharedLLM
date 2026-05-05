@@ -1,3 +1,6 @@
+import axios from 'axios';
+
+// SharedLLM Nexus API Service
 const BASE_URL = ''; // Proxied via Vite
 
 export interface HealthStatus {
@@ -11,7 +14,7 @@ export interface LogEntry {
   service: string;
   level: string;
   message: string;
-  context?: any;
+  context?: Record<string, unknown>;
 }
 
 export interface Workspace {
@@ -22,156 +25,194 @@ export interface Workspace {
   scope: string;
 }
 
-const getHeaders = () => {
-  const apiKey = localStorage.getItem('jarvis_api_key');
-  return {
+export interface UserProfile {
+  id: string;
+  username: string;
+  role: 'admin' | 'user';
+  full_name?: string;
+  voice_id?: string;
+  avatar_url?: string;
+  is_admin?: boolean;
+  is_system_default?: boolean;
+  share_with_all?: boolean;
+  [key: string]: unknown;
+}
+
+export interface APIKey {
+  id: string;
+  label: string;
+  prefix: string;
+  created_at: string;
+}
+
+// Axios Instance
+export const apiClient = axios.create({
+  baseURL: BASE_URL,
+  headers: {
     'Content-Type': 'application/json',
-    ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
-  };
-};
+  },
+});
+
+// Request Interceptor
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('jarvis_token');
+  const internalSecret = localStorage.getItem('internal_secret');
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  
+  if (internalSecret) {
+    config.headers['X-Internal-Secret'] = internalSecret;
+  }
+
+  return config;
+});
+
+// Response Interceptor
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
 export const api = {
-  async login(username: string, password: string): Promise<any> {
-    const resp = await fetch(`${BASE_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    if (!resp.ok) throw new Error('Invalid credentials');
-    return resp.json();
+  // Auth & Identity
+  async login(username: string, password: string): Promise<{ access_token: string, username: string, is_admin: boolean }> {
+    const resp = await apiClient.post('/api/auth/login', { username, password });
+    return resp.data;
   },
 
-  async discoverUsers(): Promise<any[]> {
-    const resp = await fetch(`${BASE_URL}/api/auth/discover`, {
-      headers: getHeaders(),
-    });
-    if (!resp.ok) throw new Error('Discovery failed');
-    return resp.json();
+  async getMe(): Promise<UserProfile> {
+    const resp = await apiClient.get('/api/users/me');
+    return resp.data;
   },
 
-  async changePassword(newPassword: string): Promise<any> {
-    const resp = await fetch(`${BASE_URL}/api/auth/change-password?new_password=${encodeURIComponent(newPassword)}`, {
-      method: 'POST',
-      headers: getHeaders(),
-    });
-    if (!resp.ok) throw new Error('Failed to update password');
-    return resp.json();
+  async discoverUsers(): Promise<UserProfile[]> {
+    const resp = await apiClient.get('/api/auth/discover');
+    return resp.data;
   },
 
+  async getUsers(): Promise<UserProfile[]> {
+    const resp = await apiClient.get('/api/users');
+    return resp.data;
+  },
+
+  async updateUser(username: string, data: Partial<UserProfile>): Promise<UserProfile> {
+    const resp = await apiClient.patch(`/api/users/${username}`, data);
+    return resp.data;
+  },
+
+  async deleteUser(username: string): Promise<{ success: boolean }> {
+    const resp = await apiClient.delete(`/api/users/${username}`);
+    return resp.data;
+  },
+
+  async updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {
+    const resp = await apiClient.patch('/api/users/me', data);
+    return resp.data;
+  },
+
+  async enrollVoice(audioBlob: Blob): Promise<{ success: boolean, voice_id: string }> {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'enrollment.webm');
+    const resp = await apiClient.post('/api/users/me/enroll', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return resp.data;
+  },
+
+  // Gateway & System
   async getHealth(): Promise<HealthStatus> {
-    const resp = await fetch(`${BASE_URL}/health/ready`);
-    if (!resp.ok) throw new Error('Health check failed');
-    return resp.json();
+    const resp = await apiClient.get('/health/ready');
+    return resp.data;
   },
 
+  async chat(message: string, workspaceId?: string, userId?: string, stream = false): Promise<unknown> {
+    const resp = await apiClient.post('/api/chat', { 
+      message, 
+      workspace_id: workspaceId, 
+      user_id: userId,
+      stream 
+    });
+    return resp.data;
+  },
+
+  async globalSearch(query: string): Promise<unknown> {
+    const resp = await apiClient.get(`/api/search?q=${encodeURIComponent(query)}`);
+    return resp.data;
+  },
+
+  // Logs & JarvisLab
   async getLogs(limit = 50): Promise<LogEntry[]> {
-    const resp = await fetch(`${BASE_URL}/api/logs?limit=${limit}`, {
-      headers: getHeaders(),
-    });
-    if (!resp.ok) throw new Error('Failed to fetch logs');
-    return resp.json();
+    const resp = await apiClient.get(`/api/logs?limit=${limit}`);
+    return resp.data;
   },
 
-  async chat(message: string, workspaceId?: string, stream = false) {
-    const resp = await fetch(`${BASE_URL}/api/chat`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ message, workspace_id: workspaceId, stream }),
-    });
-    if (!resp.ok) throw new Error('Chat request failed');
-    return resp.json();
+  getLogWebSocket(): WebSocket {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    return new WebSocket(`${protocol}//${host}/api/logs/stream`);
   },
 
-  async getMe(): Promise<any> {
-    const resp = await fetch(`${BASE_URL}/api/users/me`, {
-      headers: getHeaders(),
-    });
-    if (!resp.ok) throw new Error('Failed to fetch profile');
-    return resp.json();
+  // Settings & Integrations
+  async getSettings(): Promise<unknown[]> {
+    const resp = await apiClient.get('/api/settings');
+    return resp.data;
   },
 
-  async updateProfile(data: any): Promise<any> {
-    const resp = await fetch(`${BASE_URL}/api/users/me`, {
-      method: 'PATCH',
-      headers: getHeaders(),
-      body: JSON.stringify(data),
-    });
-    if (!resp.ok) throw new Error('Failed to update profile');
-    return resp.json();
+  async updateSetting(key: string, value: string): Promise<{ success: boolean }> {
+    const resp = await apiClient.patch(`/api/settings/${key}`, { value });
+    return resp.data;
   },
 
-  async getSettings(): Promise<any[]> {
-    const resp = await fetch(`${BASE_URL}/api/settings`, {
-      headers: getHeaders(),
-    });
-    if (!resp.ok) throw new Error('Failed to fetch settings');
-    return resp.json();
-  },
-
-  async updateSetting(key: string, value: string): Promise<any> {
-    const resp = await fetch(`${BASE_URL}/api/settings/${key}`, {
-      method: 'PATCH',
-      headers: getHeaders(),
-      body: JSON.stringify({ value }),
-    });
-    if (!resp.ok) throw new Error('Failed to update setting');
-    return resp.json();
-  },
-
-  async getUsers(): Promise<any[]> {
-    const resp = await fetch(`${BASE_URL}/api/users`, {
-      headers: getHeaders(),
-    });
-    if (!resp.ok) throw new Error('Failed to fetch users');
-    return resp.json();
-  },
-
-  async updateUser(username: string, data: any): Promise<any> {
-    const resp = await fetch(`${BASE_URL}/api/users/${username}`, {
-      method: 'PATCH',
-      headers: getHeaders(),
-      body: JSON.stringify(data),
-    });
-    if (!resp.ok) throw new Error('Failed to update user');
-    return resp.json();
-  },
-
-  async deleteUser(username: string): Promise<any> {
-    const resp = await fetch(`${BASE_URL}/api/users/${username}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
-    });
-    if (!resp.ok) throw new Error('Failed to delete user');
-    return resp.json();
-  },
-
-  async testConnection(service: string, config: any): Promise<any> {
-    const resp = await fetch(`${BASE_URL}/api/auth/test-connection`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ service, config }),
-    });
-    if (!resp.ok) throw new Error('Failed to test connection');
-    return resp.json();
+  async testConnection(service: string, config: Record<string, unknown>): Promise<{ status: 'SUCCESS' | 'ERROR', message?: string }> {
+    const resp = await apiClient.post('/api/auth/test-connection', { service, config });
+    return resp.data;
   },
 
   async getWorkspaces(): Promise<Workspace[]> {
-    const resp = await fetch(`${BASE_URL}/api/workspaces`, {
-      headers: getHeaders(),
-    });
-    if (!resp.ok) throw new Error('Failed to fetch workspaces');
-    return resp.json();
+    const resp = await apiClient.get('/api/workspaces');
+    return resp.data;
   },
-  async enrollVoice(audioBlob: Blob) {
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'enrollment.webm');
-    const resp = await fetch(`${BASE_URL}/api/users/me/enroll`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('api_key')}`
-      },
-      body: formData
-    });
-    return resp.json();
+
+  // Execution Service (Scheduler/Timer)
+  async setTimer(duration: number, label: string): Promise<{ success: boolean }> {
+    const resp = await apiClient.post('/api/execute/timer', { duration, label });
+    return resp.data;
+  },
+
+  async scheduleTask(task: string, time: string): Promise<{ success: boolean }> {
+    const resp = await apiClient.post('/api/execute/calendar', { task, time });
+    return resp.data;
+  },
+
+  // API Key Management
+  async getAPIKeys(): Promise<APIKey[]> {
+    const resp = await apiClient.get('/api/users/me/keys');
+    return resp.data;
+  },
+
+  async generateAPIKey(label: string): Promise<APIKey & { key: string }> {
+    const resp = await apiClient.post('/api/users/me/keys', { label });
+    return resp.data;
+  },
+
+  async revokeAPIKey(keyId: string): Promise<{ success: boolean }> {
+    const resp = await apiClient.delete(`/api/users/me/keys/${keyId}`);
+    return resp.data;
+  },
+
+  // Admin/Devices
+  async updateDeviceAssignment(assignment: { user_id: string, entity_id: string }): Promise<{ success: boolean }> {
+    const resp = await apiClient.post('/api/users/devices', assignment);
+    return resp.data;
+  },
+  
+  // Tests
+  async runSmokeTest(): Promise<{ success: boolean, results: unknown }> {
+    const resp = await apiClient.post('/api/admin/tests/smoke');
+    return resp.data;
   }
 };

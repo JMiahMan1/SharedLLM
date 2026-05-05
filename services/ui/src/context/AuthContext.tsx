@@ -1,51 +1,111 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { api } from '../services/api';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { api, apiClient, UserProfile } from '../services/api';
+import toast from 'react-hot-toast';
+import axios from 'axios';
 
 interface AuthContextType {
-  user: any | null;
-  apiKey: string | null;
+  user: UserProfile | null;
+  token: string | null;
+  role: 'admin' | 'user' | null;
   login: (credentials: { username: string; password: string }) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<any | null>(null);
-  const [apiKey, setApiKey] = useState<string | null>(localStorage.getItem('jarvis_api_key'));
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [token, setToken] = useState<string | null>(localStorage.getItem('jarvis_token'));
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const storedUser = localStorage.getItem('jarvis_user');
-    if (storedUser && apiKey) {
-      setUser(JSON.parse(storedUser));
+  const logout = useCallback(() => {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem('jarvis_token');
+    localStorage.removeItem('jarvis_user');
+    window.location.href = '/login';
+  }, []);
+
+  const refreshProfile = useCallback(async () => {
+    if (!token) return;
+    try {
+      const profile = await api.getMe();
+      setUser(profile);
+      localStorage.setItem('jarvis_user', JSON.stringify(profile));
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        logout();
+      }
     }
-    setIsLoading(false);
-  }, [apiKey]);
+  }, [token, logout]);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      if (token) {
+        await refreshProfile();
+      }
+      setIsLoading(false);
+    };
+    initAuth();
+  }, [token, refreshProfile]);
+
+  // Setup Axios interceptor for 401
+  useEffect(() => {
+    const interceptor = apiClient.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          toast.error('Session expired. Please log in again.');
+          logout();
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => apiClient.interceptors.response.eject(interceptor);
+  }, [logout]);
 
   const login = async (credentials: { username: string; password: string }) => {
-    const data = await api.login(credentials.username, credentials.password);
-    setApiKey(data.api_key);
-    setUser({ username: data.username, is_admin: data.is_admin });
-    localStorage.setItem('jarvis_api_key', data.api_key);
-    localStorage.setItem('jarvis_user', JSON.stringify({ username: data.username, is_admin: data.is_admin }));
+    try {
+      const data = await api.login(credentials.username, credentials.password);
+      const authToken = data.access_token;
+      setToken(authToken);
+      localStorage.setItem('jarvis_token', authToken);
+      
+      const profile = await api.getMe();
+      setUser(profile);
+      localStorage.setItem('jarvis_user', JSON.stringify(profile));
+      
+      toast.success(`Welcome back, ${profile.full_name || profile.username}!`);
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        toast.error(error.response?.data?.detail || 'Login failed');
+      } else {
+        toast.error('Login failed');
+      }
+      throw error;
+    }
   };
 
-  const logout = () => {
-    setApiKey(null);
-    setUser(null);
-    localStorage.removeItem('jarvis_api_key');
-    localStorage.removeItem('jarvis_user');
-  };
+  const role = user?.role || (user?.is_admin ? 'admin' : 'user');
 
   return (
-    <AuthContext.Provider value={{ user, apiKey, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      token, 
+      role: role as 'admin' | 'user' | null, 
+      login, 
+      logout, 
+      isLoading,
+      refreshProfile
+    }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
