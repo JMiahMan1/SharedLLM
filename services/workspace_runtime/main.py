@@ -740,6 +740,34 @@ def write_file(req: FileWriteRequest, x_internal_secret: Optional[str] = Header(
     }
 
 
+class FileDeleteRequest(WorkspaceRef):
+    relative_path: str
+
+@app.post("/files/delete")
+def delete_file(req: FileDeleteRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "write")
+    workspace_path = Path(workspace["resolved_path"])
+    target = _safe_target_path(workspace_path, req.relative_path)
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {req.relative_path}")
+    
+    if target.is_dir():
+        import shutil
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+        
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "relative_path": req.relative_path,
+        "message": f"Deleted {req.relative_path}"
+    }
+
+
 @app.post("/provider/scan")
 def provider_scan(req: ProviderScanRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
