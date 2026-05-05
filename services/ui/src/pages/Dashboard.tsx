@@ -16,9 +16,9 @@ import {
   Search,
   MessageSquare,
   Zap,
-  Globe,
-  LucideIcon
+  Globe
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { HealthStatus, LogEntry } from '../services/api';

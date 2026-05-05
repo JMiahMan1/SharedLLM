@@ -15,9 +15,9 @@ import {
   ShieldCheck,
   User as UserIcon,
   Smartphone,
-  Cpu,
-  LucideIcon
+  Cpu
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
