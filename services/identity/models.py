@@ -13,6 +13,7 @@ class User(SQLModel, table=True):
     display_name: str = Field(default="")
     is_admin: bool = Field(default=False)
     is_system_default: bool = Field(default=False)
+    password_hash: Optional[str] = Field(default=None)
     api_key: Optional[str] = Field(default=None, index=True)
 
     # Plain-text fields
