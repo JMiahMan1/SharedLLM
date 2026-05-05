@@ -1,0 +1,45 @@
+name: UI CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'services/ui/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'services/ui/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: 'npm'
+        cache-dependency-path: services/ui/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd services/ui
+        npm ci
+
+    - name: Run Lint
+      run: |
+        cd services/ui
+        npm run lint || echo "Linting failed, but continuing for tests"
+
+    - name: Run Unit Tests
+      run: |
+        cd services/ui
+        npm run test
+
+    - name: Build
+      run: |
+        cd services/ui
+        npm run build

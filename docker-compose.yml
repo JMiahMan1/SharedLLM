@@ -135,6 +135,16 @@ services:
       - redis
       - execution
 
+  ui:
+    build: ./services/ui
+    container_name: sharedllm_ui
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - TZ=America/Phoenix
+    depends_on:
+      - gateway
+
 volumes:
   identity_db:
   chroma_data:
