@@ -1055,7 +1055,8 @@ async def chat_handler(request: Request):
             "pause_media": "/execute/media/transport",
             "open_garage": "/execute/security",
             "close_garage": "/execute/security",
-            "toggle": "/execute/light"
+            "toggle": "/execute/light",
+            "set_brightness": "/execute/light"
         }
 
         endpoint = endpoint_map.get(intent)
@@ -1136,6 +1137,18 @@ async def chat_handler(request: Request):
                 return _make_openai_response(msg, selected_model, intent, stream=should_stream)
             return _make_ollama_response(msg, selected_model, intent, stream=should_stream)
 
+        # Extract parameters for fast-path
+        brightness_pct = None
+        if intent == "set_brightness":
+            b_match = re.search(r"(\d+)\s*%", refined_query)
+            if b_match:
+                brightness_pct = int(b_match.group(1))
+            else:
+                # Try plain number
+                b_match = re.search(r"(\d+)\s*(?:percent|brightness)", refined_query)
+                if b_match:
+                    brightness_pct = int(b_match.group(1))
+
         if endpoint:
             target_entity = "auto"
             query_normalized = refined_query.lower().replace("-", " ")
@@ -1165,8 +1178,11 @@ async def chat_handler(request: Request):
             exec_payload = {
                 "user_context": creds,
                 "entity_id": target_entity,
-                "action": "turn_on" if intent == "turn_on" else ("turn_off" if intent == "turn_off" else ("toggle" if intent == "toggle" else "play"))
+                "action": "turn_on" if intent in ("turn_on", "set_brightness") else ("turn_off" if intent == "turn_off" else ("toggle" if intent == "toggle" else "play"))
             }
+            if brightness_pct is not None:
+                exec_payload["brightness_pct"] = brightness_pct
+
             if intent == "play_media":
                 if media_query:
                     exec_payload["query"] = media_query
