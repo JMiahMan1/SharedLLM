@@ -23,7 +23,8 @@ import {
   LucideIcon
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, UserProfile, APIKey } from '../services/api';
+import { api } from '../services/api';
+import type { UserProfile, APIKey } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 

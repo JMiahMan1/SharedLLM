@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { api, apiClient, UserProfile } from '../services/api';
+import { api, apiClient } from '../services/api';
+import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
 import axios from 'axios';
 
