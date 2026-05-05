@@ -642,12 +642,24 @@ async def orchestrate_code_change(
     workspace_context = await build_workspace_readme_context(workspace, user_id)
     
     prompt = (
-      "You are an expert software engineer agent.\n"
-      "Identify the file to change and the new content based on the request.\n"
-      "Return ONLY a JSON object with: 'relative_path', 'content', 'reasoning', 'test_cmd' (optional).\n\n"
-      "You can use available tools in 'test_cmd' to verify your changes (e.g., 'pytest', 'flake8', 'black --check', 'npm test', 'go test', 'yamllint').\n\n"
-      f"Workspace context:\n{workspace_context}\n\n"
-      f"User request: {refined_query}\n"
+      "### Task: Plan a Code Change\n"
+      "Analyze the user request and provide a precise execution plan.\n\n"
+      "### Instructions:\n"
+      "1. Identify the 'relative_path' for the file.\n"
+      "2. Provide the full 'content' for the file.\n"
+      "3. Write a detailed 'reasoning' (2-3 sentences) explaining the change and its structure.\n"
+      "4. **Verification Command**: If the user asks for linting, testing, or running, you MUST provide a 'test_cmd'.\n"
+      "   - Examples: 'shellcheck path/to/file.sh', 'flake8 path/to/file.py', 'go vet path/to/file.go', 'node path/to/file.js'.\n"
+      "   - To run the script and check output: 'bash path/to/file.sh', 'python3 path/to/file.py', etc.\n\n"
+      "### Return ONLY JSON:\n"
+      "{\n"
+      "  \"relative_path\": \"string\",\n"
+      "  \"content\": \"string\",\n"
+      "  \"reasoning\": \"string\",\n"
+      "  \"test_cmd\": \"string (optional)\"\n"
+      "}\n\n"
+      f"### Workspace Context:\n{workspace_context}\n\n"
+      f"### User Request: {refined_query}\n"
     )
     
     payload = {
