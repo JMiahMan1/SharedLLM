@@ -61,6 +61,7 @@ def _ensure_schema_upgrades() -> None:
     columns = {column["name"] for column in inspector.get_columns("user")}
     upgrades = [
         ("is_admin", "ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"),
+        ("password_hash", "ALTER TABLE user ADD COLUMN password_hash VARCHAR"),
         ("github_url", "ALTER TABLE user ADD COLUMN github_url VARCHAR"),
         ("github_user", "ALTER TABLE user ADD COLUMN github_user VARCHAR"),
         ("github_token_enc", "ALTER TABLE user ADD COLUMN github_token_enc VARCHAR"),
