@@ -33,6 +33,9 @@ class User(SQLModel, table=True):
     github_token_enc: Optional[str] = None
     gitlab_token_enc: Optional[str] = None
     audiobookshelf_pass_enc: Optional[str] = None
+    
+    # Biometric voice profile (stored as a JSON string of embeddings)
+    voice_fingerprint: Optional[str] = None
 
     # Relationships
     devices: list["DeviceAssignment"] = Relationship(back_populates="user")
