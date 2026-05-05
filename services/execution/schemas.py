@@ -118,3 +118,30 @@ class TimerRequest(BaseModel):
     time_str: Optional[str] = None
     recurrence: Optional[str] = None
     target_device: Optional[str] = None
+
+# ─── Workspace / Code Orchestration ──────────────────────────────────────────
+
+class WorkspaceFileAction(BaseModel):
+    """Orchestrates file writes and patches within a Git-backed workspace."""
+    user_context: UserContext
+    workspace_name: str
+    path: str
+    content: str
+    is_patch: bool = False
+    commit_after: bool = False
+    commit_message: Optional[str] = None
+
+class WorkspaceGitAction(BaseModel):
+    """Performs Git lifecycle operations (pull, commit, branch, status)."""
+    user_context: UserContext
+    workspace_name: str
+    action: Literal["status", "pull", "commit", "branch", "push", "checkout"]
+    branch_name: Optional[str] = None
+    commit_message: Optional[str] = None
+
+class WorkspaceSyncAction(BaseModel):
+    """Synchronizes workspace files with Nextcloud or other storage providers."""
+    user_context: UserContext
+    workspace_name: str
+    path: Optional[str] = None  # None means sync full workspace
+    direction: Literal["upload", "download"] = "upload"

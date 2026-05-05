@@ -165,7 +165,33 @@ State Architecture**:
 
 ---
 
-## 4. Key Services
+## 4. Self-Awareness & JIT Capability Discovery
+
+To minimize LLM hallucinations and ensure precise tool usage, the system implements a **Just-In-Time (JIT) Capability Discovery** layer.
+
+### A. Capability Indexing (`scripts/index_capabilities.py`)
+
+The system programmatically extracts its own capabilities and indexes them into a specialized RAG collection (`system_capabilities`):
+
+1. **Execution Schemas**: Pydantic models from the `execution` service (e.g., `LightControlRequest`, `NoteRequest`) are converted to JSON schemas.
+2. **Intent Phrasebook**: Recognized intents and their natural language examples are extracted from `phrasebook.json`.
+3. **RAG Sync**: These are pushed to the RAG service as searchable "Capability Documents".
+
+### B. Context Injection (Gateway)
+
+During the Gateway's **Slow Path**, a parallel RAG search is performed against the `system_capabilities` collection:
+
+1. **Parallel Search**: While gathering device and document context, the Gateway also searches for "Capabilities" relevant to the user's query.
+2. **Prompt Augmentation**: The retrieved schemas and intent definitions are injected into the system prompt under a `### System Capability Context` header.
+3. **Constraint Mandate**: The system instructions strictly mandate that the LLM must use these injected schemas for all tool-call generation.
+
+### C. Automated Clean-up
+
+The system is capable of managing its own workspace through self-awareness. For example, the `Workspace Runtime` service provides a `/files/delete` endpoint, allowing the LLM (or automated maintenance scripts) to prune stale test files or temporary artifacts in a "self-cleaning" loop.
+
+---
+
+## 5. Key Services
 
 * **Unified RAG**: Retrieval Augmented Generation for non-command queries.
   Indexes docs from Nextcloud and entity state from HA.
