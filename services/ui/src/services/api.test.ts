@@ -27,7 +27,7 @@ describe('api service', () => {
   });
 
   it('login should call /api/auth/login', async () => {
-    const mockData = { access_token: 'test-token', username: 'testuser', is_admin: true };
+    const mockData = { api_key: 'test-token', username: 'testuser', is_admin: true };
     vi.mocked(apiClient.post).mockResolvedValue({ data: mockData } as AxiosResponse);
 
     const result = await api.login('testuser', 'password');
