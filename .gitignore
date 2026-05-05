@@ -12,6 +12,7 @@ __pycache__/
 *.mp4
 app/static/temp/audio/*.mp3
 app.log
+temp/
 temp_output/
 *.log*
 .codex
