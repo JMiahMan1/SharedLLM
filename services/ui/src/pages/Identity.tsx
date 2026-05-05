@@ -25,7 +25,7 @@ const UserManagement = () => {
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['users'],
-    queryFn: () => api.getLogs(50).then(() => fetch('/api/users', { headers: { 'Authorization': `Bearer ${localStorage.getItem('nexus_api_key')}` }}).then(r => r.json())),
+    queryFn: () => api.getLogs(50).then(() => fetch('/api/users', { headers: { 'Authorization': `Bearer ${localStorage.getItem('jarvis_api_key')}` }}).then(r => r.json())),
     enabled: !!currentUser?.is_admin
   });
 

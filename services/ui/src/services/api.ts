@@ -23,7 +23,7 @@ export interface Workspace {
 }
 
 const getHeaders = () => {
-  const apiKey = localStorage.getItem('nexus_api_key');
+  const apiKey = localStorage.getItem('jarvis_api_key');
   return {
     'Content-Type': 'application/json',
     ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})

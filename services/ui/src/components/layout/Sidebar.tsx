@@ -19,7 +19,7 @@ const navItems = [
   { icon: Settings, label: 'Admin', path: '/admin' },
   { icon: UserCircle, label: 'Identity', path: '/identity' },
   { icon: MessageSquare, label: 'Communication', path: '/communication' },
-  { icon: FlaskConical, label: 'Nexus Lab', path: '/lab' },
+  { icon: FlaskConical, label: 'Jarvis Lab', path: '/lab' },
 ];
 
 const Sidebar = () => {
@@ -28,7 +28,7 @@ const Sidebar = () => {
       <div className="p-6">
         <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent flex items-center gap-2">
           <Activity className="text-purple-400" />
-          Nexus OS
+          Jarvis OS
         </h1>
       </div>
       

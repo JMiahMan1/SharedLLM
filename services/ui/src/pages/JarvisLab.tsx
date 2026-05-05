@@ -11,14 +11,14 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 
-const NexusLab = () => {
+const JarvisLab = () => {
   const [activeTab, setActiveTab] = useState<'tests' | 'logs' | 'fix'>('fix');
 
   return (
     <div className="h-full flex flex-col gap-6">
       <header className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-white">Nexus Lab</h2>
+          <h2 className="text-2xl font-bold text-white">Jarvis Lab</h2>
           <p className="text-slate-400">Verification suite and autonomous orchestration reasoning</p>
         </div>
         <div className="flex bg-white/5 p-1 rounded-xl border border-white/10">
@@ -177,4 +177,4 @@ const LogViewer = () => {
   );
 };
 
-export default NexusLab;
+export default JarvisLab;
