@@ -201,6 +201,10 @@ const VoiceEnrollmentCard = ({ enrolled }: any) => {
   const queryClient = useQueryClient();
 
   const startRecording = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Voice Recording requires a secure connection (HTTPS) or localhost. Please ensure you are using HTTPS or access the site via localhost.');
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorder.current = new MediaRecorder(stream);
