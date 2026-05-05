@@ -20,7 +20,7 @@ try:
         DeviceAssignmentCreate, DeviceAssignmentRead,
     )
     from .crypto import encrypt, decrypt
-    from .seed import seed_from_env
+    from .seed import seed_from_env, pwd_context
 except (ImportError, ValueError):
     try:
         from identity.models import User, DeviceAssignment
@@ -28,18 +28,22 @@ except (ImportError, ValueError):
             ResolveRequest, ResolvedCredentials,
             UserCreate, UserRead,
             DeviceAssignmentCreate, DeviceAssignmentRead,
+            LoginRequest, LoginResponse, DiscoverUser
         )
         from identity.crypto import encrypt, decrypt
-        from identity.seed import seed_from_env
+        from identity.seed import seed_from_env, pwd_context
     except ImportError:
         from models import User, DeviceAssignment
         from schemas import (
             ResolveRequest, ResolvedCredentials,
             UserCreate, UserRead,
             DeviceAssignmentCreate, DeviceAssignmentRead,
+            LoginRequest, LoginResponse, DiscoverUser
         )
         from crypto import encrypt, decrypt
-        from seed import seed_from_env
+        from seed import seed_from_env, pwd_context
+
+import httpx
 
 # ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -343,6 +347,100 @@ def remove_device(device_id: str, session: Session = Depends(get_session), _: Us
         raise HTTPException(status_code=404, detail="Device assignment not found.")
     session.delete(assignment)
     session.commit()
+
+
+# ─── Auth & Discovery ──────────────────────────────────────────────────────────
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+def login(req: LoginRequest, session: Session = Depends(get_session)):
+    user = session.exec(select(User).where(User.username == req.username)).first()
+    if not user or not user.password_hash:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    if not pwd_context.verify(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    # Ensure user has an API key to return as token
+    if not user.api_key:
+        user.api_key = os.urandom(24).hex()
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+    return LoginResponse(
+        api_key=user.api_key,
+        username=user.username,
+        is_admin=user.is_admin
+    )
+
+@app.post("/api/auth/change-password")
+def change_password(new_password: str, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    user.password_hash = pwd_context.hash(new_password)
+    session.add(user)
+    session.commit()
+    return {"status": "SUCCESS", "message": "Password updated"}
+
+@app.get("/api/auth/discover", response_model=List[DiscoverUser])
+async def discover_users(session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+    """Scan Home Assistant and Nextcloud for users to import."""
+    if not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    discovered = []
+    
+    # 1. Scan Home Assistant
+    if admin.ha_url and admin.ha_token_enc:
+        ha_token = decrypt(admin.ha_token_enc)
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    f"{admin.ha_url.rstrip('/')}/api/config",
+                    headers={"Authorization": f"Bearer {ha_token}"}
+                )
+                if resp.status_code == 200:
+                    # Note: HA /api/config doesn't return full user list easily without admin auth
+                    # We'll use person entities as a proxy for users
+                    resp_persons = await client.get(
+                        f"{admin.ha_url.rstrip('/')}/api/states",
+                        headers={"Authorization": f"Bearer {ha_token}"}
+                    )
+                    if resp_persons.status_code == 200:
+                        for state in resp_persons.json():
+                            if state['entity_id'].startswith('person.'):
+                                username = state['entity_id'].split('.')[1]
+                                discovered.append(DiscoverUser(
+                                    username=username,
+                                    source="Home Assistant",
+                                    display_name=state.get('attributes', {}).get('friendly_name')
+                                ))
+        except Exception as e:
+            log.warning(f"Failed to scan HA for users: {e}")
+
+    # 2. Scan Nextcloud (OCS API)
+    if admin.nextcloud_url and admin.nextcloud_user and admin.nextcloud_pass_enc:
+        nc_pass = decrypt(admin.nextcloud_pass_enc)
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                # Nextcloud OCS User provisioning API
+                resp = await client.get(
+                    f"{admin.nextcloud_url.rstrip('/')}/ocs/v1.php/cloud/users",
+                    auth=(admin.nextcloud_user, nc_pass),
+                    headers={"OCS-APIRequest": "true"}
+                )
+                if resp.status_code == 200:
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(resp.text)
+                    for user_el in root.findall(".//element"):
+                        username = user_el.text
+                        if username:
+                            discovered.append(DiscoverUser(
+                                username=username,
+                                source="Nextcloud"
+                            ))
+        except Exception as e:
+            log.warning(f"Failed to scan Nextcloud for users: {e}")
+
+    return discovered
 
 
 # ─── Admin ─────────────────────────────────────────────────────────────────────
