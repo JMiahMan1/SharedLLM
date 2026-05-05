@@ -21,7 +21,6 @@ import {
   Trash2,
   Edit3,
   Play,
-  Mic,
   Activity,
   CheckCircle,
   AlertCircle,
