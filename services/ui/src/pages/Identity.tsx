@@ -182,7 +182,8 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
   const [form, setForm] = useState<any>({});
   const queryClient = useQueryClient();
 
-  const isConnected = !!userData?.[configKeys.url];
+  const connectionKey = Object.values(configKeys)[0] as string;
+  const isConnected = !!userData?.[connectionKey];
 
   const updateMutation = useMutation({
     mutationFn: (data: any) => api.updateProfile(data),
@@ -215,7 +216,7 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
         <div>
           <h3 className="font-bold text-white">{name}</h3>
           <p className="text-xs text-slate-500 mt-1">
-            {isConnected ? (userData?.[configKeys.url]?.replace(/^https?:\/\//, '')) : 'Not Configured'}
+            {isConnected ? (userData?.[connectionKey]?.replace(/^https?:\/\//, '')) : 'Not Configured'}
           </p>
         </div>
         <button onClick={handleOpen} className="glass-button w-full text-xs mt-2">
