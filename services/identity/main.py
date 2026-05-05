@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
             log.info(f"First-run seed complete: {seeded} user(s) added.")
     yield
 
-app = FastAPI(title="SharedLLM Identity Service", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Jarvis OS Identity", version="1.0.0", lifespan=lifespan)
 
 from fastapi.responses import JSONResponse
 import traceback

@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
     await _global_http_client.aclose()
     log.info("Gateway shutting down...")
 
-app = FastAPI(title="SOA Intent Gateway", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
