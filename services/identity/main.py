@@ -13,7 +13,7 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 try:
-    from .models import User, DeviceAssignment, GlobalSetting
+    from .models import User, DeviceAssignment, GlobalSetting, APIKey
     from .schemas import (
         ResolveRequest, ResolvedCredentials, 
         UserCreate, UserRead, UserUpdate,
@@ -24,7 +24,7 @@ try:
     from .crypto import encrypt, decrypt
     from .seed import seed_from_env, pwd_context
 except (ImportError, ModuleNotFoundError):
-    from models import User, DeviceAssignment, GlobalSetting
+    from models import User, DeviceAssignment, GlobalSetting, APIKey
     from schemas import (
         ResolveRequest, ResolvedCredentials, 
         UserCreate, UserRead, UserUpdate,
@@ -109,6 +109,13 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing API Key")
     key = authorization.split(" ")[1]
+    
+    # Check new APIKey table
+    api_key_obj = session.exec(select(APIKey).where(APIKey.key_value == key)).first()
+    if api_key_obj:
+        return api_key_obj.user
+        
+    # Fallback to legacy User.api_key (for session tokens)
     user = session.exec(select(User).where(User.api_key == key)).first()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API Key")
@@ -122,7 +129,18 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     Downstream services call this to get decrypted credentials for a user.
     """
     user = None
-    if req.rag_user:
+    
+    # Resolve by API Key first (for OpenWebUI & UI clients)
+    if req.api_key:
+        # Check new APIKey table
+        api_key_obj = session.exec(select(APIKey).where(APIKey.key_value == req.api_key)).first()
+        if api_key_obj:
+            user = api_key_obj.user
+        else:
+            # Fallback to legacy User.api_key
+            user = session.exec(select(User).where(User.api_key == req.api_key)).first()
+
+    elif req.rag_user:
         user = session.exec(select(User).where(User.username == req.rag_user.lower())).first()
     elif req.voice_id:
         # Search for user by voice_id (username or biometric match)
@@ -456,6 +474,42 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
             
     except Exception as e:
         return {"status": "ERROR", "message": str(e)}
+
+# ─── API Key Management ────────────────────────────────────────────────────────
+
+@app.get("/api/users/me/keys")
+def get_my_keys(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Return list of API keys for the current user."""
+    # Return masked keys
+    return [
+        {
+            "id": k.id, 
+            "label": k.label, 
+            "prefix": k.key_value[:8] + "...",
+            "created_at": k.created_at
+        } for k in user.api_keys
+    ]
+
+@app.post("/api/users/me/keys")
+def generate_key(body: dict, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Generate a new API key for the current user."""
+    import secrets
+    new_key_value = "sk-" + secrets.token_hex(24)
+    new_key = APIKey(key_value=new_key_value, label=body.get("label", "New Key"), user_id=user.id)
+    session.add(new_key)
+    session.commit()
+    session.refresh(new_key)
+    return {"id": new_key.id, "label": new_key.label, "key": new_key_value} # Only show full key once!
+
+@app.delete("/api/users/me/keys/{key_id}")
+def revoke_key(key_id: int, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Revoke an API key."""
+    key = session.exec(select(APIKey).where(APIKey.id == key_id, APIKey.user_id == user.id)).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="Key not found")
+    session.delete(key)
+    session.commit()
+    return {"success": True}
 
 @app.get("/api/auth/discover", response_model=List[DiscoverUser])
 async def discover_users(session: Session = Depends(get_session), admin: User = Depends(require_api_key)):

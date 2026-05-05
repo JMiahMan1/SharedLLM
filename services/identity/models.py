@@ -2,6 +2,7 @@
 """
 SQLModel database models for the Identity & Profile Service.
 """
+from datetime import datetime
 from typing import Optional
 from sqlmodel import SQLModel, Field, Relationship
 
@@ -42,6 +43,7 @@ class User(SQLModel, table=True):
 
     # Relationships
     devices: list["DeviceAssignment"] = Relationship(back_populates="user")
+    api_keys: list["APIKey"] = Relationship(back_populates="user")
 
 
 class DeviceAssignment(SQLModel, table=True):
@@ -50,6 +52,15 @@ class DeviceAssignment(SQLModel, table=True):
     device_id: str = Field(index=True, unique=True)  # e.g. "media_player.kitchen_speaker"
     user_id: int = Field(foreign_key="user.id")
     user: Optional[User] = Relationship(back_populates="devices")
+
+class APIKey(SQLModel, table=True):
+    """Secure access tokens for users and external clients."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    key_value: str = Field(index=True, unique=True)
+    label: str = Field(default="External Client")
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    user_id: int = Field(foreign_key="user.id")
+    user: Optional[User] = Relationship(back_populates="api_keys")
 
 class GlobalSetting(SQLModel, table=True):
     """System-wide configuration settings."""

@@ -13,6 +13,7 @@ class ResolveRequest(BaseModel):
     rag_user: Optional[str] = None
     voice_id: Optional[str] = None
     device_id: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 class ResolvedCredentials(BaseModel):
