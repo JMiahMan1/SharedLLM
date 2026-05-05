@@ -389,15 +389,18 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     
     discovered = []
     
-    # 1. Scan Home Assistant
+    # 1. Scan Home Assistant (Person entities)
+    log.info(f"[discovery] Starting scan for user: {admin.username} (HA_URL: {admin.ha_url}, NC_URL: {admin.nextcloud_url})")
     if admin.ha_url and admin.ha_token_enc:
         ha_token = decrypt(admin.ha_token_enc)
+        log.info(f"[discovery] Decrypted HA token: {bool(ha_token)}")
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(
                     f"{admin.ha_url.rstrip('/')}/api/config",
                     headers={"Authorization": f"Bearer {ha_token}"}
                 )
+                log.info(f"[discovery] HA /api/config status: {resp.status_code}")
                 if resp.status_code == 200:
                     # Note: HA /api/config doesn't return full user list easily without admin auth
                     # We'll use person entities as a proxy for users
@@ -405,6 +408,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                         f"{admin.ha_url.rstrip('/')}/api/states",
                         headers={"Authorization": f"Bearer {ha_token}"}
                     )
+                    log.info(f"[discovery] HA /api/states status: {resp_persons.status_code}")
                     if resp_persons.status_code == 200:
                         for state in resp_persons.json():
                             if state['entity_id'].startswith('person.'):
@@ -415,16 +419,19 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                                     display_name=state.get('attributes', {}).get('friendly_name')
                                 ))
         except Exception as e:
-            log.warning(f"Failed to scan HA for users: {e}")
+            log.error(f"[discovery] Failed to scan HA for users: {e}")
 
     # 2. Scan Nextcloud (OCS API)
     if admin.nextcloud_url and admin.nextcloud_user and admin.nextcloud_pass_enc:
         nc_pass = decrypt(admin.nextcloud_pass_enc)
+        log.info(f"[discovery] Decrypted NC pass: {bool(nc_pass)}")
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 # Nextcloud OCS User provisioning API
+                url = f"{admin.nextcloud_url.rstrip('/')}/ocs/v1.php/cloud/users"
+                log.info(f"[discovery] Querying Nextcloud OCS: {url} as {admin.nextcloud_user}")
                 resp = await client.get(
-                    f"{admin.nextcloud_url.rstrip('/')}/ocs/v1.php/cloud/users",
+                    url,
                     auth=(admin.nextcloud_user, nc_pass),
                     headers={"OCS-APIRequest": "true"}
                 )
@@ -441,6 +448,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
         except Exception as e:
             log.warning(f"Failed to scan Nextcloud for users: {e}")
 
+    log.info(f"[discovery] Discovery complete. Found {len(discovered)} users.")
     return discovered
 
 
