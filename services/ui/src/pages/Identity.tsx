@@ -342,17 +342,25 @@ const Identity = () => {
             }}
           />
           <IntegrationTile 
-            name="Git Repos" 
+            name="GitHub" 
+            icon={Server} 
+            color="slate" 
+            userData={fullUser}
+            configKeys={{
+              "API URL": "github_url",
+              "Username": "github_user",
+              "Personal Token": "github_token"
+            }}
+          />
+          <IntegrationTile 
+            name="GitLab" 
             icon={Server} 
             color="orange" 
             userData={fullUser}
             configKeys={{
-              "GitHub URL": "github_url",
-              "GitHub User": "github_user",
-              "GitHub Token": "github_token",
-              "GitLab URL": "gitlab_url",
-              "GitLab User": "gitlab_user",
-              "GitLab Token": "gitlab_token"
+              "Instance URL": "gitlab_url",
+              "Username": "gitlab_user",
+              "Access Token": "gitlab_token"
             }}
           />
         </div>
