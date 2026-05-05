@@ -384,7 +384,37 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     return {"status": "SUCCESS", "message": "Connected to Nextcloud"}
                 else:
                     return {"status": "ERROR", "message": f"Nextcloud returned {resp.status_code}"}
-                    
+            
+            elif service == "GitHub":
+                url = config.get("github_url") or "https://api.github.com"
+                token = config.get("github_token")
+                if not token:
+                    return {"status": "ERROR", "message": "Personal Token is required"}
+                
+                resp = await client.get(
+                    f"{url.rstrip('/')}/user",
+                    headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+                )
+                if resp.status_code == 200:
+                    return {"status": "SUCCESS", "message": f"Connected to GitHub as {resp.json().get('login')}"}
+                else:
+                    return {"status": "ERROR", "message": f"GitHub returned {resp.status_code}"}
+
+            elif service == "GitLab":
+                url = config.get("gitlab_url") or "https://gitlab.com"
+                token = config.get("gitlab_token")
+                if not token:
+                    return {"status": "ERROR", "message": "Access Token is required"}
+                
+                resp = await client.get(
+                    f"{url.rstrip('/')}/api/v4/user",
+                    headers={"PRIVATE-TOKEN": token}
+                )
+                if resp.status_code == 200:
+                    return {"status": "SUCCESS", "message": f"Connected to GitLab as {resp.json().get('username')}"}
+                else:
+                    return {"status": "ERROR", "message": f"GitLab returned {resp.status_code}"}
+
             return {"status": "ERROR", "message": f"Service {service} not testable yet"}
             
     except Exception as e:
