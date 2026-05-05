@@ -345,6 +345,51 @@ def change_password(new_password: str, session: Session = Depends(get_session), 
     session.commit()
     return {"status": "SUCCESS", "message": "Password updated"}
 
+@app.post("/api/auth/test-connection")
+async def test_connection(req: dict, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+    """Test a connection before saving."""
+    service = req.get("service")
+    config = req.get("config", {})
+    
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            if service == "Home Assistant":
+                url = config.get("ha_url")
+                token = config.get("ha_token")
+                if not url or not token:
+                    return {"status": "ERROR", "message": "URL and Token are required"}
+                
+                resp = await client.get(
+                    f"{url.rstrip('/')}/api/config",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                if resp.status_code == 200:
+                    return {"status": "SUCCESS", "message": "Connected to Home Assistant"}
+                else:
+                    return {"status": "ERROR", "message": f"HA returned {resp.status_code}: {resp.text[:100]}"}
+            
+            elif service == "Nextcloud":
+                url = config.get("nextcloud_url")
+                user = config.get("nextcloud_user")
+                password = config.get("nextcloud_pass")
+                if not url or not user or not password:
+                    return {"status": "ERROR", "message": "URL, User, and Password are required"}
+                
+                resp = await client.get(
+                    f"{url.rstrip('/')}/ocs/v1.php/cloud/users?format=json",
+                    headers={"OCS-APIRequest": "true"},
+                    auth=(user, password)
+                )
+                if resp.status_code == 200:
+                    return {"status": "SUCCESS", "message": "Connected to Nextcloud"}
+                else:
+                    return {"status": "ERROR", "message": f"Nextcloud returned {resp.status_code}"}
+                    
+            return {"status": "ERROR", "message": f"Service {service} not testable yet"}
+            
+    except Exception as e:
+        return {"status": "ERROR", "message": str(e)}
+
 @app.get("/api/auth/discover", response_model=List[DiscoverUser])
 async def discover_users(session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     """Scan Home Assistant and Nextcloud for users to import."""

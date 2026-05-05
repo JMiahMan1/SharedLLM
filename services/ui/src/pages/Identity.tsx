@@ -19,7 +19,11 @@ import {
   Plus,
   ExternalLink,
   Trash2,
-  Edit3
+  Edit3,
+  Play,
+  Volume2,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
@@ -47,6 +51,8 @@ const Modal = ({ isOpen, onClose, title, children }: any) => {
 const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any) => {
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState<any>({});
+  const [testResult, setTestResult] = useState<any>(null);
+  const [isTesting, setIsTesting] = useState(false);
   const queryClient = useQueryClient();
 
   const connectionKey = Object.values(configKeys)[0] as string;
@@ -68,20 +74,34 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['me'] });
       setIsOpen(false);
+      setTestResult(null);
     },
     onError: (err: any) => {
       alert(err.message);
     }
   });
 
+  const handleTest = async () => {
+    setIsTesting(true);
+    setTestResult(null);
+    try {
+      const result = await api.testConnection(name, form);
+      setTestResult(result);
+    } catch (err: any) {
+      setTestResult({ status: 'ERROR', message: err.message });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   const handleOpen = () => {
-    // Pre-fill form with existing (non-sensitive) values
     const initialForm: any = {};
     Object.values(configKeys).forEach((key: any) => {
       initialForm[key] = userData?.[key] || '';
     });
     setForm(initialForm);
     setIsOpen(true);
+    setTestResult(null);
   };
 
   return (
@@ -92,7 +112,7 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
         </div>
         <div>
           <h3 className="font-bold text-white">{name}</h3>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 mt-1 truncate max-w-[150px]">
             {isConnected ? (userData?.[connectionKey]?.replace(/^https?:\/\//, '')) : 'Not Configured'}
           </p>
         </div>
@@ -112,7 +132,7 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
           <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl flex gap-4">
              <Shield className="text-purple-400 shrink-0" size={24} />
              <p className="text-xs text-slate-300 leading-relaxed">
-               Your credentials are encrypted using AES-256 (Fernet) before being stored in our secure identity vault. They are only decrypted at runtime when a service specifically requests them.
+               Your credentials are encrypted using AES-256 (Fernet) before being stored in our secure identity vault.
              </p>
           </div>
 
@@ -133,7 +153,25 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
               </div>
             ))}
           </div>
+
+          {testResult && (
+            <div className={`p-4 rounded-xl flex items-center gap-3 border ${
+              testResult.status === 'SUCCESS' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
+            }`}>
+              {testResult.status === 'SUCCESS' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
+              <p className="text-xs font-medium">{testResult.message}</p>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-4">
+            <button 
+              onClick={handleTest}
+              disabled={isTesting}
+              className="glass-button px-6 py-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest"
+            >
+              <RefreshCcw size={16} className={isTesting ? 'animate-spin' : ''} />
+              {isTesting ? 'Testing...' : 'Test Connection'}
+            </button>
             <button 
               onClick={() => updateMutation.mutate(form)}
               disabled={updateMutation.isPending}
@@ -142,7 +180,6 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
               <Save size={18} />
               {updateMutation.isPending ? 'Saving...' : 'Save Configuration'}
             </button>
-            <button onClick={() => setIsOpen(false)} className="glass-button px-6 py-3">Cancel</button>
           </div>
         </div>
       </Modal>
@@ -150,11 +187,32 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
   );
 };
 
+const VoicePersonaCard = ({ name, description, active, onClick }: any) => (
+  <div 
+    onClick={onClick}
+    className={`glass-panel p-6 flex flex-col gap-4 cursor-pointer transition-all border-2 ${
+      active ? 'border-purple-500 bg-purple-500/10' : 'border-transparent hover:border-white/10'
+    }`}
+  >
+    <div className="flex justify-between items-start">
+      <div className={`p-3 rounded-xl ${active ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+        <Volume2 size={24} />
+      </div>
+      {active && <span className="text-[10px] font-bold uppercase tracking-widest text-purple-400 px-2 py-1 rounded-full bg-purple-500/10">Active</span>}
+    </div>
+    <div>
+      <h4 className="font-bold text-white">{name}</h4>
+      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{description}</p>
+    </div>
+    <button className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors mt-auto">
+      <Play size={12} /> Preview Voice
+    </button>
+  </div>
+);
+
 const DiscoveryModal = () => {
   const [isOpen, setIsOpen] = useState(false);
   const queryClient = useQueryClient();
-
-  // Expose to window for global trigger
   (window as any).showDiscoveryModal = () => setIsOpen(true);
 
   const { data: discovered, isLoading } = useQuery({
@@ -180,7 +238,6 @@ const DiscoveryModal = () => {
     <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title="Discover New Users">
       <div className="space-y-6">
         <p className="text-sm text-slate-400">Jarvis OS is scanning your connected Home Assistant and Nextcloud instances for family members to import.</p>
-        
         {isLoading ? (
           <div className="flex flex-col items-center py-12 gap-4">
              <RefreshCcw className="animate-spin text-purple-500" size={32} />
@@ -216,7 +273,6 @@ const Identity = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   
-  // Fetch full user data including URLs
   const { data: fullUser } = useQuery({
     queryKey: ['me'],
     queryFn: () => api.getMe(),
@@ -234,8 +290,6 @@ const Identity = () => {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] })
   });
 
-  console.log('[Identity] fullUser:', fullUser);
-
   return (
     <div className="space-y-12">
       <header className="flex justify-between items-end">
@@ -249,100 +303,142 @@ const Identity = () => {
         </div>
       </header>
 
-      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <IntegrationTile 
-          name="Home Assistant" 
-          icon={Home} 
-          color="blue" 
-          userData={fullUser}
-          configKeys={{
-            "HA URL": "ha_url",
-            "Access Token": "ha_token"
-          }}
-        />
-        <IntegrationTile 
-          name="Nextcloud" 
-          icon={Cloud} 
-          color="emerald" 
-          userData={fullUser}
-          configKeys={{
-            "Cloud URL": "nextcloud_url",
-            "Username": "nextcloud_user",
-            "App Password": "nextcloud_pass"
-          }}
-        />
-        <IntegrationTile 
-          name="Git Repos" 
-          icon={Server} 
-          color="orange" 
-          userData={fullUser}
-          configKeys={{
-            "GitHub URL": "github_url",
-            "GitHub User": "github_user",
-            "GitHub Token": "github_token",
-            "GitLab URL": "gitlab_url",
-            "GitLab User": "gitlab_user",
-            "GitLab Token": "gitlab_token"
-          }}
-        />
+      <section>
+        <div className="flex items-center gap-3 mb-8">
+          <div className="p-3 rounded-2xl bg-purple-500/20 text-purple-400">
+            <RefreshCcw size={24} />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-white">Service Integrations</h3>
+            <p className="text-sm text-slate-400">Credentials for external tools and cloud services</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <IntegrationTile 
+            name="Home Assistant" 
+            icon={Home} 
+            color="blue" 
+            userData={fullUser}
+            configKeys={{
+              "HA URL": "ha_url",
+              "Access Token": "ha_token"
+            }}
+          />
+          <IntegrationTile 
+            name="Nextcloud" 
+            icon={Cloud} 
+            color="emerald" 
+            userData={fullUser}
+            configKeys={{
+              "Cloud URL": "nextcloud_url",
+              "Username": "nextcloud_user",
+              "App Password": "nextcloud_pass"
+            }}
+          />
+          <IntegrationTile 
+            name="Git Repos" 
+            icon={Server} 
+            color="orange" 
+            userData={fullUser}
+            configKeys={{
+              "GitHub URL": "github_url",
+              "GitHub User": "github_user",
+              "GitHub Token": "github_token",
+              "GitLab URL": "gitlab_url",
+              "GitLab User": "gitlab_user",
+              "GitLab Token": "gitlab_token"
+            }}
+          />
+        </div>
       </section>
 
       <section>
-        <div className="flex items-center justify-between mb-8">
-           <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl bg-indigo-500/20 text-indigo-400">
-                <Users size={24} />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-white">Family & Users</h3>
-                <p className="text-sm text-slate-400">Manage access for other members</p>
-              </div>
-           </div>
-           {fullUser?.is_admin && (
+        <div className="flex items-center gap-3 mb-8">
+          <div className="p-3 rounded-2xl bg-pink-500/20 text-pink-400">
+            <Mic size={24} />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-white">Voice Persona</h3>
+            <p className="text-sm text-slate-400">Select how Jarvis speaks to you</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <VoicePersonaCard 
+            name="Jarvis" 
+            description="The classic, sophisticated British assistant tone." 
+            active={true}
+          />
+          <VoicePersonaCard 
+            name="Samantha" 
+            description="A warm, empathetic AI voice with a natural flow." 
+          />
+          <VoicePersonaCard 
+            name="Friday" 
+            description="Professional, efficient, and slightly sarcastic." 
+          />
+          <VoicePersonaCard 
+            name="Ultron" 
+            description="Deep, resonating, and authoritative presence." 
+          />
+        </div>
+      </section>
+
+      {fullUser?.is_admin && (
+        <section>
+          <div className="flex items-center justify-between mb-8">
+             <div className="flex items-center gap-4">
+                <div className="p-3 rounded-2xl bg-indigo-500/20 text-indigo-400">
+                  <Users size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white">Family & Users</h3>
+                  <p className="text-sm text-slate-400">Manage access for other members</p>
+                </div>
+             </div>
              <button 
                onClick={() => (window as any).showDiscoveryModal?.()}
                className="glass-button flex items-center gap-2 text-xs py-2 px-4"
              >
-               <Plus size={16} /> Discover Users
+               <UserPlus size={16} /> Discover Users
              </button>
-           )}
-        </div>
-        
-        <div className="grid gap-4">
-           {usersList?.map((u: any) => (
-             <div key={u.id} className="glass-panel p-6 flex items-center justify-between group">
-                <div className="flex items-center gap-4">
-                   <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-indigo-400 font-bold uppercase">
-                      {u.username[0]}
-                   </div>
-                   <div>
-                      <p className="text-sm font-bold text-white">{u.display_name || u.username}</p>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">
-                        {u.is_admin ? 'Admin' : 'Member'} {u.is_system_default && '/ System'}
-                      </p>
-                   </div>
-                </div>
-                <div className="flex items-center gap-3">
-                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-widest">Active</span>
-                   
-                   {fullUser?.is_admin && !u.is_system_default && (
-                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button className="p-2 hover:text-indigo-400 transition-colors">
-                           <Edit3 size={16} />
-                        </button>
-                        <button 
-                          onClick={() => confirm(`Delete ${u.username}?`) && deleteMutation.mutate(u.username)}
-                          className="p-2 hover:text-red-400 transition-colors"
-                        >
-                           <Trash2 size={16} />
-                        </button>
+          </div>
+          
+          <div className="grid gap-4">
+             {usersList?.map((u: any) => (
+               <div key={u.id} className="glass-panel p-6 flex items-center justify-between group">
+                  <div className="flex items-center gap-4">
+                     <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-indigo-400 font-bold uppercase">
+                        {u.username[0]}
                      </div>
-                   )}
-                </div>
-             </div>
-           ))}
-        </div>
-      </section>
+                     <div>
+                        <p className="text-sm font-bold text-white">{u.display_name || u.username}</p>
+                        <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">
+                          {u.is_admin ? 'Admin' : 'Member'} {u.is_system_default && '/ System'}
+                        </p>
+                     </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-widest">Active</span>
+                     
+                     {!u.is_system_default && (
+                       <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button className="p-2 hover:text-indigo-400 transition-colors">
+                             <Edit3 size={16} />
+                          </button>
+                          <button 
+                            onClick={() => confirm(`Delete ${u.username}?`) && deleteMutation.mutate(u.username)}
+                            className="p-2 hover:text-red-400 transition-colors"
+                          >
+                             <Trash2 size={16} />
+                          </button>
+                       </div>
+                     )}
+                  </div>
+               </div>
+             ))}
+          </div>
+        </section>
+      )}
 
       <DiscoveryModal />
     </div>
