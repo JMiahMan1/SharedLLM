@@ -439,6 +439,28 @@ const Identity = () => {
               "Access Token": "gitlab_token"
             }}
           />
+          <IntegrationTile 
+            name="Audiobookshelf" 
+            icon={Music} 
+            color="amber" 
+            userData={fullUser}
+            configKeys={{
+              "Server URL": "audiobookshelf_url",
+              "Username": "audiobookshelf_user",
+              "Password": "audiobookshelf_pass"
+            }}
+          />
+          <IntegrationTile 
+            name="Private Git" 
+            icon={Shield} 
+            color="rose" 
+            userData={fullUser}
+            configKeys={{
+              "Git URL": "git_url",
+              "Username": "git_user",
+              "Password/Token": "git_token"
+            }}
+          />
         </div>
       </section>
 

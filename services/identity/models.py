@@ -26,6 +26,8 @@ class User(SQLModel, table=True):
     gitlab_user: Optional[str] = None
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
+    git_url: Optional[str] = None
+    git_user: Optional[str] = None
 
     # Encrypted at rest — stored as Fernet ciphertext (base64 string)
     nextcloud_pass_enc: Optional[str] = None
@@ -33,6 +35,7 @@ class User(SQLModel, table=True):
     github_token_enc: Optional[str] = None
     gitlab_token_enc: Optional[str] = None
     audiobookshelf_pass_enc: Optional[str] = None
+    git_token_enc: Optional[str] = None
     
     # Biometric voice profile (stored as a JSON string of embeddings)
     voice_fingerprint: Optional[str] = None
