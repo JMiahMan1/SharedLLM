@@ -96,7 +96,7 @@ class IntentEngine:
         if any(token in q for token in ("pause", "stop")):
             return "pause_media", 0.7
         if any(token in q for token in ("toggle", "flip")):
-            return "toggle", 0.75
+            return "toggle", 0.9
         return "unknown", 0.0
 
     def classify(self, query: str) -> Tuple[str, float]:

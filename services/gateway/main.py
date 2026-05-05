@@ -1002,6 +1002,8 @@ async def chat_handler(request: Request):
     
     # 3. Fast Path (Semantic Routing)
     intent, confidence = engine.classify(refined_query)
+    log.info(f"Intent Classification: query='{refined_query}' intent='{intent}' confidence={confidence}")
+    
     if media_transport_command:
         intent = "media_transport"
         confidence = 1.0
@@ -1012,7 +1014,7 @@ async def chat_handler(request: Request):
         confidence = 0.0
 
     if confidence >= FAST_PATH_THRESHOLD:
-        log.info(f"[FastPath] intent='{intent}' confidence={confidence}")
+        log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence}")
         
         if intent == "index_storage":
             await emit_log("INFO", "Triggering full library index...")
