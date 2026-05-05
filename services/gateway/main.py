@@ -700,10 +700,13 @@ async def orchestrate_code_change(
         f"**Action**: Autonomous creation and verification.\n\n"
         f"**Developer Reasoning & Description**:\n{reasoning}\n\n"
         f"**Workflow Result**:\n"
-        f"- Commit: `{result.get('commit_sha', 'N/A')}`\n"
-        f"- Sync: {result.get('sync_status', 'N/A')}\n"
-        f"- Tests: {result.get('test_status', 'N/A')}\n"
+        f"- **Commit**: `{result.get('commit_sha', 'N/A')}`\n"
+        f"- **Sync**: {result.get('sync_status', 'N/A')}\n"
+        f"- **Verification**: {result.get('test_status', 'N/A')}\n"
     )
+    
+    if result.get("test_stdout"):
+        summary += f"\n**Verification Output**:\n```\n{result.get('test_stdout')}\n```\n"
     
     if is_openai:
       return _make_openai_response(summary, selected_model, stream=should_stream)
