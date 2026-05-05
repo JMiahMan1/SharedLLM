@@ -11,7 +11,7 @@ describe('Sidebar Component', () => {
       </BrowserRouter>
     );
     
-    expect(screen.getByText('Nexus OS')).toBeInTheDocument();
+    expect(screen.getByText('Jarvis OS')).toBeInTheDocument();
   });
 
   it('renders navigation links', () => {
@@ -23,6 +23,6 @@ describe('Sidebar Component', () => {
     
     expect(screen.getByText('Dashboard')).toBeInTheDocument();
     expect(screen.getByText('Admin')).toBeInTheDocument();
-    expect(screen.getByText('Nexus Lab')).toBeInTheDocument();
+    expect(screen.getByText('Jarvis Lab')).toBeInTheDocument();
   });
 });

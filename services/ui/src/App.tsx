@@ -7,7 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import Identity from './pages/Identity';
 import Communication from './pages/Communication';
-import NexusLab from './pages/NexusLab';
+import JarvisLab from './pages/JarvisLab';
 import Login from './pages/Login';
 
 const queryClient = new QueryClient();
@@ -42,7 +42,7 @@ function App() {
             <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="/identity" element={<ProtectedRoute><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute><Communication /></ProtectedRoute>} />
-            <Route path="/lab" element={<ProtectedRoute><NexusLab /></ProtectedRoute>} />
+            <Route path="/lab" element={<ProtectedRoute><JarvisLab /></ProtectedRoute>} />
           </Routes>
         </Router>
       </AuthProvider>
