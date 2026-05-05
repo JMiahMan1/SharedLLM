@@ -82,6 +82,24 @@ export const api = {
     return resp.json();
   },
 
+  async getMe(): Promise<any> {
+    const resp = await fetch(`${BASE_URL}/api/users/me`, {
+      headers: getHeaders(),
+    });
+    if (!resp.ok) throw new Error('Failed to fetch profile');
+    return resp.json();
+  },
+
+  async updateProfile(data: any): Promise<any> {
+    const resp = await fetch(`${BASE_URL}/api/users/me`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!resp.ok) throw new Error('Failed to update profile');
+    return resp.json();
+  },
+
   async getWorkspaces(): Promise<Workspace[]> {
     const resp = await fetch(`${BASE_URL}/api/workspaces`, {
       headers: getHeaders(),
