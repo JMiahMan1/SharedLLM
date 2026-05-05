@@ -39,11 +39,13 @@ def run_coding_task(description, expected_markers, workspace_id="SharedLLM", rel
             if v_resp.status_code == 200:
                 file_data = v_resp.json()
                 actual_content = file_data.get("content", "")
-                print(f"VERIFICATION: File '{relative_path}' exists ({len(actual_content)} bytes)")
-                if len(actual_content) > 10:
-                    print("VERIFICATION: SUCCESS")
+                file_size = len(actual_content)
+                print(f"VERIFICATION: File '{relative_path}' exists ({file_size} bytes)")
+                
+                if file_size > 10:
+                    print(f"VERIFICATION SUCCESS: File verified on disk. Size: {file_size} bytes.")
                 else:
-                    print("VERIFICATION: FAILURE (File empty or too short)")
+                    print(f"VERIFICATION FAILURE: File on disk is too small ({file_size} bytes).")
                     return False
             else:
                 print(f"VERIFICATION: ERROR - Could not read file {relative_path}: {v_resp.text}")
