@@ -14,6 +14,7 @@ This document defines the modular service-oriented architecture for the SharedLL
 | **Logging** | 8006 (Host: 11436) | Observability Hub | Centralized SQLite log storage, App-ready API | Microservices (via HTTP) |
 | **Workspace Runtime** | 8007 | Sandboxed Workspace Agent Substrate | Workspace registry, Identity-backed workspace filtering, limited system workspaces, local file read/write, provider-folder scan, provider file sync, git inspection/mutation, orchestrated workspace workflows, targeted pytest execution | Mounted workspaces, Git, Identity, Storage |
 | **Automation** | - | Background Tasks | Cron-like tasks, Device polling, Sync triggers | Gateway, Execution |
+| **Nexus UI** | 8008 | Family OS Interface | Glassmorphism dashboard, Nexus Lab, Identity Hub, Communication | Gateway |
 
 ## Key Workflows
 

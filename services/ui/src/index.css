@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-50 min-h-screen overflow-x-hidden;
+    background: radial-gradient(circle at top left, #1e1b4b, #0f172a);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-xl;
+  }
+
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-lg border border-white/10 rounded-xl hover:bg-white/10 transition-all duration-300;
+  }
+
+  .glass-input {
+    @apply bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 backdrop-blur-sm transition-all;
+  }
+
+  .glass-button {
+    @apply bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/30 rounded-lg px-4 py-2 transition-all duration-300 flex items-center justify-center gap-2;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full hover:bg-white/20;
+}
+
+/* Day/Night gradients (can be controlled via class on body) */
+.day-mode {
+  background: radial-gradient(circle at top left, #4f46e5, #0ea5e9);
+}
+
+.night-mode {
+  background: radial-gradient(circle at top left, #1e1b4b, #020617);
+}
