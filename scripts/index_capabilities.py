@@ -35,7 +35,10 @@ def index_capabilities():
         "TVCastRequest": "Powers on a TV and casts media content.",
         "CalendarRequest": "Manages calendar events (list, add, delete).",
         "NoteRequest": "Manages personal notes and checklists.",
-        "TimerRequest": "Sets, lists, or deletes timers and alarms."
+        "TimerRequest": "Sets, lists, or deletes timers and alarms.",
+        "WorkspaceFileAction": "Orchestrates file writes and patches within a Git-backed workspace.",
+        "WorkspaceGitAction": "Performs Git lifecycle operations (pull, commit, branch, status).",
+        "WorkspaceSyncAction": "Synchronizes workspace files with Nextcloud or other storage providers."
     }
 
     for class_name, description in schema_map.items():
