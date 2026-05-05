@@ -1539,7 +1539,7 @@ async def chat_handler(request: Request):
         final_answer = answer if answer else "I received an empty response from the brain."
 
         # 6. Parse and execute any tool calls in the LLM response
-        tool_match = re.search(r"(\{.*\"action\":\s*\"(.*?)\".*?\})", final_answer, re.DOTALL)
+        tool_match = re.search(r"(\{.*\"action\":\s*\"(.*?)\".*\})", final_answer, re.DOTALL)
         if tool_match:
             try:
                 potential_json = tool_match.group(1)
@@ -1600,7 +1600,10 @@ async def chat_handler(request: Request):
                              exec_msg = "No HA sync data found."
 
                      # Strip JSON and update final_answer
-                     clean_answer = re.sub(r"```json.*?```", "", final_answer, flags=re.DOTALL).strip()
+                     clean_answer = re.sub(r"```json.*?```", "", final_answer, flags=re.DOTALL)
+                     if tool_match.group(0) in clean_answer:
+                         clean_answer = clean_answer.replace(tool_match.group(0), "")
+                     clean_answer = clean_answer.strip()
                      final_answer = f"{exec_msg}\n\n{clean_answer}" if clean_answer else exec_msg
                      endpoint = None # Skip the execute_command block
                 else:
@@ -1616,7 +1619,10 @@ async def chat_handler(request: Request):
                     if exec_res.get("status") == "SUCCESS":
                         exec_msg = exec_res.get('message', 'Action completed.')
                         # Combine with LLM's natural language preamble if any
-                        clean_answer = re.sub(r"```json.*?```", "", final_answer, flags=re.DOTALL).strip()
+                        clean_answer = re.sub(r"```json.*?```", "", final_answer, flags=re.DOTALL)
+                        if tool_match.group(0) in clean_answer:
+                            clean_answer = clean_answer.replace(tool_match.group(0), "")
+                        clean_answer = clean_answer.strip()
                         final_answer = f"{exec_msg}\n\n{clean_answer}"
                     else:
                         final_answer = f"I tried to perform the action, but it failed: {exec_res.get('message')}"
