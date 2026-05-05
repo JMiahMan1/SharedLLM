@@ -194,8 +194,16 @@ def _seed_db_from_json():
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
+    
+    # Handle dubious ownership in mounted volumes
+    try:
+        import subprocess
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], check=True)
+        log.info("Added '*' to git safe.directory")
+    except Exception as e:
+        log.warning(f"Failed to set git safe.directory: {e}")
     _seed_db_from_json()
 
 
