@@ -1520,6 +1520,54 @@ async def chat_handler(request: Request):
                 answer = str(data.get("response", "I encountered an error."))
         
         final_answer = answer if answer else "I received an empty response from the brain."
+
+        # 6. Parse and execute any tool calls in the LLM response
+        tool_match = re.search(r"(\{.*\"action\":\s*\"(.*?)\".*?\})", final_answer, re.DOTALL)
+        if tool_match:
+            try:
+                potential_json = tool_match.group(1)
+                # Clean up markdown if present
+                potential_json = potential_json.strip().strip("```json").strip("```").strip()
+                
+                tool_call = json.loads(potential_json)
+                action_name = tool_call.get("action")
+                payload = tool_call.get("payload", {})
+                
+                # Map action name to endpoint
+                action_to_endpoint = {
+                    "LightControlRequest": "/execute/light",
+                    "MediaPlayRequest": "/execute/media/play",
+                    "MediaTransportRequest": "/execute/media/transport",
+                    "NoteRequest": "/execute/note",
+                    "TimerRequest": "/execute/timer",
+                    "CalendarRequest": "/execute/calendar",
+                    "AnnouncementRequest": "/execute/announce",
+                    "TVCastRequest": "/execute/tv_cast",
+                    "HAServiceRequest": "/execute/ha_service",
+                    # Workspace Runtime Mappings
+                    "WorkspaceFileAction": "/files/write",
+                    "WorkspaceGitAction": "/git/status",
+                    "WorkspaceSyncAction": "/sync/nextcloud"
+                }
+                
+                endpoint = action_to_endpoint.get(action_name)
+                if endpoint:
+                    log.info(f"[SlowPath] Executing tool call: {action_name}")
+                    # Ensure user_context is in payload
+                    if "user_context" not in payload:
+                        payload["user_context"] = creds
+                    
+                    exec_res = await execute_command(endpoint, payload)
+                    if exec_res.get("status") == "SUCCESS":
+                        exec_msg = exec_res.get('message', 'Action completed.')
+                        # Combine with LLM's natural language preamble if any
+                        clean_answer = re.sub(r"```json.*?```", "", final_answer, flags=re.DOTALL).strip()
+                        final_answer = f"{exec_msg}\n\n{clean_answer}"
+                    else:
+                        final_answer = f"I tried to perform the action, but it failed: {exec_res.get('message')}"
+            except Exception as te:
+                log.warning(f"Failed to parse tool call: {te}")
+
         await update_history(user_id, "user", query)
         await update_history(user_id, "assistant", final_answer)
 
