@@ -1310,6 +1310,15 @@ async def chat_handler(request: Request):
                 ))
                 task_names.append("code_realtime")
 
+        # Task 6: System Capability Search (Self-Awareness)
+        # Always search for relevant capabilities to provide schemas/intents
+        tasks.append(client.post(
+            f"{RAG_SVC}/rag/search",
+            json={"query": refined_query, "user_id": "default", "collection_name": "system_capabilities", "k": 5},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        ))
+        task_names.append("cap_rag")
+
         # Execute parallel tasks
         if tasks:
             responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1376,6 +1385,12 @@ async def chat_handler(request: Request):
                                 "\n\nRepository-Adjacent Storage Matches (Discovery Only):\n"
                                 f"{storage_text}"
                             )
+                    elif name == "cap_rag":
+                        cap_results = data.get("results", [])
+                        if isinstance(cap_results, list) and cap_results:
+                            cap_lines = [str(r.get("content")) for r in cap_results if isinstance(r, dict) and r.get("content")]
+                            if cap_lines:
+                                rag_context += "\n\n### System Capability Context (Self-Awareness):\n" + "\n".join(cap_lines)
                 except Exception as pe:
                     log.error(f"Error parsing {name} response: {pe}")
 

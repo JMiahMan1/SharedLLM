@@ -340,6 +340,54 @@ async def get_new_devices(user_id: str = "default", limit: int = 10):
     except Exception as e:
         return {"status": "ERROR", "message": str(e)}
 
+@app.post("/rag/sync/capabilities", dependencies=[Depends(require_internal)])
+async def sync_capabilities(payload: dict):
+    """
+    Indexes system tools, Pydantic schemas, and intent descriptions.
+    Enables dynamic self-awareness for the Gateway.
+    """
+    capabilities = payload.get("capabilities", [])
+    collection = get_collection("system_capabilities")
+    
+    ids = []
+    docs = []
+    metas = []
+    
+    for cap in capabilities:
+        name = cap.get("name")
+        description = cap.get("description", "")
+        schema = cap.get("schema", "")
+        type_ = cap.get("type", "tool") # tool, intent, etc.
+        
+        if not name: continue
+        
+        cid = f"cap:{type_}:{name}"
+        content = f"Capability: {name} | Description: {description} | Schema/Usage: {schema}"
+        
+        ids.append(cid)
+        docs.append(content)
+        metas.append({
+            "name": name,
+            "type": type_,
+            "user_id": "default", # System capabilities are shared
+            "description": description[:200] # Truncate for metadata
+        })
+        
+    if docs:
+        try:
+            collection.upsert(
+                ids=ids,
+                documents=docs,
+                metadatas=metas
+            )
+            log.info(f"Indexed {len(docs)} system capabilities.")
+            return {"status": "SUCCESS", "count": len(docs)}
+        except Exception as e:
+            log.error(f"Capability Sync failed: {e}")
+            raise HTTPException(status_code=500, detail="Sync failed")
+            
+    return {"status": "SUCCESS", "count": 0}
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "rag"}
