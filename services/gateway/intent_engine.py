@@ -78,7 +78,9 @@ class IntentEngine:
             (r"^(?:resume)\b", "play_media"),
             (r"^(?:pause|stop)\b", "pause_media"),
             (r"^(?:toggle|flip)\b", "toggle"),
+            (r"^(?:scan|index|reindex|refresh)\b.*(?:storage|folder|directory|files|notes|library)", "index_storage"),
             (r"^(?:fix|update|implement|change|patch|create)\b.*(?:code|file|module|service|script|program)", "code_orchestrate"),
+            (r"^(?:check|status|how is|state)\b.*(?:ha|home assistant|entities|devices)", "ha_status"),
         )
         for pattern, intent in regex_intent_map:
             if re.match(pattern, q, flags=re.IGNORECASE):
@@ -97,6 +99,10 @@ class IntentEngine:
             return "pause_media", 0.7
         if any(token in q for token in ("toggle", "flip")):
             return "toggle", 0.9
+        if any(token in q for token in ("scan", "index", "reindex", "refresh")):
+            return "index_storage", 0.9
+        if any(token in q for token in ("ha status", "home assistant status", "check ha")):
+            return "ha_status", 0.9
         return "unknown", 0.0
 
     def classify(self, query: str) -> Tuple[str, float]:
