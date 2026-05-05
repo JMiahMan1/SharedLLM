@@ -18,6 +18,9 @@ except ImportError:
     from models import User
     from crypto import encrypt
 
+from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 # Load legacy .env if available
 if os.path.exists("/app/.env.legacy"):
     load_dotenv("/app/.env.legacy")
@@ -129,12 +132,20 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     count = 0
 
     for udata in env_users.values():
+        # Set default password for 'default' user if not already set
+        password_hash = None
+        is_admin = udata.get("is_admin", False)
+        if udata["username"] == "default":
+            password_hash = pwd_context.hash("admin")
+            is_admin = True # Default user should be admin for first setup
+
         user = User(
             username=udata["username"],
             display_name=udata.get("display_name", ""),
-            is_admin=udata.get("is_admin", False),
+            is_admin=is_admin,
             is_system_default=udata.get("is_system_default", False),
-            api_key=udata.get("api_key"),
+            password_hash=password_hash,
+            api_key=udata.get("api_key") or os.urandom(24).hex(), # Ensure API key exists
             nextcloud_url=udata.get("nextcloud_url"),
             nextcloud_user=udata.get("nextcloud_user"),
             ha_url=udata.get("ha_url"),

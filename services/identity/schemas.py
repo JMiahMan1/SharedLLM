@@ -91,3 +91,17 @@ class DeviceAssignmentRead(BaseModel):
     device_id: str
     user_id: int
     username: str
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    api_key: str
+    username: str
+    is_admin: bool
+
+class DiscoverUser(BaseModel):
+    username: str
+    source: str  # e.g. "Home Assistant", "Nextcloud"
+    display_name: Optional[str] = None
