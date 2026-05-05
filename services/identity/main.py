@@ -279,6 +279,49 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), _: Us
     )
 
 
+@app.patch("/api/users/me", response_model=UserRead)
+def update_me(body: UserUpdate, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    return _do_update(user, body, session)
+
+
+@app.patch("/api/users/{username}", response_model=UserRead)
+def update_user(username: str, body: UserUpdate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+    if not admin.is_admin and admin.username != username:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    return _do_update(user, body, session)
+
+
+def _do_update(user: User, body: UserUpdate, session: Session):
+    update_data = body.model_dump(exclude_unset=True)
+    
+    # Handle sensitive fields (encryption)
+    enc_map = {
+        "nextcloud_pass": "nextcloud_pass_enc",
+        "ha_token": "ha_token_enc",
+        "github_token": "github_token_enc",
+        "gitlab_token": "gitlab_token_enc",
+        "audiobookshelf_pass": "audiobookshelf_pass_enc",
+    }
+    
+    for plain, enc in enc_map.items():
+        if plain in update_data:
+            val = update_data.pop(plain)
+            setattr(user, enc, encrypt(val))
+            
+    for key, value in update_data.items():
+        setattr(user, key, value)
+        
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
 @app.post("/api/admin/users/{username}/admin", dependencies=[Depends(require_internal)])
 def set_user_admin(username: str, is_admin: bool = True, session: Session = Depends(get_session)):
     user = session.exec(select(User).where(User.username == username)).first()
