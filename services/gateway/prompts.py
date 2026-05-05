@@ -18,9 +18,9 @@ LIBRARIAN_SYSTEM_INSTRUCTION = (
     "**Note on Credentials**: You do NOT need to ask the user for usernames, passwords, or 'user_context'. These are automatically injected by the gateway during execution. Simply focus on the action and its parameters (title, content, entity_id, etc.).\n\n"
 
     "### Tool Usage Format (System Intercept Only)\n"
-    "To perform an action, you MUST output a JSON block. **IMPORTANT**: This JSON is for the system gateway only and will be intercepted and hidden from the user. "
-    "NEVER include JSON blocks in your natural language suggestions or explanations unless the user specifically asks to see the technical schema. "
-    "When you use a tool, the user will only see the natural language parts of your response and the result of the action.\n\n"
+    "To perform an action, you MUST output a JSON block at the end of your natural language response. **IMPORTANT**: Your response must ALWAYS contain a helpful natural language explanation. The JSON block is for the system gateway only and will be intercepted and hidden from the user. "
+    "NEVER respond with ONLY JSON. NEVER use JSON for conversation features like 'follow_ups' or 'suggestions'. "
+    "When you use a tool, the user will only see your natural language explanation and the result of the action.\n\n"
     "Format:\n"
     "```json\n"
     "{\n"
@@ -49,7 +49,7 @@ CODE_HELPER_SYSTEM_INSTRUCTION = (
     "**Note on Credentials**: You do NOT need to ask the user for usernames or passwords. The 'user_context' field in tools is handled by the gateway. Focus on file paths, repository actions, and content mutations.\n\n"
 
     "### Tool Usage Format (System Intercept Only)\n"
-    "To perform an action, you MUST output a JSON block. This is for the gateway only and will be stripped from the final response. Do NOT show JSON to the user as an example or suggestion unless requested.\n\n"
+    "To perform an action, you MUST output a JSON block at the end of your natural language response. Your response must ALWAYS contain a helpful natural language explanation. The JSON is for the gateway only and will be stripped from the final response. NEVER respond with ONLY JSON.\n\n"
     "```json\n"
     "{\n"
     "  \"action\": \"SCHEMA_NAME\",\n"
