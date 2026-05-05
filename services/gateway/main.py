@@ -645,6 +645,7 @@ async def orchestrate_code_change(
       "You are an expert software engineer agent.\n"
       "Identify the file to change and the new content based on the request.\n"
       "Return ONLY a JSON object with: 'relative_path', 'content', 'reasoning', 'test_cmd' (optional).\n\n"
+      "You can use available tools in 'test_cmd' to verify your changes (e.g., 'pytest', 'flake8', 'black --check', 'npm test', 'go test', 'yamllint').\n\n"
       f"Workspace context:\n{workspace_context}\n\n"
       f"User request: {refined_query}\n"
     )
