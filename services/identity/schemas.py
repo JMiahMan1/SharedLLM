@@ -63,6 +63,24 @@ class UserCreate(BaseModel):
     audiobookshelf_pass: Optional[str] = None
 
 
+class UserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    nextcloud_url: Optional[str] = None
+    nextcloud_user: Optional[str] = None
+    nextcloud_pass: Optional[str] = None
+    ha_url: Optional[str] = None
+    ha_token: Optional[str] = None
+    github_url: Optional[str] = None
+    github_user: Optional[str] = None
+    github_token: Optional[str] = None
+    gitlab_url: Optional[str] = None
+    gitlab_user: Optional[str] = None
+    gitlab_token: Optional[str] = None
+    audiobookshelf_url: Optional[str] = None
+    audiobookshelf_user: Optional[str] = None
+    audiobookshelf_pass: Optional[str] = None
+
+
 class UserRead(BaseModel):
     id: int
     username: str

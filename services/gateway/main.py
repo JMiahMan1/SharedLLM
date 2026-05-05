@@ -1653,7 +1653,7 @@ async def chat_handler(request: Request):
 @app.post("/api/auth/login")
 async def proxy_login(request: Request):
     body = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(f"{IDENTITY_SVC}/api/auth/login", json=body)
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
@@ -1661,7 +1661,7 @@ async def proxy_login(request: Request):
 async def proxy_change_password(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/auth/change-password", 
             json=body,
@@ -1672,9 +1672,33 @@ async def proxy_change_password(request: Request):
 @app.get("/api/auth/discover")
 async def proxy_discover(request: Request):
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/auth/discover",
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.patch("/api/users/me")
+async def proxy_update_me(request: Request):
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.patch(
+            f"{IDENTITY_SVC}/api/users/me",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.patch("/api/users/{username}")
+async def proxy_update_user(username: str, request: Request):
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.patch(
+            f"{IDENTITY_SVC}/api/users/{username}",
+            json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
@@ -1682,7 +1706,7 @@ async def proxy_discover(request: Request):
 @app.get("/api/users")
 async def proxy_users(request: Request):
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/users",
             headers={"Authorization": auth_header} if auth_header else {}
