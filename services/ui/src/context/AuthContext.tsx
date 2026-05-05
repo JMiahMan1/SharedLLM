@@ -70,7 +70,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const login = async (credentials: { username: string; password: string }) => {
     try {
       const data = await api.login(credentials.username, credentials.password);
-      const authToken = data.access_token;
+      const authToken = data.api_key;
       setToken(authToken);
       localStorage.setItem('jarvis_token', authToken);
       
