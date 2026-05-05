@@ -697,7 +697,8 @@ async def orchestrate_code_change(
     summary = (
         f"### Code Orchestration Success\n\n"
         f"**File**: `{rel_path}`\n"
-        f"**Reasoning**: {reasoning}\n\n"
+        f"**Action**: Autonomous creation and verification.\n\n"
+        f"**Developer Reasoning & Description**:\n{reasoning}\n\n"
         f"**Workflow Result**:\n"
         f"- Commit: `{result.get('commit_sha', 'N/A')}`\n"
         f"- Sync: {result.get('sync_status', 'N/A')}\n"
