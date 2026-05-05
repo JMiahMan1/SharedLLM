@@ -161,5 +161,17 @@ export const api = {
     });
     if (!resp.ok) throw new Error('Failed to fetch workspaces');
     return resp.json();
+  },
+  async enrollVoice(audioBlob: Blob) {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'enrollment.webm');
+    const resp = await fetch(`${BASE_URL}/api/users/me/enroll`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('api_key')}`
+      },
+      body: formData
+    });
+    return resp.json();
   }
 };

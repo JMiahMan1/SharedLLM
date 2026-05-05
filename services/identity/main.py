@@ -8,7 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import List
 
-from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
+from fastapi import FastAPI, Depends, HTTPException, Header, Request, status, File, UploadFile
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -167,6 +167,33 @@ def health():
 @app.get("/api/users/me", response_model=UserRead)
 def get_me(user: User = Depends(require_api_key)):
     return user
+
+@app.post("/api/users/me/enroll")
+async def enroll_voice(
+    file: UploadFile = File(...), 
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session)
+):
+    """
+    Receives an audio file and generates a voice fingerprint.
+    For now, we simulate this by hashing the file content.
+    """
+    try:
+        import hashlib
+        content = await file.read()
+        # Simulation: In a real system, we'd run a model here.
+        # For now, we'll store a mock fingerprint based on the file content.
+        fingerprint = hashlib.sha256(content).hexdigest()
+        
+        user.voice_fingerprint = f"v1:{fingerprint[:16]}"
+        session.add(user)
+        session.commit()
+        
+        log.info(f"User {user.username} enrolled with voice fingerprint {user.voice_fingerprint}")
+        return {"status": "SUCCESS", "message": "Voice profile successfully enrolled."}
+    except Exception as e:
+        log.error(f"Enrollment failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.patch("/api/users/me", response_model=UserRead)
 def update_me(body: UserUpdate, session: Session = Depends(get_session), user: User = Depends(require_api_key)):

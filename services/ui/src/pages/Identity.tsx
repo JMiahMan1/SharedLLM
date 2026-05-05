@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { 
   Cloud, 
   Music, 
@@ -89,7 +89,11 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
       const result = await api.testConnection(name, form);
       setTestResult(result);
     } catch (err: any) {
-      setTestResult({ status: 'ERROR', message: err.message });
+      console.error("Test connection failed:", err);
+      setTestResult({ 
+        status: 'ERROR', 
+        message: err.response?.data?.message || err.message || 'Identity service error' 
+      });
     } finally {
       setIsTesting(false);
     }
@@ -188,33 +192,105 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
   );
 };
 
-const VoiceEnrollmentCard = ({ enrolled }: any) => (
-  <div className={`glass-panel p-8 flex flex-col items-center text-center gap-6 border-2 ${enrolled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-dashed border-slate-700'}`}>
-    <div className={`p-5 rounded-full ${enrolled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-      <Mic size={40} />
-    </div>
-    <div>
-      <h4 className="font-bold text-white text-lg">Your Voice Profile</h4>
-      <p className="text-sm text-slate-400 mt-2 max-w-sm">
-        {enrolled 
-          ? "Jarvis has learned your unique vocal frequency and can identify you automatically." 
-          : "Jarvis doesn't recognize your voice yet. Enroll now to enable personalized responses and biometric security."}
-      </p>
-    </div>
-    <div className="flex gap-4 w-full max-w-xs">
-       <button className="glass-button flex-1 py-3 bg-purple-600/20 border-purple-500/30 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest">
-         <Activity size={16} />
-         {enrolled ? "Retrain Voice" : "Start Enrollment"}
-       </button>
-    </div>
-    {enrolled && (
-      <div className="flex items-center gap-2">
-        <CheckCircle size={14} className="text-emerald-500" />
-        <span className="text-[10px] uppercase font-bold tracking-widest text-emerald-500">Identity Verified</span>
+const VoiceEnrollmentCard = ({ enrolled }: any) => {
+  const [isRecording, setIsRecording] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [status, setStatus] = useState<string | null>(null);
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const chunks = useRef<Blob[]>([]);
+  const queryClient = useQueryClient();
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder.current = new MediaRecorder(stream);
+      chunks.current = [];
+      
+      mediaRecorder.current.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.current.push(e.data);
+      };
+
+      mediaRecorder.current.onstop = async () => {
+        const blob = new Blob(chunks.current, { type: 'audio/webm' });
+        setStatus('Processing...');
+        try {
+          await api.enrollVoice(blob);
+          setStatus('Enrollment Successful!');
+          queryClient.invalidateQueries({ queryKey: ['me'] });
+        } catch (err) {
+          setStatus('Enrollment Failed');
+        }
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.current.start();
+      setIsRecording(true);
+      setCountdown(10);
+      setStatus('Recording...');
+      
+      const timer = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            stopRecording();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+    } catch (err) {
+      alert('Microphone access denied or not available.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder.current && isRecording) {
+      mediaRecorder.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  return (
+    <div className={`glass-panel p-8 flex flex-col items-center text-center gap-6 border-2 ${enrolled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-dashed border-slate-700'}`}>
+      <div className={`p-5 rounded-full ${isRecording ? 'bg-red-500/20 text-red-400 animate-pulse' : enrolled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+        <Mic size={40} />
       </div>
-    )}
-  </div>
-);
+      <div>
+        <h4 className="font-bold text-white text-lg">Your Voice Profile</h4>
+        <p className="text-sm text-slate-400 mt-2 max-w-sm">
+          {isRecording 
+            ? `Jarvis is listening... Please speak clearly for ${countdown} more seconds.` 
+            : enrolled 
+              ? "Jarvis has learned your unique vocal frequency and can identify you automatically." 
+              : "Jarvis doesn't recognize your voice yet. Enroll now to enable personalized responses and biometric security."}
+        </p>
+      </div>
+      <div className="flex flex-col items-center gap-4 w-full max-w-xs">
+         <button 
+           onClick={isRecording ? stopRecording : startRecording}
+           disabled={status === 'Processing...'}
+           className={`glass-button w-full py-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest ${isRecording ? 'bg-red-500/20 border-red-500/30 text-red-400' : 'bg-purple-600/20 border-purple-500/30 text-purple-400'}`}
+         >
+           {isRecording ? <X size={16} /> : <Activity size={16} />}
+           {isRecording ? `Stop (${countdown}s)` : enrolled ? "Retrain Voice" : "Start Enrollment"}
+         </button>
+         
+         {status && (
+           <p className={`text-[10px] uppercase font-bold tracking-widest ${status.includes('Failed') ? 'text-red-400' : 'text-indigo-400'}`}>
+             {status}
+           </p>
+         )}
+      </div>
+      {enrolled && !isRecording && (
+        <div className="flex items-center gap-2">
+          <CheckCircle size={14} className="text-emerald-500" />
+          <span className="text-[10px] uppercase font-bold tracking-widest text-emerald-500">Identity Verified</span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const DiscoveryModal = () => {
   const [isOpen, setIsOpen] = useState(false);
