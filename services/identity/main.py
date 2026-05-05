@@ -155,7 +155,10 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         gitlab_token=decrypt(user.gitlab_token_enc) if user.gitlab_token_enc else None,
         audiobookshelf_url=user.audiobookshelf_url,
         audiobookshelf_user=user.audiobookshelf_user,
-        audiobookshelf_pass=decrypt(user.audiobookshelf_pass_enc) if user.audiobookshelf_pass_enc else None
+        audiobookshelf_pass=decrypt(user.audiobookshelf_pass_enc) if user.audiobookshelf_pass_enc else None,
+        git_url=user.git_url,
+        git_user=user.git_user,
+        git_token=decrypt(user.git_token_enc) if user.git_token_enc else None
     )
 
 @app.get("/health")
@@ -206,7 +209,8 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
         "ha_token": "ha_token_enc",
         "github_token": "github_token_enc",
         "gitlab_token": "gitlab_token_enc",
-        "audiobookshelf_pass": "audiobookshelf_pass_enc"
+        "audiobookshelf_pass": "audiobookshelf_pass_enc",
+        "git_token": "git_token_enc"
     }
     
     for plain, enc in crypto_map.items():
@@ -239,7 +243,8 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         "ha_token": "ha_token_enc",
         "github_token": "github_token_enc",
         "gitlab_token": "gitlab_token_enc",
-        "audiobookshelf_pass": "audiobookshelf_pass_enc"
+        "audiobookshelf_pass": "audiobookshelf_pass_enc",
+        "git_token": "git_token_enc"
     }
     
     for plain, enc in crypto_map.items():
