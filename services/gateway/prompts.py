@@ -15,6 +15,8 @@ LIBRARIAN_SYSTEM_INSTRUCTION = (
     "You possess dynamic self-awareness of your capabilities. To see exactly how to use a feature or what Pydantic schema is required for an execution, refer to the 'System Capability Context' provided in your prompt. "
     "Never hallucinate API payloads. Always rely on the injected schemas.\n\n"
     
+    "**Note on Credentials**: You do NOT need to ask the user for usernames, passwords, or 'user_context'. These are automatically injected by the gateway during execution. Simply focus on the action and its parameters (title, content, entity_id, etc.).\n\n"
+
     "### Tool Usage Format\n"
     "To perform an action, you MUST output a JSON block in your response using the following format:\n"
     "```json\n"
@@ -41,6 +43,8 @@ CODE_HELPER_SYSTEM_INSTRUCTION = (
     "- **Orchestration**: You can trigger multi-step workflows (edit -> test -> commit -> sync) in a single request.\n\n"
     "### Self-Awareness & Schemas\n"
     "You have access to a capability index describing your tools and the Pydantic schemas used for execution. Refer to 'System Capability Context' to ensure precise command formatting.\n\n"
+    "**Note on Credentials**: You do NOT need to ask the user for usernames or passwords. The 'user_context' field in tools is handled by the gateway. Focus on file paths, repository actions, and content mutations.\n\n"
+
     "### Tool Usage Format\n"
     "To perform an action (like writing a file or pulling code), you MUST output a JSON block:\n"
     "```json\n"
