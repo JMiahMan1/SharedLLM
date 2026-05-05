@@ -118,6 +118,33 @@ export const api = {
     return resp.json();
   },
 
+  async getUsers(): Promise<any[]> {
+    const resp = await fetch(`${BASE_URL}/api/users`, {
+      headers: getHeaders(),
+    });
+    if (!resp.ok) throw new Error('Failed to fetch users');
+    return resp.json();
+  },
+
+  async updateUser(username: string, data: any): Promise<any> {
+    const resp = await fetch(`${BASE_URL}/api/users/${username}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!resp.ok) throw new Error('Failed to update user');
+    return resp.json();
+  },
+
+  async deleteUser(username: string): Promise<any> {
+    const resp = await fetch(`${BASE_URL}/api/users/${username}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!resp.ok) throw new Error('Failed to delete user');
+    return resp.json();
+  },
+
   async getWorkspaces(): Promise<Workspace[]> {
     const resp = await fetch(`${BASE_URL}/api/workspaces`, {
       headers: getHeaders(),

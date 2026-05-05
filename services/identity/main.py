@@ -192,6 +192,55 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
     session.refresh(user)
     return user
 
+@app.patch("/api/users/{username}", response_model=UserRead)
+def update_user(username: str, body: UserUpdate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+    if not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    user = session.exec(select(User).where(User.username == username.lower())).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    update_data = body.model_dump(exclude_unset=True)
+    
+    # Handle encrypted fields
+    crypto_map = {
+        "nextcloud_pass": "nextcloud_pass_enc",
+        "ha_token": "ha_token_enc",
+        "github_token": "github_token_enc",
+        "gitlab_token": "gitlab_token_enc",
+        "audiobookshelf_pass": "audiobookshelf_pass_enc"
+    }
+    
+    for plain, enc in crypto_map.items():
+        if plain in update_data:
+            val = update_data.pop(plain)
+            setattr(user, enc, encrypt(val) if val else None)
+
+    for key, value in update_data.items():
+        setattr(user, key, value)
+        
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+@app.delete("/api/users/{username}")
+def delete_user(username: str, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+    if not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    user = session.exec(select(User).where(User.username == username.lower())).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.is_system_default:
+        raise HTTPException(status_code=400, detail="Cannot delete system default user")
+        
+    session.delete(user)
+    session.commit()
+    return {"status": "SUCCESS"}
+
 @app.get("/api/users", response_model=List[UserRead])
 def list_users(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     if not user.is_admin:
