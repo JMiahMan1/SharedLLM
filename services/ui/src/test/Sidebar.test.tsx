@@ -1,28 +1,28 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { describe, it, expect } from 'vitest';
 import Sidebar from '../components/layout/Sidebar';
 
 describe('Sidebar Component', () => {
   it('renders the brand title', () => {
-    const { getByText } = render(
+    render(
       <BrowserRouter>
         <Sidebar />
       </BrowserRouter>
     );
     
-    expect(getByText('Nexus OS')).toBeInTheDocument();
+    expect(screen.getByText('Nexus OS')).toBeInTheDocument();
   });
 
   it('renders navigation links', () => {
-    const { getByText } = render(
+    render(
       <BrowserRouter>
         <Sidebar />
       </BrowserRouter>
     );
     
-    expect(getByText('Dashboard')).toBeInTheDocument();
-    expect(getByText('Admin')).toBeInTheDocument();
-    expect(getByText('Nexus Lab')).toBeInTheDocument();
+    expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    expect(screen.getByText('Admin')).toBeInTheDocument();
+    expect(screen.getByText('Nexus Lab')).toBeInTheDocument();
   });
 });
