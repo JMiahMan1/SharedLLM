@@ -1,9 +1,20 @@
 # Build stage
-FROM node:20-bookworm AS build
+FROM node:22-bookworm AS build
+
+# Install build essentials for native dependencies
+RUN apt-get update && apt-get install -y build-essential python3 && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY package*.json ./
+
+# Use legacy-peer-deps to handle complex version mixes in latest releases
 RUN npm install --legacy-peer-deps
+
 COPY . .
+
+# Set memory limit for Node to prevent bundler crashes
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+
 RUN npm run build
 
 # Production stage
