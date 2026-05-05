@@ -350,9 +350,10 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
     """Test a connection before saving."""
     service = req.get("service")
     config = req.get("config", {})
+    log.info(f"[test_connection] Testing {service} with config: { {k: '***' if 'token' in k.lower() or 'pass' in k.lower() else v for k, v in config.items()} }")
     
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
             if service == "Home Assistant":
                 url = config.get("ha_url")
                 token = config.get("ha_token")
@@ -363,6 +364,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     f"{url.rstrip('/')}/api/config",
                     headers={"Authorization": f"Bearer {token}"}
                 )
+                log.info(f"[test_connection] HA response: {resp.status_code}")
                 if resp.status_code == 200:
                     return {"status": "SUCCESS", "message": "Connected to Home Assistant"}
                 else:
