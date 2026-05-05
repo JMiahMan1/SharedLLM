@@ -22,7 +22,42 @@ export interface Workspace {
   scope: string;
 }
 
+const getHeaders = () => {
+  const apiKey = localStorage.getItem('nexus_api_key');
+  return {
+    'Content-Type': 'application/json',
+    ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+  };
+};
+
 export const api = {
+  async login(username: string, password: string): Promise<any> {
+    const resp = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!resp.ok) throw new Error('Invalid credentials');
+    return resp.json();
+  },
+
+  async discoverUsers(): Promise<any[]> {
+    const resp = await fetch(`${BASE_URL}/api/auth/discover`, {
+      headers: getHeaders(),
+    });
+    if (!resp.ok) throw new Error('Discovery failed');
+    return resp.json();
+  },
+
+  async changePassword(newPassword: string): Promise<any> {
+    const resp = await fetch(`${BASE_URL}/api/auth/change-password?new_password=${encodeURIComponent(newPassword)}`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!resp.ok) throw new Error('Failed to update password');
+    return resp.json();
+  },
+
   async getHealth(): Promise<HealthStatus> {
     const resp = await fetch(`${BASE_URL}/health/ready`);
     if (!resp.ok) throw new Error('Health check failed');
@@ -30,7 +65,9 @@ export const api = {
   },
 
   async getLogs(limit = 50): Promise<LogEntry[]> {
-    const resp = await fetch(`${BASE_URL}/api/logs?limit=${limit}`);
+    const resp = await fetch(`${BASE_URL}/api/logs?limit=${limit}`, {
+      headers: getHeaders(),
+    });
     if (!resp.ok) throw new Error('Failed to fetch logs');
     return resp.json();
   },
@@ -38,7 +75,7 @@ export const api = {
   async chat(message: string, workspaceId?: string, stream = false) {
     const resp = await fetch(`${BASE_URL}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ message, workspace_id: workspaceId, stream }),
     });
     if (!resp.ok) throw new Error('Chat request failed');
@@ -46,8 +83,9 @@ export const api = {
   },
 
   async getWorkspaces(): Promise<Workspace[]> {
-    // Note: This endpoint might need to be exposed or called via chat discovery
-    const resp = await fetch(`${BASE_URL}/api/workspaces`);
+    const resp = await fetch(`${BASE_URL}/api/workspaces`, {
+      headers: getHeaders(),
+    });
     if (!resp.ok) throw new Error('Failed to fetch workspaces');
     return resp.json();
   }
