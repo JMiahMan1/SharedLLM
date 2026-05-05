@@ -186,10 +186,24 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
   const isConnected = !!userData?.[connectionKey];
 
   const updateMutation = useMutation({
-    mutationFn: (data: any) => api.updateProfile(data),
+    mutationFn: (data: any) => {
+      // Validate URLs
+      for (const [label, value] of Object.entries(data)) {
+        const key = label.toLowerCase();
+        if (key.includes('url') && value && typeof value === 'string') {
+          if (!value.startsWith('http://') && !value.startsWith('https://')) {
+             throw new Error(`${label} must start with http:// or https://`);
+          }
+        }
+      }
+      return api.updateProfile(data);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['me'] });
       setIsOpen(false);
+    },
+    onError: (err: any) => {
+      alert(err.message);
     }
   });
 
@@ -229,7 +243,10 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
           <div className="grid gap-4">
             {Object.entries(configKeys).map(([label, key]: [string, any]) => (
               <div key={key}>
-                <label className="text-[10px] text-slate-400 uppercase font-bold mb-1.5 block">{label}</label>
+                <div className="flex justify-between items-end mb-1.5">
+                  <label className="text-[10px] text-slate-400 uppercase font-bold block">{label}</label>
+                  {label.toLowerCase().includes('url') && <span className="text-[9px] text-slate-500 italic">Include http:// or https://</span>}
+                </div>
                 <input 
                   type={label.toLowerCase().includes('pass') || label.toLowerCase().includes('token') ? 'password' : 'text'}
                   value={form[key] || ''}
