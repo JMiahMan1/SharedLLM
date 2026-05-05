@@ -1052,7 +1052,8 @@ async def chat_handler(request: Request):
             "media_transport": "/execute/media/transport",
             "pause_media": "/execute/media/transport",
             "open_garage": "/execute/security",
-            "close_garage": "/execute/security"
+            "close_garage": "/execute/security",
+            "toggle": "/execute/light"
         }
 
         endpoint = endpoint_map.get(intent)
@@ -1144,7 +1145,7 @@ async def chat_handler(request: Request):
                     if "media" in intent and eid.startswith("media_player."):
                         target_entity = e["entity_id"]
                         break
-                    if ("light" in intent or "turn" in intent) and eid.startswith("light."):
+                    if ("light" in intent or "turn" in intent or "toggle" in intent) and eid.startswith("light."):
                         target_entity = e["entity_id"]
                         break
 
@@ -1152,7 +1153,7 @@ async def chat_handler(request: Request):
                 if "media" in intent:
                     players = [e for e in real_entities if e['entity_id'].startswith('media_player.')]
                     if players: target_entity = players[0]['entity_id']
-                elif "light" in intent or "turn" in intent:
+                elif "light" in intent or "turn" in intent or "toggle" in intent:
                     lights = [e for e in real_entities if e['entity_id'].startswith('light.')]
                     if lights: target_entity = lights[0]['entity_id']
 
@@ -1162,7 +1163,7 @@ async def chat_handler(request: Request):
             exec_payload = {
                 "user_context": creds,
                 "entity_id": target_entity,
-                "action": "turn_on" if intent == "turn_on" else ("turn_off" if intent == "turn_off" else "play")
+                "action": "turn_on" if intent == "turn_on" else ("turn_off" if intent == "turn_off" else ("toggle" if intent == "toggle" else "play"))
             }
             if intent == "play_media":
                 if media_query:
