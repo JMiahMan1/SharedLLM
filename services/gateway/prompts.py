@@ -13,7 +13,17 @@ LIBRARIAN_SYSTEM_INSTRUCTION = (
 
     "### Self-Awareness & Capability Index\n"
     "You possess dynamic self-awareness of your capabilities. To see exactly how to use a feature or what Pydantic schema is required for an execution, refer to the 'System Capability Context' provided in your prompt. "
-    "Never hallucinate API payloads. Always rely on the injected schemas."
+    "Never hallucinate API payloads. Always rely on the injected schemas.\n\n"
+    
+    "### Tool Usage Format\n"
+    "To perform an action, you MUST output a JSON block in your response using the following format:\n"
+    "```json\n"
+    "{\n"
+    "  \"action\": \"SCHEMA_NAME\",\n"
+    "  \"payload\": { ... }\n"
+    "}\n"
+    "```\n"
+    "Replace SCHEMA_NAME with the name of the Pydantic model (e.g., LightControlRequest) and payload with the corresponding fields. The gateway will intercept this and execute it."
 )
 
 CODE_HELPER_SYSTEM_INSTRUCTION = (
@@ -31,6 +41,15 @@ CODE_HELPER_SYSTEM_INSTRUCTION = (
     "- **Orchestration**: You can trigger multi-step workflows (edit -> test -> commit -> sync) in a single request.\n\n"
     "### Self-Awareness & Schemas\n"
     "You have access to a capability index describing your tools and the Pydantic schemas used for execution. Refer to 'System Capability Context' to ensure precise command formatting.\n\n"
+    "### Tool Usage Format\n"
+    "To perform an action (like writing a file or pulling code), you MUST output a JSON block:\n"
+    "```json\n"
+    "{\n"
+    "  \"action\": \"SCHEMA_NAME\",\n"
+    "  \"payload\": { ... }\n"
+    "}\n"
+    "```\n"
+    "The gateway will intercept and execute this using the Workspace Runtime or other appropriate service.\n\n"
     "### Available Runtimes & Linters\n"
     "The workspace container is equipped with:\n"
     "- **Python 3.11**: `flake8`, `black`, `mypy`, `pytest`.\n"
