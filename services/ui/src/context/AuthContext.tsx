@@ -13,11 +13,11 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any | null>(null);
-  const [apiKey, setApiKey] = useState<string | null>(localStorage.getItem('nexus_api_key'));
+  const [apiKey, setApiKey] = useState<string | null>(localStorage.getItem('jarvis_api_key'));
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('nexus_user');
+    const storedUser = localStorage.getItem('jarvis_user');
     if (storedUser && apiKey) {
       setUser(JSON.parse(storedUser));
     }
@@ -28,15 +28,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const data = await api.login(credentials.username, credentials.password);
     setApiKey(data.api_key);
     setUser({ username: data.username, is_admin: data.is_admin });
-    localStorage.setItem('nexus_api_key', data.api_key);
-    localStorage.setItem('nexus_user', JSON.stringify({ username: data.username, is_admin: data.is_admin }));
+    localStorage.setItem('jarvis_api_key', data.api_key);
+    localStorage.setItem('jarvis_user', JSON.stringify({ username: data.username, is_admin: data.is_admin }));
   };
 
   const logout = () => {
     setApiKey(null);
     setUser(null);
-    localStorage.removeItem('nexus_api_key');
-    localStorage.removeItem('nexus_user');
+    localStorage.removeItem('jarvis_api_key');
+    localStorage.removeItem('jarvis_user');
   };
 
   return (

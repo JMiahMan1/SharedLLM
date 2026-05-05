@@ -42,7 +42,7 @@ const Login = () => {
           <div className="p-4 rounded-2xl bg-purple-600/20 text-purple-400 mb-4 border border-purple-500/20">
             <Shield size={32} />
           </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Nexus OS</h1>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Jarvis OS</h1>
           <p className="text-slate-400 mt-2">Family AI Home Operating System</p>
         </div>
 

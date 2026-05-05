@@ -1650,6 +1650,45 @@ async def chat_handler(request: Request):
         try:
             await client.post(f"{STORAGE_SVC}/index/resume", headers={"X-Internal-Secret": INTERNAL_SECRET})
         except: pass
+@app.post("/api/auth/login")
+async def proxy_login(request: Request):
+    body = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{IDENTITY_SVC}/api/auth/login", json=body)
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/auth/change-password")
+async def proxy_change_password(request: Request):
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/auth/change-password", 
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.get("/api/auth/discover")
+async def proxy_discover(request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/auth/discover",
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.get("/api/users")
+async def proxy_users(request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/users",
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 @app.post("/api/generate")
 async def proxy_generate(request: Request):
     try:
