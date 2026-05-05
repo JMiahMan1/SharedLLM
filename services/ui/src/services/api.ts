@@ -145,6 +145,16 @@ export const api = {
     return resp.json();
   },
 
+  async testConnection(service: string, config: any): Promise<any> {
+    const resp = await fetch(`${BASE_URL}/api/auth/test-connection`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ service, config }),
+    });
+    if (!resp.ok) throw new Error('Failed to test connection');
+    return resp.json();
+  },
+
   async getWorkspaces(): Promise<Workspace[]> {
     const resp = await fetch(`${BASE_URL}/api/workspaces`, {
       headers: getHeaders(),
