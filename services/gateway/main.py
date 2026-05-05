@@ -688,7 +688,8 @@ async def orchestrate_code_change(
         "commit_message": f"feat: {refined_query[:50]}",
         "run_tests": True if test_cmd else False,
         "test_command": test_cmd,
-        "sync_to_provider": True
+        "sync_to_provider": True,
+        "create_parents": True
     }
     
     result = await workspace_runtime_request("POST", "/workflow/write-sync-commit", json_payload=workflow_payload)
