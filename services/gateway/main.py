@@ -948,6 +948,11 @@ async def chat_handler(request: Request):
         body = {}
     if not isinstance(body, dict): body = {}
     
+    # NEW: Extract the Bearer token sent by OpenWebUI
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        body["api_key"] = auth_header.split(" ")[1]
+    
     # Standardized API flags
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
