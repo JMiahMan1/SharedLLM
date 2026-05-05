@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Shield, 
@@ -67,6 +68,7 @@ const ServiceCard = ({ name, icon: Icon, color, status, onClick }: any) => (
 
 const Dashboard = () => {
   const [selectedService, setSelectedService] = useState<any>(null);
+  const navigate = useNavigate();
 
   const { data: health } = useQuery({
     queryKey: ['health'],
@@ -253,22 +255,58 @@ const Dashboard = () => {
             <div className="space-y-4">
                <div className="p-4 glass-card bg-purple-500/5 flex items-center justify-between border-purple-500/20">
                   <div>
-                    <p className="text-xs font-bold text-white">Advanced Settings</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">Configuration for this service is now managed in the Identity Hub.</p>
+                    <p className="text-xs font-bold text-white">Identity Hub Integration</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Sensitive credentials for this service are managed in the secure vault.</p>
                   </div>
-                  <button className="glass-button text-[10px] py-1.5 px-3 flex items-center gap-2">
-                    Open Hub <ExternalLink size={12} />
+                  <button 
+                    onClick={() => {
+                      setSelectedService(null);
+                      navigate('/identity');
+                    }}
+                    className="glass-button text-[10px] py-1.5 px-3 flex items-center gap-2"
+                  >
+                    Manage Vault <ExternalLink size={12} />
                   </button>
                </div>
                
-               <div className="grid gap-3">
-                 <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
-                    <span className="text-xs text-slate-400 italic">Log Level</span>
-                    <span className="text-xs text-emerald-400 font-mono">INFO</span>
+               <div className="grid gap-4">
+                 <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl">
+                    <div>
+                      <p className="text-xs font-bold text-white">Global Log Level</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Affects all SOA service nodes</p>
+                    </div>
+                    <select 
+                      className="glass-input text-[10px] py-1 px-2 h-8 w-24 bg-slate-800"
+                      value={health?.services[selectedService?.key] === 'OK' ? 'INFO' : 'DEBUG'}
+                      onChange={(e) => alert(`System Log Level changed to ${e.target.value}`)}
+                    >
+                      <option>DEBUG</option>
+                      <option>INFO</option>
+                      <option>WARNING</option>
+                      <option>ERROR</option>
+                    </select>
                  </div>
-                 <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
-                    <span className="text-xs text-slate-400 italic">Health Status</span>
-                    <span className="text-xs text-emerald-400 font-mono uppercase">Operational</span>
+
+                 <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl">
+                    <div>
+                      <p className="text-xs font-bold text-white">Maintenance Mode</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Put service into Read-Only state</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                    </label>
+                 </div>
+
+                 <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl">
+                    <div>
+                      <p className="text-xs font-bold text-white">Background Sync Pulse</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Periodic state reconciliation</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" defaultChecked className="sr-only peer" />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
                  </div>
                </div>
             </div>
