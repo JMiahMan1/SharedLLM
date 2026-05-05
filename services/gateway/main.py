@@ -989,7 +989,7 @@ async def chat_handler(request: Request):
         intent = "media_transport"
         confidence = 1.0
 
-    if is_code_request and intent != "unknown":
+    if is_code_request and intent not in ("unknown", "code_orchestrate"):
         log.info(f"Bypassing fast-path intent '{intent}' for coding query.")
         intent = "unknown"
         confidence = 0.0
