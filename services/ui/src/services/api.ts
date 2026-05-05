@@ -79,7 +79,7 @@ apiClient.interceptors.response.use(
 
 export const api = {
   // Auth & Identity
-  async login(username: string, password: string): Promise<{ access_token: string, username: string, is_admin: boolean }> {
+  async login(username: string, password: string): Promise<{ api_key: string, username: string, is_admin: boolean }> {
     const resp = await apiClient.post('/api/auth/login', { username, password });
     return resp.data;
   },
