@@ -167,6 +167,7 @@ def get_me(user: User = Depends(require_api_key)):
 
 @app.patch("/api/users/me", response_model=UserRead)
 def update_me(body: UserUpdate, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    log.info(f"[update_me] Received update for {user.username}: {body.model_dump(exclude_unset=True)}")
     update_data = body.model_dump(exclude_unset=True)
     
     # Handle encrypted fields
