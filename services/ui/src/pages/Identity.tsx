@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { 
   Cloud, 
-  GitBranch, 
   Music, 
   Mic, 
   Lock,
@@ -13,7 +12,6 @@ import {
   Shield,
   Key,
   Home,
-  Github,
   Server,
   Save,
   X
@@ -309,7 +307,7 @@ const Identity = () => {
           />
           <IntegrationTile 
             name="GitHub" 
-            icon={Github} 
+            icon={Server} 
             color="slate" 
             userData={fullUser}
             configKeys={{
