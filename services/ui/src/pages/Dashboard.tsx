@@ -20,7 +20,8 @@ import {
   LucideIcon
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { api, HealthStatus, LogEntry } from '../services/api';
+import { api } from '../services/api';
+import type { HealthStatus, LogEntry } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 

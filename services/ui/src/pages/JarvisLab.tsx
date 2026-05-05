@@ -12,7 +12,8 @@ import {
   ChevronRight, 
   Monitor 
 } from 'lucide-react';
-import { api, LogEntry } from '../services/api';
+import { api } from '../services/api';
+import type { LogEntry } from '../services/api';
 import toast from 'react-hot-toast';
 
 const JarvisLab = () => {

@@ -19,7 +19,8 @@ import {
   LucideIcon
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, UserProfile } from '../services/api';
+import { api } from '../services/api';
+import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
 
 interface DeviceCardProps {
