@@ -1,8 +1,11 @@
-import { Search, Bell } from 'lucide-react';
+import { Search, Bell, LogOut } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 
 const Header = () => {
+  const { user, logout } = useAuth();
+  
   // Real-time widget polling the Gateway’s /health/ready endpoint
   const { data: health, isLoading, error } = useQuery({
     queryKey: ['health'],
@@ -43,12 +46,18 @@ const Header = () => {
 
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <p className="text-sm font-semibold text-white">Admin User</p>
-            <p className="text-xs text-slate-500">Root Access</p>
+            <p className="text-sm font-semibold text-white">{user?.username || 'Guest'}</p>
+            <p className="text-xs text-slate-500">{user?.is_admin ? 'Admin' : 'Family Member'}</p>
           </div>
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold border border-white/20">
-            A
-          </div>
+          <button 
+            onClick={logout}
+            className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold border border-white/20 hover:scale-110 transition-transform group relative"
+          >
+            {user?.username?.[0].toUpperCase() || 'G'}
+            <div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+              <LogOut size={16} />
+            </div>
+          </button>
         </div>
       </div>
     </header>

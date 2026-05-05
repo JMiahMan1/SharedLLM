@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { 
   Cloud, 
   GitBranch, 
@@ -6,13 +7,127 @@ import {
   FolderLock,
   Eye,
   EyeOff,
-  ChevronRight
+  ChevronRight,
+  UserPlus,
+  RefreshCcw,
+  Shield,
+  Key
 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+
+const UserManagement = () => {
+  const { user: currentUser } = useAuth();
+  const queryClient = useQueryClient();
+  const [newPassword, setNewPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const { data: users, isLoading } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => api.getLogs(50).then(() => fetch('/api/users', { headers: { 'Authorization': `Bearer ${localStorage.getItem('nexus_api_key')}` }}).then(r => r.json())),
+    enabled: !!currentUser?.is_admin
+  });
+
+  const discoverMutation = useMutation({
+    mutationFn: () => api.discoverUsers(),
+    onSuccess: (data) => {
+      console.log('Discovered users:', data);
+    }
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: (pwd: string) => api.changePassword(pwd),
+    onSuccess: () => {
+      setIsChangingPassword(false);
+      setNewPassword('');
+      alert('Password updated successfully');
+    }
+  });
+
+  if (!currentUser?.is_admin) return null;
+
+  return (
+    <section className="glass-panel p-8">
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h3 className="text-xl font-bold text-white flex items-center gap-2">
+            <Shield size={22} className="text-purple-400" />
+            User Management
+          </h3>
+          <p className="text-sm text-slate-400 mt-1">Manage family members and system access</p>
+        </div>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => discoverMutation.mutate()}
+            disabled={discoverMutation.isPending}
+            className="glass-button text-xs py-2 px-4 flex items-center gap-2"
+          >
+            <RefreshCcw size={14} className={discoverMutation.isPending ? 'animate-spin' : ''} />
+            {discoverMutation.isPending ? 'Scanning...' : 'Discover Users'}
+          </button>
+          <button className="glass-button text-xs py-2 px-4 flex items-center gap-2 bg-purple-600/40 border-purple-500/30">
+            <UserPlus size={14} /> Add User
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {isLoading ? (
+          <p className="text-slate-500 italic animate-pulse">Loading system users...</p>
+        ) : (
+          users?.map((u: any) => (
+            <div key={u.id} className="flex items-center justify-between p-4 glass-card group">
+              <div className="flex items-center gap-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold border ${
+                  u.is_system_default ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                }`}>
+                  {u.username[0].toUpperCase()}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-white">{u.display_name || u.username}</span>
+                    {u.is_admin && <span className="text-[10px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded border border-purple-500/20">Admin</span>}
+                  </div>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">{u.is_system_default ? 'System Default' : 'Family Member'}</p>
+                </div>
+              </div>
+              <button className="text-xs text-slate-500 hover:text-white transition-colors">Edit Settings</button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="mt-8 pt-8 border-t border-white/5">
+        <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+          <Key size={16} className="text-yellow-400" />
+          Security
+        </h4>
+        <div className="flex gap-4">
+          <input 
+            type="password"
+            placeholder="New password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="glass-input flex-1 text-sm"
+          />
+          <button 
+            onClick={() => changePasswordMutation.mutate(newPassword)}
+            disabled={!newPassword || changePasswordMutation.isPending}
+            className="glass-button px-6 bg-yellow-500/20 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/30 disabled:opacity-50"
+          >
+            Update Password
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const IntegrationTile = ({ name, icon: Icon, color, connected }: any) => (
-  <div className="glass-card p-6 flex flex-col gap-4">
+  <div className="glass-card p-6 flex flex-col gap-4 group">
     <div className="flex items-center justify-between">
-      <div className={`p-3 rounded-xl bg-${color}-500/20 text-${color}-400 border border-${color}-500/20`}>
+      <div className={`p-3 rounded-xl bg-${color}-500/20 text-${color}-400 border border-${color}-500/20 group-hover:scale-110 transition-transform`}>
         <Icon size={24} />
       </div>
       <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded-md ${connected ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
@@ -30,15 +145,25 @@ const IntegrationTile = ({ name, icon: Icon, color, connected }: any) => (
 );
 
 const Identity = () => {
+  const { user } = useAuth();
+
   return (
-    <div className="space-y-8">
-      <header>
-        <h2 className="text-2xl font-bold text-white">Identity Hub</h2>
-        <p className="text-slate-400">Manage your personal credentials and AI persona</p>
+    <div className="space-y-12">
+      <header className="flex justify-between items-end">
+        <div>
+          <h2 className="text-3xl font-bold text-white tracking-tight">Identity Hub</h2>
+          <p className="text-slate-400 mt-2">Manage your personal credentials and system access</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Logged in as</p>
+          <p className="text-purple-400 font-mono font-bold">{user?.username}</p>
+        </div>
       </header>
 
+      {user?.is_admin && <UserManagement />}
+
       <section>
-        <h3 className="text-lg font-bold text-white mb-6">Integration Gallery</h3>
+        <h3 className="text-xl font-bold text-white mb-6">Service Integrations</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <IntegrationTile name="Nextcloud" icon={Cloud} color="blue" connected={true} />
           <IntegrationTile name="GitHub" icon={GitBranch} color="slate" connected={true} />
