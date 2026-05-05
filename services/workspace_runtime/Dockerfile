@@ -10,9 +10,14 @@ RUN apt-get update && apt-get install -y \
     iputils-ping \
     net-tools \
     vim-tiny \
+    nodejs \
+    npm \
+    golang \
+    yamllint \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir flake8 black mypy
 COPY . .
 EXPOSE 8007
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8007"]
