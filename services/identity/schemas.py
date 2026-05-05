@@ -123,3 +123,11 @@ class DiscoverUser(BaseModel):
     username: str
     source: str  # e.g. "Home Assistant", "Nextcloud"
     display_name: Optional[str] = None
+
+class GlobalSettingRead(BaseModel):
+    key: str
+    value: str
+    description: Optional[str] = None
+
+class GlobalSettingUpdate(BaseModel):
+    value: str

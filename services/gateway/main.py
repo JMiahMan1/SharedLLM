@@ -1703,6 +1703,28 @@ async def proxy_update_user(username: str, request: Request):
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
+@app.get("/api/settings")
+async def proxy_get_settings(request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/settings",
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.patch("/api/settings/{key}")
+async def proxy_update_setting(key: str, request: Request):
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.patch(
+            f"{IDENTITY_SVC}/api/settings/{key}",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 @app.get("/api/users")
 async def proxy_users(request: Request):
     auth_header = request.headers.get("Authorization")
