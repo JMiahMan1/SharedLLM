@@ -77,7 +77,7 @@ class IntentEngine:
             (r"^(?:play|listen to|listen|watch)\b", "play_media"),
             (r"^(?:resume)\b", "play_media"),
             (r"^(?:pause|stop)\b", "pause_media"),
-            (r"^(?:fix|update|implement|change|patch)\b.*(?:code|file|module|service)", "code_orchestrate"),
+            (r"^(?:fix|update|implement|change|patch|create)\b.*(?:code|file|module|service|script|program)", "code_orchestrate"),
         )
         for pattern, intent in regex_intent_map:
             if re.match(pattern, q, flags=re.IGNORECASE):
