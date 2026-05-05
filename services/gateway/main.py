@@ -1669,6 +1669,18 @@ async def proxy_change_password(request: Request):
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
+@app.post("/api/auth/test-connection")
+async def proxy_test_connection(request: Request):
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/auth/test-connection", 
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 @app.get("/api/auth/discover")
 async def proxy_discover(request: Request):
     auth_header = request.headers.get("Authorization")
