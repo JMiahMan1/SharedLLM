@@ -77,6 +77,7 @@ class IntentEngine:
             (r"^(?:play|listen to|listen|watch)\b", "play_media"),
             (r"^(?:resume)\b", "play_media"),
             (r"^(?:pause|stop)\b", "pause_media"),
+            (r"^(?:toggle|flip)\b", "toggle"),
             (r"^(?:fix|update|implement|change|patch|create)\b.*(?:code|file|module|service|script|program)", "code_orchestrate"),
         )
         for pattern, intent in regex_intent_map:
@@ -94,6 +95,8 @@ class IntentEngine:
             return "play_media", 0.7
         if any(token in q for token in ("pause", "stop")):
             return "pause_media", 0.7
+        if any(token in q for token in ("toggle", "flip")):
+            return "toggle", 0.75
         return "unknown", 0.0
 
     def classify(self, query: str) -> Tuple[str, float]:
