@@ -15,33 +15,23 @@ from sqlmodel import Session, SQLModel, create_engine, select
 try:
     from .models import User, DeviceAssignment
     from .schemas import (
-        ResolveRequest, ResolvedCredentials,
-        UserCreate, UserRead,
-        DeviceAssignmentCreate, DeviceAssignmentRead,
+        ResolveRequest, ResolvedCredentials, 
+        UserCreate, UserRead, UserUpdate,
+        DeviceAssignmentRead, DeviceAssignmentCreate,
+        LoginRequest, LoginResponse, DiscoverUser
     )
     from .crypto import encrypt, decrypt
     from .seed import seed_from_env, pwd_context
-except (ImportError, ValueError):
-    try:
-        from identity.models import User, DeviceAssignment
-        from identity.schemas import (
-            ResolveRequest, ResolvedCredentials,
-            UserCreate, UserRead,
-            DeviceAssignmentCreate, DeviceAssignmentRead,
-            LoginRequest, LoginResponse, DiscoverUser
-        )
-        from identity.crypto import encrypt, decrypt
-        from identity.seed import seed_from_env, pwd_context
-    except ImportError:
-        from models import User, DeviceAssignment
-        from schemas import (
-            ResolveRequest, ResolvedCredentials,
-            UserCreate, UserRead,
-            DeviceAssignmentCreate, DeviceAssignmentRead,
-            LoginRequest, LoginResponse, DiscoverUser
-        )
-        from crypto import encrypt, decrypt
-        from seed import seed_from_env, pwd_context
+except (ImportError, ModuleNotFoundError):
+    from models import User, DeviceAssignment
+    from schemas import (
+        ResolveRequest, ResolvedCredentials, 
+        UserCreate, UserRead, UserUpdate,
+        DeviceAssignmentRead, DeviceAssignmentCreate,
+        LoginRequest, LoginResponse, DiscoverUser
+    )
+    from crypto import encrypt, decrypt
+    from seed import seed_from_env, pwd_context
 
 import httpx
 
