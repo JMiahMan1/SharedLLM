@@ -1570,15 +1570,38 @@ async def chat_handler(request: Request):
                 }
                 
                 if action_name in ("index_storage", "ha_status"):
-                     # Trigger internal logic by simulating the intent
-                     # (Simplification: just return a message for now or call the same logic)
                      log.info(f"[SlowPath] Intercepted internal tool call: {action_name}")
-                     # For now, we'll just say it's triggered. 
-                     # Real fix: refactor these into endpoints the Gateway can call on itself or RAG.
+                     
+                     # Actual execution logic
                      if action_name == "index_storage":
-                         final_answer = "I have started indexing your library in the background."
-                     else:
-                         final_answer = "I've triggered a status check. Please check back in a moment."
+                         async with httpx.AsyncClient(timeout=300.0) as client:
+                             try:
+                                 path = payload.get("path", "/")
+                                 idx_payload = {
+                                     "provider": {"kind": "nextcloud", "settings": {
+                                         "url": creds.get("nextcloud_url"),
+                                         "username": creds.get("nextcloud_user"),
+                                         "password": creds.get("nextcloud_pass")
+                                     }},
+                                     "path": path, "recursive": True
+                                 }
+                                 await client.post(f"{STORAGE_SVC}/index/full", json=idx_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                                 exec_msg = f"I have started indexing '{path}' in the background."
+                             except Exception as e:
+                                 exec_msg = f"Failed to trigger index: {e}"
+                     else: # ha_status
+                         status_res = await client.get(f"{RAG_SVC}/rag/ha/status", params={"user_id": user_id}, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                         if status_res.status_code == 200:
+                             s_data = status_res.json().get("data", {})
+                             ts = s_data.get("timestamp", 0)
+                             timestamp = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') if ts else "Never"
+                             exec_msg = f"HA Status: Last sync at {timestamp}. {s_data.get('count', 0)} entities tracked."
+                         else:
+                             exec_msg = "No HA sync data found."
+
+                     # Strip JSON and update final_answer
+                     clean_answer = re.sub(r"```json.*?```", "", final_answer, flags=re.DOTALL).strip()
+                     final_answer = f"{exec_msg}\n\n{clean_answer}" if clean_answer else exec_msg
                      endpoint = None # Skip the execute_command block
                 else:
                     endpoint = action_to_endpoint.get(action_name)
