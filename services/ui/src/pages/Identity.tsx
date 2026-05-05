@@ -21,9 +21,11 @@ import {
   Trash2,
   Edit3,
   Play,
-  Volume2,
+  Mic,
+  Activity,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Circle
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
@@ -187,26 +189,31 @@ const IntegrationTile = ({ name, icon: Icon, color, configKeys, userData }: any)
   );
 };
 
-const VoicePersonaCard = ({ name, description, active, onClick }: any) => (
-  <div 
-    onClick={onClick}
-    className={`glass-panel p-6 flex flex-col gap-4 cursor-pointer transition-all border-2 ${
-      active ? 'border-purple-500 bg-purple-500/10' : 'border-transparent hover:border-white/10'
-    }`}
-  >
-    <div className="flex justify-between items-start">
-      <div className={`p-3 rounded-xl ${active ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
-        <Volume2 size={24} />
-      </div>
-      {active && <span className="text-[10px] font-bold uppercase tracking-widest text-purple-400 px-2 py-1 rounded-full bg-purple-500/10">Active</span>}
+const VoiceEnrollmentCard = ({ enrolled }: any) => (
+  <div className={`glass-panel p-8 flex flex-col items-center text-center gap-6 border-2 ${enrolled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-dashed border-slate-700'}`}>
+    <div className={`p-5 rounded-full ${enrolled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+      <Mic size={40} />
     </div>
     <div>
-      <h4 className="font-bold text-white">{name}</h4>
-      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{description}</p>
+      <h4 className="font-bold text-white text-lg">Your Voice Profile</h4>
+      <p className="text-sm text-slate-400 mt-2 max-w-sm">
+        {enrolled 
+          ? "Jarvis has learned your unique vocal frequency and can identify you automatically." 
+          : "Jarvis doesn't recognize your voice yet. Enroll now to enable personalized responses and biometric security."}
+      </p>
     </div>
-    <button className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors mt-auto">
-      <Play size={12} /> Preview Voice
-    </button>
+    <div className="flex gap-4 w-full max-w-xs">
+       <button className="glass-button flex-1 py-3 bg-purple-600/20 border-purple-500/30 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest">
+         <Activity size={16} />
+         {enrolled ? "Retrain Voice" : "Start Enrollment"}
+       </button>
+    </div>
+    {enrolled && (
+      <div className="flex items-center gap-2">
+        <CheckCircle size={14} className="text-emerald-500" />
+        <span className="text-[10px] uppercase font-bold tracking-widest text-emerald-500">Identity Verified</span>
+      </div>
+    )}
   </div>
 );
 
@@ -358,28 +365,13 @@ const Identity = () => {
             <Mic size={24} />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-white">Voice Persona</h3>
-            <p className="text-sm text-slate-400">Select how Jarvis speaks to you</p>
+            <h3 className="text-xl font-bold text-white">Voice Identification</h3>
+            <p className="text-sm text-slate-400">Manage your biometric voice profile for Jarvis recognition</p>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <VoicePersonaCard 
-            name="Jarvis" 
-            description="The classic, sophisticated British assistant tone." 
-            active={true}
-          />
-          <VoicePersonaCard 
-            name="Samantha" 
-            description="A warm, empathetic AI voice with a natural flow." 
-          />
-          <VoicePersonaCard 
-            name="Friday" 
-            description="Professional, efficient, and slightly sarcastic." 
-          />
-          <VoicePersonaCard 
-            name="Ultron" 
-            description="Deep, resonating, and authoritative presence." 
-          />
+        
+        <div className="max-w-3xl">
+           <VoiceEnrollmentCard enrolled={false} />
         </div>
       </section>
 
