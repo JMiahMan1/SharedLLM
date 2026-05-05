@@ -79,6 +79,9 @@ class UserUpdate(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None
+    git_url: Optional[str] = None
+    git_user: Optional[str] = None
+    git_token: Optional[str] = None
     voice_fingerprint: Optional[str] = None
 
 
@@ -97,6 +100,8 @@ class UserRead(BaseModel):
     gitlab_user: Optional[str] = None
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
+    git_url: Optional[str] = None
+    git_user: Optional[str] = None
     voice_fingerprint: Optional[str] = None
     # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses
 
