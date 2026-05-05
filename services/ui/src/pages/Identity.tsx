@@ -4,7 +4,7 @@ import {
   GitBranch, 
   Music, 
   Mic, 
-  FolderLock,
+  Lock,
   Eye,
   EyeOff,
   ChevronRight,
@@ -358,7 +358,7 @@ const Identity = () => {
 
         <section className="glass-panel p-8">
           <h3 className="font-bold text-white mb-6 flex items-center gap-2">
-            <FolderLock size={18} className="text-emerald-400" />
+            <Lock size={18} className="text-emerald-400" />
             Security Context
           </h3>
           <div className="p-6 bg-white/5 rounded-2xl border border-white/5">
