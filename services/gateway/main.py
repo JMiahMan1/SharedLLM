@@ -427,7 +427,7 @@ async def workspace_runtime_request(method: str, path: str, *, json_payload: dic
       json=json_payload,
       params=params,
       headers={"X-Internal-Secret": INTERNAL_SECRET},
-      timeout=30.0,
+      timeout=120.0,
     )
     if resp.status_code != 200:
       raise HTTPException(status_code=resp.status_code, detail=f"Workspace runtime request failed: {resp.text}")
