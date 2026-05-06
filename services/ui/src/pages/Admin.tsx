@@ -63,11 +63,10 @@ const DeviceCard: FC<DeviceCardProps> = ({ name, type, icon: Icon, assignedTo, o
 
 interface UserRowProps {
   user: UserProfile;
-  onEdit: (u: UserProfile) => void;
   onDelete: (u: UserProfile) => void;
 }
 
-const UserRow: FC<UserRowProps> = ({ user, onEdit, onDelete }) => (
+const UserRow: FC<UserRowProps> = ({ user, onDelete }) => (
   <div className="glass-panel p-5 flex items-center justify-between group hover:border-purple-500/20 transition-all">
     <div className="flex items-center gap-4">
       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black shadow-lg ${user.is_admin ? 'bg-indigo-600 text-white shadow-indigo-500/20' : 'bg-slate-800 text-slate-400 shadow-black/20'}`}>
@@ -84,7 +83,6 @@ const UserRow: FC<UserRowProps> = ({ user, onEdit, onDelete }) => (
       </div>
     </div>
     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-       <button onClick={() => onEdit(user)} className="p-2 hover:bg-white/5 rounded-xl text-slate-500 hover:text-white transition-all"><Edit3 size={16} /></button>
        {!user.is_system_default && (
          <button onClick={() => onDelete(user)} className="p-2 hover:bg-red-500/10 rounded-xl text-slate-500 hover:text-red-400 transition-all"><Trash2 size={16} /></button>
        )}
@@ -267,14 +265,10 @@ const Admin = () => {
                 >
                   <UserRow 
                     user={u} 
-                    onEdit={() => toast('Edit feature coming in v1.2', { icon: '⚒️' })} 
                     onDelete={handleDelete} 
                   />
                 </div>
               ))}
-              <button className="w-full py-5 border-2 border-dashed border-white/10 rounded-2xl text-slate-500 hover:text-white hover:border-white/30 transition-all text-xs font-black uppercase tracking-widest flex items-center justify-center gap-3 bg-black/10">
-                <UserPlus size={18} /> Invite New Member
-              </button>
             </div>
           </section>
 
