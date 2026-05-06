@@ -66,3 +66,11 @@ class OllamaGenerateRequest(BaseModel):
     template: Optional[str] = None
     context: Optional[List[int]] = None
     options: Optional[Dict[str, Any]] = None
+
+class StorageListRequest(BaseModel):
+    path: str = "/"
+    recursive: bool = False
+
+class StorageIndexRequest(BaseModel):
+    path: str = "/"
+    recursive: bool = True

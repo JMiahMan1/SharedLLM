@@ -37,7 +37,7 @@ const HelpTooltip: React.FC<HelpTooltipProps> = ({ docName, sectionTitle, label 
     const startLine = lines[startIndex];
     const headingLevel = startLine.match(/^(#+)/)?.[1]?.length || 0;
     
-    let endIndex = lines.slice(startIndex + 1).findIndex(l => {
+    const endIndex = lines.slice(startIndex + 1).findIndex(l => {
       const currentLevel = l.match(/^(#+)/)?.[1]?.length || 0;
       return currentLevel > 0 && currentLevel <= headingLevel;
     });

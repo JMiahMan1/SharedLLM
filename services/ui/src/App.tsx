@@ -8,6 +8,7 @@ import Admin from './pages/Admin';
 import Identity from './pages/Identity';
 import Communication from './pages/Communication';
 import JarvisLab from './pages/JarvisLab';
+import KnowledgeHub from './pages/KnowledgeHub';
 import Docs from './pages/Docs';
 import Login from './pages/Login';
 
@@ -20,7 +21,7 @@ const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.Re
   
   if (isLoading) return (
     <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
-      <div className="animate-pulse text-indigo-500 font-bold text-xl">Initializing Nexus...</div>
+      <div className="animate-pulse text-indigo-500 font-bold text-xl">Initializing Jarvis OS...</div>
     </div>
   );
   
@@ -64,6 +65,7 @@ function App() {
             <Route path="/identity" element={<ProtectedRoute><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute><Communication /></ProtectedRoute>} />
             <Route path="/lab" element={<ProtectedRoute requireAdmin={true}><JarvisLab /></ProtectedRoute>} />
+            <Route path="/knowledge" element={<ProtectedRoute><KnowledgeHub /></ProtectedRoute>} />
             <Route path="/docs" element={<ProtectedRoute><Docs /></ProtectedRoute>} />
           </Routes>
         </Router>

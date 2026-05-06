@@ -131,6 +131,23 @@ export interface SmokeTestResult {
   results: string;
 }
 
+export interface StorageEntry {
+  path: string;
+  name: string;
+  is_dir: boolean;
+  size?: number | null;
+  mtime?: string | null;
+  content_type?: string | null;
+  indexed?: boolean;
+}
+
+export interface RagStats {
+  total_chunks: number;
+  total_documents: number;
+  last_indexed?: string;
+  providers?: string[];
+}
+
 const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
   ...raw,
   full_name: raw.full_name ?? raw.display_name ?? '',
@@ -423,6 +440,21 @@ export const api = {
 
   async runSmokeTest(): Promise<SmokeTestResult> {
     const resp = await apiClient.post('/api/admin/tests/smoke');
+    return resp.data;
+  },
+
+  async getStorageFiles(path: string): Promise<StorageEntry[]> {
+    const resp = await apiClient.post('/api/storage/list', { path, recursive: false });
+    return resp.data.entries || [];
+  },
+
+  async triggerIndexing(path: string, recursive = true): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/storage/index', { path, recursive });
+    return resp.data;
+  },
+
+  async getRagStats(): Promise<RagStats> {
+    const resp = await apiClient.get('/api/storage/stats');
     return resp.data;
   },
 };

@@ -18,8 +18,7 @@ import {
   Globe,
   LockKeyhole,
   Smartphone,
-  User,
-  UserPlus
+  User
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -550,7 +549,7 @@ const Identity = () => {
                           try {
                             await navigator.clipboard.writeText(res.key);
                             toast.success('Key copied to clipboard! Save it now, it will not be shown again.', { duration: 8000 });
-                          } catch (err) {
+                          } catch {
                             prompt('Key generated! COPY IT NOW, it will not be shown again:', res.key);
                           }
                           queryClient.invalidateQueries({ queryKey: ['api-keys'] });
