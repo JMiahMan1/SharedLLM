@@ -12,3 +12,5 @@ redis
 pytest
 pytest-asyncio
 pytest-mock
+playwright
+html2text
