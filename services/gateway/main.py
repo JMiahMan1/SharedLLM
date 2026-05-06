@@ -221,7 +221,15 @@ async def shutdown_event():
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost",
+        "http://localhost:5173",
+        "http://localhost:8080",
+        "http://192.168.2.205",
+        "http://192.168.2.205:8080",
+        "https://ai.local",
+        "http://ai.local"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -294,6 +302,10 @@ async def get_documentation(
     # For docs, we'll check for a valid API Key or internal secret
     api_key = request.headers.get("X-API-Key")
     internal_secret = request.headers.get("X-Internal-Secret")
+    auth_header = request.headers.get("Authorization")
+    
+    if not api_key and auth_header and auth_header.startswith("Bearer "):
+        api_key = auth_header.split(" ")[1]
     
     if not internal_secret == INTERNAL_SECRET and not api_key:
         # Fallback: check query params if needed, but header is preferred
@@ -1099,9 +1111,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
-        body["token"] = auth_header.split(" ")[1] # Identity expects 'token' for resolution
+        body["api_key"] = auth_header.split(" ")[1] # Identity expects 'api_key' for resolution
     elif "api_key" in body:
-        body["token"] = body["api_key"]
+        # body["api_key"] is already set
+        pass
     
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)

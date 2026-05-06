@@ -545,9 +545,14 @@ const Identity = () => {
               <div className="p-3 rounded-2xl bg-emerald-500/20 text-emerald-400">
                 <Lock size={24} />
               </div>
-              <div>
-                <h3 className="text-xl font-bold text-white">External Client Access</h3>
-                <p className="text-sm text-slate-400">Manage API keys for OpenWebUI, Lobechat, and other compatible interfaces</p>
+              <div className="flex items-center gap-2">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    External Client Access
+                    <HelpTooltip docName="integrations.md" sectionTitle="External Client Setup" label="API Keys" />
+                  </h3>
+                  <p className="text-sm text-slate-400">Manage API keys for OpenWebUI, Lobechat, and other compatible interfaces</p>
+                </div>
               </div>
             </div>
             
