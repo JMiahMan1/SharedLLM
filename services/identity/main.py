@@ -186,6 +186,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         git_url=user.git_url,
         git_user=user.git_user,
         git_token=decrypt(user.git_token_enc) if user.git_token_enc else None
+
     )
 
 @app.get("/health")

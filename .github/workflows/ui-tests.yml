@@ -28,6 +28,7 @@ jobs:
       run: |
         cd services/ui
         npm ci
+        npm install -D msw
 
     - name: Run Lint
       run: |

@@ -57,6 +57,7 @@ services:
     volumes:
       - chroma_data:/data
       - huggingface_cache:/root/.cache/huggingface
+      - qdrant_cache:/root/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
 
   gateway:
@@ -81,6 +82,8 @@ services:
       - TZ=America/Phoenix
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
+      - huggingface_cache:/root/.cache/huggingface
+      - qdrant_cache:/root/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
 
   logging:
@@ -157,5 +160,7 @@ volumes:
   logging_data:
   redis_data:
   huggingface_cache:
+  qdrant_cache:
   caddy_data:
   caddy_config:
+
