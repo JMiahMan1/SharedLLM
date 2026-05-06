@@ -1303,6 +1303,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             
             # 8. Handle tool execution at the end of the stream
             log.info(f"[StreamGenerator] Full response length: {len(full_ans)}")
+            log.info(f"[StreamGenerator] RAW RESPONSE: {full_ans}")
             if "```" in full_ans:
                 log.info(f"[StreamGenerator] Block detected. Content preview: {full_ans[full_ans.find('```'):][:100]}...")
                 
