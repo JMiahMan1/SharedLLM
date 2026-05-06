@@ -226,30 +226,24 @@ async def sync_files(payload: dict):
             
     return {"status": "SUCCESS", "count": 0}
 
-@app.post("/rag/purge", dependencies=[Depends(require_internal)])
-async def purge(payload: dict):
+@app.post("/rag/purge/{collection_name}", dependencies=[Depends(require_internal)])
+async def purge_collection_endpoint(collection_name: str, payload: dict):
     """
-    Purges entries from a collection based on a filter.
+    Deletes entries from a collection based on filters.
+    If no filters provided, deletes everything the user owns in that collection.
     """
-    collection_name = payload.get("collection_name")
-    user_id = payload.get("user_id")
+    user_id = payload.get("user_id", "default")
     filter_meta = payload.get("filter", {})
     
-    if not collection_name or not user_id:
-        raise HTTPException(status_code=400, detail="collection_name and user_id required")
-        
     collection = get_collection(collection_name)
     
-    # Always enforce user_id for safety
-    conditions = [{"user_id": user_id}]
-    for k, v in filter_meta.items():
-        conditions.append({k: v})
-        
-    where_filter = {"$and": conditions} if len(conditions) > 1 else conditions[0]
-        
+    where_filter = {"user_id": user_id}
+    if filter_meta:
+        where_filter = {"$and": [{"user_id": user_id}, filter_meta]}
+
     try:
         collection.delete(where=where_filter)
-        log.info(f"Purged entries from {collection_name} for user {user_id} with filter {filter_meta}")
+        log.info(f"Purged entries from {collection_name} for user {user_id}")
         return {"status": "SUCCESS", "message": f"Purged entries from {collection_name}"}
     except Exception as e:
         log.error(f"Purge failed: {e}")
