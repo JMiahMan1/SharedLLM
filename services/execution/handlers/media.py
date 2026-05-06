@@ -12,7 +12,8 @@ log = logging.getLogger("execution.media")
 
 async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     ctx = req.user_context
-    log.info(f"[media/play] user={ctx.user} entity={req.entity_id}")
+    full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
+    log.info(f"[media/play] user={ctx.user} entity={full_entity_id} (original={req.entity_id})")
 
     # Music Assistant library lookup path.
     if req.query:
@@ -30,7 +31,7 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
                 ctx.ha_token,
                 "music_assistant",
                 "play_media",
-                req.entity_id,
+                full_entity_id,
                 {
                     "media_id": req.query,
                     "media_type": media_type,
@@ -78,16 +79,16 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         service_data["enqueue"] = req.enqueue
 
     # Auto-power-on check
-    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, req.entity_id)
+    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
     if state and state.get("state") == "off":
-        log.info(f"[media/play] Device {req.entity_id} is off. Turning on...")
-        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", req.entity_id)
+        log.info(f"[media/play] Device {full_entity_id} is off. Turning on...")
+        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", full_entity_id)
         await asyncio.sleep(2)
 
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         "media_player", "play_media",
-        req.entity_id, service_data or None,
+        full_entity_id, service_data or None,
     )
     
     if result.get("ok"):
@@ -107,8 +108,9 @@ async def handle_media_transport(req: MediaTransportRequest) -> ExecutionResult:
     }
     
     service = button_map.get(req.command.lower(), req.command)
-    domain = "media_player"
-    target_entity = req.entity_id
+    full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
+    domain = full_entity_id.split(".")[0]
+    target_entity = full_entity_id
     
     # If it's a "button" command (Remote), switch to remote domain
     if service.isupper():

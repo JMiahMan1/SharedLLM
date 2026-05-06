@@ -77,15 +77,32 @@ def _ok(message: str, service: str, detail: dict | None = None) -> ExecutionResu
 def _fail(message: str, service: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=message, service=service, detail=detail)
 
+async def verify_entity_access(ctx: UserContext, entity_id: str) -> bool:
+    """
+    Checks if the user has permission to control this entity.
+    Admins bypass all checks.
+    """
+    if ctx.is_admin:
+        return True
+    
+    # In a stricter system, we would call Identity service here to check DeviceAssignment.
+    # For now, we allow the request but log it.
+    log.info(f"Access check for {ctx.user} on {entity_id}: ALLOWED (Implicit)")
+    return True
+
 
 # ─── Domain Endpoints ──────────────────────────────────────────────────────────
 
 @app.post("/execute/light", response_model=ExecutionResult)
 async def execute_light(req: LightControlRequest):
+    if not await verify_entity_access(req.user_context, req.entity_id):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
     return await light.handle_light(req)
 
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
+    if not await verify_entity_access(req.user_context, req.entity_id):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
     return await media.handle_media_play(req)
 
 @app.post("/execute/media/transport", response_model=ExecutionResult)
@@ -98,6 +115,8 @@ async def execute_tv_cast(req: TVCastRequest):
 
 @app.post("/execute/climate", response_model=ExecutionResult)
 async def execute_climate(req: climate.ClimateRequest):
+    if not await verify_entity_access(req.user_context, req.entity_id):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
     return await climate.handle_climate(req)
 
 @app.post("/execute/security", response_model=ExecutionResult)
