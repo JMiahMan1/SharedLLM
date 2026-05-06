@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import re
 import traceback
 from datetime import datetime
-from .schemas import ChatRequest, ResolvedCredentials
+from schemas import ChatRequest, ResolvedCredentials
 
 def _make_ollama_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
@@ -87,10 +87,10 @@ def _make_openai_response(message: str, model: str, intent: str = None, debug_co
 
 # --- Imports from internal modules ---
 try:
-    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
-    from .intent_engine import engine
-    from .history import get_history, update_history, ping_redis, get_long_term_memory
-    from .prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+    from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
+    from intent_engine import engine
+    from history import get_history, update_history, ping_redis, get_long_term_memory
+    from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 except (ImportError, ValueError):
     try:
       from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
