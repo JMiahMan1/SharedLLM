@@ -97,6 +97,8 @@ const Admin = () => {
   const [newSettingKey, setNewSettingKey] = useState('');
   const [newSettingValue, setNewSettingValue] = useState('');
   const [discoveryFilter, setDiscoveryFilter] = useState('');
+  const [passwordModalUser, setPasswordModalUser] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
 
   const { data: users = [] } = useQuery<UserProfile[]>({
     queryKey: ['users'],
@@ -227,6 +229,16 @@ const Admin = () => {
     },
     onError: (error: Error) => toast.error(error.message || 'Failed to save setting'),
   });
+  
+  const setPasswordMutation = useMutation({
+    mutationFn: ({ username, password }: { username: string; password: string }) => api.adminSetPassword(username, password),
+    onSuccess: () => {
+      setPasswordModalUser(null);
+      setNewPassword('');
+      toast.success('Password updated successfully');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to update password'),
+  });
 
   const filteredDiscoveredUsers = useMemo(() => {
     return discoveredUsers.filter((user) => {
@@ -310,6 +322,13 @@ const Admin = () => {
                     aria-label={`Edit ${user.username}`}
                   >
                     <Edit3 size={16} />
+                  </button>
+                  <button
+                    onClick={() => setPasswordModalUser(user.username)}
+                    className="rounded-xl p-2 text-slate-400 transition hover:bg-indigo-500/10 hover:text-indigo-300"
+                    aria-label={`Change password for ${user.username}`}
+                  >
+                    <KeyRound size={16} />
                   </button>
                   {!user.is_system_default && (
                     <button
@@ -672,6 +691,53 @@ const Admin = () => {
             >
               <Save size={14} />
               Save User
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(passwordModalUser)}
+        onClose={() => {
+          setPasswordModalUser(null);
+          setNewPassword('');
+        }}
+        title={`Set Password for @${passwordModalUser}`}
+      >
+        <div className="space-y-6">
+          <p className="text-sm text-slate-400">
+            Enter a new password for this user. They will be able to log in with this immediately.
+          </p>
+          <label className="block space-y-2">
+            <span className="text-xs font-black uppercase tracking-widest text-slate-500">New Password</span>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="glass-input w-full"
+              placeholder="••••••••"
+              autoFocus
+            />
+          </label>
+          <div className="flex gap-3">
+             <button
+              onClick={() => setPasswordModalUser(null)}
+              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (!newPassword) {
+                  toast.error('Enter a password');
+                  return;
+                }
+                setPasswordMutation.mutate({ username: passwordModalUser!, password: newPassword });
+              }}
+              disabled={setPasswordMutation.isPending}
+              className="glass-button flex-1 px-4 py-3 bg-indigo-600/30 border-indigo-500/30 text-[10px] font-black uppercase tracking-widest text-indigo-300"
+            >
+              {setPasswordMutation.isPending ? 'Updating...' : 'Set Password'}
             </button>
           </div>
         </div>

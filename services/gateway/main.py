@@ -1604,6 +1604,18 @@ async def proxy_change_password(request: Request):
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
+
+@app.post("/api/users/{username}/password")
+async def proxy_admin_set_password(username: str, request: Request):
+    body = await request.json()
+    async with get_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/users/{username}/password",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 @app.post("/api/auth/test-connection")
 async def proxy_test_connection(request: Request):
     body = await request.json()
@@ -2047,6 +2059,27 @@ async def get_storage_stats(request: Request):
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
     return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/storage/purge/{collection_name}")
+async def purge_storage_collection(collection_name: str, request: Request):
+    try:
+        creds_data = await _resolve_identity_from_request(request)
+        user_id = creds_data.get("user", "default")
+    except:
+        user_id = "default"
+
+    body = await request.json()
+    # Inject user_id into filter if not present to ensure multi-tenancy safety
+    # Actually the RAG service handles user_id param
+    
+    async with get_http_client() as client:
+        resp = await client.post(
+            f"{RAG_SVC}/rag/purge/{collection_name}?user_id={user_id}",
+            json=body.get("filter", {}),
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 
 @app.post("/api/admin/tests/smoke")
 async def proxy_smoke_test(request: Request):
