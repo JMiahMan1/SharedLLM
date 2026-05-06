@@ -1,7 +1,6 @@
 import axios from 'axios';
 
-// SharedLLM Nexus API Service
-const BASE_URL = ''; // Proxied via Vite
+const BASE_URL = '';
 
 export interface HealthStatus {
   status: 'READY' | 'NOT_READY';
@@ -9,12 +8,12 @@ export interface HealthStatus {
 }
 
 export interface LogEntry {
-  id: number;
+  id?: number;
   timestamp: string;
   service: string;
   level: string;
   message: string;
-  context?: Record<string, unknown>;
+  context?: Record<string, unknown> | null;
 }
 
 export interface Workspace {
@@ -25,27 +24,110 @@ export interface Workspace {
   scope: string;
 }
 
-export interface UserProfile {
-  id: string;
+interface UserProfileRaw {
+  id: string | number;
   username: string;
-  role: 'admin' | 'user';
+  display_name?: string;
   full_name?: string;
-  voice_id?: string;
-  avatar_url?: string;
+  role?: 'admin' | 'user';
   is_admin?: boolean;
   is_system_default?: boolean;
+  nextcloud_url?: string | null;
+  nextcloud_user?: string | null;
+  ha_url?: string | null;
+  github_url?: string | null;
+  github_user?: string | null;
+  gitlab_url?: string | null;
+  gitlab_user?: string | null;
+  git_url?: string | null;
+  git_user?: string | null;
+  audiobookshelf_url?: string | null;
+  audiobookshelf_user?: string | null;
+  voice_fingerprint?: string | null;
+  voice_id?: string | null;
+  avatar_url?: string | null;
   share_with_all?: boolean;
   [key: string]: unknown;
 }
 
-export interface APIKey {
-  id: string;
-  label: string;
-  prefix: string;
-  created_at: string;
+export interface UserProfile extends UserProfileRaw {
+  full_name?: string;
+  role: 'admin' | 'user';
+  is_admin: boolean;
+  voice_id?: string | null;
 }
 
-// Axios Instance
+export interface APIKey {
+  id: string | number;
+  label: string;
+  prefix: string;
+  created_at?: string;
+  key?: string;
+}
+
+export interface DiscoveredUser {
+  username: string;
+  source: string;
+  display_name?: string;
+}
+
+export interface DeviceAssignment {
+  id: number;
+  device_id: string;
+  user_id: number;
+  username: string;
+}
+
+export interface GlobalSetting {
+  key: string;
+  value: string;
+  description?: string | null;
+}
+
+export interface ExecutionResponse {
+  status: 'SUCCESS' | 'FAILURE' | 'PARTIAL';
+  message: string;
+  service: string;
+  detail?: Record<string, unknown> | null;
+}
+
+export interface TimerRecord {
+  id: string;
+  type: string;
+  title: string;
+  expires_at: string;
+  active: boolean;
+  recurrence?: string | null;
+  target_device?: string | null;
+}
+
+export interface SmokeTestResult {
+  status: string;
+  passed: boolean;
+  results: string;
+}
+
+const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
+  ...raw,
+  full_name: raw.full_name ?? raw.display_name ?? '',
+  role: raw.role ?? (raw.is_admin ? 'admin' : 'user'),
+  is_admin: Boolean(raw.is_admin),
+  voice_id: raw.voice_id ?? raw.voice_fingerprint ?? null,
+});
+
+const mapUserPayload = (data: Partial<UserProfile>) => {
+  const payload: Record<string, unknown> = { ...data };
+  if ('full_name' in payload) {
+    payload.display_name = payload.full_name;
+    delete payload.full_name;
+  }
+  if ('voice_id' in payload) {
+    payload.voice_fingerprint = payload.voice_id;
+    delete payload.voice_id;
+  }
+  return payload;
+};
+
 export const apiClient = axios.create({
   baseURL: BASE_URL,
   headers: {
@@ -53,7 +135,6 @@ export const apiClient = axios.create({
   },
 });
 
-// Request Interceptor
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('jarvis_api_key');
   const internalSecret = localStorage.getItem('internal_secret');
@@ -61,7 +142,7 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-  
+
   if (internalSecret) {
     config.headers['X-Internal-Secret'] = internalSecret;
   }
@@ -76,71 +157,75 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401 && !isLoggingOut) {
       isLoggingOut = true;
-      console.error("Session expired or unauthorized. Wiping local state.");
       localStorage.removeItem('jarvis_api_key');
       localStorage.removeItem('jarvis_user');
       window.location.href = '/login';
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 export const api = {
-  // Auth & Identity
-  async login(username: string, password: string): Promise<{ api_key: string, username: string, is_admin: boolean }> {
+  async login(username: string, password: string): Promise<{ api_key: string; username: string; is_admin: boolean }> {
     const resp = await apiClient.post('/api/auth/login', { username, password });
     return resp.data;
   },
 
   async getMe(): Promise<UserProfile> {
     const resp = await apiClient.get('/api/users/me');
-    return resp.data;
+    return normalizeUser(resp.data);
   },
 
-  async discoverUsers(): Promise<UserProfile[]> {
+  async discoverUsers(): Promise<DiscoveredUser[]> {
     const resp = await apiClient.get('/api/auth/discover');
     return resp.data;
   },
 
   async getUsers(): Promise<UserProfile[]> {
     const resp = await apiClient.get('/api/users');
-    return resp.data;
+    return (resp.data ?? []).map(normalizeUser);
+  },
+
+  async createUser(data: Partial<UserProfile> & { username: string }): Promise<UserProfile> {
+    const resp = await apiClient.post('/api/users', mapUserPayload(data));
+    return normalizeUser(resp.data);
   },
 
   async updateUser(username: string, data: Partial<UserProfile>): Promise<UserProfile> {
-    const resp = await apiClient.patch(`/api/users/${username}`, data);
-    return resp.data;
+    const resp = await apiClient.patch(`/api/users/${username}`, mapUserPayload(data));
+    return normalizeUser(resp.data);
   },
 
-  async deleteUser(username: string): Promise<{ success: boolean }> {
+  async deleteUser(username: string): Promise<{ status?: string; success?: boolean }> {
     const resp = await apiClient.delete(`/api/users/${username}`);
     return resp.data;
   },
 
   async updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {
-    const resp = await apiClient.patch('/api/users/me', data);
-    return resp.data;
+    const resp = await apiClient.patch('/api/users/me', mapUserPayload(data));
+    return normalizeUser(resp.data);
   },
 
-  async enrollVoice(audioBlob: Blob): Promise<{ success: boolean, voice_id: string }> {
+  async enrollVoice(audioBlob: Blob): Promise<{ status: string; message: string }> {
     const formData = new FormData();
     formData.append('file', audioBlob, 'enrollment.webm');
-    const resp = await apiClient.post('/api/users/me/enroll', formData);
+    const resp = await apiClient.post('/api/users/me/enroll', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return resp.data;
   },
 
-  // Gateway & System
   async getHealth(): Promise<HealthStatus> {
     const resp = await apiClient.get('/health/ready');
     return resp.data;
   },
 
   async chat(message: string, workspaceId?: string, userId?: string, stream = false): Promise<unknown> {
-    const resp = await apiClient.post('/api/chat', { 
-      message, 
-      workspace_id: workspaceId, 
+    const resp = await apiClient.post('/api/chat', {
+      query: message,
+      workspace_id: workspaceId,
       user_id: userId,
-      stream 
+      stream,
     });
     return resp.data;
   },
@@ -150,7 +235,6 @@ export const api = {
     return resp.data;
   },
 
-  // Logs & JarvisLab
   async getLogs(limit = 50): Promise<LogEntry[]> {
     const resp = await apiClient.get(`/api/logs?limit=${limit}`);
     return resp.data;
@@ -162,18 +246,17 @@ export const api = {
     return new WebSocket(`${protocol}//${host}/api/logs/stream`);
   },
 
-  // Settings & Integrations
-  async getSettings(): Promise<unknown[]> {
+  async getSettings(): Promise<GlobalSetting[]> {
     const resp = await apiClient.get('/api/settings');
     return resp.data;
   },
 
-  async updateSetting(key: string, value: string): Promise<{ success: boolean }> {
+  async updateSetting(key: string, value: string): Promise<GlobalSetting> {
     const resp = await apiClient.patch(`/api/settings/${key}`, { value });
     return resp.data;
   },
 
-  async testConnection(service: string, config: Record<string, unknown>): Promise<{ status: 'SUCCESS' | 'ERROR', message?: string }> {
+  async testConnection(service: string, config: Record<string, unknown>): Promise<{ status: 'SUCCESS' | 'ERROR'; message?: string }> {
     const resp = await apiClient.post('/api/auth/test-connection', { service, config });
     return resp.data;
   },
@@ -183,52 +266,108 @@ export const api = {
     return resp.data;
   },
 
-  // Execution Service (Scheduler/Timer)
-  async setTimer(duration: number, label: string): Promise<{ success: boolean }> {
-    const resp = await apiClient.post('/execute/timer', { duration, label });
-    return resp.data;
-  },
-
-  async getTimers(): Promise<any[]> {
-    const resp = await apiClient.get('/execute/timers');
-    return resp.data;
-  },
-
-  async scheduleTask(task: string, time: string): Promise<{ success: boolean }> {
-    const resp = await apiClient.post('/execute/calendar', { task, time });
-    return resp.data;
-  },
-
-  // API Key Management
   async getAPIKeys(): Promise<APIKey[]> {
     const resp = await apiClient.get('/api/users/me/keys');
     return resp.data;
   },
 
-  async generateAPIKey(label: string): Promise<APIKey & { key: string }> {
+  async generateAPIKey(label: string): Promise<APIKey> {
     const resp = await apiClient.post('/api/users/me/keys', { label });
-    return resp.data;
+    return {
+      ...resp.data,
+      prefix: resp.data.prefix ?? String(resp.data.key || '').slice(0, 8),
+    };
   },
 
-  async revokeAPIKey(keyId: string): Promise<{ success: boolean }> {
+  async revokeAPIKey(keyId: string | number): Promise<{ success: boolean }> {
     const resp = await apiClient.delete(`/api/users/me/keys/${keyId}`);
     return resp.data;
   },
 
-  // Admin/Devices
-  async updateDeviceAssignment(assignment: { user_id: string, entity_id: string }): Promise<{ success: boolean }> {
+  async getDevices(): Promise<DeviceAssignment[]> {
+    const resp = await apiClient.get('/api/users/devices');
+    return resp.data;
+  },
+
+  async updateDeviceAssignment(assignment: { username: string; device_id: string }): Promise<DeviceAssignment> {
     const resp = await apiClient.post('/api/users/devices', assignment);
     return resp.data;
   },
 
-  async getDevices(): Promise<any[]> {
-    const resp = await apiClient.get('/api/users/devices');
+  async deleteDeviceAssignment(deviceId: string): Promise<{ status?: string; success?: boolean }> {
+    const resp = await apiClient.delete(`/api/devices/${encodeURIComponent(deviceId)}`);
     return resp.data;
   },
-  
-  // Tests
-  async runSmokeTest(): Promise<{ success: boolean, results: unknown }> {
+
+  async syncDiscovery(): Promise<{ status: string; entities_count: number }> {
+    const resp = await apiClient.post('/api/discovery/sync', {});
+    return resp.data;
+  },
+
+  async getTimers(): Promise<TimerRecord[]> {
+    const resp = await apiClient.get('/api/communication/timers');
+    return resp.data;
+  },
+
+  async createTimer(payload: {
+    title: string;
+    duration_str?: string;
+    time_str?: string;
+    type?: 'timer' | 'alarm';
+    recurrence?: string;
+    target_device?: string;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/timers', payload);
+    return resp.data;
+  },
+
+  async deleteTimer(title: string, type: 'timer' | 'alarm' = 'timer'): Promise<ExecutionResponse> {
+    const resp = await apiClient.delete('/api/communication/timers', { data: { title, type } });
+    return resp.data;
+  },
+
+  async getCalendarList(): Promise<ExecutionResponse> {
+    const resp = await apiClient.get('/api/communication/calendar/calendars');
+    return resp.data;
+  },
+
+  async getCalendarEvents(): Promise<ExecutionResponse> {
+    const resp = await apiClient.get('/api/communication/calendar/events');
+    return resp.data;
+  },
+
+  async addCalendarEvent(payload: { summary: string; start_time: string; calendar_name?: string }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/calendar/events', payload);
+    return resp.data;
+  },
+
+  async createNote(payload: { title: string; content?: string; category?: string }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/create', payload);
+    return resp.data;
+  },
+
+  async readNote(title: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/read', { title });
+    return resp.data;
+  },
+
+  async appendNote(payload: { title: string; content: string }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/append', payload);
+    return resp.data;
+  },
+
+  async deleteNote(title: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/delete', { title });
+    return resp.data;
+  },
+
+  async sendAnnouncement(payload: { entity_id: string; message: string; volume?: number }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/announcements', payload);
+    return resp.data;
+  },
+
+  async runSmokeTest(): Promise<SmokeTestResult> {
     const resp = await apiClient.post('/api/admin/tests/smoke');
     return resp.data;
-  }
+  },
 };

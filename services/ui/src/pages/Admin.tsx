@@ -1,280 +1,639 @@
-import { useState, FC } from 'react';
-import { motion } from 'framer-motion';
-import { 
-  Monitor, 
-  Lightbulb, 
-  Thermometer, 
-  Lock, 
-  UserPlus,
-  ArrowRightLeft,
-  Shield,
-  Zap,
-  MoreVertical,
-  Trash2,
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Cpu,
   Edit3,
-  ShieldCheck,
-  User as UserIcon,
-  Smartphone,
-  Cpu
+  KeyRound,
+  RefreshCcw,
+  Save,
+  Search,
+  Settings2,
+  Shield,
+  Trash2,
+  UserPlus,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../services/api';
-import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
+import { api } from '../services/api';
+import type {
+  DeviceAssignment,
+  DiscoveredUser,
+  GlobalSetting,
+  LogEntry,
+  UserProfile,
+} from '../services/api';
+import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
 
-interface DeviceCardProps {
-  name: string;
-  type: string;
-  icon: LucideIcon;
-  assignedTo?: string | null;
-  onAssign: () => void;
-}
+type UserFormState = {
+  username: string;
+  full_name: string;
+  is_admin: boolean;
+  ha_url: string;
+  ha_token: string;
+  nextcloud_url: string;
+  nextcloud_user: string;
+  nextcloud_pass: string;
+  github_url: string;
+  github_user: string;
+  github_token: string;
+  gitlab_url: string;
+  gitlab_user: string;
+  gitlab_token: string;
+  audiobookshelf_url: string;
+  audiobookshelf_user: string;
+  audiobookshelf_pass: string;
+};
 
-const DeviceCard: FC<DeviceCardProps> = ({ name, type, icon: Icon, assignedTo, onAssign }) => (
-  <motion.div 
-    layout
-    whileHover={{ scale: 1.02 }}
-    className={`glass-card p-4 flex flex-col items-center gap-3 text-center relative group overflow-hidden border-2 transition-all ${assignedTo ? 'border-purple-500/30 bg-purple-500/5' : 'border-white/5 bg-white/5'}`}
-  >
-    <div className={`p-3 rounded-2xl ${assignedTo ? 'bg-purple-600/20 text-purple-400' : 'bg-slate-800 text-slate-500'} group-hover:scale-110 transition-transform`}>
-      <Icon size={20} />
-    </div>
-    <div className="z-10">
-      <p className="text-[11px] font-bold text-white truncate w-24 tracking-tight">{name}</p>
-      <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mt-0.5">{type}</p>
-    </div>
-    
-    <button 
-      onClick={() => onAssign()}
-      className={`mt-2 w-full py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${assignedTo ? 'bg-purple-600/20 text-purple-400' : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-white'}`}
-    >
-      {assignedTo ? `Owner: ${assignedTo}` : 'Unassigned'}
-    </button>
+const emptyUserForm: UserFormState = {
+  username: '',
+  full_name: '',
+  is_admin: false,
+  ha_url: '',
+  ha_token: '',
+  nextcloud_url: '',
+  nextcloud_user: '',
+  nextcloud_pass: '',
+  github_url: '',
+  github_user: '',
+  github_token: '',
+  gitlab_url: '',
+  gitlab_user: '',
+  gitlab_token: '',
+  audiobookshelf_url: '',
+  audiobookshelf_user: '',
+  audiobookshelf_pass: '',
+};
 
-    {assignedTo && (
-      <div className="absolute top-1 right-1">
-         <ShieldCheck size={12} className="text-purple-500" />
-      </div>
-    )}
-  </motion.div>
-);
-
-interface UserRowProps {
-  user: UserProfile;
-  onDelete: (u: UserProfile) => void;
-}
-
-const UserRow: FC<UserRowProps> = ({ user, onDelete }) => (
-  <div className="glass-panel p-5 flex items-center justify-between group hover:border-purple-500/20 transition-all">
-    <div className="flex items-center gap-4">
-      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black shadow-lg ${user.is_admin ? 'bg-indigo-600 text-white shadow-indigo-500/20' : 'bg-slate-800 text-slate-400 shadow-black/20'}`}>
-        {user.username[0].toUpperCase()}
-      </div>
-      <div>
-        <p className="text-sm font-bold text-white tracking-tight">{user.full_name || user.username}</p>
-        <div className="flex items-center gap-2 mt-1">
-          <span className={`text-[8px] uppercase font-black px-2 py-0.5 rounded-full border ${user.is_admin ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-slate-800 text-slate-500 border-white/5'}`}>
-            {user.is_admin ? 'System Admin' : 'Family Member'}
-          </span>
-          <span className="text-[8px] text-slate-600 uppercase font-bold">ID: {String(user.id).slice(0,8)}</span>
-        </div>
-      </div>
-    </div>
-    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-       {!user.is_system_default && (
-         <button onClick={() => onDelete(user)} className="p-2 hover:bg-red-500/10 rounded-xl text-slate-500 hover:text-red-400 transition-all"><Trash2 size={16} /></button>
-       )}
-    </div>
-  </div>
-);
+const toUserForm = (user?: UserProfile | null): UserFormState => ({
+  username: user?.username ?? '',
+  full_name: user?.full_name ?? '',
+  is_admin: Boolean(user?.is_admin),
+  ha_url: String(user?.ha_url ?? ''),
+  ha_token: '',
+  nextcloud_url: String(user?.nextcloud_url ?? ''),
+  nextcloud_user: String(user?.nextcloud_user ?? ''),
+  nextcloud_pass: '',
+  github_url: String(user?.github_url ?? ''),
+  github_user: String(user?.github_user ?? ''),
+  github_token: '',
+  gitlab_url: String(user?.gitlab_url ?? ''),
+  gitlab_user: String(user?.gitlab_user ?? ''),
+  gitlab_token: '',
+  audiobookshelf_url: String(user?.audiobookshelf_url ?? ''),
+  audiobookshelf_user: String(user?.audiobookshelf_user ?? ''),
+  audiobookshelf_pass: '',
+});
 
 const Admin = () => {
   const queryClient = useQueryClient();
-  const [selectedUserForAssignment, setSelectedUserForAssignment] = useState<UserProfile | null>(null);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
+  const [deviceId, setDeviceId] = useState('');
+  const [deviceUsername, setDeviceUsername] = useState('');
+  const [settingsDrafts, setSettingsDrafts] = useState<Record<string, string>>({});
+  const [newSettingKey, setNewSettingKey] = useState('');
+  const [newSettingValue, setNewSettingValue] = useState('');
+  const [discoveryFilter, setDiscoveryFilter] = useState('');
 
-  const { data: users } = useQuery<UserProfile[]>({
+  const { data: users = [] } = useQuery<UserProfile[]>({
     queryKey: ['users'],
     queryFn: () => api.getUsers(),
   });
 
-  const { data: logs } = useQuery<any[]>({
-    queryKey: ['admin-audit-logs'],
-    queryFn: () => api.getLogs(5),
-    refetchInterval: 10000
+  const { data: discoveredUsers = [], refetch: refetchDiscoveredUsers, isFetching: isDiscovering } = useQuery<DiscoveredUser[]>({
+    queryKey: ['discovered-users'],
+    queryFn: () => api.discoverUsers(),
   });
 
-  const { data: devices, isLoading: devicesLoading } = useQuery({
+  const { data: devices = [] } = useQuery<DeviceAssignment[]>({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
-    // Fallback if API is empty
-    initialData: [
-      { id: 'light.kitchen', name: 'Kitchen Main', type: 'LIGHT', icon: Lightbulb },
-      { id: 'media_player.living_tv', name: 'Living Room TV', type: 'MEDIA', icon: Monitor },
-      { id: 'climate.office', name: 'Office HVAC', type: 'CLIMATE', icon: Thermometer },
-    ]
   });
 
-  const updateAssignmentMutation = useMutation({
-    mutationFn: (data: { user_id: string, entity_id: string }) => api.updateDeviceAssignment(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['devices'] });
-      toast.success('Matrix synchronization complete');
+  const { data: settings = [] } = useQuery<GlobalSetting[]>({
+    queryKey: ['settings'],
+    queryFn: () => api.getSettings(),
+  });
+
+  const { data: logs = [] } = useQuery<LogEntry[]>({
+    queryKey: ['admin-logs'],
+    queryFn: () => api.getLogs(12),
+    refetchInterval: 10000,
+  });
+
+  const saveUserMutation = useMutation({
+    mutationFn: async (form: UserFormState) => {
+      const payload = {
+        username: form.username.trim().toLowerCase(),
+        full_name: form.full_name,
+        is_admin: form.is_admin,
+        ha_url: form.ha_url,
+        ha_token: form.ha_token,
+        nextcloud_url: form.nextcloud_url,
+        nextcloud_user: form.nextcloud_user,
+        nextcloud_pass: form.nextcloud_pass,
+        github_url: form.github_url,
+        github_user: form.github_user,
+        github_token: form.github_token,
+        gitlab_url: form.gitlab_url,
+        gitlab_user: form.gitlab_user,
+        gitlab_token: form.gitlab_token,
+        audiobookshelf_url: form.audiobookshelf_url,
+        audiobookshelf_user: form.audiobookshelf_user,
+        audiobookshelf_pass: form.audiobookshelf_pass,
+      };
+
+      if (editingUser) {
+        return api.updateUser(editingUser.username, payload);
+      }
+      return api.createUser(payload);
     },
-    onError: (err: any) => toast.error(err.message || 'Assignment failed')
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setEditingUser(null);
+      setUserForm(emptyUserForm);
+      setIsUserModalOpen(false);
+      toast.success('User saved');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to save user'),
   });
 
   const deleteUserMutation = useMutation({
     mutationFn: (username: string) => api.deleteUser(username),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
-      toast.success('Member removed from matrix');
+      toast.success('User deleted');
     },
-    onError: (err: any) => toast.error(err.message || 'Termination failed')
+    onError: (error: Error) => toast.error(error.message || 'Failed to delete user'),
   });
 
-  const handleAssign = async (deviceId: string) => {
-    if (!selectedUserForAssignment) {
-      toast('Select a user first to map devices', { icon: '👤' });
-      return;
-    }
-    try {
-      await updateAssignmentMutation.mutateAsync({
-        user_id: selectedUserForAssignment.id,
-        entity_id: deviceId
-      });
-    } catch (err) {
-      // Handled by onError
-    }
+  const importUserMutation = useMutation({
+    mutationFn: (user: DiscoveredUser) => api.createUser({
+      username: user.username,
+      full_name: user.display_name || user.username,
+      is_admin: false,
+    }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['users'] }),
+        queryClient.invalidateQueries({ queryKey: ['discovered-users'] }),
+      ]);
+      toast.success('Discovered user imported');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to import user'),
+  });
+
+  const syncDiscoveryMutation = useMutation({
+    mutationFn: () => api.syncDiscovery(),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      toast.success(`Discovery synced ${data.entities_count} entities`);
+    },
+    onError: (error: Error) => toast.error(error.message || 'Discovery sync failed'),
+  });
+
+  const assignDeviceMutation = useMutation({
+    mutationFn: (payload: { username: string; device_id: string }) => api.updateDeviceAssignment(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      setDeviceId('');
+      toast.success('Device assignment updated');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Device assignment failed'),
+  });
+
+  const removeDeviceMutation = useMutation({
+    mutationFn: (targetDeviceId: string) => api.deleteDeviceAssignment(targetDeviceId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      toast.success('Device assignment removed');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to remove assignment'),
+  });
+
+  const saveSettingMutation = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) => api.updateSetting(key, value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      toast.success('Setting saved');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to save setting'),
+  });
+
+  const filteredDiscoveredUsers = useMemo(() => {
+    return discoveredUsers.filter((user) => {
+      const haystack = `${user.username} ${user.display_name ?? ''} ${user.source}`.toLowerCase();
+      return haystack.includes(discoveryFilter.toLowerCase());
+    });
+  }, [discoveredUsers, discoveryFilter]);
+
+  const openCreateUser = () => {
+    setEditingUser(null);
+    setUserForm(emptyUserForm);
+    setIsUserModalOpen(true);
   };
 
-  const handleDelete = (user: UserProfile) => {
-    if (window.confirm(`Are you sure you want to remove ${user.username}? This cannot be undone.`)) {
-      deleteUserMutation.mutate(user.username);
-    }
+  const openEditUser = (user: UserProfile) => {
+    setEditingUser(user);
+    setUserForm(toUserForm(user));
+    setIsUserModalOpen(true);
   };
 
   return (
-    <div className="h-full flex flex-col gap-10 pb-12">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+    <div className="space-y-8 pb-12">
+      <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <h2 className="text-4xl font-black text-white tracking-tighter uppercase">Command Center</h2>
-          <p className="text-slate-400 mt-2">Administrative override, system policies, and device matrix orchestration</p>
+          <h2 className="text-4xl font-black tracking-tighter text-white uppercase">System Matrix</h2>
+          <p className="mt-2 text-slate-400">Live user administration, device ownership, settings, and audit state.</p>
         </div>
-        <div className="flex gap-3">
-           <div className="flex items-center gap-2 px-4 py-2 glass-panel border-indigo-500/20 bg-indigo-500/5">
-              <Shield size={16} className="text-indigo-400" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">Restricted Admin Access</span>
-           </div>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => syncDiscoveryMutation.mutate()}
+            disabled={syncDiscoveryMutation.isPending}
+            className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+          >
+            <RefreshCcw size={14} className={syncDiscoveryMutation.isPending ? 'animate-spin' : ''} />
+            Sync Device Discovery
+          </button>
+          <button
+            onClick={openCreateUser}
+            className="glass-button px-4 py-3 bg-indigo-600/30 border-indigo-500/30 text-[10px] font-black uppercase tracking-widest text-indigo-300"
+          >
+            <UserPlus size={14} />
+            Create User
+          </button>
         </div>
       </header>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-10 flex-1 min-h-0">
-        <div className="xl:col-span-8 space-y-10 overflow-y-auto pr-2 custom-scrollbar">
-          <section>
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                <Cpu size={24} className="text-purple-400" />
-                Device Matrix
-                <HelpTooltip docName="architecture.md" sectionTitle="Core Components" label="Device Matrix" />
+      <div className="grid gap-8 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="glass-panel p-6">
+          <div className="mb-6 flex items-center justify-between">
+            <div>
+              <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                <Shield size={20} className="text-indigo-400" />
+                User Management
               </h3>
-              <div className="flex items-center gap-4">
-                 <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Active Mapping:</p>
-                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] text-white font-bold">
-                    {selectedUserForAssignment ? (
-                      <>
-                        <UserIcon size={12} className="text-purple-400" />
-                        Assigning to {selectedUserForAssignment.username}
-                      </>
-                    ) : 'Select a user →'}
-                 </div>
-              </div>
+              <p className="mt-1 text-sm text-slate-400">Create, edit, and remove real identities used by the backend.</p>
             </div>
-            
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
-              {devices.map(dev => (
-                <DeviceCard 
-                  key={dev.id} 
-                  {...dev} 
-                  assignedTo={null} 
-                  onAssign={() => handleAssign(dev.id)}
-                />
-              ))}
-            </div>
-          </section>
+            <HelpTooltip docName="api_reference.md" sectionTitle="Identity Resolution" label="Users" />
+          </div>
 
-          <section className="glass-panel p-8">
-            <h3 className="text-xl font-bold text-white mb-8 flex items-center gap-3">
-               <ArrowRightLeft size={24} className="text-orange-400" />
-               Audit Trail
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-slate-500 border-b border-white/5 font-black uppercase text-[10px] tracking-widest">
-                    <th className="pb-4">Service</th>
-                    <th className="pb-4">Message</th>
-                    <th className="pb-4">Timestamp</th>
-                    <th className="pb-4">Severity</th>
-                  </tr>
-                </thead>
-                <tbody className="text-slate-300 font-mono text-[11px]">
-                  {logs?.map((log: any) => (
-                    <tr key={log.id} className="border-b border-white/5 last:border-0 group hover:bg-white/5 transition-colors">
-                      <td className="py-5 font-bold text-white">{log.service}</td>
-                      <td className="py-5 text-indigo-400 truncate max-w-xs">{log.message}</td>
-                      <td className="py-5 text-slate-500">{new Date(log.timestamp).toLocaleTimeString()}</td>
-                      <td className="py-5">
-                        <span className={`px-3 py-1 rounded-full border font-black tracking-tighter ${
-                           log.level === 'ERROR' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                           log.level === 'WARN' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
-                           'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                        }`}>
-                           {log.level || 'INFO'}
-                        </span>
-                      </td>
-                    </tr>
-                  )) || (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-slate-500 italic">No recent orchestration events found.</td>
-                    </tr>
+          <div className="space-y-3">
+            {users.map((user) => (
+              <div key={user.username} className="glass-card flex items-center justify-between p-4">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <p className="font-semibold text-white">{user.full_name || user.username}</p>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${
+                      user.is_admin ? 'bg-indigo-500/10 text-indigo-300' : 'bg-white/5 text-slate-400'
+                    }`}>
+                      {user.is_admin ? 'Admin' : 'User'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">@{user.username}</p>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    HA: {user.ha_url || 'Not configured'} | Nextcloud: {user.nextcloud_url || 'Not configured'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openEditUser(user)}
+                    className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+                    aria-label={`Edit ${user.username}`}
+                  >
+                    <Edit3 size={16} />
+                  </button>
+                  {!user.is_system_default && (
+                    <button
+                      onClick={() => deleteUserMutation.mutate(user.username)}
+                      className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                      aria-label={`Delete ${user.username}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
 
-        <div className="xl:col-span-4 space-y-10">
-          <section className="glass-panel p-8 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/5 rounded-full blur-3xl group-hover:bg-purple-500/10 transition-colors" />
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="font-bold text-white flex items-center gap-3">
-                <UserPlus size={20} className="text-purple-400" />
-                Identity Mgmt
+        <section className="glass-panel p-6">
+          <div className="mb-6 flex items-center justify-between">
+            <div>
+              <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                <Search size={20} className="text-emerald-400" />
+                Discovery Import
               </h3>
-              <button className="p-2 hover:bg-white/5 rounded-xl transition-all text-slate-500 hover:text-purple-400"><MoreVertical size={20} /></button>
+              <p className="mt-1 text-sm text-slate-400">Live Home Assistant and Nextcloud discovery results.</p>
             </div>
-            <div className="space-y-4">
-              {users?.map((u) => (
-                <div 
-                  key={u.id}
-                  onClick={() => setSelectedUserForAssignment(u)}
-                  className={`cursor-pointer transition-all ${selectedUserForAssignment?.id === u.id ? 'ring-2 ring-purple-500/50 rounded-2xl' : ''}`}
+            <button
+              onClick={() => refetchDiscoveredUsers()}
+              className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+              aria-label="Refresh discovered users"
+            >
+              <RefreshCcw size={16} className={isDiscovering ? 'animate-spin' : ''} />
+            </button>
+          </div>
+
+          <input
+            type="text"
+            value={discoveryFilter}
+            onChange={(event) => setDiscoveryFilter(event.target.value)}
+            placeholder="Filter discovered users"
+            className="glass-input mb-4 w-full"
+          />
+
+          <div className="space-y-3">
+            {filteredDiscoveredUsers.map((user) => (
+              <div key={`${user.source}-${user.username}`} className="glass-card flex items-center justify-between p-4">
+                <div>
+                  <p className="font-semibold text-white">{user.display_name || user.username}</p>
+                  <p className="text-xs text-slate-400">@{user.username}</p>
+                  <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-500">{user.source}</p>
+                </div>
+                <button
+                  onClick={() => importUserMutation.mutate(user)}
+                  className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest"
                 >
-                  <UserRow 
-                    user={u} 
-                    onDelete={handleDelete} 
+                  Import
+                </button>
+              </div>
+            ))}
+            {!filteredDiscoveredUsers.length && (
+              <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                No undiscovered users matched the current filter.
+              </p>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid gap-8 xl:grid-cols-[0.95fr_1.05fr]">
+        <section className="glass-panel p-6">
+          <div className="mb-6 flex items-center justify-between">
+            <div>
+              <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                <Cpu size={20} className="text-orange-300" />
+                Device Assignments
+              </h3>
+              <p className="mt-1 text-sm text-slate-400">Every entry here is live identity-to-device data.</p>
+            </div>
+            <HelpTooltip docName="architecture.md" sectionTitle="Identity Service" label="Device Assignments" />
+          </div>
+
+          <div className="mb-4 grid gap-3 md:grid-cols-[1fr_220px_auto]">
+            <input
+              type="text"
+              value={deviceId}
+              aria-label="Device ID"
+              onChange={(event) => setDeviceId(event.target.value)}
+              placeholder="Home Assistant entity ID"
+              className="glass-input"
+            />
+            <select
+              value={deviceUsername}
+              aria-label="Device User"
+              onChange={(event) => setDeviceUsername(event.target.value)}
+              className="glass-input bg-black/30"
+            >
+              <option value="">Select user</option>
+              {users.map((user) => (
+                <option key={user.username} value={user.username}>
+                  {user.username}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                if (!deviceId.trim() || !deviceUsername) {
+                  toast.error('Choose a user and a device ID');
+                  return;
+                }
+                assignDeviceMutation.mutate({ username: deviceUsername, device_id: deviceId.trim() });
+              }}
+              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+            >
+              <Save size={14} />
+              Save Assignment
+            </button>
+          </div>
+
+          <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-2">
+            {devices.map((device) => (
+              <div key={device.device_id} className="glass-card flex items-center justify-between p-4">
+                <div>
+                  <p className="font-mono text-sm text-white">{device.device_id}</p>
+                  <p className="mt-1 text-xs text-slate-400">Assigned to @{device.username}</p>
+                </div>
+                <button
+                  onClick={() => removeDeviceMutation.mutate(device.device_id)}
+                  className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                  aria-label={`Remove ${device.device_id}`}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="space-y-8">
+          <div className="glass-panel p-6">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                  <Settings2 size={20} className="text-cyan-300" />
+                  Global Settings
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">Seeded system settings with live writeback.</p>
+              </div>
+              <HelpTooltip docName="architecture.md" sectionTitle="Global Error Handling" label="Settings" />
+            </div>
+
+            <div className="space-y-3">
+              {settings.map((setting) => (
+                <div key={setting.key} className="glass-card p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="font-mono text-sm text-white">{setting.key}</p>
+                    <button
+                      onClick={() => saveSettingMutation.mutate({
+                        key: setting.key,
+                        value: settingsDrafts[setting.key] ?? setting.value,
+                      })}
+                      className="text-[10px] font-black uppercase tracking-widest text-cyan-300"
+                    >
+                      Save Setting
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={settingsDrafts[setting.key] ?? setting.value}
+                    onChange={(event) => setSettingsDrafts((current) => ({ ...current, [setting.key]: event.target.value }))}
+                    className="glass-input w-full"
                   />
+                  {setting.description && (
+                    <p className="mt-2 text-xs text-slate-500">{setting.description}</p>
+                  )}
                 </div>
               ))}
             </div>
-          </section>
 
+            <div className="mt-6 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+              <input
+                type="text"
+                value={newSettingKey}
+                onChange={(event) => setNewSettingKey(event.target.value)}
+                placeholder="new_setting_key"
+                className="glass-input"
+              />
+              <input
+                type="text"
+                value={newSettingValue}
+                onChange={(event) => setNewSettingValue(event.target.value)}
+                placeholder="value"
+                className="glass-input"
+              />
+              <button
+                onClick={() => {
+                  if (!newSettingKey.trim()) {
+                    toast.error('Enter a setting key');
+                    return;
+                  }
+                  saveSettingMutation.mutate({ key: newSettingKey.trim(), value: newSettingValue });
+                  setNewSettingKey('');
+                  setNewSettingValue('');
+                }}
+                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+              >
+                <KeyRound size={14} />
+                Add
+              </button>
+            </div>
+          </div>
 
-        </div>
+          <div className="glass-panel p-6">
+            <h3 className="mb-6 text-xl font-bold text-white">Audit Trail</h3>
+            <div className="space-y-3">
+              {logs.map((log, index) => (
+                <div key={`${log.timestamp}-${index}`} className="glass-card p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="font-semibold text-white">{log.service}</p>
+                    <span className="text-[10px] uppercase tracking-widest text-slate-500">{log.level}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-300">{log.message}</p>
+                  <p className="mt-2 text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
       </div>
+
+      <Modal
+        isOpen={isUserModalOpen}
+        onClose={() => {
+          setEditingUser(null);
+          setUserForm(emptyUserForm);
+          setIsUserModalOpen(false);
+        }}
+        title={editingUser ? `Edit @${editingUser.username}` : 'Create User'}
+      >
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-xs font-black uppercase tracking-widest text-slate-500">Username</span>
+              <input
+                type="text"
+                value={userForm.username}
+                aria-label="Username"
+                disabled={Boolean(editingUser)}
+                onChange={(event) => setUserForm((current) => ({ ...current, username: event.target.value }))}
+                className="glass-input w-full disabled:opacity-50"
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-xs font-black uppercase tracking-widest text-slate-500">Display Name</span>
+              <input
+                type="text"
+                value={userForm.full_name}
+                aria-label="Display Name"
+                onChange={(event) => setUserForm((current) => ({ ...current, full_name: event.target.value }))}
+                className="glass-input w-full"
+              />
+            </label>
+          </div>
+
+          <label className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/5 p-4">
+            <input
+              type="checkbox"
+              checked={userForm.is_admin}
+              onChange={(event) => setUserForm((current) => ({ ...current, is_admin: event.target.checked }))}
+            />
+            <span className="text-sm text-slate-300">Grant admin privileges</span>
+          </label>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {[
+              ['Home Assistant URL', 'ha_url'],
+              ['Home Assistant Token', 'ha_token'],
+              ['Nextcloud URL', 'nextcloud_url'],
+              ['Nextcloud Username', 'nextcloud_user'],
+              ['Nextcloud Password', 'nextcloud_pass'],
+              ['GitHub URL', 'github_url'],
+              ['GitHub Username', 'github_user'],
+              ['GitHub Token', 'github_token'],
+              ['GitLab URL', 'gitlab_url'],
+              ['GitLab Username', 'gitlab_user'],
+              ['GitLab Token', 'gitlab_token'],
+              ['Audiobookshelf URL', 'audiobookshelf_url'],
+              ['Audiobookshelf Username', 'audiobookshelf_user'],
+              ['Audiobookshelf Password', 'audiobookshelf_pass'],
+            ].map(([label, key]) => (
+              <label key={key} className="space-y-2">
+                <span className="text-xs font-black uppercase tracking-widest text-slate-500">{label}</span>
+                <input
+                  type={label.toLowerCase().includes('token') || label.toLowerCase().includes('password') ? 'password' : 'text'}
+                  value={userForm[key as keyof UserFormState] as string}
+                  aria-label={label}
+                  onChange={(event) => setUserForm((current) => ({
+                    ...current,
+                    [key]: event.target.value,
+                  }))}
+                  className="glass-input w-full"
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setEditingUser(null);
+                setUserForm(emptyUserForm);
+                setIsUserModalOpen(false);
+              }}
+              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (!userForm.username.trim()) {
+                  toast.error('Username is required');
+                  return;
+                }
+                saveUserMutation.mutate(userForm);
+              }}
+              className="glass-button flex-1 px-4 py-3 bg-indigo-600/30 border-indigo-500/30 text-[10px] font-black uppercase tracking-widest text-indigo-300"
+            >
+              <Save size={14} />
+              Save User
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
