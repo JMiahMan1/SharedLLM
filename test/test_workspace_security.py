@@ -24,6 +24,9 @@ async def test_workspace_path_traversal_blocked():
             headers={"X-Internal-Secret": "change-me-in-production"}
         )
         
+        if resp.status_code == 404:
+            print(f"Routes: {[r.path for r in app.routes]}")
+            
         # Should be blocked by resolve_safe_path
         assert resp.status_code == 403
         assert "Path traversal detected" in resp.json()["detail"]
