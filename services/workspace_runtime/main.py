@@ -1305,3 +1305,68 @@ def git_rebase(req: GitRebaseRequest, x_internal_secret: Optional[str] = Header(
         "stdout": result["stdout"],
         "stderr": result["stderr"],
     }
+
+
+@app.post("/webhook/git-pull/{workspace_id}")
+async def git_pull_webhook(
+    workspace_id: str,
+    x_webhook_secret: Optional[str] = Header(None, alias="X-Webhook-Secret"),
+    token: Optional[str] = None
+):
+    """
+    Automated webhook endpoint for triggering a git pull.
+    Expects a secret in the X-Webhook-Secret header or as a 'token' query parameter.
+    """
+    webhook_secret = os.getenv("GIT_WEBHOOK_SECRET")
+    if not webhook_secret:
+        log.warning("GIT_WEBHOOK_SECRET not set. Webhook pull disabled for security.")
+        raise HTTPException(status_code=503, detail="Webhook service unavailable")
+
+    provided_secret = x_webhook_secret or token
+    if provided_secret != webhook_secret:
+        log.warning(f"Invalid webhook secret attempt for workspace: {workspace_id}")
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Resolve workspace using admin context (since it's a system webhook)
+    # We'll use a dummy WorkspaceRef with just the ID
+    try:
+        # We need to bypass the user context check since this is a system-level trigger
+        # _resolve_workspace normally requires rag_user etc.
+        # But for webhooks, we can use an internal admin-like resolution
+        registry = _load_registry()
+        match = next((item for item in registry if item.get("id") == workspace_id), None)
+        if not match:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
+        resolved_path = resolve_safe_path(WORKSPACE_ROOT, str(match["local_path"]))
+        workspace_path = Path(resolved_path)
+        
+        remote_name = (match.get("git_remote") or "origin").strip()
+        default_branch = (match.get("default_branch") or "main").strip()
+        
+        log.info(f"Webhook triggered git pull for workspace {workspace_id} on {remote_name}/{default_branch}")
+        
+        # Note: We don't have identity context here, so this only works if:
+        # 1. The remote is public
+        # 2. Or the server has SSH keys configured globally
+        # 3. Or we use the credentials of a system user
+        
+        args = ["git", "pull", remote_name, default_branch]
+        result = _run_command(workspace_path, args)
+        
+        if result["returncode"] != 0:
+            log.error(f"Git pull failed: {result['stderr']}")
+            return {
+                "status": "ERROR",
+                "message": "Git pull failed",
+                "detail": result["stderr"].strip()
+            }
+
+        return {
+            "status": "SUCCESS",
+            "message": f"Successfully pulled latest changes for {workspace_id}",
+            "branch": default_branch
+        }
+    except Exception as e:
+        log.error(f"Webhook error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

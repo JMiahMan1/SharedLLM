@@ -52,6 +52,10 @@
         reverse_proxy workspace_runtime:8007
     }
 
+    handle /api/webhook* {
+        reverse_proxy workspace_runtime:8007
+    }
+
     # Catch-all: Route UI traffic to the React container
     handle /* {
         reverse_proxy ui:8008
