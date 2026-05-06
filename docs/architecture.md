@@ -43,18 +43,29 @@ graph TD
        them into ChromaDB for smart resolution.
     4. `start_scheduler()`: Starts the background timer/alarm loop.
 
-### B. Intent Engine (`app/intent_engine.py`)
+### B. Semantic Router Pipeline (`app/intent_engine.py`)
 
-Responsible for converting natural language (e.g., "Turn on the kitchen lights")
-into a structured Intent (e.g., `turn_on`). It uses a multi-stage pipeline:
+The intent engine has evolved into a high-performance **Semantic Router** using `FastEmbed` (`BAAI/bge-small-en-v1.5`). It manages command routing through a tiered confidence model:
 
-1. **Regex Override**: Checks `REGEX_INTENT_MAP` for exact pattern matches
-   (Zero-Latency, 100% confidence).
-2. **Vector Search**: Embeds the user query and finds the nearest neighbor in
-   the vectorized `phrasebook.json`. (Semantic matching).
-3. **Keyword Fallback**: If models fail, performs simple keyword matching.
+1. **Fast-Path Detection**: The query is embedded and compared against the `phrasebook.json` vector space.
+2. **LLM Bypass (Sub-50ms)**: If the cosine similarity exceeds **0.85**, the intent is routed directly to the Execution Layer, bypassing LLM generation entirely.
+3. **Slow-Path Augmentation**: For low-confidence queries, the Intent is used to fetch relevant RAG context before being dispatched to the LLM for reasoning.
 
-### C. Command Router (`app/logic` & `app/domains/`)
+### E. Tiered Memory & GraphRAG
+
+Jarvis maintains two distinct memory layers to ensure context awareness without state bloat:
+
+1. **Short-Term (Sliding Window)**: The last 10-15 messages are stored in Redis for immediate conversational continuity.
+2. **Long-Term (User Facts)**: An asynchronous background task (`extract_user_facts`) monitors every conversation. It extracts durable preferences (e.g., "User likes blue lights") and saves them into a specialized `user_facts` RAG collection.
+3. **Persona Injection**: Long-term facts are retrieved via semantic search and injected into the LLM system prompt, ensuring the AI "remembers" user-specific details across months of inactivity.
+
+### F. Capability-Based Routing (Pre-Flight Intercept)
+
+To prevent cascading failures, the Gateway performs a **Pre-Flight Capability Check**:
+
+1. **Capability Map**: Intents are linked to required credentials in `main.py` (e.g., `media` -> `ha_token`).
+2. **Intercept**: If a required field is missing or empty, the Gateway short-circuits the request.
+3. **Redirection**: The user receives a persona-driven response explaining the missing integration and directing them to the **Identity Hub**.
 
 The "Brain" that decides *what* to do with an Intent.
 

@@ -3,21 +3,16 @@
 This document outlines the testing strategies for the SharedLLM SOA architecture.
 
 ## 1. CI / Smoke Tests
-These tests are designed for speed and run in CI environments. They use mocks for external services.
-- **Location**: selected files under `services/tests/`
-- **Command**:
-  `pytest services/tests/test_identity.py services/tests/test_gateway_model_selection.py services/tests/test_gateway_media_target.py services/tests/test_intent_engine.py -m "not local_only and not server_only"`
+These tests are designed for speed and run in CI environments. 
+
+- **Backend Mandate**: All asynchronous services must use `pytest-asyncio`. 
+- **Frontend Mandate**: The React UI must use **MSW (Mock Service Worker)** for API simulation.
+- **Location**: `test/unit/` and `services/*/tests/`
+- **Command**: `pytest test/unit/ -m "not live"`
 
 ### Markers
-
-- `local_only`: requires a real local workspace, nested local process behavior,
-  or machine-specific state and should only run locally or on the target
-  server.
-- `server_only`: requires the deployed stack or server-specific infrastructure
-  and should not run in GitHub Actions.
-- The GitHub Actions workflow currently uses an explicit CI-safe file list
-  instead of the entire `services/tests/` directory because some broader tests
-  still hang or depend on local/server-specific behavior.
+- `live`: Requires connection to the real SOA stack and hardware. These tests are excluded from CI.
+- `local_only`: Requires machine-specific state (e.g. local Docker socket).
 
 ## 2. Deep Local Functionality Tests
 These tests are designed to be run **locally** against live hardware and services. They verify that commands actually result in state changes.

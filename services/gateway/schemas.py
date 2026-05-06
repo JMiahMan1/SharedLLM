@@ -1,6 +1,6 @@
 # services/gateway/schemas.py
-from typing import Optional, Dict, Any, Literal
-from pydantic import BaseModel
+from typing import Optional, Dict, Any, Literal, List
+from pydantic import BaseModel, field_validator
 
 class ChatRequest(BaseModel):
     query: str
@@ -9,13 +9,48 @@ class ChatRequest(BaseModel):
     rag_user: Optional[str] = None
     model: Optional[str] = None
     stream: bool = False
+    api_key: Optional[str] = None
 
 class ChatResponse(BaseModel):
     status: Literal["SUCCESS", "FAILURE"]
     message: str
     intent: Optional[str] = None
     confidence: Optional[float] = None
+    llm_bypassed: bool = False
     execution_result: Optional[Dict[str, Any]] = None
+
+class SemanticRoute(BaseModel):
+    name: str
+    description: str
+    examples: List[str]
+    confidence_threshold: float = 0.85
+
+class IntentClassificationResponse(BaseModel):
+    intent: str
+    confidence: float
+    llm_bypassed: bool
+    route_name: Optional[str] = None
+
+class ResolvedCredentials(BaseModel):
+    user: str
+    github_token: Optional[str] = None
+    nextcloud_url: Optional[str] = None
+    nextcloud_user: Optional[str] = None
+    nextcloud_pass: Optional[str] = None
+    ha_url: Optional[str] = None
+    ha_token: Optional[str] = None
+    openai_key: Optional[str] = None
+    is_admin: bool = False
+
+    @field_validator(
+        "github_token", "nextcloud_url", "nextcloud_user", "nextcloud_pass", 
+        "ha_url", "ha_token", "openai_key", mode="before"
+    )
+    @classmethod
+    def coerce_empty_to_none(cls, v: Any) -> Optional[str]:
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 class OllamaPullRequest(BaseModel):
     model: Optional[str] = None
@@ -29,5 +64,5 @@ class OllamaGenerateRequest(BaseModel):
     stream: bool = False
     system: Optional[str] = None
     template: Optional[str] = None
-    context: Optional[list[int]] = None
+    context: Optional[List[int]] = None
     options: Optional[Dict[str, Any]] = None
