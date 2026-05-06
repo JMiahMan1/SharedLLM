@@ -1949,6 +1949,37 @@ async def get_workspaces_proxy():
         log.error(f"Workspaces proxy failed: {e}")
         return []
 
+@app.post("/api/workspaces")
+async def create_workspace_proxy(request: Request):
+    """Proxy to workspace runtime."""
+    body = await request.json()
+    resp = await get_http_client().post(
+        f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+        json=body,
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.patch("/api/workspaces/{workspace_id}")
+async def update_workspace_proxy(workspace_id: str, request: Request):
+    """Proxy to workspace runtime."""
+    body = await request.json()
+    resp = await get_http_client().patch(
+        f"{WORKSPACE_RUNTIME_SVC}/workspaces/{workspace_id}",
+        json=body,
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.delete("/api/workspaces/{workspace_id}")
+async def delete_workspace_proxy(workspace_id: str):
+    """Proxy to workspace runtime."""
+    resp = await get_http_client().delete(
+        f"{WORKSPACE_RUNTIME_SVC}/workspaces/{workspace_id}",
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 @app.post("/api/storage/list")
 async def list_storage_files(request: Request, body: StorageListRequest):
     creds = await _resolve_identity_from_request(request)

@@ -18,10 +18,16 @@ export interface LogEntry {
 
 export interface Workspace {
   id: string;
-  name: string;
-  resolved_path: string;
-  available: boolean;
+  display_name: string;
+  local_path: string;
+  nextcloud_path?: string | null;
+  git_remote?: string | null;
+  default_branch?: string | null;
+  sync_mode: string;
   scope: string;
+  capabilities: string[];
+  owner_user?: string | null;
+  auto_pull_enabled: boolean;
 }
 
 interface UserProfileRaw {
@@ -304,6 +310,21 @@ export const api = {
 
   async getWorkspaces(): Promise<Workspace[]> {
     const resp = await apiClient.get('/api/workspaces');
+    return resp.data;
+  },
+
+  async createWorkspace(data: Partial<Workspace> & { id: string }): Promise<Workspace> {
+    const resp = await apiClient.post('/api/workspaces', data);
+    return resp.data.workspace;
+  },
+
+  async updateWorkspace(id: string, data: Partial<Workspace>): Promise<Workspace> {
+    const resp = await apiClient.patch(`/api/workspaces/${id}`, data);
+    return resp.data.workspace;
+  },
+
+  async deleteWorkspace(id: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.delete(`/api/workspaces/${id}`);
     return resp.data;
   },
 

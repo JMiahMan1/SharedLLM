@@ -7,7 +7,8 @@ import {
   FlaskConical, 
   Activity,
   HelpCircle,
-  Database
+  Database,
+  Boxes
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -24,6 +25,7 @@ const navItems = [
   { icon: MessageSquare, label: 'Communication', path: '/communication' },
   { icon: FlaskConical, label: 'Jarvis Lab', path: '/lab', adminOnly: true },
   { icon: Database, label: 'Knowledge Hub', path: '/knowledge' },
+  { icon: Boxes, label: 'Workspaces', path: '/workspaces', adminOnly: true },
   { icon: HelpCircle, label: 'Help Hub', path: '/docs' },
 ];
 

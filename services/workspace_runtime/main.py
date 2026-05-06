@@ -633,6 +633,49 @@ def resolve_workspace(req: WorkspaceRef, x_internal_secret: Optional[str] = Head
     return {"status": "SUCCESS", "workspace": workspace}
 
 
+@app.post("/workspaces")
+def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        existing = session.get(Workspace, ws.id)
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Workspace {ws.id} already exists")
+        session.add(ws)
+        session.commit()
+        session.refresh(ws)
+        return {"status": "SUCCESS", "workspace": ws}
+
+
+@app.patch("/workspaces/{workspace_id}")
+def update_workspace(workspace_id: str, updates: dict, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        ws = session.get(Workspace, workspace_id)
+        if not ws:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        
+        for key, value in updates.items():
+            if hasattr(ws, key):
+                setattr(ws, key, value)
+        
+        session.add(ws)
+        session.commit()
+        session.refresh(ws)
+        return {"status": "SUCCESS", "workspace": ws}
+
+
+@app.delete("/workspaces/{workspace_id}")
+def delete_workspace(workspace_id: str, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        ws = session.get(Workspace, workspace_id)
+        if not ws:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        session.delete(ws)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Workspace {workspace_id} deleted"}
+
+
 @app.post("/files/read")
 def read_file(req: FileReadRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
@@ -1318,31 +1361,35 @@ async def git_pull_webhook(
     Expects a secret in the X-Webhook-Secret header or as a 'token' query parameter.
     """
     webhook_secret = os.getenv("GIT_WEBHOOK_SECRET")
-    if not webhook_secret:
-        log.warning("GIT_WEBHOOK_SECRET not set. Webhook pull disabled for security.")
-        raise HTTPException(status_code=503, detail="Webhook service unavailable")
-
-    provided_secret = x_webhook_secret or token
-    if provided_secret != webhook_secret:
-        log.warning(f"Invalid webhook secret attempt for workspace: {workspace_id}")
-        raise HTTPException(status_code=403, detail="Forbidden")
-
+    
     # Resolve workspace using admin context (since it's a system webhook)
-    # We'll use a dummy WorkspaceRef with just the ID
     try:
         # We need to bypass the user context check since this is a system-level trigger
-        # _resolve_workspace normally requires rag_user etc.
-        # But for webhooks, we can use an internal admin-like resolution
-        registry = _load_registry()
-        match = next((item for item in registry if item.get("id") == workspace_id), None)
-        if not match:
-            raise HTTPException(status_code=404, detail="Workspace not found")
+        with Session(engine) as session:
+            match = session.get(Workspace, workspace_id)
+            if not match:
+                raise HTTPException(status_code=404, detail="Workspace not found")
+            
+            # Verify secret (either workspace-specific or global)
+            expected_secret = match.webhook_token or webhook_secret
+            if not expected_secret:
+                log.warning(f"No webhook secret configured for workspace: {workspace_id}")
+                raise HTTPException(status_code=503, detail="Webhook service unavailable")
 
-        resolved_path = resolve_safe_path(WORKSPACE_ROOT, str(match["local_path"]))
-        workspace_path = Path(resolved_path)
-        
-        remote_name = (match.get("git_remote") or "origin").strip()
-        default_branch = (match.get("default_branch") or "main").strip()
+            provided_secret = x_webhook_secret or token
+            if provided_secret != expected_secret:
+                log.warning(f"Invalid webhook secret attempt for workspace: {workspace_id}")
+                raise HTTPException(status_code=403, detail="Forbidden")
+
+            if not match.auto_pull_enabled:
+                log.warning(f"Webhook pull attempted for workspace {workspace_id} but auto_pull_enabled is False")
+                raise HTTPException(status_code=403, detail="Webhook pulling is disabled for this workspace")
+
+            resolved_path = resolve_safe_path(WORKSPACE_ROOT, str(match.local_path))
+            workspace_path = Path(resolved_path)
+            
+            remote_name = (match.git_remote or "origin").strip()
+            default_branch = (match.default_branch or "main").strip()
         
         log.info(f"Webhook triggered git pull for workspace {workspace_id} on {remote_name}/{default_branch}")
         
