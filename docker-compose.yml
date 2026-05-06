@@ -128,6 +128,7 @@ services:
     restart: unless-stopped
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - RAG_SVC_URL=http://rag:8004
       - TZ=America/Phoenix
     volumes:
       - ./:/workspace/SharedLLM:ro
