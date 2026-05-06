@@ -98,14 +98,15 @@ def test_autonomous_fix_it_loop(client):
     """
     Test 3.2: The Autonomous 'Fix-It' Loop
     """
-    # Pass a payload with a syntax error and a test command
+    # Pass a payload with a syntax error and a pytest target
     payload = {
         "workspace_id": "demo",
         "rag_user": "admin",
         "relative_path": "broken.py",
         "content": "def broken_func() return True",  # Missing colon
-        "test_command": "python3 -m py_compile broken.py",
-        "run_tests": True
+        "commit_message": "test commit",
+        "pytest_targets": ["broken.py"],
+        "sync_to_provider": False
     }
     
     resp = client.post(
@@ -114,12 +115,9 @@ def test_autonomous_fix_it_loop(client):
         headers={"X-Internal-Secret": "test-secret"}
     )
     
-    assert resp.status_code == 200
-    data = resp.json()
-    
-    # The Assertion: Should be FAILED with a syntax error in stdout
-    assert data["test_status"] == "FAILED"
-    assert "SyntaxError" in data["test_stdout"]
+    # The Assertion: Should be 400 because pytest fails on syntax error
+    assert resp.status_code == 400
+    assert "Pytest failed" in resp.json()["detail"]
 
 def test_path_traversal_protection(client):
     """
