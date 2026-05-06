@@ -94,7 +94,7 @@ async def extract_and_store_user_facts(user_id: str, history: list):
         return
 
     try:
-        ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "qwen2.5:7b")
+        ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "qwen3:latest")
         OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
         INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
         RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
