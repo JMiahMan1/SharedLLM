@@ -17,7 +17,7 @@
     }
 
     handle /execute* {
-        reverse_proxy execution:11436
+        reverse_proxy execution:8003
     }
 
     # 3. Route Identity/Auth API traffic
@@ -34,10 +34,10 @@
     }
 
     handle /api/admin* {
-        reverse_proxy workspace_runtime:11438
+        reverse_proxy workspace_runtime:8007
     }
 
     handle /api/workspace* {
-        reverse_proxy workspace_runtime:11438
+        reverse_proxy workspace_runtime:8007
     }
 }
