@@ -1,6 +1,6 @@
 import os
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 from contextlib import asynccontextmanager
 
@@ -100,3 +100,40 @@ async def test_gateway_enforces_capabilities_for_coding(client, mocker):
     # PROOF: Downstream was never called
     mock_workspace.assert_not_called()
     print("\nSUCCESS: Gateway correctly blocked request due to missing capability.")
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_missing_ha_token(client, mocker):
+    """
+    Test that the Gateway intercepts 'turn_on' if ha_token is missing.
+    """
+    # 1. Resolve identity with NO ha_token
+    mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={
+        "user": "testuser",
+        "ha_token": None, # MISSING
+        "ha_url": "http://ha"
+    })
+    
+    # 2. Force intent to 'turn_on'
+    mocker.patch("gateway.main.engine.classify", return_value=("turn_on", 1.0))
+    
+    # 3. Mock Ollama for the persona-driven redirection message
+    mocker.patch("gateway.main.call_ollama", new_callable=AsyncMock, return_value=MagicMock(
+        status_code=200, 
+        json=lambda: {"response": "Please set up your Home Assistant token."}
+    ))
+    
+    # 4. Mock execution service (should NOT be called)
+    mock_exec = mocker.patch("gateway.main.execute_command", new_callable=AsyncMock)
+
+    # Send request
+    resp = client.post(
+        "/api/chat",
+        json={"query": "turn on lights"}
+    )
+    
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "Home Assistant" in data.get("message", {}).get("content", "")
+    
+    # PROOF: Execution was never triggered
+    mock_exec.assert_not_called()
