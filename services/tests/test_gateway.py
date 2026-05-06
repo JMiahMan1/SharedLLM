@@ -40,17 +40,18 @@ def test_gateway_health(client):
     assert resp.status_code == 200
     assert resp.json()["service"] == "gateway"
 
-def test_fast_path_light_control(client, mock_intent, mocker):
+@pytest.mark.asyncio
+async def test_fast_path_light_control(client, mock_intent, mocker):
     """Test the Gateway Fast Path successfully routes a turn_on intent to Execution."""
     # Mock high confidence intent
     mock_intent.return_value = ("turn_on", 0.95)
     
-    # Mock the internal calls using mocker.patch on the specific functions
-    mocker.patch("gateway.main.resolve_identity", return_value={"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"})
-    mocker.patch("gateway.main.fetch_ha_entities", return_value=[{"entity_id": "light.living_room"}])
-    mocker.patch("gateway.main.execute_command", return_value={"status": "SUCCESS", "message": "Lights on", "service": "light_control"})
-    mocker.patch("gateway.main.update_history", return_value=None)
-    mocker.patch("gateway.main.get_history", return_value=[])
+    # Mock the internal calls using AsyncMock
+    mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"})
+    mocker.patch("gateway.main.fetch_ha_entities", new_callable=AsyncMock, return_value=[{"entity_id": "light.living_room"}])
+    mocker.patch("gateway.main.execute_command", new_callable=AsyncMock, return_value={"status": "SUCCESS", "message": "Lights on", "service": "light_control"})
+    mocker.patch("gateway.main.update_history", new_callable=AsyncMock, return_value=None)
+    mocker.patch("gateway.main.get_history", new_callable=AsyncMock, return_value=[])
 
     resp = client.post("/api/chat", json={
         "query": "Turn on the living room lights",
@@ -64,18 +65,19 @@ def test_fast_path_light_control(client, mock_intent, mocker):
     assert data["execution_result"]["service"] == "light_control"
 
 
-def test_slow_path_conversational(client, mock_intent, mocker):
+@pytest.mark.asyncio
+async def test_slow_path_conversational(client, mock_intent, mocker):
     """Test the Gateway Slow Path when confidence is low or intent is unknown."""
     mock_intent.return_value = ("unknown", 0.40)
     
-    mocker.patch("gateway.main.resolve_identity", return_value={"user": "alice"})
-    mocker.patch("gateway.main.fetch_ha_entities", return_value=[])
-    mocker.patch("gateway.main.get_history", return_value=[])
-    mocker.patch("gateway.main.update_history", return_value=None)
-    mocker.patch("gateway.main.contextualize_query", return_value="What is the meaning of life?")
-    mocker.patch("gateway.main.decompose_command_query", return_value=[])
+    mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={"user": "alice"})
+    mocker.patch("gateway.main.fetch_ha_entities", new_callable=AsyncMock, return_value=[])
+    mocker.patch("gateway.main.get_history", new_callable=AsyncMock, return_value=[])
+    mocker.patch("gateway.main.update_history", new_callable=AsyncMock, return_value=None)
+    mocker.patch("gateway.main.contextualize_query", new_callable=AsyncMock, return_value="What is the meaning of life?")
+    mocker.patch("gateway.main.decompose_command_query", new_callable=AsyncMock, return_value=[])
     
-    # Mock Ollama call directly in httpx
+    # Mock Ollama call directly
     class MockResponse:
         def __init__(self, json_data):
             self.json_data = json_data
@@ -83,10 +85,7 @@ def test_slow_path_conversational(client, mock_intent, mocker):
         def json(self): return self.json_data
         def raise_for_status(self): pass
 
-    async def mock_post(*args, **kwargs):
-        return MockResponse({"message": {"content": "Simulated LLM response"}})
-
-    mocker.patch("httpx.AsyncClient.post", side_effect=mock_post)
+    mocker.patch("gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockResponse({"message": {"content": "Simulated LLM response"}}))
 
     resp = client.post("/api/chat", json={
         "query": "What is the meaning of life?",
@@ -99,17 +98,18 @@ def test_slow_path_conversational(client, mock_intent, mocker):
     assert "Simulated LLM response" in data["message"]
 
 
-def test_action_with_status_followup_executes_and_reports_refreshed_state(client, mock_intent, mocker):
+@pytest.mark.asyncio
+async def test_action_with_status_followup_executes_and_reports_refreshed_state(client, mock_intent, mocker):
     mock_intent.return_value = ("turn_off", 0.95)
 
-    mocker.patch("gateway.main.resolve_identity", return_value={"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"})
-    mocker.patch("gateway.main.get_history", return_value=[])
-    mocker.patch("gateway.main.update_history", return_value=None)
-    mocker.patch("gateway.main.contextualize_query", return_value="Can you power off the Piano-Lamp and recheck its status after?")
-    mocker.patch("gateway.main.execute_command", return_value={"status": "SUCCESS", "message": "Powered off Piano-Lamp."})
-    mocker.patch("gateway.main.asyncio.sleep", new=mocker.AsyncMock(return_value=None))
+    mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"})
+    mocker.patch("gateway.main.get_history", new_callable=AsyncMock, return_value=[])
+    mocker.patch("gateway.main.update_history", new_callable=AsyncMock, return_value=None)
+    mocker.patch("gateway.main.contextualize_query", new_callable=AsyncMock, return_value="Can you power off the Piano-Lamp and recheck its status after?")
+    mocker.patch("gateway.main.execute_command", new_callable=AsyncMock, return_value={"status": "SUCCESS", "message": "Powered off Piano-Lamp."})
+    mocker.patch("gateway.main.asyncio.sleep", new_callable=AsyncMock, return_value=None)
 
-    fetch_entities = mocker.patch("gateway.main.fetch_ha_entities")
+    fetch_entities = mocker.patch("gateway.main.fetch_ha_entities", new_callable=AsyncMock)
     fetch_entities.side_effect = [
         [{"entity_id": "light.piano_lamp", "state": "on", "attributes": {"friendly_name": "Piano-Lamp"}}],
         [{"entity_id": "light.piano_lamp", "state": "off", "attributes": {"friendly_name": "Piano-Lamp"}}],

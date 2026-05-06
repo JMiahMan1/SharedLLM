@@ -222,20 +222,50 @@ const LogTelemetryStream = () => {
   const ws = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    try {
-      ws.current = api.getLogWebSocket();
-      ws.current.onmessage = (event) => {
-        const log = JSON.parse(event.data);
-        setLogs(prev => [...prev.slice(-199), log]);
-      };
-      ws.current.onerror = () => {
-        toast.error('WebSocket log stream failed');
-      };
-    } catch (err) {
-      console.error('WS Connection error', err);
-    }
+    let ws: WebSocket | null = null;
+    let retryCount = 0;
+    let reconnectTimeout: NodeJS.Timeout;
 
-    return () => ws.current?.close();
+    const connect = () => {
+      try {
+        ws = api.getLogWebSocket();
+        
+        ws.onmessage = (event) => {
+          const log = JSON.parse(event.data);
+          if (log.ping) return; // Ignore pings
+          setLogs(prev => [...prev.slice(-199), log]);
+        };
+
+        ws.onopen = () => {
+          retryCount = 0;
+          console.log('WS Connected');
+        };
+
+        ws.onclose = () => {
+          console.log('WS Disconnected, retrying...');
+          const timeout = Math.min(1000 * Math.pow(2, retryCount), 10000);
+          reconnectTimeout = setTimeout(connect, timeout);
+          retryCount++;
+        };
+
+        ws.onerror = () => {
+          // Error usually precedes close, so we let onclose handle the retry
+          ws?.close();
+        };
+      } catch (err) {
+        console.error('WS Connection error', err);
+        const timeout = Math.min(1000 * Math.pow(2, retryCount), 10000);
+        reconnectTimeout = setTimeout(connect, timeout);
+        retryCount++;
+      }
+    };
+
+    connect();
+
+    return () => {
+      ws?.close();
+      clearTimeout(reconnectTimeout);
+    };
   }, []);
 
   useEffect(() => {
