@@ -1,4 +1,9 @@
 :80 {
+    # 0. Health Routes
+    handle /health* {
+        reverse_proxy gateway:11435
+    }
+
     # 1. Route UI traffic to the React container
     handle /* {
         reverse_proxy ui:8008
