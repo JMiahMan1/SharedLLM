@@ -1179,15 +1179,11 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     if is_fast_path:
         log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence}")
-        # Simple fast-path execution mapping
+        # Fast-path is now restricted to non-parameterized system status or simple toggle triggers
+        # Device control with parameters (like set_brightness or play_media) MUST go through the LLM for extraction
         endpoint_map = {
-            "turn_on": "/execute/light",
-            "turn_off": "/execute/light",
-            "play_media": "/execute/media/play",
-            "media_transport": "/execute/media/transport",
-            "pause_media": "/execute/media/transport",
-            "toggle": "/execute/light",
-            "set_brightness": "/execute/light"
+            "ha_status": "/health", # Placeholder for status check
+            "storage_status": "/health",
         }
         endpoint = endpoint_map.get(intent)
         if endpoint:
@@ -1242,6 +1238,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     if should_stream:
         async def stream_generator():
             full_ans = ""
+            suppressing = False
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=ollama_payload) as resp:
                     async for line in resp.aiter_lines():
@@ -1251,15 +1248,76 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             content = chunk.get("message", {}).get("content", "")
                             if content:
                                 full_ans += content
-                                if is_openai:
-                                    # OpenAI wrap
-                                    yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
-                                else:
-                                    yield line + "\n"
+                                # Detection of tool block to start suppression
+                                if "```json" in full_ans and not suppressing:
+                                    suppressing = True
+                                
+                                if not suppressing:
+                                    if is_openai:
+                                        yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
+                                    else:
+                                        yield line + "\n"
                             if chunk.get("done"): break
                         except: pass
+            
+            # Handle tool execution at the end of the stream
+            if "```json" in full_ans:
+                try:
+                    start = full_ans.find("```json") + 7
+                    end = full_ans.find("```", start)
+                    tool_json = full_ans[start:end].strip()
+                    tool_data = json.loads(tool_json)
+                    action = tool_data.get("action")
+                    payload = tool_data.get("payload", {})
+                    
+                    action_map = {
+                        "LightControlRequest": (EXECUTION_SVC, "/execute/light"),
+                        "MediaPlayRequest": (EXECUTION_SVC, "/execute/media/play"),
+                        "MediaTransportRequest": (EXECUTION_SVC, "/execute/media/transport"),
+                        "TVCastRequest": (EXECUTION_SVC, "/execute/tv_cast"),
+                        "ClimateRequest": (EXECUTION_SVC, "/execute/climate"),
+                        "SecurityRequest": (EXECUTION_SVC, "/execute/security"),
+                        "AnnouncementRequest": (EXECUTION_SVC, "/execute/announce"),
+                        "HAServiceRequest": (EXECUTION_SVC, "/execute/ha_service"),
+                        "CalendarRequest": (EXECUTION_SVC, "/execute/calendar"),
+                        "NoteRequest": (EXECUTION_SVC, "/execute/note"),
+                        "TimerRequest": (EXECUTION_SVC, "/execute/timer"),
+                        "WorkspaceFileAction": (WORKSPACE_RUNTIME_SVC, "/execute/file"),
+                        "WorkspaceGitAction": (WORKSPACE_RUNTIME_SVC, "/execute/git"),
+                        "WorkspaceSyncAction": (WORKSPACE_RUNTIME_SVC, "/execute/sync"),
+                    }
+                    
+                    if action in action_map:
+                        svc_base, endpoint = action_map[action]
+                        if "user_context" not in payload:
+                            payload["user_context"] = creds.model_dump()
+                        
+                        log.info(f"[StreamToolExecution] Triggering {action}")
+                        exec_resp = await get_http_client().post(
+                            f"{svc_base}{endpoint}",
+                            json=payload,
+                            headers={"X-Internal-Secret": INTERNAL_SECRET},
+                            timeout=30.0
+                        )
+                        exec_data = exec_resp.json()
+                        exec_msg = exec_data.get("message", "Action completed.")
+                        
+                        update_text = f"\n\n**System Update**: {exec_msg}"
+                        full_ans = full_ans[:full_ans.find("```json")].strip() + update_text
+                        
+                        if is_openai:
+                            yield f"data: {json.dumps({'choices': [{'delta': {'content': update_text}}]})}\n\n"
+                        else:
+                            # Ollama format chunk
+                            final_chunk = {"message": {"role": "assistant", "content": update_text}, "done": False}
+                            yield json.dumps(final_chunk) + "\n"
+                except Exception as e:
+                    log.error(f"Streaming tool execution failed: {e}")
+
             await update_history(user_id, "user", query)
             await update_history(user_id, "assistant", full_ans)
+            if not is_openai:
+                yield json.dumps({"done": True}) + "\n"
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream" if is_openai else "application/x-ndjson")
 
@@ -1277,8 +1335,59 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             return _make_openai_response(ans, selected_model, "degraded")
         return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
     
-    # 8. Tool Execution (Optional)
-    # (Existing tool parsing logic would go here, simplified for this turn)
+    # 8. Tool Execution
+    # Intercept JSON blocks for execution as defined in prompts.py
+    if "```json" in ans:
+        try:
+            start = ans.find("```json") + 7
+            end = ans.find("```", start)
+            tool_json = ans[start:end].strip()
+            tool_data = json.loads(tool_json)
+            
+            action = tool_data.get("action")
+            payload = tool_data.get("payload", {})
+            
+            # Map action to service endpoint
+            action_map = {
+                "LightControlRequest": (EXECUTION_SVC, "/execute/light"),
+                "MediaPlayRequest": (EXECUTION_SVC, "/execute/media/play"),
+                "MediaTransportRequest": (EXECUTION_SVC, "/execute/media/transport"),
+                "TVCastRequest": (EXECUTION_SVC, "/execute/tv_cast"),
+                "ClimateRequest": (EXECUTION_SVC, "/execute/climate"),
+                "SecurityRequest": (EXECUTION_SVC, "/execute/security"),
+                "AnnouncementRequest": (EXECUTION_SVC, "/execute/announce"),
+                "HAServiceRequest": (EXECUTION_SVC, "/execute/ha_service"),
+                "CalendarRequest": (EXECUTION_SVC, "/execute/calendar"),
+                "NoteRequest": (EXECUTION_SVC, "/execute/note"),
+                "TimerRequest": (EXECUTION_SVC, "/execute/timer"),
+                "WorkspaceFileAction": (WORKSPACE_RUNTIME_SVC, "/execute/file"),
+                "WorkspaceGitAction": (WORKSPACE_RUNTIME_SVC, "/execute/git"),
+                "WorkspaceSyncAction": (WORKSPACE_RUNTIME_SVC, "/execute/sync"),
+            }
+            
+            if action in action_map:
+                svc_base, endpoint = action_map[action]
+                # Inject user context if missing
+                if "user_context" not in payload:
+                    payload["user_context"] = creds.model_dump()
+                
+                log.info(f"[ToolExecution] Triggering {action} via {svc_base}{endpoint}")
+                exec_resp = await get_http_client().post(
+                    f"{svc_base}{endpoint}",
+                    json=payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=30.0
+                )
+                exec_data = exec_resp.json()
+                exec_msg = exec_data.get("message", "Action completed.")
+                
+                # Append execution result to answer and hide the raw JSON from user
+                clean_ans = ans[:ans.find("```json")].strip()
+                ans = f"{clean_ans}\n\n**System Update**: {exec_msg}"
+                log.info(f"[ToolExecution] Success: {exec_msg}")
+        except Exception as e:
+            log.error(f"Tool execution failed: {e}")
+            # Optionally keep the answer as is or append error
     
     await update_history(user_id, "user", query)
     await update_history(user_id, "assistant", ans)
