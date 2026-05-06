@@ -5,7 +5,8 @@ import {
   UserCircle, 
   MessageSquare, 
   FlaskConical, 
-  Activity 
+  Activity,
+  HelpCircle
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -20,6 +21,7 @@ const navItems = [
   { icon: UserCircle, label: 'Identity', path: '/identity' },
   { icon: MessageSquare, label: 'Communication', path: '/communication' },
   { icon: FlaskConical, label: 'Jarvis Lab', path: '/lab' },
+  { icon: HelpCircle, label: 'Help Hub', path: '/docs' },
 ];
 
 const Sidebar = () => {

@@ -45,6 +45,33 @@ async def update_history(user_id: str, role: str, content: str):
     except Exception as e:
         log.warning(f"History write error: {e}")
 
+async def get_long_term_memory(user_id: str, query: str) -> str:
+    """
+    Retrieves relevant 'User Facts' from the RAG service to provide semantic memory.
+    """
+    try:
+        # Call RAG service to find facts for this user
+        from main import call_rag_service # Potential circular import, handle with care or move
+        res = await call_rag_service(
+            method="POST",
+            path="/rag/search",
+            payload={
+                "collection_name": "user_facts",
+                "query": query,
+                "user_id": user_id,
+                "k": 3
+            }
+        )
+        facts = res.get("results", [])
+        if not facts:
+            return ""
+        
+        context = "\n".join([f"- {f['content']}" for f in facts])
+        return f"### User Preferences & Long-Term Memory\n{context}\n"
+    except Exception as e:
+        log.warning(f"Failed to retrieve long-term memory: {e}")
+        return ""
+
 def ping_redis() -> bool:
     """Verifies Redis connectivity for health checks."""
     try:
