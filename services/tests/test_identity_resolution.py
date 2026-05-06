@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 # Set environment variables for testing
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
+os.environ["INIT_DB"] = "false"
 
 import identity.main as identity_main
 from identity.main import app, get_session
