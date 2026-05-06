@@ -70,9 +70,17 @@ apiClient.interceptors.request.use((config) => {
 });
 
 // Response Interceptor
+let isLoggingOut = false;
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 401 && !isLoggingOut) {
+      isLoggingOut = true;
+      localStorage.removeItem('jarvis_api_key');
+      // Use window.location.href to force a clean slate and avoid React state thrashing
+      window.location.href = '/login';
+    }
     return Promise.reject(error);
   }
 );
