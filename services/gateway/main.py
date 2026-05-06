@@ -1265,8 +1265,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             content = chunk.get("message", {}).get("content", "")
                             if content:
                                 full_ans += content
-                                # Detection of tool block OR raw background JSON to start suppression
-                                if ("```json" in full_ans or '"follow_ups":' in full_ans) and not suppressing:
+                                # Detection of ANY code block OR raw background JSON to start suppression
+                                if ("```" in full_ans or '"follow_ups":' in full_ans) and not suppressing:
                                     suppressing = True
                                 
                                 if not suppressing:
