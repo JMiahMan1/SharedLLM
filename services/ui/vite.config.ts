@@ -18,23 +18,19 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api/auth': 'http://localhost:8001',
-      '/api/users': 'http://localhost:8001',
-      '/api/resolve': 'http://localhost:8001',
-      '/api/chat': 'http://localhost:11435',
-      '/api/search': 'http://localhost:11435',
-      '/api/settings': 'http://localhost:11435',
-      '/api/workspaces': 'http://localhost:11435',
-      '/v1': 'http://localhost:11435',
-      '/api/logs': 'http://localhost:8006',
-      '/api/logs/stream': {
-        target: 'ws://localhost:8006',
-        ws: true
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        ws: true,
       },
-      '/execute': 'http://localhost:11436',
-      '/api/admin': 'http://localhost:11438',
-      '/api/workspace': 'http://localhost:11438',
-      '/health': 'http://localhost:11435',
+      '/health': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/v1': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     }
   }
 })

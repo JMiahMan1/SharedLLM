@@ -33,7 +33,7 @@ const Docs = () => {
   const { data: docContent, isLoading, error } = useQuery({
     queryKey: ['docs', selectedDoc.id],
     queryFn: async () => {
-      const response = await axios.get(`http://${window.location.hostname}:11435/api/docs/${selectedDoc.file}`, {
+      const response = await axios.get(`/api/docs/${selectedDoc.file}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       return response.data.content;

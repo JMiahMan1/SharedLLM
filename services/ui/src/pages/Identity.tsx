@@ -490,14 +490,14 @@ const Identity = () => {
                 }}
               />
               <IntegrationTile 
-                name="Private Git" 
+                name="GitLab" 
                 icon={Server} 
                 color="rose" 
                 userData={fullUser}
                 configKeys={{
-                  "Git Endpoint": "git_url",
-                  "Auth Username": "git_user",
-                  "Auth Password": "git_token"
+                  "GitLab URL": "gitlab_url",
+                  "GitLab Username": "gitlab_user",
+                  "Access Token": "gitlab_token"
                 }}
               />
             </div>
@@ -615,7 +615,7 @@ const Identity = () => {
                         defaultValue={fullUser?.full_name}
                         onBlur={(e) => updateProfileMutation.mutate({ full_name: e.target.value })}
                         className="glass-input w-full text-xs" 
-                        placeholder="John Doe" 
+                        placeholder="Display name" 
                       />
                    </div>
                    <div>
