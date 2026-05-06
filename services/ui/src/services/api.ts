@@ -117,9 +117,7 @@ export const api = {
   async enrollVoice(audioBlob: Blob): Promise<{ success: boolean, voice_id: string }> {
     const formData = new FormData();
     formData.append('file', audioBlob, 'enrollment.webm');
-    const resp = await apiClient.post('/api/users/me/enroll', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const resp = await apiClient.post('/api/users/me/enroll', formData);
     return resp.data;
   },
 
