@@ -129,14 +129,15 @@ class NextCloudClient:
                 props = item["props"]
                 
                 # Normalize path: remove base_path and trailing slash
-                clean_path = href
+                from urllib.parse import unquote
+                clean_path = unquote(href)
                 if clean_path.startswith(self.base_path):
                     clean_path = clean_path[len(self.base_path):]
                 
                 norm_path = "/" + clean_path.strip("/")
                 
                 # Skip the current directory itself
-                if norm_path == target or not clean_path or (base_href and href == base_href):
+                if norm_path == unquote(target) or not clean_path or (base_href and href == base_href):
                     continue
                 
                 if norm_path in seen_paths:
