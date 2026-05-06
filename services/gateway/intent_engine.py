@@ -5,7 +5,10 @@ Classifies intents rapidly using fastembed to bypass LLMs for known commands.
 import os
 import json
 import logging
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 from typing import Tuple
 
 log = logging.getLogger("gateway.intent_engine")
@@ -13,7 +16,7 @@ log = logging.getLogger("gateway.intent_engine")
 class IntentEngine:
     def __init__(self):
         self.model = None
-        self.intent_embeddings = np.array([])
+        self.intent_embeddings = np.array([]) if np is not None else []
         self.intent_labels = []
         
         # Update path to local relative path for development, or use ENV
@@ -67,7 +70,10 @@ class IntentEngine:
         embeddings = list(self.model.embed(phrases))
         
         # Using NumPy arrays for ultra-fast vectorized dot product comparisons
-        self.intent_embeddings = np.array(embeddings)
+        if np is not None:
+            self.intent_embeddings = np.array(embeddings)
+        else:
+            self.intent_embeddings = embeddings
         self.intent_labels = labels
         log.info(f"Semantic Router initialized. Indexed {len(phrases)} examples across {len(data)} routes.")
 
@@ -77,7 +83,7 @@ class IntentEngine:
         Returns (intent_name, confidence_score).
         """
         # Fallback Check: Engine crashed or has no embeddings
-        if not self.is_active or not self.model or len(self.intent_embeddings) == 0:
+        if not self.is_active or not self.model or len(self.intent_embeddings) == 0 or np is None:
             return "unknown", 0.0
             
         try:
