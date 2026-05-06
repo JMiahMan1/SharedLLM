@@ -130,6 +130,15 @@ entirely to achieve command execution in under 200ms.
   `list_playlists`, `list_radio`.
 * **Benefit**: drastic latency reduction for simple, repetitive commands.
 
+### Capability-Based Routing (Pre-Flight Enforcement)
+
+To ensure system stability and provide clear feedback, the Gateway performs a **Pre-Flight Capability Check** before fanning out requests to downstream services:
+
+1. **Capability Map**: Every intent is linked to a set of required identity credentials (e.g., `turn_on` requires `ha_url` and `ha_token`).
+2. **Pre-Flight Validation**: After intent classification, the Gateway evaluates the `ResolvedCredentials` of the user.
+3. **Graceful Redirection**: If a required credential is missing or evaluates to an empty string, the Gateway halts execution and returns a persona-driven message guiding the user to the **Jarvis Identity Hub** to complete their setup.
+4. **Credential Hygiene**: The Identity service strictly enforces that empty or whitespace-only inputs are coerced to `None`, ensuring that enforcement logic like `if not ha_token` is reliable.
+
 ### Multi-User Context
 
 The system uses the `X-RAG-User` header to provide isolation:

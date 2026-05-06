@@ -57,3 +57,46 @@ def test_gateway_extracts_bearer_token(client, mocker):
     passed_body = mock_resolve.call_args[0][0]
     assert passed_body["api_key"] == "sk-test-123"
     print("\nSUCCESS: Gateway correctly extracted and passed the Bearer token.")
+
+@pytest.mark.asyncio
+async def test_gateway_enforces_capabilities_for_coding(client, mocker):
+    """
+    Test that the Gateway intercepts requests when required capabilities are missing.
+    In this case, intent 'workspace_coding' requires 'github_token'.
+    """
+    # 1. Resolve identity with NO github_token
+    mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={
+        "user": "testuser",
+        "github_token": None  # MISSING!
+    })
+    
+    # 2. Force intent to 'workspace_coding'
+    mocker.patch("gateway.main.engine.classify", return_value=("workspace_coding", 1.0))
+    
+    # 3. Mock Ollama for the persona-driven redirection message
+    class MockPersonaResponse:
+        def __init__(self):
+            self.status_code = 200
+        def json(self):
+            return {"response": "Please set up your GitHub token in the Identity page."}
+            
+    mocker.patch("gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockPersonaResponse())
+    
+    # 4. Mock the downstream service (should NOT be called)
+    mock_workspace = mocker.patch("gateway.main.orchestrate_code_change", new_callable=AsyncMock)
+
+    # Send request
+    resp = client.post(
+        "/api/chat",
+        json={"query": "fix my code"},
+        headers={"Authorization": "Bearer sk-test-123"}
+    )
+    
+    assert resp.status_code == 200
+    data = resp.json()
+    content = data["message"]["content"]
+    assert "GitHub" in content or "Identity" in content
+    
+    # PROOF: Downstream was never called
+    mock_workspace.assert_not_called()
+    print("\nSUCCESS: Gateway correctly blocked request due to missing capability.")

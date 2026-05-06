@@ -243,9 +243,15 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
     for plain, enc in crypto_map.items():
         if plain in update_data:
             val = update_data.pop(plain)
+            if isinstance(val, str):
+                val = val.strip()
+            val = val if val else None
             setattr(user, enc, encrypt(val) if val else None)
 
     for key, value in update_data.items():
+        if isinstance(value, str):
+            value = value.strip()
+        value = value if value else None
         setattr(user, key, value)
         
     session.add(user)
@@ -277,9 +283,15 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
     for plain, enc in crypto_map.items():
         if plain in update_data:
             val = update_data.pop(plain)
+            if isinstance(val, str):
+                val = val.strip()
+            val = val if val else None
             setattr(user, enc, encrypt(val) if val else None)
 
     for key, value in update_data.items():
+        if isinstance(value, str):
+            value = value.strip()
+        value = value if value else None
         setattr(user, key, value)
         
     session.add(user)
@@ -314,26 +326,31 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
         
+    def _coerce(val):
+        if isinstance(val, str):
+            val = val.strip()
+        return val if val else None
+
     user = User(
         username=body.username.lower(),
         display_name=body.display_name,
         is_admin=body.is_admin,
         is_system_default=body.is_system_default,
         api_key=body.api_key or os.urandom(24).hex(),
-        nextcloud_url=body.nextcloud_url,
-        nextcloud_user=body.nextcloud_user,
-        nextcloud_pass_enc=encrypt(body.nextcloud_pass) if body.nextcloud_pass else None,
-        ha_url=body.ha_url,
-        ha_token_enc=encrypt(body.ha_token) if body.ha_token else None,
-        github_url=body.github_url,
-        github_user=body.github_user,
-        github_token_enc=encrypt(body.github_token) if body.github_token else None,
-        gitlab_url=body.gitlab_url,
-        gitlab_user=body.gitlab_user,
-        gitlab_token_enc=encrypt(body.gitlab_token) if body.gitlab_token else None,
-        audiobookshelf_url=body.audiobookshelf_url,
-        audiobookshelf_user=body.audiobookshelf_user,
-        audiobookshelf_pass_enc=encrypt(body.audiobookshelf_pass) if body.audiobookshelf_pass else None
+        nextcloud_url=_coerce(body.nextcloud_url),
+        nextcloud_user=_coerce(body.nextcloud_user),
+        nextcloud_pass_enc=encrypt(_coerce(body.nextcloud_pass)) if _coerce(body.nextcloud_pass) else None,
+        ha_url=_coerce(body.ha_url),
+        ha_token_enc=encrypt(_coerce(body.ha_token)) if _coerce(body.ha_token) else None,
+        github_url=_coerce(body.github_url),
+        github_user=_coerce(body.github_user),
+        github_token_enc=encrypt(_coerce(body.github_token)) if _coerce(body.github_token) else None,
+        gitlab_url=_coerce(body.gitlab_url),
+        gitlab_user=_coerce(body.gitlab_user),
+        gitlab_token_enc=encrypt(_coerce(body.gitlab_token)) if _coerce(body.gitlab_token) else None,
+        audiobookshelf_url=_coerce(body.audiobookshelf_url),
+        audiobookshelf_user=_coerce(body.audiobookshelf_user),
+        audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None
     )
     session.add(user)
     session.commit()

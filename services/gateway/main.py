@@ -143,6 +143,37 @@ WORKSPACE_README_ACTION_HINTS = (
   "readme.md", "readme file",
 )
 
+# --- Capability Configuration ---
+# Maps intents to the credential fields required in ResolvedCredentials
+INTENT_CAPABILITY_MAP = {
+    "turn_on": ["ha_url", "ha_token"],
+    "turn_off": ["ha_url", "ha_token"],
+    "play_media": ["ha_url", "ha_token"],
+    "media_transport": ["ha_url", "ha_token"],
+    "pause_media": ["ha_url", "ha_token"],
+    "open_garage": ["ha_url", "ha_token"],
+    "close_garage": ["ha_url", "ha_token"],
+    "toggle": ["ha_url", "ha_token"],
+    "set_brightness": ["ha_url", "ha_token"],
+    "ha_status": ["ha_url", "ha_token"],
+    "sync_ha": ["ha_url", "ha_token"],
+    "workspace_coding": ["github_token"],
+    "github": ["github_token"],
+    "index_storage": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"],
+    "storage_search": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"],
+    "read_file": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"],
+    "storage_status": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"]
+}
+
+HUMAN_READABLE_CAPABILITIES = {
+    "ha_url": "Home Assistant URL",
+    "ha_token": "Home Assistant Token",
+    "github_token": "GitHub Personal Access Token",
+    "nextcloud_url": "Nextcloud URL",
+    "nextcloud_user": "Nextcloud Username",
+    "nextcloud_pass": "Nextcloud Password"
+}
+
 # --- Global Clients ---
 _global_http_client: httpx.AsyncClient = None
 
@@ -1014,13 +1045,48 @@ async def chat_handler(request: Request):
             is_openai=is_openai,
         )
     
-    # 3. Fast Path (Semantic Routing)
+    # 3. Pre-Flight Capability Check
     intent, confidence = engine.classify(refined_query)
     log.info(f"Intent Classification: query='{refined_query}' intent='{intent}' confidence={confidence}")
     
     if media_transport_command:
         intent = "media_transport"
         confidence = 1.0
+
+    # Enforcement: Check if user has required credentials for this intent
+    required_fields = INTENT_CAPABILITY_MAP.get(intent, [])
+    missing = [f for f in required_fields if not creds.get(f)]
+    
+    if missing and confidence >= FAST_PATH_THRESHOLD:
+        readable_missing = ", ".join([HUMAN_READABLE_CAPABILITIES.get(m, m) for m in missing])
+        log.warning(f"[CapabilityEnforcement] User {user_id} lacks {missing} for intent {intent}")
+        
+        prompt = (
+            f"System Note: The user requested a {intent} action, but their profile is missing {readable_missing}. "
+            "Politely explain that you cannot perform this action yet because the integration is not fully configured. "
+            "Guide them to the 'Identity' hub in Jarvis to connect their account and provide the missing credentials."
+        )
+        
+        # Call LLM to generate the persona-driven redirection message
+        if should_stream:
+            # For simplicity in this interceptor, we'll return a non-streaming response for the error state
+            # but usually we would stream a custom message.
+            pass 
+        
+        err_resp = await call_ollama({
+            "model": selected_model,
+            "prompt": prompt,
+            "stream": False,
+            "system": "You are Jarvis, a helpful AI assistant. Be concise and professional."
+        }, use_chat=False)
+        
+        msg = "I'm sorry, I can't do that yet. Please visit the Identity page to set up your credentials."
+        if err_resp.status_code == 200:
+            msg = err_resp.json().get("response", msg)
+
+        if is_openai:
+            return _make_openai_response(msg, selected_model, intent, stream=False)
+        return _make_ollama_response(msg, selected_model, intent, stream=False)
 
     if is_code_request and intent not in ("unknown", "code_orchestrate"):
         log.info(f"Bypassing fast-path intent '{intent}' for coding query.")
