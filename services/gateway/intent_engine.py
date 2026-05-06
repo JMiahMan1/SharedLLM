@@ -108,3 +108,4 @@ class IntentEngine:
         Determines if the semantic match is strong enough to bypass LLM classification.
         """
         return confidence >= self.FAST_PATH_CONFIDENCE
+engine = IntentEngine()
