@@ -1392,3 +1392,52 @@ async def proxy_tags():
 @app.get("/api/version")
 async def proxy_version():
     return {"version": "0.1.32"}
+@app.get("/api/search")
+async def global_search(q: str, request: Request):
+    """Global semantic search proxying to RAG service."""
+    # Resolve user for multi-tenancy
+    auth_header = request.headers.get("Authorization")
+    user_id = "admin"
+    if auth_header and auth_header.startswith("Bearer "):
+        try:
+            # Simple identity check
+            resp = await get_http_client().post(
+                f"{IDENTITY_SVC}/api/resolve",
+                headers={"Authorization": auth_header, "X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                user_id = resp.json().get("user", "admin")
+        except: pass
+
+    try:
+        resp = await get_http_client().post(
+            f"{RAG_SVC}/rag/search",
+            json={"query": q, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code != 200:
+            return JSONResponse({"status": "ERROR", "message": "Search failed"}, status_code=502)
+        
+        data = resp.json()
+        # Transform for UI
+        results = data.get("results", [])
+        return {
+            "answer": results[0]["content"] if results else "No specific context found.",
+            "files": [{"name": os.path.basename(r["metadata"].get("path", "unknown")), "path": r["metadata"].get("path", "unknown")} for r in results]
+        }
+    except Exception as e:
+        log.error(f"Search proxy failed: {e}")
+        return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
+
+@app.get("/api/workspaces")
+async def get_workspaces_proxy():
+    """Proxy to workspace runtime."""
+    try:
+        resp = await get_http_client().get(
+            f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return resp.json()
+    except Exception as e:
+        log.error(f"Workspaces proxy failed: {e}")
+        return []

@@ -22,6 +22,9 @@ export default defineConfig({
       '/api/users': 'http://localhost:8001',
       '/api/resolve': 'http://localhost:8001',
       '/api/chat': 'http://localhost:11435',
+      '/api/search': 'http://localhost:11435',
+      '/api/settings': 'http://localhost:11435',
+      '/api/workspaces': 'http://localhost:11435',
       '/v1': 'http://localhost:11435',
       '/api/logs': 'http://localhost:8006',
       '/api/logs/stream': {

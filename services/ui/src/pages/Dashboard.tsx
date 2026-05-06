@@ -305,7 +305,7 @@ const Dashboard = () => {
               name={s.name} 
               icon={s.icon} 
               color={s.color} 
-              status={health?.services[s.key]}
+              status={health?.services?.[s.key]}
               onClick={() => setSelectedService(s)}
             />
           ))}

@@ -18,13 +18,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('jarvis_token'));
+  const [token, setToken] = useState<string | null>(localStorage.getItem('jarvis_api_key'));
   const [isLoading, setIsLoading] = useState(true);
 
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem('jarvis_token');
+    localStorage.removeItem('jarvis_api_key');
     localStorage.removeItem('jarvis_user');
     window.location.href = '/login';
   }, []);
@@ -52,27 +52,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     initAuth();
   }, [token, refreshProfile]);
 
-  // Setup Axios interceptor for 401
-  useEffect(() => {
-    const interceptor = apiClient.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          toast.error('Session expired. Please log in again.');
-          logout();
-        }
-        return Promise.reject(error);
-      }
-    );
-    return () => apiClient.interceptors.response.eject(interceptor);
-  }, [logout]);
+  // Centralized 401 handling is now in services/api.ts
 
   const login = async (credentials: { username: string; password: string }) => {
     try {
       const data = await api.login(credentials.username, credentials.password);
       const authToken = data.api_key;
       setToken(authToken);
-      localStorage.setItem('jarvis_token', authToken);
+      localStorage.setItem('jarvis_api_key', authToken);
       
       const profile = await api.getMe();
       setUser(profile);
