@@ -246,6 +246,23 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # --- Global Health & Readiness ---
+@app.delete("/api/history")
+async def clear_history_endpoint(request: Request):
+    """Clears conversation history for the current user."""
+    try:
+        body = await request.json()
+        creds_data = await resolve_identity(body)
+        user_id = creds_data.get("user", "default")
+        
+        from history import _redis, _get_history_key
+        key = _get_history_key(user_id)
+        _redis.delete(key)
+        
+        return {"status": "SUCCESS", "message": f"History cleared for {user_id}."}
+    except Exception as e:
+        log.error(f"History clear failed: {e}")
+        return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "gateway"}
@@ -1248,8 +1265,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             content = chunk.get("message", {}).get("content", "")
                             if content:
                                 full_ans += content
-                                # Detection of tool block to start suppression
-                                if "```json" in full_ans and not suppressing:
+                                # Detection of tool block OR raw background JSON to start suppression
+                                if ("```json" in full_ans or '"follow_ups":' in full_ans) and not suppressing:
                                     suppressing = True
                                 
                                 if not suppressing:
