@@ -47,11 +47,16 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             def _list():
                 client = provider.calendar_client()
                 calendars = client.principal().calendars()
-                valid = [f"- {c.name}" for c in calendars if "birthday" not in (c.name or "").lower()]
-                return "Available Calendars:\n" + "\n".join(valid) if valid else "No calendars found."
+                return [
+                    {
+                        "id": c.id,
+                        "display_name": c.name,
+                        "color": getattr(c, 'calendar_color', None)
+                    } for c in calendars if "birthday" not in (c.name or "").lower()
+                ]
             
-            res_msg = await loop.run_in_executor(None, _list)
-            return ExecutionResult(status="SUCCESS", message=res_msg, service="calendar_list")
+            res_data = await loop.run_in_executor(None, _list)
+            return ExecutionResult(status="SUCCESS", message=str(res_data), service="calendar_list", data=res_data)
 
         elif action == "read":
             def _read():
