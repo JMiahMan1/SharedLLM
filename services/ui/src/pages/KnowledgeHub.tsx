@@ -112,6 +112,12 @@ const KnowledgeHub = () => {
             <h3 className="text-4xl font-bold text-white mt-2">
               {statsLoading ? '...' : stats?.total_chunks?.toLocaleString() ?? '0'}
             </h3>
+            {stats?.breakdown && (
+              <div className="mt-1 flex gap-3 text-[9px] font-black uppercase tracking-tighter text-slate-500">
+                <span>{stats.breakdown.nextcloud_files?.chunks ?? 0} Files</span>
+                <span>{stats.breakdown.ha_entities?.chunks ?? 0} Devices</span>
+              </div>
+            )}
             <p className="text-xs text-slate-500 mt-4 flex items-center gap-1">
               <Info size={12} />
               Atomic units of knowledge in ChromaDB
@@ -128,6 +134,12 @@ const KnowledgeHub = () => {
             <h3 className="text-4xl font-bold text-indigo-400 mt-2">
               {statsLoading ? '...' : stats?.total_documents?.toLocaleString() ?? '0'}
             </h3>
+            {stats?.breakdown && (
+              <div className="mt-1 flex gap-3 text-[9px] font-black uppercase tracking-tighter text-indigo-400/50">
+                <span>{stats.breakdown.nextcloud_files?.documents ?? 0} Files</span>
+                <span>{stats.breakdown.ha_entities?.documents ?? 0} Devices</span>
+              </div>
+            )}
             <p className="text-xs text-slate-500 mt-4 flex items-center gap-1">
               <CheckCircle2 size={12} className="text-emerald-500" />
               Verified across all providers
