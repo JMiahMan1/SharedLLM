@@ -16,8 +16,7 @@
         reverse_proxy logging:8006
     }
 
-    handle /api/execute* {
-        uri strip_prefix /api
+    handle /execute* {
         reverse_proxy execution:11436
     }
 
