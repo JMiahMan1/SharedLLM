@@ -120,7 +120,7 @@ services:
       - IDENTITY_SVC_URL=http://identity:8001
       - STORAGE_SVC_URL=http://storage:8005
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
-      - WORKSPACE_RUNTIME_ROOT=/workspace
+      - WORKSPACE_RUNTIME_ROOT=/workspace/SharedLLM
       - TZ=America/Phoenix
     volumes:
       - ./:/workspace/SharedLLM
