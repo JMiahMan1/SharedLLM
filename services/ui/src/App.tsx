@@ -36,9 +36,9 @@ const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.Re
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-100">
       <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden relative">
         <Header />
-        <main className="flex-1 overflow-y-auto p-6 scroll-smooth">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scroll-smooth">
           {children}
         </main>
       </div>

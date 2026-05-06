@@ -32,15 +32,15 @@ const navItems = [
 const Sidebar = () => {
   const { user } = useAuth();
   return (
-    <aside className="w-64 glass-panel m-4 mr-0 flex flex-col">
-      <div className="p-6">
+    <aside className="w-20 md:w-64 glass-panel m-2 md:m-4 md:mr-0 flex flex-col transition-all duration-300">
+      <div className="p-4 md:p-6 flex justify-center md:justify-start">
         <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent flex items-center gap-2">
           <Activity className="text-purple-400" />
-          Jarvis OS
+          <span className="hidden md:inline">Jarvis OS</span>
         </h1>
       </div>
       
-      <nav className="flex-1 px-4 space-y-2">
+      <nav className="flex-1 px-2 md:px-4 space-y-2">
         {navItems
           .filter(item => !item.adminOnly || user?.is_admin)
           .map((item) => (
@@ -48,19 +48,20 @@ const Sidebar = () => {
               key={item.path}
               to={item.path}
               className={({ isActive }) => cn(
-                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200",
+                "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
                 isActive 
                   ? "bg-purple-600/30 text-white border border-purple-500/30 shadow-lg shadow-purple-500/10" 
                   : "text-slate-400 hover:text-white hover:bg-white/5"
               )}
+              title={item.label}
             >
-              <item.icon size={20} />
-              <span className="font-medium">{item.label}</span>
+              <item.icon size={20} className="shrink-0" />
+              <span className="font-medium hidden md:inline">{item.label}</span>
             </NavLink>
           ))}
       </nav>
 
-      <div className="p-4 mt-auto">
+      <div className="p-4 mt-auto hidden md:block">
         <div className="glass-card p-4 text-xs text-slate-500">
           <p>System v1.0.0-alpha</p>
           <div className="flex items-center gap-2 mt-1">
