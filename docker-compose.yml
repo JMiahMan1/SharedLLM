@@ -43,6 +43,7 @@ services:
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      - ./services/tests:/app/tests
 
   rag:
     build: ./services/rag
