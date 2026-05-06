@@ -40,19 +40,24 @@ export PYTHONPATH="${PWD}/services:${PWD}"
 export ASSISTANT_MODEL="${ASSISTANT_MODEL:-qwen3:latest}"
 export CODING_MODEL="${CODING_MODEL:-qwen2.5-coder:7b}"
 
-echo -e "\nRunning Gateway Model Routing Verification..."
-pytest services/tests/test_gateway_model_selection.py -s
+if [ "$#" -gt 0 ]; then
+    echo -e "\nRunning Targeted Tests: $@"
+    pytest "$@" -s
+else
+    echo -e "\nRunning Gateway Model Routing Verification..."
+    pytest services/tests/test_gateway_model_selection.py -s
 
-echo -e "\nRunning Identity and Auth Database Verification..."
-pytest test/local/test_auth_identity.py -s
+    echo -e "\nRunning Identity and Auth Database Verification..."
+    pytest test/local/test_auth_identity.py -s
 
-echo -e "\nRunning Hardware and Service State Verification..."
-pytest test/local/test_hardware_state.py -s
+    echo -e "\nRunning Hardware and Service State Verification..."
+    pytest test/local/test_hardware_state.py -s
 
-echo -e "\nRunning Office TV Media Control Verification..."
-pytest test/local/test_office_tv_media_controls.py -s
+    echo -e "\nRunning Office TV Media Control Verification..."
+    pytest test/local/test_office_tv_media_controls.py -s
 
-echo -e "\nRunning RAG Sync Loop Verification..."
-pytest test/local/test_rag_sync.py -s
+    echo -e "\nRunning RAG Sync Loop Verification..."
+    pytest test/local/test_rag_sync.py -s
+fi
 
 echo -e "\n=== Tests Complete ==="
