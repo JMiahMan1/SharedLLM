@@ -46,11 +46,18 @@ def test_api_key_generation_and_resolution(client, session):
     Test 1: Key Generation and Test 2: Resolution Routing
     """
     # 1. Create a dummy user (Dad)
-    dad = User(username="dad", is_admin=True)
-    session.add(dad)
+    dad = session.exec(select(User).where(User.username == "dad")).first()
+    if not dad:
+        dad = User(username="dad", is_admin=True)
+        session.add(dad)
     
-    # Also create the 'default' user for fallback
-    default_user = User(username="default", is_system_default=True, ha_url="http://default-ha")
+    # Also find or update the 'default' user for fallback
+    default_user = session.exec(select(User).where(User.username == "default")).first()
+    if not default_user:
+        default_user = User(username="default", is_system_default=True)
+        session.add(default_user)
+    
+    default_user.ha_url = "http://default-ha"
     session.add(default_user)
     session.commit()
     
