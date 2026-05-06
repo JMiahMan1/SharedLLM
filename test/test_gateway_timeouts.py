@@ -22,9 +22,9 @@ async def test_gateway_timeout_degradation():
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.post("/api/chat", json={"message": "hello"})
+        resp = await ac.post("/api/chat", json={"query": "hello"})
         
         # In a hardened system, we return a structured degradation instead of 500
         assert resp.status_code == 200
-        assert "Jarvis is currently operating in low-latency mode" in resp.json()["response"] or \
-               "Downstream service timed out" in resp.json()["response"]
+        content = resp.json().get("message", "")
+        assert "low-latency mode" in content or "timed out" in content
