@@ -46,6 +46,7 @@ const Communication = () => {
   const [announcementVolume, setAnnouncementVolume] = useState(0.6);
   const [eventSummary, setEventSummary] = useState('');
   const [eventStartTime, setEventStartTime] = useState('');
+  const [selectedCalendar, setSelectedCalendar] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [noteResult, setNoteResult] = useState<ExecutionResponse | null>(null);
@@ -105,6 +106,10 @@ const Communication = () => {
     () => detailList<TalkMessage>(talkMessagesResponse, 'messages'),
     [talkMessagesResponse],
   );
+  const calendars = useMemo(
+    () => detailList<string>(calendarList, 'calendars'),
+    [calendarList],
+  );
 
   useEffect(() => {
     if (!announcementDevice && mediaTargets.length > 0) {
@@ -119,6 +124,13 @@ const Communication = () => {
       setSelectedTalkToken(talkConversations[0].token);
     }
   }, [selectedTalkToken, talkConversations]);
+
+  useEffect(() => {
+    if (!selectedCalendar && calendars.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedCalendar(calendars[0]);
+    }
+  }, [selectedCalendar, calendars]);
 
   const createTimerMutation = useMutation({
     mutationFn: () => api.createTimer({ title: timerTitle, duration_str: timerDuration }),
@@ -154,7 +166,11 @@ const Communication = () => {
   });
 
   const calendarMutation = useMutation({
-    mutationFn: () => api.addCalendarEvent({ summary: eventSummary, start_time: eventStartTime }),
+    mutationFn: () => api.addCalendarEvent({ 
+      summary: eventSummary, 
+      start_time: eventStartTime,
+      calendar_name: selectedCalendar || undefined,
+    }),
     onSuccess: () => {
       refetchCalendarEvents();
       toast.success('Calendar event added');
@@ -579,7 +595,17 @@ const Communication = () => {
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr_180px_auto]">
+            <select
+              value={selectedCalendar}
+              onChange={(e) => setSelectedCalendar(e.target.value)}
+              className="glass-input bg-black/30"
+            >
+              <option value="">Default Calendar</option>
+              {calendars.map(cal => (
+                <option key={cal} value={cal}>{cal}</option>
+              ))}
+            </select>
             <input
               type="text"
               value={eventSummary}

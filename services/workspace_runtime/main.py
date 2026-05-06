@@ -29,7 +29,27 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
 STORAGE_SVC_URL = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
 WORKSPACE_REGISTRY_PATH = os.getenv("WORKSPACE_REGISTRY_PATH", "/app/config/workspaces.json")
-WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
+_DEFAULT_WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
+
+def get_workspace_root() -> Path:
+    """Fetch the current workspace root from global settings or fallback to env/default."""
+    try:
+        # We use a short timeout and cache or just fallback if identity is down
+        with httpx.Client(timeout=2.0) as client:
+            resp = client.get(
+                f"{IDENTITY_SVC_URL}/api/settings/workspace_runtime_root",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                val = resp.json().get("value")
+                if val:
+                    return Path(val).resolve()
+    except Exception as e:
+        log.debug(f"Failed to fetch workspace_runtime_root from identity: {e}")
+    
+    return _DEFAULT_WORKSPACE_ROOT
+
+WORKSPACE_ROOT = get_workspace_root() # Initial value
 DEFAULT_PYTEST_TIMEOUT_SECONDS = int(os.getenv("WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "90"))
 DEFAULT_FILE_READ_LIMIT = int(os.getenv("WORKSPACE_RUNTIME_FILE_READ_LIMIT", "20000"))
 
@@ -292,7 +312,7 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     if access_policy == "admin_only" and not is_admin:
         raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' requires an admin identity")
 
-    resolved_path = resolve_safe_path(WORKSPACE_ROOT, str(match["local_path"]))
+    resolved_path = resolve_safe_path(get_workspace_root(), str(match["local_path"]))
     if not resolved_path.is_dir():
          raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {match['local_path']}")
     workspace = dict(match)
@@ -581,7 +601,7 @@ def _run_git_with_optional_askpass(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "workspace_runtime", "workspace_root": str(WORKSPACE_ROOT)}
+    return {"status": "ok", "service": "workspace_runtime", "workspace_root": str(get_workspace_root())}
 
 
 @app.get("/workspaces")
@@ -1247,7 +1267,7 @@ def run_pytest(req: PytestRequest, x_internal_secret: Optional[str] = Header(def
 def run_smoke_test(x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     # Run soa_smoke_test.py from the root of the repo (which is /workspace in the container)
-    workspace_path = WORKSPACE_ROOT
+    workspace_path = get_workspace_root()
     result = _run_command(workspace_path, ["python3", "soa_smoke_test.py"], timeout_seconds=60)
     return {
         "status": "SUCCESS",
@@ -1385,7 +1405,7 @@ async def git_pull_webhook(
                 log.warning(f"Webhook pull attempted for workspace {workspace_id} but auto_pull_enabled is False")
                 raise HTTPException(status_code=403, detail="Webhook pulling is disabled for this workspace")
 
-            resolved_path = resolve_safe_path(WORKSPACE_ROOT, str(match.local_path))
+            resolved_path = resolve_safe_path(get_workspace_root(), str(match.local_path))
             workspace_path = Path(resolved_path)
             
             remote_name = (match.git_remote or "origin").strip()
