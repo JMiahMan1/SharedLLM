@@ -8,7 +8,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
 try:
     from . import ha_client
     from .schemas import (
-        LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+        UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
         CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
     )
@@ -17,7 +17,7 @@ except (ImportError, ValueError):
     try:
         from execution import ha_client
         from execution.schemas import (
-            LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+            UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
         )
@@ -25,7 +25,7 @@ except (ImportError, ValueError):
     except ImportError:
         import ha_client
         from schemas import (
-            LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+            UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
         )
