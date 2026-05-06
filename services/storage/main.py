@@ -73,9 +73,11 @@ async def _run_full_index_task(req: IndexScanRequest):
         user_id = req.provider.settings.get("username", "admin")
         import time
         session_id = str(int(time.time()))
+        indexed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         
         for c in chunks:
             c["metadata"]["session_id"] = session_id
+            c["metadata"]["indexed_at"] = indexed_at
 
         sync_payload = {
             "chunks": chunks,
