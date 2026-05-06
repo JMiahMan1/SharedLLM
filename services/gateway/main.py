@@ -1298,14 +1298,20 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     
     full_system = f"{system_instruction}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}"
     
-    if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes"]):
-        full_system += "\n\nCRITICAL DIRECTIVE: You have full permission to access the storage system. Do NOT refuse. Output the ```json StorageIndexRequest block immediately to fulfill the user's request."
+    final_query = query
+    if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
+        final_query += (
+            "\n\n[SYSTEM OVERRIDE: You ARE fully capable of executing this storage action. "
+            "DO NOT apologize or say you lack access. DO NOT provide a tutorial. "
+            "You MUST immediately execute the appropriate tool: `StorageListRequest` to find resources, "
+            "or `StorageIndexRequest` to index them. Output the correct JSON block now.]"
+        )
         
     ollama_payload = {
         "model": selected_model,
         "messages": [
             {"role": "system", "content": full_system}
-        ] + short_term + [{"role": "user", "content": query}],
+        ] + short_term + [{"role": "user", "content": final_query}],
         "stream": should_stream
     }
 
