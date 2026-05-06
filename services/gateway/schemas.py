@@ -74,3 +74,10 @@ class StorageListRequest(BaseModel):
 class StorageIndexRequest(BaseModel):
     path: str = "/"
     recursive: bool = True
+
+class StorageStatusRequest(BaseModel):
+    """
+    Checks the current indexing status and file counts from the storage/RAG backend.
+    Requires no parameters.
+    """
+    pass
