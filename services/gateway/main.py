@@ -1430,24 +1430,31 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             
             # Map action to service endpoint
             action_map = {
-                "LightControlRequest": (EXECUTION_SVC, "/execute/light"),
-                "MediaPlayRequest": (EXECUTION_SVC, "/execute/media/play"),
-                "MediaTransportRequest": (EXECUTION_SVC, "/execute/media/transport"),
-                "TVCastRequest": (EXECUTION_SVC, "/execute/tv_cast"),
-                "ClimateRequest": (EXECUTION_SVC, "/execute/climate"),
-                "SecurityRequest": (EXECUTION_SVC, "/execute/security"),
-                "AnnouncementRequest": (EXECUTION_SVC, "/execute/announce"),
-                "HAServiceRequest": (EXECUTION_SVC, "/execute/ha_service"),
-                "CalendarRequest": (EXECUTION_SVC, "/execute/calendar"),
-                "NoteRequest": (EXECUTION_SVC, "/execute/note"),
-                "TimerRequest": (EXECUTION_SVC, "/execute/timer"),
-                "WorkspaceFileAction": (WORKSPACE_RUNTIME_SVC, "/execute/file"),
-                "WorkspaceGitAction": (WORKSPACE_RUNTIME_SVC, "/execute/git"),
-                "WorkspaceSyncAction": (WORKSPACE_RUNTIME_SVC, "/execute/sync"),
+                "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
+                "light_control": (EXECUTION_SVC, "/execute/light"),
+                "light_control_request": (EXECUTION_SVC, "/execute/light"),
+                "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
+                "media_play": (EXECUTION_SVC, "/execute/media/play"),
+                "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
+                "media_transport": (EXECUTION_SVC, "/execute/media/transport"),
+                "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
+                "tv_cast": (EXECUTION_SVC, "/execute/tv_cast"),
+                "climaterequest": (EXECUTION_SVC, "/execute/climate"),
+                "securityrequest": (EXECUTION_SVC, "/execute/security"),
+                "announcementrequest": (EXECUTION_SVC, "/execute/announce"),
+                "haservicerequest": (EXECUTION_SVC, "/execute/ha_service"),
+                "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
+                "noterequest": (EXECUTION_SVC, "/execute/note"),
+                "timerrequest": (EXECUTION_SVC, "/execute/timer"),
+                "workspacefileaction": (WORKSPACE_RUNTIME_SVC, "/execute/file"),
+                "workspacegitaction": (WORKSPACE_RUNTIME_SVC, "/execute/git"),
+                "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/execute/sync"),
             }
             
-            if action in action_map:
-                svc_base, endpoint = action_map[action]
+            lookup_action = action.lower().strip() if action else ""
+            
+            if lookup_action in action_map:
+                svc_base, endpoint = action_map[lookup_action]
                 
                 # ALWAYS overwrite user context with real resolved credentials
                 # Filter to only fields expected by Execution (user, ha_url, ha_token)
