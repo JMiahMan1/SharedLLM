@@ -107,7 +107,9 @@ def get_session():
     with Session(engine) as session:
         yield session
 
-def require_internal(authorization: str = Header(None)):
+def require_internal(authorization: str = Header(None), x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
+    if x_internal_secret == INTERNAL_SECRET:
+        return
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing internal token")
     token = authorization.split(" ")[1]
