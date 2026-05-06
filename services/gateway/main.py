@@ -183,19 +183,36 @@ HUMAN_READABLE_CAPABILITIES = {
 }
 
 # --- Global Clients ---
-_global_http_client: httpx.AsyncClient = None
+_global_http_client: Optional[httpx.AsyncClient] = None
+
+def get_http_client() -> httpx.AsyncClient:
+    """Lazy initializer for the global httpx client to ensure test compatibility."""
+    global _global_http_client
+    if _global_http_client is None:
+        _global_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(45.0, connect=5.0),
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+        )
+    return _global_http_client
+
+@app.on_event("startup")
+async def startup_event():
+    # Initialize the client explicitly on startup
+    get_http_client()
+    log.info("Gateway initialized with standardized 45s timeouts")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global _global_http_client
+    if _global_http_client:
+        await _global_http_client.aclose()
+        _global_http_client = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _global_http_client
-    _global_http_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(45.0, connect=5.0),
-        transport=httpx.AsyncHTTPTransport(retries=3)
-    )
     log.info("Gateway starting up...")
     engine.load()
     yield
-    await _global_http_client.aclose()
     log.info("Gateway shutting down...")
 
 app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
@@ -360,7 +377,7 @@ async def contextualize_query(query: str, history: list) -> str:
     prompt = f"Given history:\n{hist_str}\nRewrite follow-up to standalone command.\nFollow-up: {query}\nCommand:"
     try:
         payload = {"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
-        resp = await _global_http_client.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
+        resp = await get_http_client().post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, dict):
@@ -523,9 +540,7 @@ def wants_workspace_readme_generation(query: str) -> bool:
 
 
 async def workspace_runtime_request(method: str, path: str, *, json_payload: dict | None = None, params: dict | None = None) -> dict:
-    client = _global_http_client
-    if client is None:
-      raise RuntimeError("Gateway HTTP client is not initialized")
+    client = get_http_client()
 
     resp = await client.request(
       method,
@@ -901,7 +916,7 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
 
 async def call_ollama(payload: dict, use_chat: bool = True) -> httpx.Response:
     endpoint = "/api/chat" if use_chat else "/api/generate"
-    return await _global_http_client.post(
+    return await get_http_client().post(
       f"{OLLAMA_URL}{endpoint}",
       json=payload,
       timeout=OLLAMA_TIMEOUT,
@@ -972,7 +987,7 @@ async def resolve_identity(body: dict) -> dict:
 
 async def fetch_ha_entities(creds: dict) -> list:
     try:
-      resp = await _global_http_client.get(
+      resp = await get_http_client().get(
           f"{EXECUTION_SVC}/discovery/entities",
           params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
           headers={"X-Internal-Secret": INTERNAL_SECRET},
@@ -986,7 +1001,7 @@ async def fetch_ha_entities(creds: dict) -> list:
       entities = data.get("entities", []) if isinstance(data, dict) else []
       if entities:
           # Async sync task
-          asyncio.create_task(_global_http_client.post(
+          asyncio.create_task(get_http_client().post(
             f"{RAG_SVC}/rag/sync/ha",
             json={"entities": entities, "user_id": creds.get("user", "admin")},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
@@ -998,7 +1013,7 @@ async def fetch_ha_entities(creds: dict) -> list:
 
 async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> list:
     try:
-      resp = await _global_http_client.get(
+      resp = await get_http_client().get(
           f"{EXECUTION_SVC}/discovery/history",
           params={
             "ha_url": creds.get("ha_url"),
@@ -1029,7 +1044,7 @@ async def discovery_sync(request: Request):
 
 async def execute_command(endpoint: str, payload: dict) -> dict:
     try:
-      resp = await _global_http_client.post(
+      resp = await get_http_client().post(
           f"{EXECUTION_SVC}{endpoint}",
           json=payload,
           headers={"X-Internal-Secret": INTERNAL_SECRET},
@@ -1073,7 +1088,7 @@ Example: ["Turn on the office light", "Play some jazz music"]
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks: BackgroundTasks = None):
-    client = _global_http_client
+    client = get_http_client()
     # 1. Resolve Identity
     try:
         body = await request.json()
