@@ -52,14 +52,13 @@ strict separation of concerns:
     library data.
   * **Status**: *Completed*.
 
-## 🛠 Priority 2: System Hardening
+## ✅ Completed Milestones (2026 Architecture)
 
-* [ ] **Unit Test Coverage**
-  * Add comprehensive tests for the `IntentEngine` regex patterns.
-  * Mock Home Assistant API for offline testing.
-* [ ] **User-Specific Context**
-  * Enhance `Redis` storage to remember *which* user asked for what (e.g.,
-    "Resume *my* podcast", not the generic last one).
+* [x] **Semantic Intent Engine**: Replaced naive regex with FastEmbed Semantic Router.
+* [x] **Hybrid RAG Search**: Implemented BM25 + Vector search with RRF in RAG service.
+* [x] **Tiered Memory System**: Implemented asynchronous User Fact extraction.
+* [x] **React UI Hardening**: Integrated TanStack Query and Global Error Boundaries.
+* [x] **Capability-Based Routing**: Enforced pre-flight credential checks at the Gateway.
 
 ## 🧠 Priority 3: Advanced Intelligence
 
