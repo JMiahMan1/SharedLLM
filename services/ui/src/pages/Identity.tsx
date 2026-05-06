@@ -358,7 +358,7 @@ const APIKeyRows = () => {
                  <span className="font-bold text-white tracking-tight">{k.label}</span>
               </div>
            </td>
-           <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">sk-nexus-••••{k.prefix}</td>
+           <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">sk-jarvis-••••{k.prefix}</td>
            <td className="px-6 py-4">
               <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[8px] font-black uppercase tracking-widest">Active</span>
            </td>
