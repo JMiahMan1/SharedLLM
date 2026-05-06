@@ -5,11 +5,15 @@ Manages ChromaDB for vector search and ingestion.
 """
 import os
 import logging
+import time
+import hashlib
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
+from fastapi.responses import JSONResponse
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
+import traceback
 
 try:
     from .schemas import SearchRequest, SearchResponse, SearchResultItem, IngestRequest
@@ -42,9 +46,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SharedLLM RAG Service", version="1.0.0", lifespan=lifespan)
 
-from fastapi.responses import JSONResponse
-import traceback
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     err_msg = f"RAG Error: {type(exc).__name__}: {str(exc)}"
@@ -60,7 +61,6 @@ def require_internal(x_internal_secret: str = Header(...)):
 
 def get_collection(name: str):
     try:
-        # Get or create collection
         return chroma_client.get_or_create_collection(
             name=name,
             embedding_function=embedding_fn
@@ -81,15 +81,12 @@ async def search(req: SearchRequest):
     }
     
     try:
-        # 1. Vector Search (Dense)
         vector_results = collection.query(
             query_texts=[req.query],
-            n_results=req.k * 2, # Fetch more to allow for fusion
+            n_results=req.k * 2,
             where=where_filter
         )
         
-        # 2. Keyword Search (Lexical Fallback)
-        # Chroma supports basic keyword search via where_document $contains
         keyword_results = collection.query(
             query_texts=[req.query],
             n_results=req.k * 2,
@@ -97,11 +94,8 @@ async def search(req: SearchRequest):
             where_document={"$contains": req.query}
         )
 
-        # 3. Reciprocal Rank Fusion (RRF)
-        # Score = sum(1 / (k + rank))
-        # k is a constant (e.g. 60)
         K_RRF = 60
-        scores = {} # (doc_content, meta_tuple) -> score
+        scores = {}
         
         def process_results(results):
             if not results or not results["documents"] or not results["documents"][0]:
@@ -115,7 +109,6 @@ async def search(req: SearchRequest):
         process_results(vector_results)
         process_results(keyword_results)
         
-        # Sort by score
         sorted_results = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         top_k = sorted_results[:req.k]
         
@@ -140,31 +133,37 @@ async def get_stats(user_id: str = "default"):
 
         for name in collections:
             coll = chroma_client.get_or_create_collection(name=name, embedding_function=embedding_fn)
-            count = coll.count()
-            total_chunks += count
             
-            if count > 0:
+            # Query all entries for this user to get counts and documents
+            results = coll.get(where={"user_id": user_id}, include=["metadatas"])
+            if results and results["ids"]:
+                total_chunks += len(results["ids"])
                 providers.append(name.split('_')[0])
-                # Query unique paths for this user to count documents
-                results = coll.get(where={"user_id": user_id}, include=["metadatas"])
-                if results and results["metadatas"]:
-                    unique_paths = {m.get("path") for m in results["metadatas"] if m.get("path")}
-                    total_documents += len(unique_paths)
-                    
-                    # Track last indexed timestamp if available in metadata
+                
+                if results["metadatas"]:
+                    unique_items = set()
                     for m in results["metadatas"]:
-                        indexed_at = m.get("indexed_at")
-                        if indexed_at:
-                            if not last_indexed or indexed_at > last_indexed:
-                                last_indexed = indexed_at
+                        item_id = m.get("path") or m.get("friendly_name") or m.get("entity_id")
+                        if item_id:
+                            unique_items.add(item_id)
+                        
+                        # Track last indexed timestamp
+                        idx_at = m.get("indexed_at")
+                        if idx_at:
+                            if not last_indexed or idx_at > last_indexed:
+                                last_indexed = idx_at
+                    
+                    total_documents += len(unique_items)
+                    
+                    if not unique_items and len(results["ids"]) > 0:
+                        total_documents += 1
 
         return {
             "status": "SUCCESS",
             "total_chunks": total_chunks,
             "total_documents": total_documents,
             "last_indexed": last_indexed,
-            "providers": providers,
-            "collections": collections # Keep for internal debug
+            "providers": list(set(providers))
         }
     except Exception as e:
         log.error(f"Stats failed: {e}")
@@ -187,13 +186,12 @@ async def get_indexed_paths(user_id: str = "default"):
 @app.post("/rag/ingest", dependencies=[Depends(require_internal)])
 async def ingest(req: IngestRequest):
     collection = get_collection(req.collection_name)
-    
     import uuid
     doc_id = str(uuid.uuid4())
-    
-    # Enforce user_id in metadata for privacy
     meta = req.metadata.copy()
     meta["user_id"] = req.user_id
+    # Add timestamp
+    meta["indexed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     
     try:
         collection.add(
@@ -208,9 +206,6 @@ async def ingest(req: IngestRequest):
 
 @app.post("/rag/sync/files", dependencies=[Depends(require_internal)])
 async def sync_files(payload: dict):
-    """
-    Ingests file chunks for a specific provider/user.
-    """
     chunks = payload.get("chunks", [])
     user_id = payload.get("user_id", "admin")
     collection_name = payload.get("collection_name", "nextcloud_files")
@@ -223,7 +218,8 @@ async def sync_files(payload: dict):
     docs = []
     metas = []
     
-    import hashlib
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    
     for c in chunks:
         if not isinstance(c, dict): continue
         content = c.get("content")
@@ -233,23 +229,23 @@ async def sync_files(payload: dict):
             
         path = metadata.get("path", "unknown")
         chunk_idx = metadata.get("chunk_index", 0)
-        
-        # Unique ID per chunk
-        # Using hash of path to avoid special character issues in IDs
         path_hash = hashlib.md5(path.encode()).hexdigest()
+        
         if metadata.get("is_metadata"):
             cid = f"file:{user_id}:{path_hash}:meta"
         else:
             cid = f"file:{user_id}:{path_hash}:{chunk_idx}"
         
-        # Enforce user_id in meta and sanitize values for ChromaDB
         meta = {}
         for k, v in metadata.items():
             if isinstance(v, (str, int, float, bool)):
                 meta[k] = v
             else:
-                meta[k] = str(v) # Fallback to string for complex types
+                meta[k] = str(v)
         meta["user_id"] = user_id
+        # Always ensure indexed_at is present
+        if "indexed_at" not in meta:
+            meta["indexed_at"] = now_ts
         
         ids.append(cid)
         docs.append(content)
@@ -272,19 +268,12 @@ async def sync_files(payload: dict):
 
 @app.post("/rag/purge/{collection_name}", dependencies=[Depends(require_internal)])
 async def purge_collection_endpoint(collection_name: str, payload: dict):
-    """
-    Deletes entries from a collection based on filters.
-    If no filters provided, deletes everything the user owns in that collection.
-    """
     user_id = payload.get("user_id", "default")
     filter_meta = payload.get("filter", {})
-    
     collection = get_collection(collection_name)
-    
     where_filter = {"user_id": user_id}
     if filter_meta:
         where_filter = {"$and": [{"user_id": user_id}, filter_meta]}
-
     try:
         collection.delete(where=where_filter)
         log.info(f"Purged entries from {collection_name} for user {user_id}")
@@ -295,18 +284,12 @@ async def purge_collection_endpoint(collection_name: str, payload: dict):
 
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict):
-    """
-    Enriches and indexes HA entities for RAG.
-    Tracks new vs updated entities.
-    """
     entities = payload.get("entities", [])
     user_id = payload.get("user_id", "admin")
     collection = get_collection("ha_entities")
-    
-    import time
     now = int(time.time())
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     
-    # Get existing IDs to find new ones
     try:
         existing = collection.get(where={"user_id": user_id})
         existing_ids = set(existing["ids"]) if existing and "ids" in existing else set()
@@ -322,28 +305,17 @@ async def sync_ha(payload: dict):
         if not isinstance(e, dict): continue
         eid = e.get("entity_id", "")
         if not eid: continue
-        
         state = e.get("state", "unknown")
         attrs = e.get("attributes", {})
         fname = attrs.get("friendly_name", eid)
         area = attrs.get("area_id") or "unassigned area"
-        
         content = f"Device: {fname} (ID: {eid}) | Area: {area} | Current State: {state}."
-        if attrs.get("brightness") is not None:
-            # Convert 0-255 to percentage
-            bright_pct = round((attrs['brightness'] / 255) * 100)
-            content += f" Brightness is at {bright_pct}% ({attrs['brightness']}/255)."
-        if "current_temperature" in attrs:
-            content += f" Temperature: {attrs['current_temperature']}."
-        if "unit_of_measurement" in attrs:
-            content += f" {attrs['unit_of_measurement']}."
-            
+        
         cid = f"ha:{eid}"
+        created_at = now
         if cid not in existing_ids:
             new_count += 1
-            created_at = now
         else:
-            # Preserve created_at if possible
             created_at = now # Simplified
             
         ids.append(cid)
@@ -355,28 +327,22 @@ async def sync_ha(payload: dict):
             "user_id": user_id,
             "type": "ha_entity",
             "updated_at": now,
-            "created_at": created_at
+            "created_at": created_at,
+            "indexed_at": now_ts
         })
     
     if docs:
         try:
-            collection.upsert(
-                ids=ids,
-                documents=docs,
-                metadatas=metas
-            )
-            # Store sync status in a special meta entry
+            collection.upsert(ids=ids, documents=docs, metadatas=metas)
             collection.upsert(
                 ids=[f"sync_status:{user_id}"],
                 documents=[f"Last HA sync for {user_id} at {now}. Total: {len(docs)}, New: {new_count}"],
-                metadatas=[{"type": "sync_status", "user_id": user_id, "timestamp": now, "count": len(docs), "new_count": new_count}]
+                metadatas=[{"type": "sync_status", "user_id": user_id, "timestamp": now, "count": len(docs), "new_count": new_count, "indexed_at": now_ts}]
             )
-            log.info(f"Synced {len(docs)} HA entities for user {user_id} ({new_count} new)")
             return {"status": "SUCCESS", "count": len(docs), "new_count": new_count}
         except Exception as e:
             log.error(f"HA Sync failed: {e}")
             raise HTTPException(status_code=500, detail="Sync failed")
-    
     return {"status": "SUCCESS", "count": 0, "new_count": 0}
 
 @app.get("/rag/ha/status", dependencies=[Depends(require_internal)])
@@ -394,9 +360,6 @@ async def get_ha_status(user_id: str = "default"):
 async def get_new_devices(user_id: str = "default", limit: int = 10):
     collection = get_collection("ha_entities")
     try:
-        # Search for items updated/created recently
-        # Note: Chroma '$gt' filters work on metadata
-        import time
         last_24h = int(time.time()) - 86400
         res = collection.get(
             where={"$and": [{"user_id": user_id}, {"created_at": {"$gt": last_24h}}]},
@@ -408,50 +371,37 @@ async def get_new_devices(user_id: str = "default", limit: int = 10):
 
 @app.post("/rag/sync/capabilities", dependencies=[Depends(require_internal)])
 async def sync_capabilities(payload: dict):
-    """
-    Indexes system tools, Pydantic schemas, and intent descriptions.
-    Enables dynamic self-awareness for the Gateway.
-    """
     capabilities = payload.get("capabilities", [])
     collection = get_collection("system_capabilities")
-    
     ids = []
     docs = []
     metas = []
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     
     for cap in capabilities:
         name = cap.get("name")
         description = cap.get("description", "")
         schema = cap.get("schema", "")
-        type_ = cap.get("type", "tool") # tool, intent, etc.
-        
+        type_ = cap.get("type", "tool")
         if not name: continue
-        
         cid = f"cap:{type_}:{name}"
         content = f"Capability: {name} | Description: {description} | Schema/Usage: {schema}"
-        
         ids.append(cid)
         docs.append(content)
         metas.append({
             "name": name,
             "type": type_,
-            "user_id": "default", # System capabilities are shared
-            "description": description[:200] # Truncate for metadata
+            "user_id": "default",
+            "description": description[:200],
+            "indexed_at": now_ts
         })
-        
     if docs:
         try:
-            collection.upsert(
-                ids=ids,
-                documents=docs,
-                metadatas=metas
-            )
-            log.info(f"Indexed {len(docs)} system capabilities.")
+            collection.upsert(ids=ids, documents=docs, metadatas=metas)
             return {"status": "SUCCESS", "count": len(docs)}
         except Exception as e:
             log.error(f"Capability Sync failed: {e}")
             raise HTTPException(status_code=500, detail="Sync failed")
-            
     return {"status": "SUCCESS", "count": 0}
 
 @app.get("/health")

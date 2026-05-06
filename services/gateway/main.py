@@ -2033,10 +2033,17 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
     return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 @app.get("/api/storage/stats")
-async def get_storage_stats():
+async def get_storage_stats(request: Request):
+    # Resolve user from request
+    try:
+        creds_data = await _resolve_identity_from_request(request)
+        user_id = creds_data.get("username", "default")
+    except:
+        user_id = "default"
+
     # Proxies to RAG service stats
     resp = await get_http_client().get(
-        f"{RAG_SVC}/rag/stats",
+        f"{RAG_SVC}/rag/stats?user_id={user_id}",
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
     return JSONResponse(status_code=resp.status_code, content=resp.json())
