@@ -33,10 +33,12 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
         full_entity_id, service_data or None,
     )
     
+    log.info(f"[light] RESULT: {result.get('ok')} | entity={full_entity_id} | error={result.get('error')}")
+
     if result.get("ok"):
         return ExecutionResult(
             status="SUCCESS", 
-            message=f"Command '{req.action}' executed on {req.entity_id}.", 
+            message=f"Command '{req.action}' executed on {full_entity_id}.", 
             service="light_control"
         )
     return ExecutionResult(
