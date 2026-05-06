@@ -1289,8 +1289,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     
                     if action in action_map:
                         svc_base, endpoint = action_map[action]
-                        if "user_context" not in payload:
-                            payload["user_context"] = creds.model_dump()
+                        
+                        # ALWAYS overwrite user context with real resolved credentials
+                        # Filtered for compatibility with Execution schemas
+                        payload["user_context"] = {
+                            "user": creds.user,
+                            "ha_url": creds.ha_url,
+                            "ha_token": creds.ha_token
+                        }
                         
                         log.info(f"[StreamToolExecution] Triggering {action}")
                         exec_resp = await get_http_client().post(
@@ -1299,8 +1305,16 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             headers={"X-Internal-Secret": INTERNAL_SECRET},
                             timeout=30.0
                         )
-                        exec_data = exec_resp.json()
-                        exec_msg = exec_data.get("message", "Action completed.")
+                        
+                        if exec_resp.status_code == 200:
+                            exec_data = exec_resp.json()
+                            exec_msg = exec_data.get("message", "Action completed.")
+                        else:
+                            try:
+                                err_detail = exec_resp.json().get("detail", exec_resp.text)
+                            except:
+                                err_detail = exec_resp.text
+                            exec_msg = f"Failed: {err_detail}"
                         
                         update_text = f"\n\n**System Update**: {exec_msg}"
                         full_ans = full_ans[:full_ans.find("```json")].strip() + update_text
@@ -1367,9 +1381,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             
             if action in action_map:
                 svc_base, endpoint = action_map[action]
-                # Inject user context if missing
-                if "user_context" not in payload:
-                    payload["user_context"] = creds.model_dump()
+                
+                # ALWAYS overwrite user context with real resolved credentials
+                # Filter to only fields expected by Execution (user, ha_url, ha_token)
+                # to avoid 422 validation errors from extra fields in ResolvedCredentials
+                payload["user_context"] = {
+                    "user": creds.user,
+                    "ha_url": creds.ha_url,
+                    "ha_token": creds.ha_token
+                }
                 
                 log.info(f"[ToolExecution] Triggering {action} via {svc_base}{endpoint}")
                 exec_resp = await get_http_client().post(
@@ -1378,13 +1398,21 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=30.0
                 )
-                exec_data = exec_resp.json()
-                exec_msg = exec_data.get("message", "Action completed.")
+                
+                if exec_resp.status_code == 200:
+                    exec_data = exec_resp.json()
+                    exec_msg = exec_data.get("message", "Action completed.")
+                else:
+                    try:
+                        err_detail = exec_resp.json().get("detail", exec_resp.text)
+                    except:
+                        err_detail = exec_resp.text
+                    exec_msg = f"Failed: {err_detail}"
                 
                 # Append execution result to answer and hide the raw JSON from user
                 clean_ans = ans[:ans.find("```json")].strip()
                 ans = f"{clean_ans}\n\n**System Update**: {exec_msg}"
-                log.info(f"[ToolExecution] Success: {exec_msg}")
+                log.info(f"[ToolExecution] Result: {exec_msg}")
         except Exception as e:
             log.error(f"Tool execution failed: {e}")
             # Optionally keep the answer as is or append error
