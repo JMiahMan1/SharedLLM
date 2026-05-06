@@ -44,7 +44,7 @@
     
     # Optional: Route other service APIs if needed
     handle /api/storage* {
-        reverse_proxy storage:8005
+        reverse_proxy gateway:11435
     }
 
     handle /api/admin* {

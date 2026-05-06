@@ -1382,6 +1382,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
                         "nextcloud_sync": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
                         "workflow_write_sync_commit": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
+                        "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
+                        "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
                     }
                     
                     # Normalize action name for lookup
@@ -1511,6 +1513,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
                 "nextcloud_sync": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
                 "workflow_write_sync_commit": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
+                "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
+                "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
             }
             
             lookup_action = action.lower().strip() if action else ""
