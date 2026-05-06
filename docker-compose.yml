@@ -54,6 +54,8 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - CHROMA_PERSIST_DIR=/data/chroma_db
       - TZ=America/Phoenix
+    ports:
+      - "8004:8004"
     volumes:
       - chroma_data:/data
       - huggingface_cache:/root/.cache/huggingface
