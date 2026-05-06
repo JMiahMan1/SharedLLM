@@ -55,7 +55,7 @@ export const apiClient = axios.create({
 
 // Request Interceptor
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('jarvis_token');
+  const token = localStorage.getItem('jarvis_api_key');
   const internalSecret = localStorage.getItem('internal_secret');
 
   if (token) {
@@ -69,7 +69,6 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Response Interceptor
 let isLoggingOut = false;
 
 apiClient.interceptors.response.use(
@@ -78,8 +77,8 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !isLoggingOut) {
       isLoggingOut = true;
       console.error("Session expired or unauthorized. Wiping local state.");
-      localStorage.clear(); // Wipe everything for safety
-      // Use window.location.href to force a clean slate and avoid React state thrashing
+      localStorage.removeItem('jarvis_api_key');
+      localStorage.removeItem('jarvis_user');
       window.location.href = '/login';
     }
     return Promise.reject(error);
