@@ -310,7 +310,7 @@ const Communication = () => {
         <p className="mt-2 text-slate-400">Live execution-backed timers, announcements, Nextcloud Talk chat, calendars, and notes.</p>
       </header>
 
-      <div className="grid gap-8 xl:grid-cols-2">
+      <div className="grid gap-6 xl:gap-8 lg:grid-cols-2">
         <section className="glass-panel p-6">
           <div className="mb-6 flex items-center gap-3">
             <Clock3 size={20} className="text-orange-300" />
@@ -320,7 +320,7 @@ const Communication = () => {
             </div>
           </div>
 
-          <div className="mb-4 grid gap-3 md:grid-cols-[1fr_140px_auto]">
+          <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_140px_auto]">
             <input
               type="text"
               value={timerTitle}
@@ -440,7 +440,7 @@ const Communication = () => {
           </div>
         </div>
 
-        <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
+        <div className="mb-5 grid gap-3 grid-cols-1 md:grid-cols-[1fr_auto]">
           <input
             type="text"
             value={talkTargetUser}
@@ -463,7 +463,7 @@ const Communication = () => {
           </button>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[300px_1fr]">
+        <div className="grid gap-6 grid-cols-1 xl:grid-cols-[300px_1fr]">
           <div className="space-y-3">
             {talkConversations.map((conversation) => (
               <button
@@ -511,7 +511,7 @@ const Communication = () => {
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-[1fr_auto]">
               <textarea
                 value={talkMessage}
                 onChange={(event) => setTalkMessage(event.target.value)}
@@ -563,7 +563,7 @@ const Communication = () => {
                   {isRecording ? 'Stop Recording' : 'Record Voice'}
                 </button>
               </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+              <div className="mt-4 grid gap-3 grid-cols-1 md:grid-cols-[1fr_auto]">
                 <input
                   type="text"
                   value={voiceCaption}
@@ -597,7 +597,7 @@ const Communication = () => {
         </div>
       </section>
 
-      <div className="grid gap-8 xl:grid-cols-2">
+      <div className="grid gap-6 xl:gap-8 lg:grid-cols-2">
         <section className="glass-panel p-6">
           <div className="mb-6 flex items-center gap-3">
             <Calendar size={20} className="text-emerald-300" />
@@ -607,7 +607,7 @@ const Communication = () => {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
             <label className="space-y-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Target Calendar</span>
               <select
@@ -632,27 +632,23 @@ const Communication = () => {
             </label>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_auto]">
-            <input
-              type="text"
-              value={eventSummary}
-              onChange={(event) => setEventSummary(event.target.value)}
-              className="glass-input"
-              placeholder="Calendar event title"
-            />
+          <div className="mt-4 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_auto]">
             <input
               type="text"
               value={eventStartTime}
               onChange={(event) => setEventStartTime(event.target.value)}
               className="glass-input"
-              placeholder="Start time"
+              placeholder="Start time (e.g. tomorrow at 2pm)"
             />
             <button
               onClick={() => {
-                if (!eventSummary.trim() || !eventStartTime.trim()) {
-                  toast.error('Enter an event summary and time');
+                const summary = eventForm.summary || eventSummary;
+                if (!summary.trim() || !eventStartTime.trim()) {
+                  toast.error('Enter an event title and time');
                   return;
                 }
+                // Use the consolidated state
+                setEventSummary(summary);
                 calendarMutation.mutate();
               }}
               className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
@@ -697,7 +693,7 @@ const Communication = () => {
               className="glass-input min-h-28 w-full"
               placeholder="Note content"
             />
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
               <button onClick={() => noteMutation.mutate('create')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Create</button>
               <button onClick={() => noteMutation.mutate('read')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Read</button>
               <button onClick={() => noteMutation.mutate('append')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Append</button>
