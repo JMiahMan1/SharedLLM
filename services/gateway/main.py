@@ -1696,3 +1696,13 @@ async def get_workspaces_proxy():
     except Exception as e:
         log.error(f"Workspaces proxy failed: {e}")
         return []
+
+@app.post("/api/admin/tests/smoke")
+async def proxy_smoke_test(request: Request):
+    async with get_http_client() as client:
+        resp = await client.post(
+            f"{WORKSPACE_RUNTIME_SVC}/api/admin/tests/smoke",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=65.0
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
