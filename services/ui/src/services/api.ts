@@ -101,6 +101,30 @@ export interface TimerRecord {
   target_device?: string | null;
 }
 
+export interface TalkConversation {
+  id?: number;
+  token: string;
+  display_name: string;
+  name?: string | null;
+  description?: string | null;
+  unread_messages?: number;
+  last_activity?: number | null;
+  last_message?: string | null;
+}
+
+export interface TalkMessage {
+  id?: number;
+  token: string;
+  actor_type?: string | null;
+  actor_id?: string | null;
+  actor_display_name: string;
+  timestamp?: number | null;
+  message_type?: string | null;
+  system_message?: string | null;
+  message?: string | null;
+  is_replyable?: boolean;
+}
+
 export interface SmokeTestResult {
   status: string;
   passed: boolean;
@@ -363,6 +387,37 @@ export const api = {
 
   async sendAnnouncement(payload: { entity_id: string; message: string; volume?: number }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/announcements', payload);
+    return resp.data;
+  },
+
+  async getTalkConversations(): Promise<ExecutionResponse> {
+    const resp = await apiClient.get('/api/communication/talk/conversations');
+    return resp.data;
+  },
+
+  async openTalkConversation(payload: { token?: string; target_user?: string }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/conversations/open', payload);
+    return resp.data;
+  },
+
+  async getTalkMessages(token: string, limit = 50): Promise<ExecutionResponse> {
+    const resp = await apiClient.get(`/api/communication/talk/messages?token=${encodeURIComponent(token)}&limit=${limit}`);
+    return resp.data;
+  },
+
+  async sendTalkMessage(payload: { token: string; message: string }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/messages', payload);
+    return resp.data;
+  },
+
+  async sendTalkVoice(payload: {
+    token: string;
+    audio_base64: string;
+    mime_type?: string;
+    file_name?: string;
+    caption?: string;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/voice', payload);
     return resp.data;
   },
 

@@ -1,11 +1,12 @@
 # services/tests/test_execution_handlers.py
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, patch
-from services.execution.handlers import light, media, climate, security
+from unittest.mock import AsyncMock, Mock, patch
+from services.execution.handlers import light, media, climate, security, talk
+from services.execution.personal_data import resolve_personal_data_provider
 from services.execution.schemas import (
     LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-    TVCastRequest, UserContext
+    TVCastRequest, TalkRequest, UserContext
 )
 
 @pytest.fixture
@@ -110,3 +111,78 @@ async def test_tv_cast_macro(user_ctx):
         assert mock_call.call_count == 2
         assert mock_call.call_args_list[0][0][3] == "turn_on"
         assert mock_call.call_args_list[1][0][3] == "play_media"
+
+
+def test_personal_data_provider_resolves_from_user_context():
+    provider = resolve_personal_data_provider(
+        UserContext(
+            user="default",
+            nextcloud_url="https://cloud.example.com",
+            nextcloud_user="default",
+            nextcloud_pass="secret",
+        )
+    )
+
+    assert provider is not None
+    assert provider.kind == "nextcloud"
+    assert provider.base_url == "https://cloud.example.com"
+    assert provider.username == "default"
+
+
+@pytest.mark.asyncio
+async def test_talk_send_message_uses_provider_request():
+    provider = Mock()
+    provider.request.return_value = (
+        True,
+        {
+            "id": 9,
+            "token": "room-alpha",
+            "actorType": "users",
+            "actorId": "default",
+            "actorDisplayName": "Default",
+            "messageType": "comment",
+            "message": "hello world",
+            "isReplyable": True,
+        },
+        "",
+    )
+
+    with patch("services.execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
+        result = await talk.handle_talk(
+            TalkRequest(
+                user_context=UserContext(user="default"),
+                action="send",
+                token="room-alpha",
+                message="hello world",
+            )
+        )
+
+    assert result.status == "SUCCESS"
+    assert result.service == "talk_send"
+    provider.request.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_talk_send_voice_uploads_and_shares():
+    provider = Mock()
+    provider.sanitize_filename.return_value = "voice.webm"
+    provider.upload_file.return_value = Mock(status_code=201)
+    provider.request.return_value = (True, {"id": 44}, "")
+
+    with patch("services.execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
+        result = await talk.handle_talk(
+            TalkRequest(
+                user_context=UserContext(user="default"),
+                action="send_voice",
+                token="room-alpha",
+                audio_base64="data:audio/webm;base64,bW9jay1hdWRpbw==",
+                mime_type="audio/webm",
+                caption="Voice update",
+            )
+        )
+
+    assert result.status == "SUCCESS"
+    assert result.service == "talk_send_voice"
+    provider.ensure_directory.assert_called_once()
+    provider.upload_file.assert_called_once()
+    provider.request.assert_called_once()

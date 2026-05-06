@@ -25,6 +25,8 @@ let settings: Array<Record<string, unknown>> = [];
 let timers: Array<Record<string, unknown>> = [];
 let apiKeys: Array<Record<string, unknown>> = [];
 let logs: Array<Record<string, unknown>> = [];
+let talkConversations: Array<Record<string, unknown>> = [];
+let talkMessages: Record<string, Array<Record<string, unknown>>> = {};
 
 const resetMockState = () => {
   users = [structuredClone(defaultUser)];
@@ -50,6 +52,58 @@ const resetMockState = () => {
     { id: 1, timestamp: '2026-05-06T09:00:00Z', service: 'gateway', level: 'INFO', message: 'Gateway ready', context: null },
     { id: 2, timestamp: '2026-05-06T09:01:00Z', service: 'identity', level: 'INFO', message: 'Identity ready', context: null },
   ];
+  talkConversations = [
+    {
+      id: 1,
+      token: 'room-alpha',
+      display_name: 'Family',
+      name: 'Family',
+      description: 'Family coordination',
+      unread_messages: 1,
+      last_activity: 1715000000,
+      last_message: 'Dinner at 6.',
+    },
+    {
+      id: 2,
+      token: 'room-work',
+      display_name: 'Ops',
+      name: 'Ops',
+      description: 'Operations',
+      unread_messages: 0,
+      last_activity: 1715001000,
+      last_message: 'Deploy complete.',
+    },
+  ];
+  talkMessages = {
+    'room-alpha': [
+      {
+        id: 101,
+        token: 'room-alpha',
+        actor_type: 'users',
+        actor_id: 'michele',
+        actor_display_name: 'Michele',
+        timestamp: 1715000000,
+        message_type: 'comment',
+        system_message: '',
+        message: 'Dinner at 6.',
+        is_replyable: true,
+      },
+    ],
+    'room-work': [
+      {
+        id: 201,
+        token: 'room-work',
+        actor_type: 'users',
+        actor_id: 'default',
+        actor_display_name: 'Shared/Default User',
+        timestamp: 1715001000,
+        message_type: 'comment',
+        system_message: '',
+        message: 'Deploy complete.',
+        is_replyable: true,
+      },
+    ],
+  };
 };
 
 export const server = setupServer(
@@ -206,6 +260,103 @@ export const server = setupServer(
     message: 'Announcement sent.',
     service: 'announce',
   })),
+  http.get('/api/communication/talk/conversations', () => HttpResponse.json({
+    status: 'SUCCESS',
+    message: `Loaded ${talkConversations.length} conversation(s).`,
+    service: 'talk_list',
+    detail: { conversations: talkConversations },
+  })),
+  http.post('/api/communication/talk/conversations/open', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    let conversation = talkConversations.find((item) => item.token === body.token);
+    if (!conversation && body.target_user) {
+      conversation = {
+        id: talkConversations.length + 1,
+        token: `dm-${String(body.target_user)}`,
+        display_name: `DM ${String(body.target_user)}`,
+        name: '',
+        description: '',
+        unread_messages: 0,
+        last_activity: 1715002000,
+        last_message: '',
+      };
+      talkConversations = [conversation, ...talkConversations];
+      talkMessages[String(conversation.token)] = [];
+    }
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: 'Opened conversation.',
+      service: 'talk_open',
+      detail: { conversation },
+    });
+  }),
+  http.get('/api/communication/talk/messages', ({ request }) => {
+    const url = new URL(request.url);
+    const token = url.searchParams.get('token') || '';
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: `Loaded ${(talkMessages[token] || []).length} message(s).`,
+      service: 'talk_messages',
+      detail: { messages: talkMessages[token] || [] },
+    });
+  }),
+  http.post('/api/communication/talk/messages', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    const token = String(body.token);
+    const entry = {
+      id: Date.now(),
+      token,
+      actor_type: 'users',
+      actor_id: 'default',
+      actor_display_name: 'Shared/Default User',
+      timestamp: 1715003000,
+      message_type: 'comment',
+      system_message: '',
+      message: String(body.message || ''),
+      is_replyable: true,
+    };
+    talkMessages[token] = [...(talkMessages[token] || []), entry];
+    talkConversations = talkConversations.map((conversation) =>
+      conversation.token === token
+        ? { ...conversation, last_message: entry.message, last_activity: entry.timestamp }
+        : conversation,
+    );
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: 'Chat message sent.',
+      service: 'talk_send',
+      detail: { message_record: entry },
+    });
+  }),
+  http.post('/api/communication/talk/voice', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    const token = String(body.token);
+    const caption = String(body.caption || 'Voice message');
+    const entry = {
+      id: Date.now() + 1,
+      token,
+      actor_type: 'users',
+      actor_id: 'default',
+      actor_display_name: 'Shared/Default User',
+      timestamp: 1715004000,
+      message_type: 'voice-message',
+      system_message: '',
+      message: caption,
+      is_replyable: true,
+    };
+    talkMessages[token] = [...(talkMessages[token] || []), entry];
+    talkConversations = talkConversations.map((conversation) =>
+      conversation.token === token
+        ? { ...conversation, last_message: caption, last_activity: entry.timestamp }
+        : conversation,
+    );
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: 'Voice message sent to Nextcloud Talk.',
+      service: 'talk_send_voice',
+      detail: { path: '/Talk Uploads/voice-message.webm' },
+    });
+  }),
   http.get('/api/docs/:docName', () => HttpResponse.json({ content: '# Docs\n\nUseful documentation.' })),
   http.post('/api/auth/test-connection', () => HttpResponse.json({ status: 'SUCCESS', message: 'Connected' })),
   http.post('/api/users/me/enroll', () => HttpResponse.json({ status: 'SUCCESS', message: 'Enrolled' })),
@@ -217,6 +368,35 @@ beforeEach(() => {
   resetMockState();
   localStorage.clear();
   localStorage.setItem('jarvis_api_key', 'test-token');
+  class MockMediaRecorder {
+    static isTypeSupported() {
+      return true;
+    }
+    ondataavailable: ((event: BlobEvent) => void) | null = null;
+    onstop: (() => void) | null = null;
+    state = 'inactive';
+    constructor(_stream: MediaStream) {}
+    start() {
+      this.state = 'recording';
+    }
+    stop() {
+      this.state = 'inactive';
+      this.ondataavailable?.({ data: new Blob(['mock-audio'], { type: 'audio/webm' }) } as BlobEvent);
+      this.onstop?.();
+    }
+  }
+  Object.defineProperty(window, 'MediaRecorder', {
+    writable: true,
+    value: MockMediaRecorder,
+  });
+  Object.defineProperty(window.navigator, 'mediaDevices', {
+    writable: true,
+    value: {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop: () => undefined }],
+      }),
+    },
+  });
 });
 
 afterEach(() => {

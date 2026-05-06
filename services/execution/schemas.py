@@ -15,6 +15,9 @@ class UserContext(BaseModel):
     is_admin: bool = False
     ha_url: Optional[str] = None
     ha_token: Optional[str] = None
+    nextcloud_url: Optional[str] = None
+    nextcloud_user: Optional[str] = None
+    nextcloud_pass: Optional[str] = None
 
 
 class ExecutionResult(BaseModel):
@@ -119,6 +122,19 @@ class TimerRequest(BaseModel):
     time_str: Optional[str] = None
     recurrence: Optional[str] = None
     target_device: Optional[str] = None
+
+
+class TalkRequest(BaseModel):
+    user_context: UserContext
+    action: Literal["list", "open", "messages", "send", "send_voice"]
+    token: Optional[str] = None
+    target_user: Optional[str] = None
+    message: Optional[str] = None
+    limit: int = Field(50, ge=1, le=200)
+    audio_base64: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_name: Optional[str] = None
+    caption: Optional[str] = None
 
 # ─── Workspace / Code Orchestration ──────────────────────────────────────────
 

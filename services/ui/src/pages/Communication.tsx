@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BellRing,
@@ -6,12 +6,36 @@ import {
   Clock3,
   FileText,
   Megaphone,
+  MessageSquare,
+  Mic,
+  MicOff,
   Plus,
+  Send,
   Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import type { DeviceAssignment, ExecutionResponse, TimerRecord } from '../services/api';
+import type {
+  DeviceAssignment,
+  ExecutionResponse,
+  TalkConversation,
+  TalkMessage,
+  TimerRecord,
+} from '../services/api';
+
+const detailList = <T,>(response: ExecutionResponse | undefined, key: string): T[] => {
+  const detail = response?.detail as Record<string, unknown> | null | undefined;
+  const value = detail?.[key];
+  return Array.isArray(value) ? (value as T[]) : [];
+};
+
+const blobToDataUrl = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read audio recording.'));
+    reader.readAsDataURL(blob);
+  });
 
 const Communication = () => {
   const queryClient = useQueryClient();
@@ -25,6 +49,15 @@ const Communication = () => {
   const [noteTitle, setNoteTitle] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [noteResult, setNoteResult] = useState<ExecutionResponse | null>(null);
+  const [talkTargetUser, setTalkTargetUser] = useState('');
+  const [selectedTalkToken, setSelectedTalkToken] = useState('');
+  const [talkMessage, setTalkMessage] = useState('');
+  const [voiceCaption, setVoiceCaption] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedAudio, setRecordedAudio] = useState<{ base64: string; mimeType: string; fileName: string } | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
   const { data: timers = [] } = useQuery<TimerRecord[]>({
     queryKey: ['communication-timers'],
@@ -47,9 +80,30 @@ const Communication = () => {
     queryFn: () => api.getCalendarEvents(),
   });
 
+  const { data: talkConversationsResponse } = useQuery<ExecutionResponse>({
+    queryKey: ['talk-conversations'],
+    queryFn: () => api.getTalkConversations(),
+    refetchInterval: 15000,
+  });
+
+  const { data: talkMessagesResponse, refetch: refetchTalkMessages } = useQuery<ExecutionResponse>({
+    queryKey: ['talk-messages', selectedTalkToken],
+    queryFn: () => api.getTalkMessages(selectedTalkToken),
+    enabled: Boolean(selectedTalkToken),
+    refetchInterval: selectedTalkToken ? 8000 : false,
+  });
+
   const mediaTargets = useMemo(
     () => devices.filter((device) => device.device_id.startsWith('media_player.')),
     [devices],
+  );
+  const talkConversations = useMemo(
+    () => detailList<TalkConversation>(talkConversationsResponse, 'conversations'),
+    [talkConversationsResponse],
+  );
+  const talkMessages = useMemo(
+    () => detailList<TalkMessage>(talkMessagesResponse, 'messages'),
+    [talkMessagesResponse],
   );
 
   useEffect(() => {
@@ -58,11 +112,19 @@ const Communication = () => {
     }
   }, [announcementDevice, mediaTargets]);
 
+  useEffect(() => {
+    if (!selectedTalkToken && talkConversations.length > 0) {
+      setSelectedTalkToken(talkConversations[0].token);
+    }
+  }, [selectedTalkToken, talkConversations]);
+
   const createTimerMutation = useMutation({
     mutationFn: () => api.createTimer({ title: timerTitle, duration_str: timerDuration }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['communication-timers'] });
       toast.success('Timer created');
+      setTimerTitle('');
+      setTimerDuration('');
     },
     onError: (error: Error) => toast.error(error.message || 'Failed to create timer'),
   });
@@ -82,7 +144,10 @@ const Communication = () => {
       message: announcementMessage,
       volume: announcementVolume,
     }),
-    onSuccess: () => toast.success('Announcement sent'),
+    onSuccess: () => {
+      toast.success('Announcement sent');
+      setAnnouncementMessage('');
+    },
     onError: (error: Error) => toast.error(error.message || 'Announcement failed'),
   });
 
@@ -91,6 +156,8 @@ const Communication = () => {
     onSuccess: () => {
       refetchCalendarEvents();
       toast.success('Calendar event added');
+      setEventSummary('');
+      setEventStartTime('');
     },
     onError: (error: Error) => toast.error(error.message || 'Failed to add event'),
   });
@@ -115,11 +182,102 @@ const Communication = () => {
     onError: (error: Error) => toast.error(error.message || 'Note action failed'),
   });
 
+  const openTalkConversationMutation = useMutation({
+    mutationFn: (payload: { token?: string; target_user?: string }) => api.openTalkConversation(payload),
+    onSuccess: (data) => {
+      const detail = data.detail as { conversation?: TalkConversation } | undefined;
+      const token = detail?.conversation?.token;
+      queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
+      if (token) {
+        setSelectedTalkToken(token);
+      }
+      setTalkTargetUser('');
+      toast.success('Conversation ready');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to open conversation'),
+  });
+
+  const talkMessageMutation = useMutation({
+    mutationFn: () => api.sendTalkMessage({ token: selectedTalkToken, message: talkMessage }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['talk-conversations'] }),
+        refetchTalkMessages(),
+      ]);
+      setTalkMessage('');
+      toast.success('Talk message sent');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to send Talk message'),
+  });
+
+  const talkVoiceMutation = useMutation({
+    mutationFn: () => {
+      if (!recordedAudio) {
+        throw new Error('Record audio before sending.');
+      }
+      return api.sendTalkVoice({
+        token: selectedTalkToken,
+        audio_base64: recordedAudio.base64,
+        mime_type: recordedAudio.mimeType,
+        file_name: recordedAudio.fileName,
+        caption: voiceCaption,
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['talk-conversations'] }),
+        refetchTalkMessages(),
+      ]);
+      setRecordedAudio(null);
+      setVoiceCaption('');
+      toast.success('Voice message sent');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to send voice message'),
+  });
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      recordedChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = async () => {
+        const type = recordedChunksRef.current[0]?.type || 'audio/webm';
+        const blob = new Blob(recordedChunksRef.current, { type });
+        const base64 = await blobToDataUrl(blob);
+        setRecordedAudio({
+          base64,
+          mimeType: type,
+          fileName: `talk-voice-${Date.now()}.${type.includes('mp4') ? 'm4a' : 'webm'}`,
+        });
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      };
+      recorder.start();
+      setIsRecording(true);
+      toast.success('Recording started');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Microphone access failed');
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+  };
+
   return (
     <div className="space-y-8 pb-12">
       <header>
         <h2 className="text-4xl font-black tracking-tighter text-white uppercase">Communication</h2>
-        <p className="mt-2 text-slate-400">Live execution-backed timers, announcements, calendars, and notes.</p>
+        <p className="mt-2 text-slate-400">Live execution-backed timers, announcements, Nextcloud Talk chat, calendars, and notes.</p>
       </header>
 
       <div className="grid gap-8 xl:grid-cols-2">
@@ -242,6 +400,172 @@ const Communication = () => {
           </div>
         </section>
       </div>
+
+      <section className="glass-panel p-6">
+        <div className="mb-6 flex items-center gap-3">
+          <MessageSquare size={20} className="text-fuchsia-300" />
+          <div>
+            <h3 className="text-xl font-bold text-white">Nextcloud Talk</h3>
+            <p className="text-sm text-slate-400">Open live conversations, chat with users, and record voice messages into Talk.</p>
+          </div>
+        </div>
+
+        <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
+          <input
+            type="text"
+            value={talkTargetUser}
+            onChange={(event) => setTalkTargetUser(event.target.value)}
+            className="glass-input"
+            placeholder="Nextcloud username to open"
+          />
+          <button
+            onClick={() => {
+              if (!talkTargetUser.trim()) {
+                toast.error('Enter a Nextcloud username');
+                return;
+              }
+              openTalkConversationMutation.mutate({ target_user: talkTargetUser.trim() });
+            }}
+            className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+          >
+            <Plus size={14} />
+            Open Conversation
+          </button>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[300px_1fr]">
+          <div className="space-y-3">
+            {talkConversations.map((conversation) => (
+              <button
+                key={conversation.token}
+                onClick={() => setSelectedTalkToken(conversation.token)}
+                className={`w-full rounded-2xl border p-4 text-left transition ${
+                  selectedTalkToken === conversation.token
+                    ? 'border-fuchsia-400/40 bg-fuchsia-500/10'
+                    : 'border-white/5 bg-white/5 hover:border-white/10 hover:bg-white/10'
+                }`}
+              >
+                <p className="font-semibold text-white">{conversation.display_name}</p>
+                <p className="mt-1 text-xs text-slate-400">{conversation.description || conversation.token}</p>
+                <p className="mt-2 text-xs text-slate-500">{conversation.last_message || 'No messages yet.'}</p>
+              </button>
+            ))}
+            {!talkConversations.length && (
+              <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                No Talk conversations available.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
+              <p className="mb-3 text-xs font-black uppercase tracking-widest text-slate-500">Conversation Feed</p>
+              <div className="space-y-3">
+                {talkMessages.map((message) => (
+                  <div key={`${message.id ?? message.timestamp}-${message.actor_display_name}`} className="rounded-2xl border border-white/5 bg-white/5 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-white">{message.actor_display_name}</p>
+                      <p className="text-[11px] text-slate-500">
+                        {message.timestamp ? new Date(message.timestamp * 1000).toLocaleString() : 'Pending'}
+                      </p>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-300">{message.message || message.system_message || 'Empty message'}</p>
+                  </div>
+                ))}
+                {selectedTalkToken && !talkMessages.length && (
+                  <p className="text-sm text-slate-500">No messages yet for this conversation.</p>
+                )}
+                {!selectedTalkToken && (
+                  <p className="text-sm text-slate-500">Select or open a conversation to load messages.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+              <textarea
+                value={talkMessage}
+                onChange={(event) => setTalkMessage(event.target.value)}
+                className="glass-input min-h-28 w-full"
+                placeholder="Send a live Nextcloud Talk message"
+              />
+              <button
+                onClick={() => {
+                  if (!selectedTalkToken) {
+                    toast.error('Open or select a conversation first');
+                    return;
+                  }
+                  if (!talkMessage.trim()) {
+                    toast.error('Enter a message');
+                    return;
+                  }
+                  talkMessageMutation.mutate();
+                }}
+                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest md:self-start"
+              >
+                <Send size={14} />
+                Send Message
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">Voice Message</p>
+                  <p className="text-xs text-slate-400">Record in the browser and send the clip into the active Talk conversation.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (!selectedTalkToken) {
+                      toast.error('Open or select a conversation first');
+                      return;
+                    }
+                    if (isRecording) {
+                      stopRecording();
+                    } else {
+                      void startRecording();
+                    }
+                  }}
+                  className={`glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest ${
+                    isRecording ? 'border-red-400/30 bg-red-500/10 text-red-200' : ''
+                  }`}
+                >
+                  {isRecording ? <MicOff size={14} /> : <Mic size={14} />}
+                  {isRecording ? 'Stop Recording' : 'Record Voice'}
+                </button>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+                <input
+                  type="text"
+                  value={voiceCaption}
+                  onChange={(event) => setVoiceCaption(event.target.value)}
+                  className="glass-input"
+                  placeholder="Optional caption for voice message"
+                />
+                <button
+                  onClick={() => {
+                    if (!selectedTalkToken) {
+                      toast.error('Open or select a conversation first');
+                      return;
+                    }
+                    if (!recordedAudio) {
+                      toast.error('Record audio before sending');
+                      return;
+                    }
+                    talkVoiceMutation.mutate();
+                  }}
+                  className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+                >
+                  <Send size={14} />
+                  Send Voice
+                </button>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">
+                {recordedAudio ? `Recorded clip ready: ${recordedAudio.fileName}` : 'No recorded clip yet.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div className="grid gap-8 xl:grid-cols-2">
         <section className="glass-panel p-6">

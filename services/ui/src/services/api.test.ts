@@ -62,4 +62,34 @@ describe('api service', () => {
     expect(apiClient.post).toHaveBeenCalledWith('/api/communication/timers', { title: 'Kitchen Timer', duration_str: '10m' });
     expect(result).toEqual(mockResult);
   });
+
+  it('getTalkMessages should call the talk message endpoint', async () => {
+    const mockResult = { status: 'SUCCESS', message: 'Loaded 1 message(s).', service: 'talk_messages' };
+    vi.mocked(apiClient.get).mockResolvedValue({ data: mockResult } as AxiosResponse);
+
+    const result = await api.getTalkMessages('room-alpha', 25);
+    expect(apiClient.get).toHaveBeenCalledWith('/api/communication/talk/messages?token=room-alpha&limit=25');
+    expect(result).toEqual(mockResult);
+  });
+
+  it('sendTalkVoice should call the talk voice endpoint', async () => {
+    const mockResult = { status: 'SUCCESS', message: 'Voice message sent.', service: 'talk_send_voice' };
+    vi.mocked(apiClient.post).mockResolvedValue({ data: mockResult } as AxiosResponse);
+
+    const result = await api.sendTalkVoice({
+      token: 'room-alpha',
+      audio_base64: 'data:audio/webm;base64,AAAA',
+      mime_type: 'audio/webm',
+      file_name: 'voice.webm',
+      caption: 'Update',
+    });
+    expect(apiClient.post).toHaveBeenCalledWith('/api/communication/talk/voice', {
+      token: 'room-alpha',
+      audio_base64: 'data:audio/webm;base64,AAAA',
+      mime_type: 'audio/webm',
+      file_name: 'voice.webm',
+      caption: 'Update',
+    });
+    expect(result).toEqual(mockResult);
+  });
 });
