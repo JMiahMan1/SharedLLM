@@ -7,7 +7,28 @@ import httpx
 
 log = logging.getLogger("execution.ha_client")
 
+import re
 _TIMEOUT = httpx.Timeout(45.0, connect=5.0)
+
+def sanitize_entity_id(domain: str, llm_target: str) -> str:
+    """
+    Ensures the entity_id is well-formed for Home Assistant.
+    Example: 'piano-lamp' -> 'light.piano_lamp'
+    """
+    if not llm_target: return ""
+    
+    # If already has a dot, assume it's domain.name and sanitize the name part
+    if "." in llm_target:
+        prefix, name = llm_target.split(".", 1)
+        # Verify prefix matches domain or use domain if prefix is generic
+        target_domain = prefix if prefix in ("light", "switch", "media_player", "climate", "cover", "sensor", "binary_sensor") else domain
+    else:
+        target_domain = domain
+        name = llm_target
+
+    # Strip non-alphanumeric, replace with underscore
+    sanitized_name = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
+    return f"{target_domain}.{sanitized_name}"
 
 async def call_service(
     ha_url: str,

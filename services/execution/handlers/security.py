@@ -18,20 +18,24 @@ class SecurityRequest(BaseModel):
 
 async def handle_security(req: SecurityRequest) -> ExecutionResult:
     ctx = req.user_context
-    log.info(f"[security] user={ctx.user} entity={req.entity_id} action={req.action}")
+    # Resolve and sanitize entity_id based on prefix or default to 'lock'/'cover'
+    domain_guess = req.entity_id.split(".")[0] if "." in req.entity_id else "lock"
+    full_entity_id = ha_client.sanitize_entity_id(domain_guess, req.entity_id)
+    
+    log.info(f"[security] user={ctx.user} entity={full_entity_id} action={req.action} (original={req.entity_id})")
 
     if req.action == "status":
-        state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, req.entity_id)
+        state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
         if state:
             return ExecutionResult(
                 status="SUCCESS", 
-                message=f"The {req.entity_id} is {state.get('state')}.", 
+                message=f"The {full_entity_id} is {state.get('state')}.", 
                 service="security",
                 detail=state
             )
-        return ExecutionResult(status="FAILURE", message=f"Could not get state for {req.entity_id}", service="security")
+        return ExecutionResult(status="FAILURE", message=f"Could not get state for {full_entity_id}", service="security")
 
-    domain = req.entity_id.split(".")[0]
+    domain = full_entity_id.split(".")[0]
     # Map high-level actions to domain-specific services
     ha_service_map = {
         "open": "open_cover",
@@ -42,7 +46,7 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         domain, service,
-        req.entity_id
+        full_entity_id
     )
     
     if result.get("ok"):

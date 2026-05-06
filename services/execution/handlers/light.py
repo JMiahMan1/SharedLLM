@@ -21,17 +21,16 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
     if req.rgb_color is not None:
         service_data["rgb_color"] = list(req.rgb_color)
 
-    # Auto-detect domain if needed, though light control usually uses 'light'
-    domain = req.entity_id.split(".")[0] if "." in req.entity_id else "light"
+    # Resolve and sanitize entity_id
+    full_entity_id = ha_client.sanitize_entity_id("light", req.entity_id)
+    domain = full_entity_id.split(".")[0]
     
-    # Force 'light' domain for turn_on/off if it's a light entity
-    # but allow switches to work too
-    ha_domain = "light" if domain == "light" else domain
+    log.info(f"[light] user={ctx.user} (admin={ctx.is_admin}) entity={full_entity_id} action={req.action} (original={req.entity_id})")
 
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
-        ha_domain, req.action,
-        req.entity_id, service_data or None,
+        domain, req.action,
+        full_entity_id, service_data or None,
     )
     
     if result.get("ok"):
