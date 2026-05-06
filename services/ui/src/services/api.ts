@@ -152,6 +152,7 @@ export interface RagStats {
   total_documents: number;
   last_indexed?: string;
   providers?: string[];
+  breakdown?: Record<string, { chunks: number; documents: number }>;
 }
 
 const normalizeUser = (raw: UserProfileRaw): UserProfile => ({

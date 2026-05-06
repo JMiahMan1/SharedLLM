@@ -11,6 +11,7 @@ import {
   Shield,
   Trash2,
   UserPlus,
+  Database,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -20,6 +21,7 @@ import type {
   GlobalSetting,
   LogEntry,
   UserProfile,
+  RagStats,
 } from '../services/api';
 import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
@@ -120,6 +122,11 @@ const Admin = () => {
     queryKey: ['admin-logs'],
     queryFn: () => api.getLogs(12),
     refetchInterval: 10000,
+  });
+  
+  const { data: ragStats } = useQuery<RagStats>({
+    queryKey: ['rag-stats'],
+    queryFn: () => api.getRagStats(),
   });
 
   const saveUserMutation = useMutation({
@@ -510,6 +517,41 @@ const Admin = () => {
                 <KeyRound size={14} />
                 Add
               </button>
+            </div>
+          </div>
+
+          <div className="glass-panel p-6">
+            <h3 className="mb-6 text-xl font-bold text-white flex items-center gap-3">
+              <Database size={20} className="text-purple-400" />
+              Advanced Database Insights
+            </h3>
+            
+            <div className="space-y-4">
+               {ragStats?.breakdown && Object.entries(ragStats.breakdown).map(([name, stats]) => (
+                 <div key={name} className="glass-card p-4">
+                    <div className="flex items-center justify-between mb-3">
+                       <p className="font-bold text-white uppercase tracking-tighter">{name.replace('_', ' ')}</p>
+                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Live Collection</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                       <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Chunks</p>
+                          <p className="text-xl font-bold text-white">{stats.chunks.toLocaleString()}</p>
+                       </div>
+                       <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Documents</p>
+                          <p className="text-xl font-bold text-white">{stats.documents.toLocaleString()}</p>
+                       </div>
+                    </div>
+                 </div>
+               ))}
+
+               <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 text-xs text-slate-400">
+                  <p>
+                    <strong className="text-indigo-300">Note:</strong> Home Assistant entities are indexed as 1 document per entity. 
+                    If you have many smart devices, your document count will reflect the total number of unique entities discovered.
+                  </p>
+               </div>
             </div>
           </div>
 
