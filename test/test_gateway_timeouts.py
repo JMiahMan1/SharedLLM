@@ -1,6 +1,7 @@
 import pytest
 import httpx
 import respx
+import re
 from fastapi import status
 
 # Phase 4.1: Test HTTP Timeouts
@@ -12,11 +13,11 @@ async def test_gateway_timeout_degradation():
     from services.gateway.main import app
     
     # Mock Ollama timeout
-    respx.post("http://127.0.0.1:11434/api/generate").mock(side_effect=httpx.ConnectTimeout)
-    
-    # Mock Identity success
-    respx.post("http://127.0.0.1:8001/api/resolve").return_value = httpx.Response(
-        status.HTTP_200_OK, 
+    respx.post(re.compile(r".*/api/generate")).mock(side_effect=httpx.ConnectTimeout)
+
+    # Mock Identity success - using regex to be robust
+    respx.post(re.compile(r".*/api/resolve")).return_value = httpx.Response(
+        status.HTTP_200_OK,
         json={"user": "jeremiah", "is_admin": True}
     )
 
