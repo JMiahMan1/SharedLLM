@@ -94,16 +94,16 @@ def _make_openai_response(message: str, model: str, intent: str = None, debug_co
 
 # --- Imports from internal modules ---
 try:
-    from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
-    from intent_engine import engine
-    from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-    from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
+    from .intent_engine import engine
+    from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
+    from .prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 except (ImportError, ValueError):
     try:
-      from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
-      from gateway.intent_engine import engine
-      from gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-      from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+      from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
+      from services.gateway.intent_engine import engine
+      from services.gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
+      from services.gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     except ImportError:
       from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from intent_engine import engine
