@@ -22,6 +22,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
+import HelpTooltip from '../components/ui/HelpTooltip';
 
 interface DeviceCardProps {
   name: string;
@@ -126,6 +127,15 @@ const Admin = () => {
     { id: 'switch.coffee_maker', name: 'Coffee Pulse', type: 'SWITCH', icon: Zap },
   ];
 
+  const deleteUserMutation = useMutation({
+    mutationFn: (username: string) => api.deleteUser(username),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast.success('Member removed from matrix');
+    },
+    onError: () => toast.error('Termination failed')
+  });
+
   const handleAssign = (deviceId: string) => {
     if (!selectedUserForAssignment) {
       toast('Select a user first to map devices', { icon: '👤' });
@@ -135,6 +145,12 @@ const Admin = () => {
       user_id: selectedUserForAssignment.id,
       entity_id: deviceId
     });
+  };
+
+  const handleDelete = (user: UserProfile) => {
+    if (window.confirm(`Are you sure you want to remove ${user.username}? This cannot be undone.`)) {
+      deleteUserMutation.mutate(user.username);
+    }
   };
 
   return (
@@ -159,6 +175,7 @@ const Admin = () => {
               <h3 className="text-xl font-bold text-white flex items-center gap-3">
                 <Cpu size={24} className="text-purple-400" />
                 Device Matrix
+                <HelpTooltip docName="architecture.md" sectionTitle="Core Components" label="Device Matrix" />
               </h3>
               <div className="flex items-center gap-4">
                  <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Active Mapping:</p>
@@ -236,8 +253,8 @@ const Admin = () => {
                 >
                   <UserRow 
                     user={u} 
-                    onEdit={() => {}} 
-                    onDelete={() => {}} 
+                    onEdit={() => toast('Edit feature coming in v1.2', { icon: '⚒️' })} 
+                    onDelete={handleDelete} 
                   />
                 </div>
               ))}
@@ -251,6 +268,7 @@ const Admin = () => {
              <div className="flex items-center gap-3 mb-4">
                 <Shield size={20} className="text-blue-400" />
                 <h3 className="font-bold text-white text-sm uppercase tracking-widest">Policy Engine</h3>
+                <HelpTooltip docName="roadmap.md" sectionTitle="Completed Milestones" label="Policy Engine" />
              </div>
              <p className="text-xs text-slate-400 leading-relaxed italic">
                "Device ownership determines the 'Personal Context' used by the Gateway Intent Engine. When @Alice says 'Turn on my light', the system resolves <code>owner_id = Alice</code> and routes the command to her assigned entities."

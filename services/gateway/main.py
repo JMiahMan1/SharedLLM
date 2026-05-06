@@ -10,7 +10,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import re
 import traceback
 from datetime import datetime
-from schemas import ChatRequest, ResolvedCredentials
+from pathlib import Path
+try:
+    from .schemas import ChatRequest, ResolvedCredentials
+except (ImportError, ValueError):
+    try:
+        from schemas import ChatRequest, ResolvedCredentials
+    except ImportError:
+        from gateway.schemas import ChatRequest, ResolvedCredentials
 
 def _make_ollama_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
@@ -95,12 +102,12 @@ except (ImportError, ValueError):
     try:
       from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from gateway.intent_engine import engine
-      from gateway.history import get_history, update_history, ping_redis
+      from gateway.history import get_history, update_history, ping_redis, get_long_term_memory
       from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     except ImportError:
       from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from intent_engine import engine
-      from history import get_history, update_history, ping_redis
+      from history import get_history, update_history, ping_redis, get_long_term_memory
       from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 
 # --- Setup Logging ---
@@ -248,12 +255,65 @@ async def readiness():
     if ping_redis():
       results["services"]["redis"] = "OK"
     else:
-      results["services"]["redis"] = "UNREACHABLE"
+      results["services"]["redis"] = "ERROR"
       all_ok = False
 
     if not all_ok:
-      results["status"] = "NOT_READY"
+      results["status"] = "DEGRADED"
+    
     return results
+
+# --- Documentation Endpoint ---
+@app.get("/api/docs/{doc_name}")
+async def get_documentation(
+    doc_name: str, 
+    request: Request
+):
+    """
+    Serves system documentation securely from the /docs folder or root markdown files.
+    """
+    # 1. Authentication Check (Basic)
+    # For docs, we'll check for a valid API Key or internal secret
+    api_key = request.headers.get("X-API-Key")
+    internal_secret = request.headers.get("X-Internal-Secret")
+    
+    if not internal_secret == INTERNAL_SECRET and not api_key:
+        # Fallback: check query params if needed, but header is preferred
+        api_key = request.query_params.get("api_key")
+        
+    if not internal_secret == INTERNAL_SECRET and not api_key:
+        raise HTTPException(status_code=401, detail="Authentication required to view system docs")
+
+    # 2. Path Security & Resolution
+    # We allow files from the 'docs' directory or specific root files
+    base_dir = Path(__file__).parent.parent.parent
+    docs_dir = base_dir / "docs"
+    
+    # Whitelist of allowed files
+    allowed_root_files = ["EXAMPLES.md", "README.md", "TESTING.md"]
+    
+    # Normalize doc_name
+    if not doc_name.endswith(".md"):
+        doc_name += ".md"
+        
+    # Prevent path traversal
+    if ".." in doc_name or doc_name.startswith("/") or "\\" in doc_name:
+        raise HTTPException(status_code=400, detail="Invalid document path")
+    
+    if doc_name in allowed_root_files:
+        target_path = base_dir / doc_name
+    else:
+        target_path = docs_dir / doc_name
+        
+    if not target_path or not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Documentation '{doc_name}' not found")
+        
+    try:
+        content = target_path.read_text()
+        return {"name": doc_name, "content": content}
+    except Exception as e:
+        log.error(f"Error reading doc {doc_name}: {e}")
+        raise HTTPException(status_code=500, detail="Error reading documentation file")
 
 # --- Logging Helper ---
 async def emit_log(level: str, message: str, context: dict = None):

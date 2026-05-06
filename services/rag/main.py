@@ -73,7 +73,6 @@ def get_collection(name: str):
 async def search(req: SearchRequest):
     collection = get_collection(req.collection_name)
     
-    # Metadata filter for privacy (user's own data or default shared data)
     where_filter = {
         "$or": [
             {"user_id": req.user_id},
@@ -82,22 +81,51 @@ async def search(req: SearchRequest):
     }
     
     try:
-        results = collection.query(
+        # 1. Vector Search (Dense)
+        vector_results = collection.query(
             query_texts=[req.query],
-            n_results=req.k,
+            n_results=req.k * 2, # Fetch more to allow for fusion
             where=where_filter
         )
         
-        response_items = []
-        if results and results["documents"] and len(results["documents"]) > 0:
+        # 2. Keyword Search (Lexical Fallback)
+        # Chroma supports basic keyword search via where_document $contains
+        keyword_results = collection.query(
+            query_texts=[req.query],
+            n_results=req.k * 2,
+            where=where_filter,
+            where_document={"$contains": req.query}
+        )
+
+        # 3. Reciprocal Rank Fusion (RRF)
+        # Score = sum(1 / (k + rank))
+        # k is a constant (e.g. 60)
+        K_RRF = 60
+        scores = {} # (doc_content, meta_tuple) -> score
+        
+        def process_results(results):
+            if not results or not results["documents"] or not results["documents"][0]:
+                return
             docs = results["documents"][0]
             metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
-            for doc, meta in zip(docs, metas):
-                response_items.append(SearchResultItem(content=doc, metadata=meta))
+            for i, (doc, meta) in enumerate(zip(docs, metas)):
+                key = (doc, tuple(sorted(meta.items(), key=lambda x: str(x[0]))))
+                scores[key] = scores.get(key, 0) + (1.0 / (K_RRF + i + 1))
+
+        process_results(vector_results)
+        process_results(keyword_results)
+        
+        # Sort by score
+        sorted_results = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        top_k = sorted_results[:req.k]
+        
+        response_items = []
+        for (doc, meta_tuple), score in top_k:
+            response_items.append(SearchResultItem(content=doc, metadata=dict(meta_tuple)))
                 
         return SearchResponse(results=response_items)
     except Exception as e:
-        log.error(f"Search failed: {e}")
+        log.error(f"Hybrid search failed: {e}")
         return SearchResponse(results=[])
 
 @app.get("/rag/stats", dependencies=[Depends(require_internal)])

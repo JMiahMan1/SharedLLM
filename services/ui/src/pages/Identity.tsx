@@ -27,6 +27,7 @@ import { api } from '../services/api';
 import type { UserProfile, APIKey } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+import HelpTooltip from '../components/ui/HelpTooltip';
 
 interface ModalProps {
   isOpen: boolean;
@@ -163,7 +164,10 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
           <div className="grid gap-4">
             {Object.entries(configKeys).map(([label, key]) => (
               <div key={key}>
-                <label className="text-[10px] text-slate-400 uppercase font-black block mb-2 tracking-widest">{label}</label>
+                <div className="flex items-center mb-2">
+                  <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
+                  <HelpTooltip docName="integrations.md" sectionTitle={name} label={label} />
+                </div>
                 <input 
                   type={label.toLowerCase().includes('pass') || label.toLowerCase().includes('token') || label.toLowerCase().includes('secret') ? 'password' : 'text'}
                   value={(form[key] as string) || ''}

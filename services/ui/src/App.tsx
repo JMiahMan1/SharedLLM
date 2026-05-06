@@ -8,6 +8,7 @@ import Admin from './pages/Admin';
 import Identity from './pages/Identity';
 import Communication from './pages/Communication';
 import JarvisLab from './pages/JarvisLab';
+import Docs from './pages/Docs';
 import Login from './pages/Login';
 
 import { Toaster } from 'react-hot-toast';
@@ -58,6 +59,7 @@ function App() {
             <Route path="/identity" element={<ProtectedRoute><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute><Communication /></ProtectedRoute>} />
             <Route path="/lab" element={<ProtectedRoute><JarvisLab /></ProtectedRoute>} />
+            <Route path="/docs" element={<ProtectedRoute><Docs /></ProtectedRoute>} />
           </Routes>
         </Router>
       </AuthProvider>
