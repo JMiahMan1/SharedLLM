@@ -201,10 +201,18 @@ async def sync_files(payload: dict):
         # Unique ID per chunk
         # Using hash of path to avoid special character issues in IDs
         path_hash = hashlib.md5(path.encode()).hexdigest()
-        cid = f"file:{user_id}:{path_hash}:{chunk_idx}"
+        if metadata.get("is_metadata"):
+            cid = f"file:{user_id}:{path_hash}:meta"
+        else:
+            cid = f"file:{user_id}:{path_hash}:{chunk_idx}"
         
-        # Enforce user_id in meta
-        meta = metadata.copy()
+        # Enforce user_id in meta and sanitize values for ChromaDB
+        meta = {}
+        for k, v in metadata.items():
+            if isinstance(v, (str, int, float, bool)):
+                meta[k] = v
+            else:
+                meta[k] = str(v) # Fallback to string for complex types
         meta["user_id"] = user_id
         
         ids.append(cid)

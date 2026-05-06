@@ -161,6 +161,7 @@ async def extract_and_chunk_contents(
                 "item_type": item.item_type,
                 "subtype": item.subtype,
                 "role": item.role,
+                "is_metadata": True,
                 "session_id": "temp" # Filled by main.py
             }
         })
