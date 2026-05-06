@@ -1260,7 +1260,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             if chunk.get("done"): break
                         except: pass
             
-            # Handle tool execution at the end of the stream
+            # 8. Handle tool execution at the end of the stream
             if "```json" in full_ans:
                 try:
                     start = full_ans.find("```json") + 7
@@ -1328,8 +1328,12 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 except Exception as e:
                     log.error(f"Streaming tool execution failed: {e}")
 
-            await update_history(user_id, "user", query)
-            await update_history(user_id, "assistant", full_ans)
+            if not is_background_task:
+                await update_history(user_id, "user", query)
+                await update_history(user_id, "assistant", full_ans)
+            else:
+                log.info(f"[Background] Skipping history update for task: {query[:50]}...")
+                
             if not is_openai:
                 yield json.dumps({"done": True}) + "\n"
 
@@ -1417,8 +1421,11 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             log.error(f"Tool execution failed: {e}")
             # Optionally keep the answer as is or append error
     
-    await update_history(user_id, "user", query)
-    await update_history(user_id, "assistant", ans)
+    if not is_background_task:
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", ans)
+    else:
+        log.info(f"[Background] Skipping history update for task: {query[:50]}...")
     
     if background_tasks:
         background_tasks.add_task(extract_and_store_user_facts, user_id, short_term + [{"role": "user", "content": query}])
