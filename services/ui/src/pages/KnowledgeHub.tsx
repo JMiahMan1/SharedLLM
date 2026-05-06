@@ -13,16 +13,12 @@ import {
   CheckCircle2,
   Clock,
   ArrowRight,
-  Trash2,
-  AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type StorageEntry, type RagStats } from '../services/api';
-import Modal from '../components/ui/Modal';
 
 const KnowledgeHub = () => {
   const [currentPath, setCurrentPath] = useState('/');
-  const [purgeCollection, setPurgeCollection] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data: stats, isLoading: statsLoading } = useQuery<RagStats>({
@@ -45,18 +41,6 @@ const KnowledgeHub = () => {
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Failed to start indexing');
-    },
-  });
-
-  const purgeMutation = useMutation({
-    mutationFn: (collectionName: string) => api.purgeRagCollection(collectionName, 'me'),
-    onSuccess: () => {
-      toast.success('Collection purged');
-      setPurgeCollection(null);
-      queryClient.invalidateQueries({ queryKey: ['rag-stats'] });
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to purge collection');
     },
   });
 
@@ -184,70 +168,6 @@ const KnowledgeHub = () => {
           </div>
         </div>
       </div>
-
-      {/* Danger Zone / Maintenance */}
-      <section className="glass-panel p-6 border-red-500/10 bg-red-500/5">
-        <div className="flex items-center gap-3 mb-4">
-           <AlertTriangle className="text-red-400" size={20} />
-           <h3 className="text-lg font-bold text-white">Maintenance Operations</h3>
-        </div>
-        <p className="text-sm text-slate-400 mb-6">
-          Irreversibly clear indexed knowledge from the vector database. This does not affect your original files.
-        </p>
-        <div className="flex flex-wrap gap-4">
-           {stats?.breakdown && Object.keys(stats.breakdown).map(name => (
-             <button
-                key={name}
-                onClick={() => setPurgeCollection(name)}
-                className="glass-button border-red-500/20 text-red-300 hover:bg-red-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest flex items-center gap-2"
-             >
-                <Trash2 size={14} />
-                Clear {name.replace('_', ' ')}
-             </button>
-           ))}
-           <button
-              onClick={() => setPurgeCollection('all')}
-              className="glass-button border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20 px-4 py-2 text-[10px] font-black uppercase tracking-widest flex items-center gap-2"
-           >
-              <Trash2 size={14} />
-              Purge Entire Hub
-           </button>
-        </div>
-      </section>
-
-      <Modal
-        isOpen={Boolean(purgeCollection)}
-        onClose={() => setPurgeCollection(null)}
-        title="Confirm Permanent Deletion"
-      >
-        <div className="space-y-6">
-          <div className="flex items-center gap-4 p-4 rounded-2xl bg-red-500/10 border border-red-500/20">
-            <AlertTriangle className="text-red-400 shrink-0" size={24} />
-            <p className="text-sm text-red-200">
-              You are about to delete all vector embeddings for <strong>{purgeCollection === 'all' ? 'the entire Knowledge Hub' : purgeCollection}</strong>. 
-              This action is irreversible and the system will lose all memory associated with this data until it is re-indexed.
-            </p>
-          </div>
-          <p className="text-sm text-slate-400">
-            Are you absolutely sure you want to proceed?
-          </p>
-          <div className="flex gap-3">
-            <button
-              onClick={() => setPurgeCollection(null)}
-              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => purgeMutation.mutate(purgeCollection!)}
-              disabled={purgeMutation.isPending}
-              className="glass-button flex-1 px-4 py-3 bg-red-600/30 border-red-500/30 text-[10px] font-black uppercase tracking-widest text-red-300"
-            >
-              {purgeMutation.isPending ? 'Purging...' : 'Yes, Delete Knowledge'}
-            </button>
-          </div>
-        </div>
-      </Modal>
 
       {/* Manual Ingestion Form */}
       <section className="glass-panel p-6 border-white/5 relative overflow-hidden">

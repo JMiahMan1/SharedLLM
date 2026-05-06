@@ -19,9 +19,7 @@ TALK_UPLOAD_DIR = "Talk Uploads"
 
 def _decode_audio(audio_base64: str) -> bytes:
     payload = audio_base64.split(",", 1)[-1] if "," in audio_base64 else audio_base64
-    # Remove any whitespace that might be present
-    payload = "".join(payload.split())
-    return base64.b64decode(payload)
+    return base64.b64decode(payload, validate=True)
 
 
 def _conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:
@@ -170,7 +168,6 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 },
             )
             if not ok:
-                log.error(f"Failed to share voice message: {message} (data={data})")
                 return ExecutionResult(status="FAILURE", message=message or "Failed to send voice message.", service="talk_send_voice")
 
             return ExecutionResult(
