@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 WORKDIR /app
 # Install system deps required for sentence-transformers
-RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
