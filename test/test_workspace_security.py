@@ -16,9 +16,10 @@ async def test_workspace_path_traversal_blocked():
         "content": "print('hacked')"
     }
     
-    async with httpx.AsyncClient(app=app, base_url="http://test") as ac:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.post(
-            "/files/write", 
+            "http://test/files/write", 
             json=malicious_payload,
             headers={"X-Internal-Secret": "change-me-in-production"}
         )

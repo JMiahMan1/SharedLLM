@@ -1238,12 +1238,18 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         return StreamingResponse(stream_generator(), media_type="text/event-stream" if is_openai else "application/x-ndjson")
 
     # Non-streaming
-    resp = await call_ollama(ollama_payload, use_chat=True)
-    if resp.status_code != 200:
-        return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
-        
-    data = resp.json()
-    ans = data.get("message", {}).get("content", "Error.")
+    try:
+        resp = await call_ollama(ollama_payload, use_chat=True)
+        if resp.status_code != 200:
+            return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
+        data = resp.json()
+        ans = data.get("message", {}).get("content", "Error.")
+    except (httpx.TimeoutException, httpx.ConnectError):
+        ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
+        # Ensure we return a 200 OK with the degradation message as per hardening requirements
+        if is_openai:
+            return _make_openai_response(ans, selected_model, "degraded")
+        return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
     
     # 8. Tool Execution (Optional)
     # (Existing tool parsing logic would go here, simplified for this turn)
