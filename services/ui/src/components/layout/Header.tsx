@@ -20,8 +20,8 @@ const Header = () => {
   const statusText = error ? 'Offline' : (isLoading ? 'Polling...' : (health?.status || 'Unknown'));
 
   return (
-    <header className="h-20 flex items-center justify-between px-8 bg-transparent">
-      <div className="flex-1 max-w-2xl relative group">
+    <header className="h-20 flex items-center justify-between px-4 md:px-8 bg-transparent">
+      <div className="hidden md:flex flex-1 max-w-2xl relative group">
         <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-purple-400 transition-colors">
           <Search size={20} />
         </div>
@@ -32,10 +32,10 @@ const Header = () => {
         />
       </div>
 
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-2 glass-panel px-4 py-2 text-sm">
+      <div className="flex items-center gap-3 md:gap-6 ml-auto md:ml-0">
+        <div className="hidden sm:flex items-center gap-2 glass-panel px-4 py-2 text-sm">
           <div className={`w-2 h-2 rounded-full ${statusColor} animate-pulse`} />
-          <span className="text-slate-300">System Pulse:</span>
+          <span className="text-slate-300">Pulse:</span>
           <span className={`font-semibold uppercase ${isReady ? 'text-green-400' : 'text-yellow-400'}`}>
             {statusText}
           </span>
@@ -76,7 +76,7 @@ const Header = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="text-right">
+          <div className="text-right hidden sm:block">
             <p className="text-sm font-semibold text-white">{user?.username || 'Guest'}</p>
             <p className="text-xs text-slate-500">{user?.is_admin ? 'Admin' : 'Family Member'}</p>
           </div>

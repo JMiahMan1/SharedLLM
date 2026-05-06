@@ -295,7 +295,7 @@ const Admin = () => {
         </div>
       </header>
 
-      <div className="grid gap-8 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid gap-6 xl:gap-8 xl:grid-cols-[1.2fr_0.8fr]">
         <section className="glass-panel p-6">
           <div className="mb-6 flex items-center justify-between">
             <div>
@@ -416,7 +416,7 @@ const Admin = () => {
         </section>
       </div>
 
-      <div className="grid gap-8 xl:grid-cols-[0.95fr_1.05fr]">
+      <div className="grid gap-6 xl:gap-8 xl:grid-cols-[0.95fr_1.05fr]">
         <section className="glass-panel p-6">
           <div className="mb-6 flex items-center justify-between">
             <div>
@@ -429,7 +429,7 @@ const Admin = () => {
             <HelpTooltip docName="architecture.md" sectionTitle="Identity Service" label="Device Assignments" />
           </div>
 
-          <div className="mb-4 grid gap-3 md:grid-cols-[1fr_220px_auto]">
+          <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_220px_auto]">
             <input
               type="text"
               value={deviceId}
@@ -526,7 +526,7 @@ const Admin = () => {
               ))}
             </div>
 
-            <div className="mt-6 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <div className="mt-6 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_1fr_auto]">
               <input
                 type="text"
                 value={newSettingKey}

@@ -118,7 +118,7 @@ const KnowledgeHub = () => {
       </header>
 
       {/* Stats Grid */}
-      <div className="grid gap-6 md:grid-cols-3">
+      <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
             <Database size={80} />
@@ -381,7 +381,7 @@ const KnowledgeHub = () => {
             </div>
          </div>
 
-         <div className="grid gap-6 md:grid-cols-2">
+         <div className="grid gap-6 grid-cols-1 md:grid-cols-2">
             <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
                <div className="flex items-start justify-between mb-6">
                   <div className="space-y-1">
