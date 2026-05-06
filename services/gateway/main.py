@@ -1278,9 +1278,16 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         except: pass
             
             # 8. Handle tool execution at the end of the stream
-            if "```json" in full_ans:
+            log.info(f"[StreamGenerator] Full response length: {len(full_ans)}")
+            if "```" in full_ans:
+                log.info(f"[StreamGenerator] Block detected. Content preview: {full_ans[full_ans.find('```'):][:100]}...")
+                
+            # Detect tool block (either ```json or raw ``` if it looks like JSON)
+            if "```json" in full_ans or ("```" in full_ans and "action" in full_ans and "payload" in full_ans):
                 try:
-                    start = full_ans.find("```json") + 7
+                    # Find the start of the block
+                    tag = "```json" if "```json" in full_ans else "```"
+                    start = full_ans.find(tag) + len(tag)
                     end = full_ans.find("```", start)
                     tool_json = full_ans[start:end].strip()
                     tool_data = json.loads(tool_json)
@@ -1372,9 +1379,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     
     # 8. Tool Execution
     # Intercept JSON blocks for execution as defined in prompts.py
-    if "```json" in ans:
+    log.info(f"[ChatHandler] Full response length: {len(ans)}")
+    if "```" in ans:
+        log.info(f"[ChatHandler] Block detected. Content preview: {ans[ans.find('```'):][:100]}...")
+
+    if "```json" in ans or ("```" in ans and "action" in ans and "payload" in ans):
         try:
-            start = ans.find("```json") + 7
+            tag = "```json" if "```json" in ans else "```"
+            start = ans.find(tag) + len(tag)
             end = ans.find("```", start)
             tool_json = ans[start:end].strip()
             tool_data = json.loads(tool_json)
