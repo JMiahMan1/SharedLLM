@@ -52,9 +52,10 @@ fi
 log "Waiting 15s for SOA stack to initialize..."
 sleep 15
 
-# --- Step 3: Verify the API is healthy ---
+# --- Step 3: Verify the API is healthy inside the Docker boundary ---
+# Using docker exec ensures we hit the container internally, avoiding port blockages.
 HEALTH_URL="http://localhost:11435/health/ready"
-log "Checking SOA Readiness at $HEALTH_URL ..."
+log "Checking SOA Readiness at $HEALTH_URL via Docker internal network..."
 
 MAX_ATTEMPTS=6
 ATTEMPT=0
@@ -62,7 +63,10 @@ HEALTHY=false
 
 while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
     ATTEMPT=$((ATTEMPT + 1))
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
+    
+    # Execute the curl command INSIDE the gateway container
+    HTTP_CODE=$($COMPOSE exec -T gateway curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
+    
     if [ "$HTTP_CODE" = "200" ]; then
         HEALTHY=true
         log "API healthy (HTTP $HTTP_CODE) after attempt $ATTEMPT."
@@ -80,7 +84,8 @@ fi
 
 # --- Step 4: Re-ingest HA devices ---
 log "Re-ingesting Home Assistant devices via Gateway..."
-curl -s -X POST "http://localhost:11435/api/discovery/sync" \
+# Execute the POST request INSIDE the gateway container
+$COMPOSE exec -T gateway curl -s -X POST "http://localhost:11435/api/discovery/sync" \
      -H "Content-Type: application/json" \
      -d '{"user": "admin"}' \
      | tee -a "$LOG_FILE"
