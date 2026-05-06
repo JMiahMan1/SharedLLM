@@ -48,18 +48,6 @@ class LogEntry(BaseModel):
     message: str
     context: Optional[dict] = None
 
-@app.post("/log")
-async def add_log(entry: LogEntry):
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO logs (timestamp, service, level, message, context) VALUES (?, ?, ?, ?, ?)",
-        (now, entry.service, entry.level, entry.message, json.dumps(entry.context) if entry.context else None)
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "success"}
-
 @app.get("/logs")
 async def get_logs(service: Optional[str] = None, limit: int = 100):
     conn = sqlite3.connect(DB_PATH)
@@ -76,6 +64,66 @@ async def get_logs(service: Optional[str] = None, limit: int = 100):
     conn.close()
     
     return [dict(r) for r in rows]
+
+# --- WebSocket Streaming ---
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception:
+                pass
+
+manager = ConnectionManager()
+
+@app.websocket("/api/logs/stream")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Just keep the connection alive
+            await asyncio.sleep(10)
+            await websocket.send_text(json.dumps({"ping": True}))
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+# Update add_log to broadcast
+@app.post("/log")
+async def add_log(entry: LogEntry):
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_dict = {
+        "timestamp": now,
+        "service": entry.service,
+        "level": entry.level,
+        "message": entry.message,
+        "context": entry.context
+    }
+    
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO logs (timestamp, service, level, message, context) VALUES (?, ?, ?, ?, ?)",
+        (now, entry.service, entry.level, entry.message, json.dumps(entry.context) if entry.context else None)
+    )
+    conn.commit()
+    conn.close()
+    
+    # Broadcast to websocket clients
+    await manager.broadcast(json.dumps(log_dict))
+    
+    return {"status": "success"}
 
 @app.get("/health")
 def health():

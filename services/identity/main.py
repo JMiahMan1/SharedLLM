@@ -376,6 +376,46 @@ def remove_device(device_id: str, session: Session = Depends(get_session), _: Us
         raise HTTPException(status_code=404, detail="Device assignment not found.")
     session.delete(assignment)
     session.commit()
+    return {"status": "SUCCESS"}
+
+# --- Device Matrix (UI Contract) ---
+@app.get("/api/users/devices", response_model=List[DeviceAssignmentRead])
+def list_devices_ui(session: Session = Depends(get_session), _: User = Depends(require_api_key)):
+    results = session.exec(select(DeviceAssignment)).all()
+    return [
+        DeviceAssignmentRead(
+            id=d.id, 
+            device_id=d.device_id, 
+            user_id=d.user_id, 
+            username=d.user.username
+        ) for d in results
+    ]
+
+@app.post("/api/users/devices", response_model=DeviceAssignmentRead)
+def add_device_ui(body: DeviceAssignmentCreate, session: Session = Depends(get_session), _: User = Depends(require_api_key)):
+    user = session.exec(select(User).where(User.username == body.username.lower())).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # Upsert logic: if device already assigned, reassign it
+    existing = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == body.device_id)).first()
+    if existing:
+        existing.user_id = user.id
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        return DeviceAssignmentRead(id=existing.id, device_id=existing.device_id, user_id=existing.user_id, username=user.username)
+
+    assignment = DeviceAssignment(device_id=body.device_id, user_id=user.id)
+    session.add(assignment)
+    session.commit()
+    session.refresh(assignment)
+    return DeviceAssignmentRead(
+        id=assignment.id, 
+        device_id=assignment.device_id, 
+        user_id=assignment.user_id, 
+        username=user.username
+    )
 
 # ─── Auth & Discovery ──────────────────────────────────────────────────────────
 

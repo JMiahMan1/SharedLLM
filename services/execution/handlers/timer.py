@@ -101,3 +101,13 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
     except Exception as e:
         log.error(f"Timer error: {e}")
         return ExecutionResult(status="FAILURE", message=f"Timer error: {str(e)}", service="timer")
+
+async def get_active_timers():
+    r = await get_redis()
+    keys = await r.keys("timer:*")
+    timers = []
+    for k in keys:
+        data = await r.get(k)
+        if data:
+            timers.append(json.loads(data))
+    return timers
