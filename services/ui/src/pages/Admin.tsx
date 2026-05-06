@@ -101,10 +101,10 @@ const Admin = () => {
     queryFn: () => api.getUsers(),
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { data: _assignments } = useQuery({
-    queryKey: ['device-assignments'],
-    queryFn: () => api.getSettings(), 
+  const { data: logs } = useQuery<any[]>({
+    queryKey: ['admin-audit-logs'],
+    queryFn: () => api.getLogs(5),
+    refetchInterval: 10000
   });
 
   const { data: devices, isLoading: devicesLoading } = useQuery({
@@ -215,23 +215,33 @@ const Admin = () => {
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-slate-500 border-b border-white/5 font-black uppercase text-[10px] tracking-widest">
-                    <th className="pb-4">Operator</th>
-                    <th className="pb-4">Orchestration</th>
+                    <th className="pb-4">Service</th>
+                    <th className="pb-4">Message</th>
                     <th className="pb-4">Timestamp</th>
-                    <th className="pb-4">Response</th>
+                    <th className="pb-4">Severity</th>
                   </tr>
                 </thead>
                 <tbody className="text-slate-300 font-mono text-[11px]">
-                  {[1, 2, 3].map((i) => (
-                    <tr key={i} className="border-b border-white/5 last:border-0 group hover:bg-white/5 transition-colors">
-                      <td className="py-5 font-bold text-white">@jeremiah</td>
-                      <td className="py-5 text-indigo-400">SET_DEVICE_OWNER(light.office, user_12)</td>
-                      <td className="py-5 text-slate-500">2026-05-05 08:24:12</td>
+                  {logs?.map((log: any) => (
+                    <tr key={log.id} className="border-b border-white/5 last:border-0 group hover:bg-white/5 transition-colors">
+                      <td className="py-5 font-bold text-white">{log.service}</td>
+                      <td className="py-5 text-indigo-400 truncate max-w-xs">{log.message}</td>
+                      <td className="py-5 text-slate-500">{new Date(log.timestamp).toLocaleTimeString()}</td>
                       <td className="py-5">
-                        <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-black tracking-tighter">SUCCESS_SYNC</span>
+                        <span className={`px-3 py-1 rounded-full border font-black tracking-tighter ${
+                           log.level === 'ERROR' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                           log.level === 'WARN' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
+                           'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                        }`}>
+                           {log.level || 'INFO'}
+                        </span>
                       </td>
                     </tr>
-                  ))}
+                  )) || (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-slate-500 italic">No recent orchestration events found.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -268,68 +278,7 @@ const Admin = () => {
             </div>
           </section>
 
-          <section className="glass-panel p-8 bg-blue-900/10 border-blue-500/20 shadow-2xl shadow-blue-500/5">
-             <div className="flex items-center gap-3 mb-6">
-                <Shield size={20} className="text-blue-400" />
-                <h3 className="font-bold text-white text-sm uppercase tracking-widest">Policy Engine</h3>
-                <HelpTooltip docName="roadmap.md" sectionTitle="Completed Milestones" label="Policy Engine" />
-             </div>
-             
-             <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-6">
-                   <div>
-                      <div className="flex items-center justify-between mb-3">
-                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Router Threshold</label>
-                         <span className="text-xs font-mono font-bold text-blue-400">0.85</span>
-                      </div>
-                      <input 
-                        type="range" 
-                        min="0.5" 
-                        max="1.0" 
-                        step="0.01" 
-                        defaultValue="0.85"
-                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                      />
-                   </div>
-                   <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-2">Default LLM Model</label>
-                      <select className="glass-input w-full text-xs py-2 bg-black/20">
-                         <option>gpt-4o</option>
-                         <option>claude-3-5-sonnet</option>
-                         <option>ollama/llama3.1:8b</option>
-                      </select>
-                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-6">
-                   <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-2">Global Index Path</label>
-                      <input type="text" defaultValue="/app/data/chroma" className="glass-input w-full text-xs py-2 bg-black/20" />
-                   </div>
-                   <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-2">Workspace Root</label>
-                      <input type="text" defaultValue="/workspace" className="glass-input w-full text-xs py-2 bg-black/20" />
-                   </div>
-                </div>
-
-                <div className="pt-6 border-t border-white/5">
-                   <p className="text-xs text-slate-400 leading-relaxed italic">
-                     "Device ownership determines the 'Personal Context' used by the Gateway Intent Engine. When @Alice says 'Turn on my light', the system resolves <code>owner_id = Alice</code> and routes the command to her assigned entities."
-                   </p>
-                </div>
-
-                <div className="pt-4 grid grid-cols-2 gap-4">
-                   <div className="p-3 bg-black/20 rounded-xl border border-white/5">
-                      <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mb-1">Mesh Status</p>
-                      <p className="text-xs text-emerald-400 font-bold tracking-tighter">SYNCHRONIZED</p>
-                   </div>
-                   <div className="p-3 bg-black/20 rounded-xl border border-white/5">
-                      <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mb-1">Active Rules</p>
-                      <p className="text-xs text-blue-400 font-bold tracking-tighter">24 POLICIES</p>
-                   </div>
-                </div>
-             </div>
-          </section>
         </div>
       </div>
     </div>
