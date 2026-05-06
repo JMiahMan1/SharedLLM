@@ -161,6 +161,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
 
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     err_msg = f"Gateway Error: {type(exc).__name__}: {str(exc)}"

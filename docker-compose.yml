@@ -1,9 +1,24 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: sharedllm_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - ui
+      - gateway
+      - identity
+
   identity:
     build: ./services/identity
     container_name: sharedllm_identity
     restart: unless-stopped
-    network_mode: "host"
     env_file:
       - .env
     environment:
@@ -20,12 +35,11 @@ services:
     build: ./services/execution
     container_name: sharedllm_execution
     restart: unless-stopped
-    network_mode: "host"
     env_file:
       - .env
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
-      - REDIS_URL=redis://127.0.0.1:6379/0
+      - REDIS_URL=redis://redis:6379/0
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
@@ -34,7 +48,6 @@ services:
     build: ./services/rag
     container_name: sharedllm_rag
     restart: unless-stopped
-    network_mode: "host"
     env_file:
       - .env
     environment:
@@ -50,18 +63,17 @@ services:
     build: ./services/gateway
     container_name: sharedllm_gateway
     restart: unless-stopped
-    network_mode: "host"
     env_file:
       - .env
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
-      - IDENTITY_SVC_URL=http://127.0.0.1:8001
-      - EXECUTION_SVC_URL=http://127.0.0.1:8003
-      - RAG_SVC_URL=http://127.0.0.1:8004
-      - STORAGE_SVC_URL=http://127.0.0.1:8005
-      - LOGGING_SVC_URL=http://127.0.0.1:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://127.0.0.1:8007
-      - REDIS_URL=redis://127.0.0.1:6379/0
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
       - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
@@ -75,7 +87,6 @@ services:
     build: ./services/logging
     container_name: sharedllm_logging
     restart: unless-stopped
-    network_mode: "host"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
@@ -87,7 +98,6 @@ services:
     build: ./services/storage
     container_name: sharedllm_storage
     restart: unless-stopped
-    network_mode: "host"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
@@ -99,11 +109,10 @@ services:
     build: ./services/workspace_runtime
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
-    network_mode: "host"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
-      - IDENTITY_SVC_URL=http://127.0.0.1:8001
-      - STORAGE_SVC_URL=http://127.0.0.1:8005
+      - IDENTITY_SVC_URL=http://identity:8001
+      - STORAGE_SVC_URL=http://storage:8005
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
       - WORKSPACE_RUNTIME_ROOT=/workspace
       - TZ=America/Phoenix
@@ -117,7 +126,6 @@ services:
     container_name: sharedllm_redis
     restart: unless-stopped
     command: redis-server --appendonly yes
-    network_mode: "host"
     volumes:
       - redis_data:/data
 
@@ -125,10 +133,9 @@ services:
     build: ./services/automation
     container_name: sharedllm_automation
     restart: unless-stopped
-    network_mode: "host"
     environment:
-      - REDIS_URL=redis://127.0.0.1:6379/0
-      - EXECUTION_SVC_URL=http://127.0.0.1:8003
+      - REDIS_URL=redis://redis:6379/0
+      - EXECUTION_SVC_URL=http://execution:8003
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
     depends_on:
@@ -139,7 +146,6 @@ services:
     build: ./services/ui
     container_name: sharedllm_ui
     restart: unless-stopped
-    network_mode: "host"
     environment:
       - TZ=America/Phoenix
     depends_on:
@@ -151,3 +157,5 @@ volumes:
   logging_data:
   redis_data:
   huggingface_cache:
+  caddy_data:
+  caddy_config:
