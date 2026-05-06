@@ -113,9 +113,10 @@ const KnowledgeHub = () => {
               {statsLoading ? '...' : stats?.total_chunks?.toLocaleString() ?? '0'}
             </h3>
             {stats?.breakdown && (
-              <div className="mt-1 flex gap-3 text-[9px] font-black uppercase tracking-tighter text-slate-500">
-                <span>{stats.breakdown.nextcloud_files?.chunks ?? 0} Files</span>
-                <span>{stats.breakdown.ha_entities?.chunks ?? 0} Devices</span>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-black uppercase tracking-tighter text-slate-500">
+                {Object.entries(stats.breakdown).map(([name, s]) => (
+                  <span key={name}>{s.chunks.toLocaleString()} {name.split('_')[0]}</span>
+                ))}
               </div>
             )}
             <p className="text-xs text-slate-500 mt-4 flex items-center gap-1">
@@ -135,9 +136,10 @@ const KnowledgeHub = () => {
               {statsLoading ? '...' : stats?.total_documents?.toLocaleString() ?? '0'}
             </h3>
             {stats?.breakdown && (
-              <div className="mt-1 flex gap-3 text-[9px] font-black uppercase tracking-tighter text-indigo-400/50">
-                <span>{stats.breakdown.nextcloud_files?.documents ?? 0} Files</span>
-                <span>{stats.breakdown.ha_entities?.documents ?? 0} Devices</span>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-black uppercase tracking-tighter text-indigo-400/50">
+                {Object.entries(stats.breakdown).map(([name, s]) => (
+                  <span key={name}>{s.documents.toLocaleString()} {name.split('_')[0]}</span>
+                ))}
               </div>
             )}
             <p className="text-xs text-slate-500 mt-4 flex items-center gap-1">
