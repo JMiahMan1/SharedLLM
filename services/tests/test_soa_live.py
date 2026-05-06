@@ -24,8 +24,8 @@ def _run_query(title, payload):
 if __name__ == "__main__":
     # 1. Fast Path - Light Control
     # 'Turn on' usually triggers the turn_on intent with high confidence.
-    _run_query("FAST PATH: Light Control", {
-        "query": "Turn on the living room lights",
+    _run_query("HARDWARE: Piano-Lamp Control", {
+        "query": "Turn on the Piano-Lamp",
         "voice_id": "default"
     })
 
