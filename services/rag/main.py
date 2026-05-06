@@ -7,6 +7,7 @@ import os
 import logging
 import time
 import hashlib
+from typing import Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
 from fastapi.responses import JSONResponse
