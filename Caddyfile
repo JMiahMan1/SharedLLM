@@ -4,10 +4,7 @@
         reverse_proxy gateway:11435
     }
 
-    # 1. Route UI traffic to the React container
-    handle /* {
-        reverse_proxy ui:8008
-    }
+
 
     # 2. Route Chat/Gateway API traffic
     handle /v1/* {
@@ -53,5 +50,10 @@
 
     handle /api/workspace* {
         reverse_proxy workspace_runtime:8007
+    }
+
+    # Catch-all: Route UI traffic to the React container
+    handle /* {
+        reverse_proxy ui:8008
     }
 }
