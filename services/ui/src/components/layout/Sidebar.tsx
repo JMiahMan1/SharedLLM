@@ -21,7 +21,6 @@ const navItems = [
   { icon: Settings, label: 'System Matrix', path: '/admin', adminOnly: true },
   { icon: UserCircle, label: 'Identity', path: '/identity' },
   { icon: MessageSquare, label: 'Communication', path: '/communication' },
-  { icon: UserCircle, label: 'User Management', path: '/admin#users', adminOnly: true },
   { icon: FlaskConical, label: 'Jarvis Lab', path: '/lab', adminOnly: true },
   { icon: HelpCircle, label: 'Help Hub', path: '/docs' },
 ];
