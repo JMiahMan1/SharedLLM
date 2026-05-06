@@ -253,7 +253,7 @@ const Workspaces = () => {
                 value={form.id}
                 disabled={Boolean(editingWs)}
                 onChange={(e) => setForm({ ...form, id: e.target.value })}
-                placeholder="sharedllm"
+                placeholder="project-id"
                 className="glass-input w-full disabled:opacity-50"
               />
             </label>
@@ -277,7 +277,7 @@ const Workspaces = () => {
                 type="text" 
                 value={form.local_path}
                 onChange={(e) => setForm({ ...form, local_path: e.target.value })}
-                placeholder="Code/MyProject"
+                placeholder="your/repository/folder"
                 className="glass-input w-full pl-10"
               />
             </div>
