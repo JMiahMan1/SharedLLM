@@ -22,17 +22,21 @@ test_engine = create_engine(
 )
 
 @pytest.fixture(name="session")
-def session_fixture():
+def session_fixture(monkeypatch):
+    # Override the engine in the main module BEFORE creating tables
+    monkeypatch.setattr(identity_main, "engine", test_engine)
     SQLModel.metadata.create_all(test_engine)
     with Session(test_engine) as session:
         yield session
     SQLModel.metadata.drop_all(test_engine)
 
 @pytest.fixture(name="client")
-def client_fixture(session):
+def client_fixture(session, monkeypatch):
     def get_session_override():
         return session
     app.dependency_overrides[get_session] = get_session_override
+    # Also monkeypatch engine here just in case
+    monkeypatch.setattr(identity_main, "engine", test_engine)
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
