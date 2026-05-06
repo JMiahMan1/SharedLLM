@@ -39,12 +39,12 @@ class IndexScanRequest(BaseModel):
 def health():
     return {"status": "ok", "service": "storage"}
 
-@app.post("/index/full")
-async def full_content_index(req: IndexScanRequest, background_tasks: BackgroundTasks):
+@app.post("/index/full", status_code=202)
+async def sync_folder_to_chroma(req: IndexScanRequest, background_tasks: BackgroundTasks):
     """Scan structure, extract content, chunk, and sync to RAG in the background."""
     background_tasks.add_task(_run_full_index_task, req)
     return {
-        "status": "SUCCESS",
+        "status": "ACCEPTED",
         "message": "Indexing started in background."
     }
 
@@ -83,7 +83,7 @@ async def _run_full_index_task(req: IndexScanRequest):
             "collection_name": f"{req.provider.kind}_files"
         }
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=5.0)) as client:
             try:
                 resp = await client.post(
                     f"{RAG_SVC}/rag/sync/files",

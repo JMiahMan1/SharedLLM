@@ -15,8 +15,8 @@ import { Toaster } from 'react-hot-toast';
 
 const queryClient = new QueryClient();
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { token, isLoading } = useAuth();
+const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean }) => {
+  const { token, user, isLoading } = useAuth();
   
   if (isLoading) return (
     <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
@@ -25,6 +25,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   );
   
   if (!token) return <Navigate to="/login" replace />;
+  
+  if (requireAdmin && !user?.is_admin) {
+    console.warn("RBAC Violation: Admin required for this route.");
+    return <Navigate to="/" replace />;
+  }
   
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-100">
@@ -55,10 +60,10 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute requireAdmin={true}><Admin /></ProtectedRoute>} />
             <Route path="/identity" element={<ProtectedRoute><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute><Communication /></ProtectedRoute>} />
-            <Route path="/lab" element={<ProtectedRoute><JarvisLab /></ProtectedRoute>} />
+            <Route path="/lab" element={<ProtectedRoute requireAdmin={true}><JarvisLab /></ProtectedRoute>} />
             <Route path="/docs" element={<ProtectedRoute><Docs /></ProtectedRoute>} />
           </Routes>
         </Router>
