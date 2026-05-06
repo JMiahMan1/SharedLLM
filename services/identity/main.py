@@ -51,7 +51,6 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
     {"key": "rag_sync_interval", "value": "3600", "description": "Frequency in seconds for RAG background re-indexing"},
-    {"key": "workspace_runtime_root", "value": "/workspace", "description": "Root folder where workspaces and files will be saved"},
 ]
 
 
@@ -504,20 +503,6 @@ def change_password(new_password: str, session: Session = Depends(get_session), 
     session.add(user)
     session.commit()
     return {"status": "SUCCESS", "message": "Password updated"}
-
-@app.post("/api/users/{username}/password")
-def admin_set_password(username: str, req: dict, session: Session = Depends(get_session), admin: User = Depends(require_admin)):
-    new_password = req.get("new_password")
-    if not new_password:
-        raise HTTPException(status_code=400, detail="new_password is required")
-    
-    user = session.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-        
-    user.password_hash = pwd_context.hash(new_password)
-    session.commit()
-    return {"status": "SUCCESS", "message": f"Password updated for @{username}"}
 
 @app.post("/api/auth/test-connection")
 async def test_connection(req: dict, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):

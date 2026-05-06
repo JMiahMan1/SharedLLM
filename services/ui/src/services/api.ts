@@ -479,19 +479,4 @@ export const api = {
     const resp = await apiClient.get('/api/storage/stats');
     return resp.data;
   },
-
-  async purgeRagCollection(collectionName: string, userId: string, filter?: Record<string, unknown>): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post(`/api/storage/purge/${collectionName}`, { user_id: userId, filter });
-    return resp.data;
-  },
-
-  async changePassword(newPassword: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/auth/change-password', { new_password: newPassword });
-    return resp.data;
-  },
-
-  async adminSetPassword(username: string, newPassword: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post(`/api/users/${username}/password`, { new_password: newPassword });
-    return resp.data;
-  },
 };
