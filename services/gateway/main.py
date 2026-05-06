@@ -1155,8 +1155,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     log.info(f"Chat request from {user_id} query='{query}'")
 
     # 3. Semantic Routing (Fast Path Detection)
-    intent, confidence = engine.classify(query)
-    is_fast_path = engine.should_bypass_llm(confidence)
+    is_background_task = "### Task:" in query or "Generate 1-3 broad tags" in query or "Suggest 3-5 relevant follow-up questions" in query
+    
+    if is_background_task:
+        intent, confidence = "none", 0.0
+        is_fast_path = False
+        log.info("[FastPath] Skipped for automated background task")
+    else:
+        intent, confidence = engine.classify(query)
+        is_fast_path = engine.should_bypass_llm(confidence)
     
     # 4. Capability Check (Pre-flight)
     required_fields = INTENT_CAPABILITY_MAP.get(intent, [])
@@ -1206,11 +1213,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     try:
         collections = ["ha_entities", "nextcloud_files", "system_capabilities"]
         for coll in collections:
-            res = await call_rag_service(
-                method="POST",
-                path="/rag/search",
-                payload={"collection_name": coll, "query": query, "user_id": user_id, "k": 3}
+            client = get_http_client()
+            resp = await client.post(
+                f"{RAG_SVC}/rag/search",
+                json={"collection_name": coll, "query": query, "user_id": user_id, "k": 3},
+                headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"}
             )
+            resp.raise_for_status()
+            res = resp.json()
             hits = res.get("results", [])
             if hits:
                 rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
