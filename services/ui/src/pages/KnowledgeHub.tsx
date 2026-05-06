@@ -178,7 +178,7 @@ const KnowledgeHub = () => {
                   id="path"
                   name="path"
                   type="text" 
-                  placeholder="/Documents/Work/project-brief.pdf" 
+                  placeholder="/your/folder/path" 
                   className="w-full bg-black/20 border border-white/10 rounded-lg py-2.5 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
