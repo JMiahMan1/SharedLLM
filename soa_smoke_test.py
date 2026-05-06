@@ -25,16 +25,17 @@ def test_service_ping(name, url):
         log(f"FAIL: {name} Ping ({e})")
     return False
 
-def test_gateway_auth():
+def test_identity_resolve():
     try:
-        # Test discovery which requires auth
-        resp = requests.get(f"{GATEWAY_URL}/api/auth/discover", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=5)
+        # Test resolve which represents internal service handshake
+        payload = {"user_id": "default"}
+        resp = requests.post(f"{IDENTITY_URL}/api/resolve", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=5)
         if resp.status_code == 200:
-            log("PASS: Gateway Auth/Discovery")
+            log("PASS: Identity Resolve Handshake")
             return True
-        log(f"FAIL: Gateway Auth (HTTP {resp.status_code})")
+        log(f"FAIL: Identity Resolve (HTTP {resp.status_code})")
     except Exception as e:
-        log(f"FAIL: Gateway Auth ({e})")
+        log(f"FAIL: Identity Resolve ({e})")
     return False
 
 def test_rag_capability_search():
@@ -83,7 +84,7 @@ def run_all():
     results.append(test_service_ping("RAG", RAG_URL))
     
     # 2. Functional
-    results.append(test_gateway_auth())
+    results.append(test_identity_resolve())
     results.append(test_rag_capability_search())
     results.append(test_execution_ha_link())
     
