@@ -51,7 +51,7 @@ async def call_service(
         
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
-            log.info(f"[ha_client] POST {url}")
+            log.info(f"HA CALL: {domain}.{service} -> {entity_id} | url={url} | payload={payload}")
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             log.info(f"[ha_client] {domain}.{service} → {entity_id} OK (HTTP {resp.status_code})")
