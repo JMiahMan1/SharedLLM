@@ -27,6 +27,27 @@ async def test_light_handler_success(user_ctx):
         )
 
 @pytest.mark.asyncio
+async def test_hyphenated_entity_resolution(user_ctx):
+    """Verify that 'piano-lamp' is correctly sanitized to 'light.piano_lamp'."""
+    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call:
+        mock_call.return_value = {"ok": True}
+        
+        # Test 1: Bare hyphenated name
+        req = LightControlRequest(user_context=user_ctx, entity_id="piano-lamp", action="turn_on")
+        res = await light.handle_light(req)
+        assert res.status == "SUCCESS"
+        mock_call.assert_called_with(
+            "http://ha", "test_tok", "light", "turn_on", "light.piano_lamp", None
+        )
+
+        # Test 2: Name with apostrophe
+        req2 = LightControlRequest(user_context=user_ctx, entity_id="Jeremiah's Lamp", action="turn_on")
+        res2 = await light.handle_light(req2)
+        assert res2.status == "SUCCESS"
+        mock_call.assert_called_with(
+            "http://ha", "test_tok", "light", "turn_on", "light.jeremiah_s_lamp", None
+        )
+@pytest.mark.asyncio
 async def test_security_status_check(user_ctx):
     with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
         mock_get_state.return_value = {"state": "open"}

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 class UserContext(BaseModel):
     """Resolved user credentials forwarded by the Gateway."""
     user: str
+    is_admin: bool = False
     ha_url: Optional[str] = None
     ha_token: Optional[str] = None
 
