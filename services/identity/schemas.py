@@ -84,6 +84,8 @@ class UserUpdate(BaseModel):
     git_user: Optional[str] = None
     git_token: Optional[str] = None
     voice_fingerprint: Optional[str] = None
+    is_admin: Optional[bool] = None
+    is_system_default: Optional[bool] = None
 
 
 class UserRead(BaseModel):

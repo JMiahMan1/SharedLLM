@@ -181,6 +181,11 @@ export const api = {
     return resp.data;
   },
 
+  async getTimers(): Promise<any[]> {
+    const resp = await apiClient.get('/api/execute/timers');
+    return resp.data;
+  },
+
   async scheduleTask(task: string, time: string): Promise<{ success: boolean }> {
     const resp = await apiClient.post('/api/execute/calendar', { task, time });
     return resp.data;

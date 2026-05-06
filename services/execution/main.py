@@ -116,6 +116,10 @@ async def execute_note(req: NoteRequest):
 async def execute_timer(req: TimerRequest):
     return await timer.handle_timer(req)
 
+@app.get("/execute/timers")
+async def list_timers():
+    return await timer.get_active_timers()
+
 @app.post("/execute/trigger", response_model=ExecutionResult)
 async def execute_trigger(payload: Dict[str, Any]):
     """Internal endpoint for Automation scheduler."""
