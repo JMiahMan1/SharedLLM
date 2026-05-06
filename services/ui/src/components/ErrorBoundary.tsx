@@ -8,59 +8,81 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  errorInfo: ErrorInfo | null;
 }
 
 class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
-    error: null
+    error: null,
+    errorInfo: null,
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+    // Update state so the next render will show the fallback UI.
+    return { hasError: true, error, errorInfo: null };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Uncaught error:', error, errorInfo);
+    console.error('Uncaught React UI error:', error, errorInfo);
+    
+    // Check if this is a Vite chunk loading error (often happens after a new deployment)
+    // If it is, automatically hard-reload the page to fetch the new JavaScript chunks.
+    if (error.message.includes('dynamically imported module') || error.message.includes('Failed to fetch dynamically imported module')) {
+        window.location.reload();
+    }
+
+    this.setState({
+      error,
+      errorInfo
+    });
   }
+
+  private handleReset = () => {
+    this.setState({ hasError: false, error: null, errorInfo: null });
+    window.location.reload();
+  };
+
+  private handleGoHome = () => {
+    this.setState({ hasError: false, error: null, errorInfo: null });
+    window.location.href = '/dashboard';
+  };
 
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#050505] flex items-center justify-center p-6 font-sans">
-          <div className="max-w-md w-full glass-panel p-10 text-center border-red-500/20 bg-red-500/5 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500/50 to-transparent" />
-            
-            <div className="w-20 h-20 bg-red-500/10 rounded-3xl flex items-center justify-center mx-auto mb-8 animate-pulse">
-              <ShieldAlert size={40} className="text-red-500" />
-            </div>
-
-            <h1 className="text-2xl font-black text-white tracking-tighter uppercase mb-4">Neural Link Severed</h1>
-            <p className="text-slate-400 text-sm leading-relaxed mb-8">
-              A critical exception occurred in the UI kernel. The matrix has been de-synchronized to prevent state corruption.
+        <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans">
+          <div className="bg-slate-900 border border-red-500/30 rounded-xl p-8 max-w-2xl w-full text-center shadow-2xl">
+            <ShieldAlert className="w-16 h-16 text-red-500 mx-auto mb-6" />
+            <h1 className="text-2xl font-bold text-white mb-2">Jarvis Encountered a UI Error</h1>
+            <p className="text-slate-400 mb-6">
+              A component failed to render properly. You can try reloading the interface or returning to the dashboard.
             </p>
-
-            <div className="bg-black/40 rounded-xl p-4 mb-8 border border-white/5 text-left">
-              <p className="text-[10px] uppercase font-black text-slate-500 tracking-widest mb-2">Error Signature</p>
-              <code className="text-[11px] text-red-400 font-mono break-all">
-                {this.state.error?.message || 'Unknown kernel panic'}
-              </code>
+            
+            <div className="text-red-400/90 mb-8 font-mono text-sm overflow-x-auto whitespace-pre-wrap text-left bg-black/50 p-4 rounded border border-slate-800 max-h-48 overflow-y-auto">
+              <strong>{this.state.error?.name}:</strong> {this.state.error?.message}
+              {this.state.errorInfo && (
+                <div className="mt-4 text-xs text-slate-500 opacity-70">
+                  {this.state.errorInfo.componentStack}
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <button 
-                onClick={() => window.location.reload()}
-                className="w-full py-4 bg-red-600 hover:bg-red-500 text-white rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-3 group"
+                onClick={this.handleReset}
+                className="flex items-center justify-center py-3 px-6 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/20 rounded-lg transition-colors font-medium flex-1"
               >
-                <RefreshCcw size={16} className="group-hover:rotate-180 transition-transform duration-500" />
-                Initialize Hot-Reload
+                <RefreshCcw className="w-5 h-5 mr-2" />
+                Reload Page
               </button>
+              
               <button 
-                onClick={() => window.location.href = '/'}
-                className="w-full py-4 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-3"
+                onClick={this.handleGoHome}
+                className="flex items-center justify-center py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex-1 shadow-lg shadow-blue-900/20"
               >
-                <Home size={16} />
-                Return to Nexus
+                <Home className="w-5 h-5 mr-2" />
+                Return to Dashboard
               </button>
             </div>
           </div>
@@ -68,7 +90,7 @@ class ErrorBoundary extends Component<Props, State> {
       );
     }
 
-    return this.children;
+    return this.props.children;
   }
 }
 
