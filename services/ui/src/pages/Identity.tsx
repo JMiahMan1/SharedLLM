@@ -207,28 +207,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                 </label>
              </div>
 
-             {name === 'Nextcloud' && (
-               <div className="pt-4 border-t border-white/5">
-                 <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mb-3">Sync Preferences Matrix</p>
-                 <div className="space-y-2">
-                   {['Documents', 'Photos', 'Notes', 'Work'].map((folder) => (
-                     <div key={folder} className="flex items-center justify-between p-2 bg-black/20 rounded-lg">
-                        <span className="text-[10px] text-slate-300 font-bold">{folder}</span>
-                        <div className="flex gap-2">
-                           <button 
-                             onClick={() => toast(`Nextcloud/${folder} is now private`)}
-                             className="text-[8px] px-2 py-1 rounded bg-slate-800 text-slate-500 hover:text-white"
-                           >Private</button>
-                           <button 
-                             onClick={() => toast(`Nextcloud/${folder} is shared with Family`)}
-                             className="text-[8px] px-2 py-1 rounded bg-purple-600/30 text-purple-400 border border-purple-500/30"
-                           >Shared</button>
-                        </div>
-                     </div>
-                   ))}
-                 </div>
-               </div>
-             )}
+
           </div>
 
           {testResult && (
@@ -666,9 +645,6 @@ const Identity = () => {
                     </div>
                   ))}
                </div>
-               <button className="glass-button w-full mt-6 py-3 text-[9px] font-black uppercase tracking-widest bg-blue-600/20 border-blue-500/20">
-                  <UserPlus size={14} /> Add System User
-               </button>
             </section>
           )}
         </div>
