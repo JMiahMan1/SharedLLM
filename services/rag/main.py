@@ -124,6 +124,8 @@ async def search(req: SearchRequest):
 @app.get("/rag/stats", dependencies=[Depends(require_internal)])
 async def get_stats(user_id: str = "default"):
     """Return counts and metadata for collections in the format expected by the UI."""
+    user_id = user_id.lower()
+    log.info(f"Fetching stats for user_id: {user_id}")
     try:
         collections = ["nextcloud_files", "ha_entities"]
         total_chunks = 0
@@ -184,6 +186,7 @@ async def get_stats(user_id: str = "default"):
 @app.get("/rag/indexed-paths", dependencies=[Depends(require_internal)])
 async def get_indexed_paths(user_id: str = "default"):
     """Return a list of all paths currently indexed for a user."""
+    user_id = user_id.lower()
     try:
         collection = chroma_client.get_or_create_collection(name="nextcloud_files", embedding_function=embedding_fn)
         results = collection.get(where={"user_id": user_id}, include=["metadatas"])
@@ -199,9 +202,9 @@ async def get_indexed_paths(user_id: str = "default"):
 async def ingest(req: IngestRequest):
     collection = get_collection(req.collection_name)
     import uuid
-    doc_id = str(uuid.uuid4())
+    # Enforce user_id in metadata for privacy
     meta = req.metadata.copy()
-    meta["user_id"] = req.user_id
+    meta["user_id"] = req.user_id.lower()
     # Add timestamp
     meta["indexed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     
@@ -219,7 +222,7 @@ async def ingest(req: IngestRequest):
 @app.post("/rag/sync/files", dependencies=[Depends(require_internal)])
 async def sync_files(payload: dict):
     chunks = payload.get("chunks", [])
-    user_id = payload.get("user_id", "admin")
+    user_id = payload.get("user_id", "admin").lower()
     collection_name = payload.get("collection_name", "nextcloud_files")
     collection = get_collection(collection_name)
     
@@ -280,7 +283,7 @@ async def sync_files(payload: dict):
 
 @app.post("/rag/purge/{collection_name}", dependencies=[Depends(require_internal)])
 async def purge_collection_endpoint(collection_name: str, payload: dict):
-    user_id = payload.get("user_id", "default")
+    user_id = payload.get("user_id", "default").lower()
     filter_meta = payload.get("filter", {})
     collection = get_collection(collection_name)
     where_filter = {"user_id": user_id}
@@ -297,7 +300,7 @@ async def purge_collection_endpoint(collection_name: str, payload: dict):
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict):
     entities = payload.get("entities", [])
-    user_id = payload.get("user_id", "admin")
+    user_id = payload.get("user_id", "admin").lower()
     collection = get_collection("ha_entities")
     now = int(time.time())
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
