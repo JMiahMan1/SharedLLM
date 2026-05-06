@@ -77,7 +77,8 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401 && !isLoggingOut) {
       isLoggingOut = true;
-      localStorage.removeItem('jarvis_api_key');
+      console.error("Session expired or unauthorized. Wiping local state.");
+      localStorage.clear(); // Wipe everything for safety
       // Use window.location.href to force a clean slate and avoid React state thrashing
       window.location.href = '/login';
     }
@@ -218,6 +219,11 @@ export const api = {
   // Admin/Devices
   async updateDeviceAssignment(assignment: { user_id: string, entity_id: string }): Promise<{ success: boolean }> {
     const resp = await apiClient.post('/api/users/devices', assignment);
+    return resp.data;
+  },
+
+  async getDevices(): Promise<any[]> {
+    const resp = await apiClient.get('/api/users/devices');
     return resp.data;
   },
   

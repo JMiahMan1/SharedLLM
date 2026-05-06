@@ -7,7 +7,7 @@ import httpx
 
 log = logging.getLogger("execution.ha_client")
 
-_TIMEOUT = 5.0
+_TIMEOUT = httpx.Timeout(45.0, connect=5.0)
 
 async def call_service(
     ha_url: str,
@@ -125,7 +125,7 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
     ]
     """
     
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             resp = await client.post(url, headers=headers, json={"template": template})
             resp.raise_for_status()

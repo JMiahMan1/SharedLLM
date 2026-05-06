@@ -230,7 +230,7 @@ def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
             f"{IDENTITY_SVC_URL}/api/resolve",
             json=payload,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=5.0,
+            timeout=httpx.Timeout(45.0, connect=5.0),
         )
     except httpx.RequestError as exc:
         raise HTTPException(status_code=503, detail=f"Identity service unreachable: {exc}") from exc
@@ -245,20 +245,26 @@ def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
     return data
 
 
-def _safe_workspace_path(local_path: str) -> Path:
-    candidate = Path(local_path)
-    if not candidate.is_absolute():
-        candidate = WORKSPACE_ROOT / candidate
-    resolved = candidate.resolve()
+def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Path:
+    """
+    Resolves a relative path against a base directory, ensuring it does not escape.
+    Raises 403 Forbidden if the path is unsafe.
+    """
     try:
-        resolved.relative_to(WORKSPACE_ROOT)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Workspace path escapes root: {resolved}") from exc
-    if not resolved.exists():
-        raise HTTPException(status_code=404, detail=f"Workspace path not found: {resolved}")
-    if not resolved.is_dir():
-        raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {resolved}")
-    return resolved
+        # 1. Joins and resolves absolute path
+        target = (base / relative).resolve()
+        
+        # 2. Check if target is within base
+        target.relative_to(base)
+        
+        # 3. Existence check if required
+        if must_exist and not target.exists():
+            raise HTTPException(status_code=404, detail=f"Path not found: {relative}")
+            
+        return target
+    except (ValueError, RuntimeError):
+        log.warning(f"SECURITY ALERT: Path traversal attempt blocked! Base='{base}', Relative='{relative}'")
+        raise HTTPException(status_code=403, detail="Forbidden: Path traversal detected")
 
 
 def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
@@ -286,7 +292,9 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     if access_policy == "admin_only" and not is_admin:
         raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' requires an admin identity")
 
-    resolved_path = _safe_workspace_path(str(match["local_path"]))
+    resolved_path = resolve_safe_path(WORKSPACE_ROOT, str(match["local_path"]))
+    if not resolved_path.is_dir():
+         raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {match['local_path']}")
     workspace = dict(match)
     workspace["resolved_path"] = str(resolved_path)
     workspace["scope"] = str(workspace.get("scope") or "user")
@@ -321,26 +329,7 @@ def _require_workspace_capability(workspace: dict[str, Any], capability: str) ->
         )
 
 
-def _safe_file_path(workspace_path: Path, relative_path: str) -> Path:
-    target = (workspace_path / relative_path).resolve()
-    try:
-        target.relative_to(workspace_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"File path escapes workspace: {relative_path}") from exc
-    if not target.exists():
-        raise HTTPException(status_code=404, detail=f"File not found: {relative_path}")
-    if not target.is_file():
-        raise HTTPException(status_code=400, detail=f"Path is not a file: {relative_path}")
-    return target
-
-
-def _safe_target_path(workspace_path: Path, relative_path: str) -> Path:
-    target = (workspace_path / relative_path).resolve()
-    try:
-        target.relative_to(workspace_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"File path escapes workspace: {relative_path}") from exc
-    return target
+# Removed redundant _safe_file_path and _safe_target_path in favor of resolve_safe_path
 
 
 def _list_workspace_entries(
@@ -351,7 +340,7 @@ def _list_workspace_entries(
     max_entries: int,
     include_dirs: bool,
 ) -> tuple[Path, list[dict[str, Any]], bool]:
-    root = _safe_target_path(workspace_path, relative_path)
+    root = resolve_safe_path(workspace_path, relative_path)
     if not root.exists():
         raise HTTPException(status_code=404, detail=f"Path not found: {relative_path}")
     if not root.is_dir():
@@ -370,8 +359,8 @@ def _list_workspace_entries(
         for child in sorted(current.iterdir(), key=lambda item: item.name.lower()):
             try:
                 child.relative_to(workspace_path)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=f"Listed path escapes workspace: {child}") from exc
+            except (ValueError, RuntimeError):
+                raise HTTPException(status_code=403, detail="Forbidden: Path traversal")
 
             rel_path = child.relative_to(workspace_path).as_posix()
             is_dir = child.is_dir()
@@ -650,7 +639,9 @@ def read_file(req: FileReadRequest, x_internal_secret: Optional[str] = Header(de
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "read")
     workspace_path = Path(workspace["resolved_path"])
-    target = _safe_file_path(workspace_path, req.relative_path)
+    target = resolve_safe_path(workspace_path, req.relative_path)
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail=f"Path is not a file: {req.relative_path}")
     content = target.read_text(errors="replace")
     return {
         "status": "SUCCESS",
@@ -691,7 +682,7 @@ def write_file(req: FileWriteRequest, x_internal_secret: Optional[str] = Header(
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
     workspace_path = Path(workspace["resolved_path"])
-    target = _safe_target_path(workspace_path, req.relative_path)
+    target = resolve_safe_path(workspace_path, req.relative_path, must_exist=False)
 
     if target.exists() and not target.is_file():
         raise HTTPException(status_code=400, detail=f"Path is not a file: {req.relative_path}")
@@ -749,7 +740,7 @@ def delete_file(req: FileDeleteRequest, x_internal_secret: Optional[str] = Heade
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
     workspace_path = Path(workspace["resolved_path"])
-    target = _safe_target_path(workspace_path, req.relative_path)
+    target = resolve_safe_path(workspace_path, req.relative_path)
 
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {req.relative_path}")
@@ -799,7 +790,9 @@ def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
     workspace_path = Path(workspace["resolved_path"])
-    local_file = _safe_file_path(workspace_path, req.relative_path)
+    local_file = resolve_safe_path(workspace_path, req.relative_path)
+    if not local_file.is_file():
+        raise HTTPException(status_code=400, detail=f"Path is not a file: {req.relative_path}")
     identity = workspace.get("resolved_identity") or {}
     provider_kind, provider_settings, provider_root = _workspace_provider_binding(workspace, identity)
     provider_path = _provider_child_path(provider_root, req.relative_path)
