@@ -18,8 +18,21 @@ TALK_UPLOAD_DIR = "Talk Uploads"
 
 
 def _decode_audio(audio_base64: str) -> bytes:
-    payload = audio_base64.split(",", 1)[-1] if "," in audio_base64 else audio_base64
-    return base64.b64decode(payload, validate=True)
+    """Decodes base64 audio, handling potential data URL prefixes and padding."""
+    try:
+        b64_data = audio_base64
+        if "," in b64_data:
+            b64_data = b64_data.split(",")[1]
+        
+        # Add padding if necessary
+        missing_padding = len(b64_data) % 4
+        if missing_padding:
+            b64_data += '=' * (4 - missing_padding)
+            
+        return base64.b64decode(b64_data)
+    except Exception as e:
+        log.error(f"Audio decoding failed: {e}")
+        return b""
 
 
 def _conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:

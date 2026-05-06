@@ -13,13 +13,19 @@ import {
   CheckCircle2,
   Clock,
   ArrowRight,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type StorageEntry, type RagStats } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import Modal from '../components/ui/Modal';
 
 const KnowledgeHub = () => {
   const [currentPath, setCurrentPath] = useState('/');
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const [purgeModalCollection, setPurgeModalCollection] = useState<string | null>(null);
 
   const { data: stats, isLoading: statsLoading } = useQuery<RagStats>({
     queryKey: ['rag-stats'],
@@ -42,6 +48,16 @@ const KnowledgeHub = () => {
     onError: (err: Error) => {
       toast.error(err.message || 'Failed to start indexing');
     },
+  });
+
+  const purgeMutation = useMutation({
+    mutationFn: (collectionName: string) => api.purgeRagCollection(collectionName, user?.username || 'default'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rag-stats'] });
+      setPurgeModalCollection(null);
+      toast.success('Collection purged successfully');
+    },
+    onError: (err: Error) => toast.error(err.message || 'Purge failed'),
   });
 
   const breadcrumbs = useMemo(() => {
@@ -353,6 +369,90 @@ const KnowledgeHub = () => {
           </table>
         </div>
       </section>
+
+      <section className="mt-12 pt-12 border-t border-white/5">
+         <div className="flex items-center gap-3 mb-8">
+            <div className="p-3 rounded-2xl bg-red-500/10 text-red-400">
+               <ShieldAlert size={24} />
+            </div>
+            <div>
+               <h3 className="text-xl font-bold text-white">System Maintenance</h3>
+               <p className="text-sm text-slate-500">Privileged operations for managing indexed knowledge collections.</p>
+            </div>
+         </div>
+
+         <div className="grid gap-6 md:grid-cols-2">
+            <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
+               <div className="flex items-start justify-between mb-6">
+                  <div className="space-y-1">
+                     <h4 className="font-bold text-white">Clear Nextcloud Collection</h4>
+                     <p className="text-xs text-slate-500">Permanently delete all indexed file chunks from Nextcloud storage.</p>
+                  </div>
+                  <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
+               </div>
+               <button 
+                 onClick={() => setPurgeModalCollection('nextcloud_files')}
+                 className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
+               >
+                  Purge Nextcloud Data
+               </button>
+            </div>
+
+            <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
+               <div className="flex items-start justify-between mb-6">
+                  <div className="space-y-1">
+                     <h4 className="font-bold text-white">Clear Home Assistant Collection</h4>
+                     <p className="text-xs text-slate-500">Remove all device states and automation history from semantic memory.</p>
+                  </div>
+                  <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
+               </div>
+               <button 
+                 onClick={() => setPurgeModalCollection('ha_entities')}
+                 className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
+               >
+                  Purge HA Entities
+               </button>
+            </div>
+         </div>
+      </section>
+
+      <Modal
+        isOpen={Boolean(purgeModalCollection)}
+        onClose={() => setPurgeModalCollection(null)}
+        title="Critical Security Warning"
+      >
+        <div className="space-y-6">
+           <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex gap-4">
+              <AlertTriangle className="text-red-500 shrink-0" size={24} />
+              <div className="text-xs text-slate-300 leading-relaxed">
+                <p className="font-bold text-white mb-1">Irreversible Action Detected</p>
+                You are about to purge the <span className="font-mono text-red-400 font-bold">{purgeModalCollection}</span> collection. 
+                This will remove all associated vectors from the ChromaDB instance. 
+                Jarvis will lose all context regarding these resources until they are re-indexed.
+              </div>
+           </div>
+
+           <p className="text-sm text-slate-400">
+             Are you absolutely sure you want to proceed? This operation cannot be undone.
+           </p>
+
+           <div className="flex gap-3">
+              <button 
+                onClick={() => setPurgeModalCollection(null)}
+                className="glass-button flex-1 py-3 font-bold text-[10px] uppercase tracking-widest"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => purgeMutation.mutate(purgeModalCollection!)}
+                disabled={purgeMutation.isPending}
+                className="glass-button flex-1 py-3 bg-red-600/30 border-red-500/30 text-red-400 font-bold text-[10px] uppercase tracking-widest"
+              >
+                {purgeMutation.isPending ? 'Purging...' : 'Confirm Purge'}
+              </button>
+           </div>
+        </div>
+      </Modal>
     </div>
   );
 };

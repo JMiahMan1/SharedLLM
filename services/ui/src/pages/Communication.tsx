@@ -59,6 +59,34 @@ const Communication = () => {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [calendars, setCalendars] = useState<{id: string, display_name: string}[]>([]);
+  const [selectedCalendar, setSelectedCalendar] = useState('');
+  const [eventForm, setEventForm] = useState({
+    summary: '',
+    description: '',
+    start: '',
+    end: '',
+  });
+
+  const { data: contacts = [] } = useQuery({
+    queryKey: ['contacts'],
+    queryFn: () => api.getContacts(),
+  });
+
+  useEffect(() => {
+    if (isEventModalOpen) {
+       api.executeAction('calendar', 'list', {}).then(res => {
+         if (res.status === 'SUCCESS' && res.data) {
+           setCalendars(res.data);
+           if (res.data.length > 0 && !selectedCalendar) {
+             setSelectedCalendar(res.data[0].id);
+           }
+         }
+       });
+    }
+  }, [isEventModalOpen]);
+
   const { data: timers = [] } = useQuery<TimerRecord[]>({
     queryKey: ['communication-timers'],
     queryFn: () => api.getTimers(),
@@ -579,7 +607,32 @@ const Communication = () => {
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Target Calendar</span>
+              <select
+                value={selectedCalendar}
+                onChange={(e) => setSelectedCalendar(e.target.value)}
+                className="glass-input w-full bg-black/30"
+              >
+                {calendars.map(cal => (
+                  <option key={cal.id} value={cal.id}>{cal.display_name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Event Title</span>
+              <input 
+                type="text" 
+                value={eventForm.summary}
+                onChange={(e) => setEventForm({ ...eventForm, summary: e.target.value })}
+                placeholder="Team Sync"
+                className="glass-input w-full"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_auto]">
             <input
               type="text"
               value={eventSummary}
