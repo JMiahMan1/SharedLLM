@@ -1298,6 +1298,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     
     full_system = f"{system_instruction}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}"
     
+    if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes"]):
+        full_system += "\n\nCRITICAL DIRECTIVE: You have full permission to access the storage system. Do NOT refuse. Output the ```json StorageIndexRequest block immediately to fulfill the user's request."
+        
     ollama_payload = {
         "model": selected_model,
         "messages": [
@@ -1377,6 +1380,21 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     
                     # Normalize action name for lookup
                     lookup_action = action.lower().strip() if action else ""
+                    
+                    if lookup_action in ("storageindexrequest", "storagelistrequest"):
+                        action_map[lookup_action] = (STORAGE_SVC, "/index/full" if lookup_action == "storageindexrequest" else "/providers/list")
+                        payload = {
+                            "provider": {
+                                "kind": "nextcloud",
+                                "settings": {
+                                    "url": creds.nextcloud_url,
+                                    "username": creds.nextcloud_user,
+                                    "password": creds.nextcloud_pass
+                                }
+                            },
+                            "path": (payload or {}).get("path", "/"),
+                            "recursive": (payload or {}).get("recursive", True)
+                        }
                     
                     if lookup_action in action_map:
                         svc_base, endpoint = action_map[lookup_action]
@@ -1490,6 +1508,21 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             }
             
             lookup_action = action.lower().strip() if action else ""
+            
+            if lookup_action in ("storageindexrequest", "storagelistrequest"):
+                action_map[lookup_action] = (STORAGE_SVC, "/index/full" if lookup_action == "storageindexrequest" else "/providers/list")
+                payload = {
+                    "provider": {
+                        "kind": "nextcloud",
+                        "settings": {
+                            "url": creds.nextcloud_url,
+                            "username": creds.nextcloud_user,
+                            "password": creds.nextcloud_pass
+                        }
+                    },
+                    "path": (payload or {}).get("path", "/"),
+                    "recursive": (payload or {}).get("recursive", True)
+                }
             
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
