@@ -6,10 +6,14 @@ import json
 from pydantic import BaseModel
 from typing import Type
 
-# Import schemas from the execution service
+# Import schemas from the services
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from services.execution import schemas as exec_schemas
+try:
+    from services.workspace_runtime import schemas as workspace_schemas
+except ImportError:
+    workspace_schemas = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("indexer")
@@ -27,16 +31,19 @@ def index_capabilities():
 
     # 1. Index Execution Schemas
     schema_map = {
-        "LightControlRequest": "Controls smart lights, brightness, and colors.",
-        "MediaPlayRequest": "Controls media players, plays music, handles TV casting.",
+        "LightControlRequest": "Controls smart lights, brightness, and colors. Use this for all light-related commands.",
+        "MediaPlayRequest": "Controls media players, plays music, handles TV casting. Use for playing content.",
         "MediaTransportRequest": "Handles pause, resume, stop, and volume for media players.",
-        "HAServiceRequest": "Generic Home Assistant service call for any domain.",
+        "HAServiceRequest": "Generic Home Assistant service call for any domain not covered by specialized tools.",
         "AnnouncementRequest": "Broadcasts a text-to-speech message to a speaker.",
         "TVCastRequest": "Powers on a TV and casts media content.",
         "CalendarRequest": "Manages calendar events (list, add, delete).",
         "NoteRequest": "Manages personal notes and checklists.",
         "TimerRequest": "Sets, lists, or deletes timers and alarms.",
-        "WorkspaceFileAction": "Orchestrates file writes and patches within a Git-backed workspace.",
+    }
+    
+    workspace_map = {
+        "WorkspaceFileAction": "Orchestrates file writes and patches within a Git-backed workspace. Use for editing code.",
         "WorkspaceGitAction": "Performs Git lifecycle operations (pull, commit, branch, status).",
         "WorkspaceSyncAction": "Synchronizes workspace files with Nextcloud or other storage providers."
     }
@@ -50,7 +57,19 @@ def index_capabilities():
                 "schema": get_json_schema(model),
                 "type": "execution_schema"
             })
-            log.info(f"Prepared schema: {class_name}")
+            log.info(f"Prepared execution schema: {class_name}")
+
+    if workspace_schemas:
+        for class_name, description in workspace_map.items():
+            model = getattr(workspace_schemas, class_name, None)
+            if model:
+                capabilities.append({
+                    "name": class_name,
+                    "description": description,
+                    "schema": get_json_schema(model),
+                    "type": "execution_schema"
+                })
+                log.info(f"Prepared workspace schema: {class_name}")
 
     # 2. Index Intents from Phrasebook
     if os.path.exists(PHRASEBOOK_PATH):
