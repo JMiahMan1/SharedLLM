@@ -1,249 +1,335 @@
-import { useState } from 'react';
-import { 
-  Send, 
-  Volume2, 
-  CloudSun,
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  BellRing,
   Calendar,
-  Clock,
-  CheckCircle,
-  Zap,
-  MessageCircle,
-  Mic,
-  Settings
+  Clock3,
+  FileText,
+  Megaphone,
+  Plus,
+  Trash2,
 } from 'lucide-react';
-import { api } from '../services/api';
 import toast from 'react-hot-toast';
+import { api } from '../services/api';
+import type { DeviceAssignment, ExecutionResponse, TimerRecord } from '../services/api';
 
 const Communication = () => {
-  const [message, setMessage] = useState('');
-  const [broadcastTarget, setBroadcastTarget] = useState<string[]>(['Kitchen Echo', 'Living Room TV']);
-  const [timerDuration, setTimerDuration] = useState(10);
-  const [timerLabel, setTimerLabel] = useState('Pasta Timer');
+  const queryClient = useQueryClient();
+  const [timerTitle, setTimerTitle] = useState('');
+  const [timerDuration, setTimerDuration] = useState('');
+  const [announcementDevice, setAnnouncementDevice] = useState('');
+  const [announcementMessage, setAnnouncementMessage] = useState('');
+  const [announcementVolume, setAnnouncementVolume] = useState(0.6);
+  const [eventSummary, setEventSummary] = useState('');
+  const [eventStartTime, setEventStartTime] = useState('');
+  const [noteTitle, setNoteTitle] = useState('');
+  const [noteContent, setNoteContent] = useState('');
+  const [noteResult, setNoteResult] = useState<ExecutionResponse | null>(null);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!message.trim()) return;
-    try {
-      // TODO: Connect to Nextcloud Talk API via Gateway
-      toast.success('Message routed to Nexus Talk');
-      setMessage('');
-    } catch {
-      toast.error('Messaging failed');
-    }
-  };
+  const { data: timers = [] } = useQuery<TimerRecord[]>({
+    queryKey: ['communication-timers'],
+    queryFn: () => api.getTimers(),
+    refetchInterval: 10000,
+  });
 
-  const handleStartTimer = async () => {
-    try {
-      await api.setTimer(timerDuration * 60, timerLabel);
-      toast.success(`Timer started: ${timerLabel} (${timerDuration}m)`);
-    } catch {
-      toast.error('Failed to set timer');
-    }
-  };
+  const { data: devices = [] } = useQuery<DeviceAssignment[]>({
+    queryKey: ['devices'],
+    queryFn: () => api.getDevices(),
+  });
 
-  const handleBroadcast = async (briefingType: string) => {
-    try {
-      // TODO: Call Gateway /api/execute/broadcast
-      toast.success(`Broadcasting ${briefingType} to selected devices`);
-    } catch {
-      toast.error('Broadcast failed');
+  const { data: calendarList } = useQuery<ExecutionResponse>({
+    queryKey: ['calendar-list'],
+    queryFn: () => api.getCalendarList(),
+  });
+
+  const { data: calendarEvents, refetch: refetchCalendarEvents } = useQuery<ExecutionResponse>({
+    queryKey: ['calendar-events'],
+    queryFn: () => api.getCalendarEvents(),
+  });
+
+  const mediaTargets = useMemo(
+    () => devices.filter((device) => device.device_id.startsWith('media_player.')),
+    [devices],
+  );
+
+  useEffect(() => {
+    if (!announcementDevice && mediaTargets.length > 0) {
+      setAnnouncementDevice(mediaTargets[0].device_id);
     }
-  };
+  }, [announcementDevice, mediaTargets]);
+
+  const createTimerMutation = useMutation({
+    mutationFn: () => api.createTimer({ title: timerTitle, duration_str: timerDuration }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['communication-timers'] });
+      toast.success('Timer created');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to create timer'),
+  });
+
+  const deleteTimerMutation = useMutation({
+    mutationFn: (title: string) => api.deleteTimer(title),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['communication-timers'] });
+      toast.success('Timer removed');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to delete timer'),
+  });
+
+  const announcementMutation = useMutation({
+    mutationFn: () => api.sendAnnouncement({
+      entity_id: announcementDevice,
+      message: announcementMessage,
+      volume: announcementVolume,
+    }),
+    onSuccess: () => toast.success('Announcement sent'),
+    onError: (error: Error) => toast.error(error.message || 'Announcement failed'),
+  });
+
+  const calendarMutation = useMutation({
+    mutationFn: () => api.addCalendarEvent({ summary: eventSummary, start_time: eventStartTime }),
+    onSuccess: () => {
+      refetchCalendarEvents();
+      toast.success('Calendar event added');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to add event'),
+  });
+
+  const noteMutation = useMutation({
+    mutationFn: async (action: 'create' | 'read' | 'append' | 'delete') => {
+      if (action === 'create') {
+        return api.createNote({ title: noteTitle, content: noteContent, category: 'Shared' });
+      }
+      if (action === 'read') {
+        return api.readNote(noteTitle);
+      }
+      if (action === 'append') {
+        return api.appendNote({ title: noteTitle, content: noteContent });
+      }
+      return api.deleteNote(noteTitle);
+    },
+    onSuccess: (data) => {
+      setNoteResult(data);
+      toast.success('Note action completed');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Note action failed'),
+  });
 
   return (
-    <div className="h-full flex flex-col gap-8 pb-12">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <h2 className="text-4xl font-black text-white tracking-tighter uppercase">Nexus Relay</h2>
-          <p className="text-slate-400 mt-2">Family coordination hub & proactive orchestration</p>
-        </div>
-        <div className="flex gap-3">
-           <button onClick={() => handleBroadcast('Morning Briefing')} className="glass-button px-6 bg-orange-600/30 border-orange-500/30 text-orange-400 text-[10px] font-black uppercase tracking-widest">
-              <CloudSun size={16} /> Run Briefing
-           </button>
-        </div>
+    <div className="space-y-8 pb-12">
+      <header>
+        <h2 className="text-4xl font-black tracking-tighter text-white uppercase">Communication</h2>
+        <p className="mt-2 text-slate-400">Live execution-backed timers, announcements, calendars, and notes.</p>
       </header>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 flex-1 min-h-0">
-        <div className="xl:col-span-8 space-y-8 overflow-y-auto pr-2 custom-scrollbar">
-          
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="glass-panel p-8 relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl" />
-              <h3 className="font-bold text-white mb-6 flex items-center gap-2">
-                <Calendar size={18} className="text-blue-400" />
-                Nexus Schedule
-              </h3>
-              <div className="space-y-3">
-                {[
-                  { time: '09:00 AM', event: 'School Drop-off', tag: 'FAMILY' },
-                  { time: '01:30 PM', event: 'Project Sync', tag: 'WORK' },
-                  { time: '06:00 PM', event: 'Dinner @ Grandma\'s', tag: 'EVENT' }
-                ].map((ev, i) => (
-                  <div key={i} className="flex items-center gap-4 p-4 glass-card border-white/5 bg-white/5 group-hover:bg-white/10 transition-colors">
-                    <div className="text-[10px] font-mono text-blue-400 font-bold bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">{ev.time}</div>
-                    <div className="flex-1">
-                      <p className="text-xs font-bold text-white">{ev.event}</p>
-                      <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mt-1">{ev.tag}</p>
-                    </div>
-                    <CheckCircle size={14} className="text-slate-600" />
-                  </div>
-                ))}
-              </div>
-              <button className="w-full mt-4 py-3 border border-dashed border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-all">
-                + Sync External Calendar
-              </button>
-            </div>
-
-            <div className="glass-panel p-8 relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 rounded-full blur-3xl" />
-              <h3 className="font-bold text-white mb-6 flex items-center gap-2">
-                <Clock size={18} className="text-orange-400" />
-                Active Timers
-              </h3>
-              <div className="space-y-4">
-                <div className="p-6 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex flex-col items-center text-center">
-                   <div className="text-4xl font-black text-orange-400 font-mono mb-2 tracking-tighter">04:20</div>
-                   <p className="text-[10px] uppercase font-black tracking-widest text-orange-500/50">Pasta Timer</p>
-                </div>
-                <div className="grid gap-3">
-                   <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        value={timerLabel}
-                        onChange={(e) => setTimerLabel(e.target.value)}
-                        placeholder="Label..." 
-                        className="glass-input flex-1 text-xs py-2" 
-                      />
-                      <input 
-                        type="number" 
-                        value={timerDuration}
-                        onChange={(e) => setTimerDuration(parseInt(e.target.value))}
-                        className="glass-input w-20 text-xs py-2 text-center" 
-                      />
-                   </div>
-                   <button 
-                     onClick={handleStartTimer}
-                     className="glass-button w-full py-3 bg-orange-600/20 border-orange-500/20 text-[10px] font-black uppercase tracking-widest text-orange-400"
-                   >
-                     Initialize Execution Timer
-                   </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="glass-panel p-8">
-             <div className="flex items-center justify-between mb-8">
-                <h3 className="font-bold text-white flex items-center gap-2">
-                  <Volume2 size={18} className="text-emerald-400" />
-                  Broadcast Matrix
-                </h3>
-                <span className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Targeting HA Entities</span>
-             </div>
-             
-             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {['Kitchen Echo', 'Living Room TV', 'Office Speaker', 'Bedroom Dot'].map((target) => (
-                  <button 
-                    key={target}
-                    onClick={() => {
-                       if (broadcastTarget.includes(target)) {
-                         setBroadcastTarget(broadcastTarget.filter(t => t !== target));
-                       } else {
-                         setBroadcastTarget([...broadcastTarget, target]);
-                       }
-                    }}
-                    className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-3 text-center group ${
-                      broadcastTarget.includes(target) 
-                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400 shadow-lg shadow-emerald-500/10' 
-                        : 'bg-white/5 border-white/10 text-slate-500 hover:border-white/20'
-                    }`}
-                  >
-                     <Volume2 size={24} className={broadcastTarget.includes(target) ? 'animate-pulse' : ''} />
-                     <span className="text-[10px] font-bold uppercase tracking-widest">{target}</span>
-                  </button>
-                ))}
-             </div>
-
-             <div className="mt-8 p-6 glass-card bg-indigo-600/10 border-indigo-500/20">
-                <div className="flex flex-col md:flex-row items-center gap-6">
-                   <div className="p-4 rounded-full bg-indigo-500/20 text-indigo-400">
-                      <Mic size={32} />
-                   </div>
-                   <div className="flex-1 text-center md:text-left">
-                      <h4 className="font-bold text-white">Direct Broadcast</h4>
-                      <p className="text-xs text-slate-400 mt-1">Speak directly through all selected home speakers via Home Assistant TTS.</p>
-                   </div>
-                   <button className="glass-button px-8 py-3 bg-indigo-600/40 border-indigo-500/30 text-[10px] font-black uppercase tracking-widest">
-                      Push to Talk
-                   </button>
-                </div>
-             </div>
-          </section>
-        </div>
-
-        <div className="xl:col-span-4 glass-panel flex flex-col bg-slate-900/60 border-blue-500/10 overflow-hidden">
-          <div className="p-6 border-b border-white/5 bg-white/5 flex items-center justify-between">
-            <h3 className="font-bold text-white flex items-center gap-2">
-              <MessageCircle size={18} className="text-blue-400" />
-              Nexus Messenger
-            </h3>
-            <div className="flex items-center gap-2">
-               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-               <span className="text-[9px] uppercase font-black text-slate-500 tracking-widest">Live: Nextcloud Talk</span>
-            </div>
-          </div>
-          
-          <div className="flex-1 p-6 space-y-6 overflow-y-auto flex flex-col custom-scrollbar">
-            <div className="self-start max-w-[85%] glass-card p-4 rounded-2xl rounded-bl-none text-xs border-blue-500/20 bg-blue-500/5">
-              <div className="flex items-center gap-2 mb-2">
-                 <div className="p-1 rounded-lg bg-blue-500/20 text-blue-400"><Zap size={12} /></div>
-                 <p className="text-blue-400 font-black uppercase tracking-tighter">Jarvis Assistant</p>
-              </div>
-              <p className="text-slate-300 leading-relaxed italic">"Morning everyone! Just a reminder: Soccer practice at 5 PM. I've pre-conditioned the car and synchronized the team calendar."</p>
-            </div>
-
-            <div className="self-end max-w-[85%] bg-purple-600/30 border border-purple-500/30 p-4 rounded-2xl rounded-br-none text-xs">
-              <div className="flex items-center justify-end gap-2 mb-2">
-                 <p className="text-purple-300 font-black uppercase tracking-tighter">Jeremiah (Admin)</p>
-                 <div className="w-5 h-5 rounded-lg bg-purple-500 flex items-center justify-center text-[10px] font-black text-white">J</div>
-              </div>
-              <p className="text-slate-100 leading-relaxed text-right">Thanks Jarvis. Can you check if the soccer kit is in the dryer?</p>
-            </div>
-
-            <div className="self-start max-w-[85%] glass-card p-4 rounded-2xl rounded-bl-none text-xs border-blue-500/20 bg-blue-500/5">
-              <div className="flex items-center gap-2 mb-2">
-                 <div className="p-1 rounded-lg bg-blue-500/20 text-blue-400"><Zap size={12} /></div>
-                 <p className="text-blue-400 font-black uppercase tracking-tighter">Jarvis Assistant</p>
-              </div>
-              <p className="text-slate-300 leading-relaxed italic">"Scanning Home Assistant sensors... Yes, the dryer completed 15 minutes ago. It is currently at 45°C. Would you like me to announce 'Laundry Ready' in the living room?"</p>
+      <div className="grid gap-8 xl:grid-cols-2">
+        <section className="glass-panel p-6">
+          <div className="mb-6 flex items-center gap-3">
+            <Clock3 size={20} className="text-orange-300" />
+            <div>
+              <h3 className="text-xl font-bold text-white">Active Timers</h3>
+              <p className="text-sm text-slate-400">Current live timer state from Redis-backed execution.</p>
             </div>
           </div>
 
-          <div className="p-6 bg-black/40 border-t border-white/5">
-            <form onSubmit={handleSendMessage} className="relative">
-              <input 
-                type="text" 
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="Message family mesh..."
-                className="w-full glass-input pr-12 text-xs h-12 bg-white/5 focus:bg-white/10"
+          <div className="mb-4 grid gap-3 md:grid-cols-[1fr_140px_auto]">
+            <input
+              type="text"
+              value={timerTitle}
+              onChange={(event) => setTimerTitle(event.target.value)}
+              className="glass-input"
+              placeholder="Timer name"
+            />
+            <input
+              type="text"
+              value={timerDuration}
+              onChange={(event) => setTimerDuration(event.target.value)}
+              className="glass-input"
+              placeholder="Duration or time expression"
+            />
+            <button
+              onClick={() => {
+                if (!timerTitle.trim() || !timerDuration.trim()) {
+                  toast.error('Enter a timer title and duration');
+                  return;
+                }
+                createTimerMutation.mutate();
+              }}
+              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+            >
+              <Plus size={14} />
+              Add Timer
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {timers.map((timer) => (
+              <div key={timer.id} className="glass-card flex items-center justify-between p-4">
+                <div>
+                  <p className="font-semibold text-white">{timer.title}</p>
+                  <p className="mt-1 text-xs text-slate-400">{new Date(timer.expires_at).toLocaleString()}</p>
+                </div>
+                <button
+                  onClick={() => deleteTimerMutation.mutate(timer.title)}
+                  className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                  aria-label={`Delete ${timer.title}`}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+            {!timers.length && (
+              <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                No active timers found.
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="glass-panel p-6">
+          <div className="mb-6 flex items-center gap-3">
+            <Megaphone size={20} className="text-indigo-300" />
+            <div>
+              <h3 className="text-xl font-bold text-white">Announcements</h3>
+              <p className="text-sm text-slate-400">Send real TTS announcements to assigned media devices.</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <select
+              value={announcementDevice}
+              onChange={(event) => setAnnouncementDevice(event.target.value)}
+              className="glass-input w-full bg-black/30"
+            >
+              <option value="">Select target device</option>
+              {mediaTargets.map((device) => (
+                <option key={device.device_id} value={device.device_id}>
+                  {device.device_id}
+                </option>
+              ))}
+            </select>
+            <textarea
+              value={announcementMessage}
+              onChange={(event) => setAnnouncementMessage(event.target.value)}
+              className="glass-input min-h-28 w-full"
+              placeholder="Enter the announcement message"
+            />
+            <label className="block text-sm text-slate-400">
+              Volume: {announcementVolume.toFixed(1)}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={announcementVolume}
+                onChange={(event) => setAnnouncementVolume(Number(event.target.value))}
+                className="mt-2 w-full"
               />
-              <button 
-                type="submit"
-                className="absolute right-2 top-2 p-2 text-purple-400 hover:text-white hover:bg-purple-500/20 rounded-xl transition-all"
-              >
-                <Send size={20} />
-              </button>
-            </form>
-            <div className="mt-3 flex items-center justify-between">
-               <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest">End-to-end encrypted</p>
-               <button className="text-[8px] text-slate-500 hover:text-slate-300 flex items-center gap-1 uppercase font-black tracking-widest transition-colors">
-                  <Settings size={10} /> Chat Settings
-               </button>
+            </label>
+            <button
+              onClick={() => {
+                if (!announcementDevice) {
+                  toast.error('Select a target device');
+                  return;
+                }
+                announcementMutation.mutate();
+              }}
+              className="glass-button w-full px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+            >
+              <BellRing size={14} />
+              Send Announcement
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div className="grid gap-8 xl:grid-cols-2">
+        <section className="glass-panel p-6">
+          <div className="mb-6 flex items-center gap-3">
+            <Calendar size={20} className="text-emerald-300" />
+            <div>
+              <h3 className="text-xl font-bold text-white">Calendar</h3>
+              <p className="text-sm text-slate-400">Live calendar listing, event readout, and event creation.</p>
             </div>
           </div>
-        </div>
+
+          <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
+            <input
+              type="text"
+              value={eventSummary}
+              onChange={(event) => setEventSummary(event.target.value)}
+              className="glass-input"
+              placeholder="Calendar event title"
+            />
+            <input
+              type="text"
+              value={eventStartTime}
+              onChange={(event) => setEventStartTime(event.target.value)}
+              className="glass-input"
+              placeholder="Start time"
+            />
+            <button
+              onClick={() => {
+                if (!eventSummary.trim() || !eventStartTime.trim()) {
+                  toast.error('Enter an event summary and time');
+                  return;
+                }
+                calendarMutation.mutate();
+              }}
+              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+            >
+              <Plus size={14} />
+              Add Event
+            </button>
+          </div>
+
+          <div className="mt-6 space-y-4">
+            <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
+              <p className="mb-2 text-xs font-black uppercase tracking-widest text-slate-500">Calendars</p>
+              <pre className="whitespace-pre-wrap text-sm text-slate-300">{calendarList?.message || 'Loading calendars...'}</pre>
+            </div>
+            <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
+              <p className="mb-2 text-xs font-black uppercase tracking-widest text-slate-500">Upcoming Events</p>
+              <pre className="whitespace-pre-wrap text-sm text-slate-300">{calendarEvents?.message || 'Loading events...'}</pre>
+            </div>
+          </div>
+        </section>
+
+        <section className="glass-panel p-6">
+          <div className="mb-6 flex items-center gap-3">
+            <FileText size={20} className="text-cyan-300" />
+            <div>
+              <h3 className="text-xl font-bold text-white">Notes</h3>
+              <p className="text-sm text-slate-400">Create, read, append, and delete shared notes through Nextcloud.</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <input
+              type="text"
+              value={noteTitle}
+              onChange={(event) => setNoteTitle(event.target.value)}
+              className="glass-input w-full"
+              placeholder="Note title"
+            />
+            <textarea
+              value={noteContent}
+              onChange={(event) => setNoteContent(event.target.value)}
+              className="glass-input min-h-28 w-full"
+              placeholder="Note content"
+            />
+            <div className="grid gap-3 md:grid-cols-4">
+              <button onClick={() => noteMutation.mutate('create')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Create</button>
+              <button onClick={() => noteMutation.mutate('read')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Read</button>
+              <button onClick={() => noteMutation.mutate('append')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Append</button>
+              <button onClick={() => noteMutation.mutate('delete')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Delete</button>
+            </div>
+            <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
+              <p className="mb-2 text-xs font-black uppercase tracking-widest text-slate-500">Last Note Response</p>
+              <pre className="whitespace-pre-wrap text-sm text-slate-300">{noteResult?.message || 'Run a note action to see the live response.'}</pre>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );

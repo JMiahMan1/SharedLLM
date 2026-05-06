@@ -47,6 +47,12 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
+DEFAULT_GLOBAL_SETTINGS = [
+    {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
+    {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
+    {"key": "rag_sync_interval", "value": "3600", "description": "Frequency in seconds for RAG background re-indexing"},
+]
+
 
 def _ensure_schema_upgrades() -> None:
     inspector = inspect(engine)
@@ -79,6 +85,21 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR"))
             conn.commit()
 
+
+def _ensure_default_settings(session: Session) -> None:
+    existing_keys = {
+        setting.key
+        for setting in session.exec(select(GlobalSetting)).all()
+    }
+    inserted = False
+    for setting in DEFAULT_GLOBAL_SETTINGS:
+        if setting["key"] in existing_keys:
+            continue
+        session.add(GlobalSetting(**setting))
+        inserted = True
+    if inserted:
+        session.commit()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Ensure tables exist
@@ -88,6 +109,7 @@ async def lifespan(app: FastAPI):
     # Run initial seed if needed
     with Session(engine) as session:
         seed_from_env(session)
+        _ensure_default_settings(session)
     yield
 
 app = FastAPI(title="Jarvis OS Identity Service", lifespan=lifespan)
