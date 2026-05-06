@@ -13,10 +13,10 @@ async def test_gateway_timeout_degradation():
     from services.gateway.main import app
     
     # Mock Ollama timeout
-    respx.post(re.compile(r".*/api/generate")).mock(side_effect=httpx.ConnectTimeout)
+    respx.post(url__regex=r".*/api/generate").mock(side_effect=httpx.ConnectTimeout)
 
     # Mock Identity success - using regex to be robust
-    respx.post(re.compile(r".*/api/resolve")).return_value = httpx.Response(
+    respx.post(url__regex=r".*/api/resolve").return_value = httpx.Response(
         status.HTTP_200_OK,
         json={"user": "jeremiah", "is_admin": True}
     )
