@@ -1322,6 +1322,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     action_map = {
                         "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
                         "light_control": (EXECUTION_SVC, "/execute/light"),
+                        "light_control_request": (EXECUTION_SVC, "/execute/light"),
                         "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
                         "media_play": (EXECUTION_SVC, "/execute/media/play"),
                         "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
