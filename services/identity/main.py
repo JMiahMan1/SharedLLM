@@ -51,6 +51,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
     {"key": "rag_sync_interval", "value": "3600", "description": "Frequency in seconds for RAG background re-indexing"},
+    {"key": "workspace_runtime_root", "value": "/workspace", "description": "Root folder where workspaces and files will be saved"},
 ]
 
 
@@ -128,6 +129,25 @@ app.add_middleware(
 def get_session():
     with Session(engine) as session:
         yield session
+
+@app.post("/api/users/{username}/password")
+def admin_set_password(username: str, req: dict, x_internal_secret: Optional[str] = Header(default=None)):
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden: Admin secret required")
+    
+    new_password = req.get("new_password")
+    if not new_password:
+        raise HTTPException(status_code=400, detail="new_password is required")
+
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.username == username)).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user.password_hash = pwd_context.hash(new_password)
+        session.add(user)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
 
 def require_internal(authorization: str = Header(None), x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
     if x_internal_secret == INTERNAL_SECRET:
@@ -720,3 +740,64 @@ def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depen
 def manual_seed(force: bool = False, session: Session = Depends(get_session)):
     count = seed_from_env(session, force=force)
     return {"status": "SUCCESS", "count": count}
+
+
+@app.post("/api/auth/import/nextcloud")
+async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(default=None)):
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    # 1. Get Nextcloud config from the default admin user
+    with Session(engine) as session:
+        admin = session.exec(select(User).where(User.is_admin == True)).first()
+        if not admin or not admin.nextcloud_url:
+            # Try global settings
+            nc_url = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_URL")).first()
+            nc_user = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_USER")).first()
+            nc_pass = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_PASS")).first()
+            
+            url = nc_url.value if nc_url else os.getenv("NEXTCLOUD_URL")
+            user = nc_user.value if nc_user else os.getenv("NEXTCLOUD_USER")
+            password = nc_pass.value if nc_pass else os.getenv("NEXTCLOUD_PASS")
+        else:
+            url = admin.nextcloud_url
+            user = admin.nextcloud_user
+            password = decrypt(admin.nextcloud_pass_enc) if admin.nextcloud_pass_enc else None
+
+        if not url or not user or not password:
+            raise HTTPException(status_code=400, detail="Nextcloud configuration missing")
+
+        # 2. Fetch users from Nextcloud OCS API
+        try:
+            async with httpx.AsyncClient(verify=False) as client:
+                resp = await client.get(
+                    f"{url.rstrip('/')}/ocs/v1.php/cloud/users",
+                    auth=(user, password),
+                    headers={"OCS-APIRequest": "true", "Accept": "application/json"},
+                    params={"format": "json"}
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=resp.status_code, detail=f"Nextcloud API error: {resp.text}")
+                
+                data = resp.json().get("ocs", {}).get("data", {}).get("users", [])
+                
+                count = 0
+                for nc_username in data:
+                    existing = session.exec(select(User).where(User.username == nc_username)).first()
+                    if not existing:
+                        new_user = User(
+                            username=nc_username,
+                            display_name=nc_username.capitalize(),
+                            is_admin=False,
+                            nextcloud_url=url,
+                            nextcloud_user=nc_username,
+                            # We don't have their password, so they must use another method or admin must set it
+                        )
+                        session.add(new_user)
+                        count += 1
+                
+                session.commit()
+                return {"status": "SUCCESS", "message": f"Imported {count} users from Nextcloud"}
+        except Exception as e:
+            log.error(f"Nextcloud import failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
