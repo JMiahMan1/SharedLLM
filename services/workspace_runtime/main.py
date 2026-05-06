@@ -1207,6 +1207,19 @@ def run_pytest(req: PytestRequest, x_internal_secret: Optional[str] = Header(def
     }
 
 
+@app.post("/api/admin/tests/smoke")
+def run_smoke_test(x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    # Run soa_smoke_test.py from the root of the repo (which is /workspace in the container)
+    workspace_path = WORKSPACE_ROOT
+    result = _run_command(workspace_path, ["python3", "soa_smoke_test.py"], timeout_seconds=60)
+    return {
+        "status": "SUCCESS",
+        "passed": result["returncode"] == 0,
+        "results": result["stdout"] + result["stderr"]
+    }
+
+
 @app.post("/git/fetch")
 def git_fetch(req: GitFetchRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
