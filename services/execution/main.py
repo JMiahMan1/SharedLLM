@@ -20,7 +20,8 @@ except (ImportError, ValueError):
         from execution.schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, ExecutionResult
+            CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
+            WebSearchRequest, WebReadRequest, ExecutionResult
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser
     except ImportError:
@@ -28,7 +29,8 @@ except (ImportError, ValueError):
         from schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, ExecutionResult
+            CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
+            WebSearchRequest, WebReadRequest, ExecutionResult
         )
         from handlers import light, media, climate, security, calendar, note, timer, talk, browser
 
