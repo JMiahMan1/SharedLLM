@@ -127,6 +127,8 @@ async def get_stats(user_id: str = "default"):
     try:
         collections = ["nextcloud_files", "ha_entities"]
         total_chunks = 0
+        coll_chunks_map = {}
+        coll_docs_map = {}
         total_documents = 0
         providers = []
         last_indexed = None
@@ -138,6 +140,7 @@ async def get_stats(user_id: str = "default"):
             results = coll.get(where={"user_id": user_id}, include=["metadatas"])
             if results and results["ids"]:
                 total_chunks += len(results["ids"])
+                coll_chunks_map[name] = len(results["ids"])
                 providers.append(name.split('_')[0])
                 
                 if results["metadatas"]:
@@ -153,17 +156,26 @@ async def get_stats(user_id: str = "default"):
                             if not last_indexed or idx_at > last_indexed:
                                 last_indexed = idx_at
                     
-                    total_documents += len(unique_items)
+                    doc_count = len(unique_items)
                     
                     if not unique_items and len(results["ids"]) > 0:
-                        total_documents += 1
+                        doc_count = 1
+                    
+                    total_documents += doc_count
+                    coll_docs_map[name] = doc_count
 
         return {
             "status": "SUCCESS",
             "total_chunks": total_chunks,
             "total_documents": total_documents,
             "last_indexed": last_indexed,
-            "providers": list(set(providers))
+            "providers": list(set(providers)),
+            "breakdown": {
+                name: {
+                    "chunks": coll_chunks_map.get(name, 0),
+                    "documents": coll_docs_map.get(name, 0)
+                } for name in collections
+            }
         }
     except Exception as e:
         log.error(f"Stats failed: {e}")
