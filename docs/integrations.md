@@ -24,6 +24,25 @@ music on a smart speaker).
 
 ---
 
+## 🔒 Integration Enforcement & Capability Mapping
+
+As the Jarvis SOA expands, all new services and intents must adhere to **Capability-Based Routing**.
+
+### 1. Identity Credential Requirement
+Every new microservice that requires external authentication (e.g., a new "Slack" service) must:
+1. Define which fields in `ResolvedCredentials` it requires.
+2. If those fields don't exist, they must be added to the `User` model in `services/identity/models.py` and the `ResolvedCredentials` schema in `services/identity/schemas.py`.
+
+### 2. Gateway Capability Map
+When a new `Intent` is added to the system (via the Intent Engine or Regex), developers **MUST** update the `INTENT_CAPABILITY_MAP` in `services/gateway/main.py`.
+
+Failure to map an intent will result in the Gateway attempting to call downstream services without validating credentials, which can lead to unstable behavior and 500 errors.
+
+### 3. Graceful Degradation
+By mapping an intent, the Gateway can automatically intercept missing credentials and guide the user to the **Identity Hub** with a persona-driven message, preventing a "crash" experience.
+
+---
+
 ## 1. Cast Integration (`CastIntegration`)
 
 **Target Devices**: Google Chromecast, Google Home, Nest Hub, Cast-enabled TVs
