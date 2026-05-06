@@ -96,18 +96,18 @@ def _make_openai_response(message: str, model: str, intent: str = None, debug_co
 try:
     from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
     from intent_engine import engine
-    from history import get_history, update_history, ping_redis, get_long_term_memory
+    from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
     from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 except (ImportError, ValueError):
     try:
       from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from gateway.intent_engine import engine
-      from gateway.history import get_history, update_history, ping_redis, get_long_term_memory
+      from gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
       from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     except ImportError:
       from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
       from intent_engine import engine
-      from history import get_history, update_history, ping_redis, get_long_term_memory
+      from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
       from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 
 # --- Setup Logging ---
@@ -189,7 +189,7 @@ _global_http_client: httpx.AsyncClient = None
 async def lifespan(app: FastAPI):
     global _global_http_client
     _global_http_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(60.0, connect=5.0),
+        timeout=httpx.Timeout(45.0, connect=5.0),
         transport=httpx.AsyncHTTPTransport(retries=3)
     )
     log.info("Gateway starting up...")
@@ -296,16 +296,21 @@ async def get_documentation(
     if not doc_name.endswith(".md"):
         doc_name += ".md"
         
-    # Prevent path traversal
-    if ".." in doc_name or doc_name.startswith("/") or "\\" in doc_name:
-        raise HTTPException(status_code=400, detail="Invalid document path")
-    
-    if doc_name in allowed_root_files:
-        target_path = base_dir / doc_name
-    else:
-        target_path = docs_dir / doc_name
+    # Prevent path traversal using resolution
+    try:
+        if doc_name in allowed_root_files:
+            target_path = (base_dir / doc_name).resolve()
+            # Must stay in base_dir
+            target_path.relative_to(base_dir)
+        else:
+            target_path = (docs_dir / doc_name).resolve()
+            # Must stay in docs_dir
+            target_path.relative_to(docs_dir)
+    except (ValueError, RuntimeError):
+        log.warning(f"SECURITY: Blocked doc path traversal attempt: {doc_name}")
+        raise HTTPException(status_code=403, detail="Forbidden: Document path traversal detected")
         
-    if not target_path or not target_path.exists() or not target_path.is_file():
+    if not target_path.exists() or not target_path.is_file():
         raise HTTPException(status_code=404, detail=f"Documentation '{doc_name}' not found")
         
     try:
@@ -1038,43 +1043,7 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
       return {"status": "FAILURE", "message": str(e)}
 
 # --- Chat Handler ---
-async def extract_user_facts(user_id: str, history: list):
-    """
-    Background task to extract facts from recent history and save to long-term memory.
-    """
-    if not history or len(history) < 2:
-        return
-        
-    try:
-        # Construct extraction prompt
-        recent_text = "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')}" for m in history[-2:]])
-        prompt = f"""Extract 1-2 key facts or preferences about the user from this conversation.
-Example: 'User prefers lights at 50%', 'User's favorite color is blue', 'User is working on the gateway service'.
-Conversation:
-{recent_text}
-Return ONLY the fact(s) as a bulleted list, or 'NONE' if no new facts are found.
-"""
-        resp = await call_ollama({"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False}, use_chat=False)
-        facts_text = resp.json().get("response", "").strip()
-        
-        if "NONE" in facts_text.upper():
-            return
-            
-        facts = [f.strip("- ").strip() for f in facts_text.split("\n") if f.strip("- ").strip()]
-        for f in facts:
-            await call_rag_service(
-                method="POST",
-                path="/rag/ingest",
-                payload={
-                    "collection_name": "user_facts",
-                    "content": f,
-                    "metadata": {"type": "user_preference", "extracted_at": time.time()},
-                    "user_id": user_id
-                }
-            )
-            log.info(f"[Memory] Saved fact for {user_id}: {f}")
-    except Exception as e:
-        log.warning(f"Fact extraction failed: {e}")
+# Removed local extract_user_facts as it is now in history.py
 
 async def decompose_query(query: str) -> list[str]:
     """
@@ -1114,7 +1083,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
-        body["api_key"] = auth_header.split(" ")[1]
+        body["token"] = auth_header.split(" ")[1] # Identity expects 'token' for resolution
+    elif "api_key" in body:
+        body["token"] = body["api_key"]
     
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
@@ -1133,9 +1104,21 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     if not query:
         return JSONResponse({"status": "ERROR", "message": "No query provided."}, status_code=400)
 
-    creds_data = await resolve_identity(body)
-    creds = ResolvedCredentials(**creds_data)
-    user_id = creds.user
+    try:
+        creds_data = await resolve_identity(body)
+        creds = ResolvedCredentials(**creds_data)
+        user_id = creds.user
+    except HTTPException as he:
+        if he.status_code == 401:
+            msg = "Authentication failed. Please log in or provide a valid API key."
+            if is_openai: return _make_openai_response(msg, selected_model, "unauthorized")
+            return _make_ollama_response(msg, selected_model, "unauthorized")
+        raise he
+    except Exception as e:
+        log.error(f"Identity resolution crash: {e}")
+        msg = "The Identity service is currently unavailable. Please try again later."
+        if is_openai: return _make_openai_response(msg, selected_model, "degraded")
+        return _make_ollama_response(msg, selected_model, "degraded")
     
     log.info(f"Chat request from {user_id} query='{query}'")
 
@@ -1253,7 +1236,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     await update_history(user_id, "assistant", ans)
     
     if background_tasks:
-        background_tasks.add_task(extract_user_facts, user_id, short_term + [{"role": "user", "content": query}])
+        background_tasks.add_task(extract_and_store_user_facts, user_id, short_term + [{"role": "user", "content": query}])
 
     if is_openai:
         return _make_openai_response(ans, selected_model, intent)

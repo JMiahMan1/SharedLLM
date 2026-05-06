@@ -18,7 +18,7 @@ const HelpTooltip: React.FC<HelpTooltipProps> = ({ docName, sectionTitle, label 
   const { data: docContent, isLoading } = useQuery({
     queryKey: ['docs', docName],
     queryFn: async () => {
-      const response = await axios.get(`http://${window.location.hostname}:11435/api/docs/${docName}`, {
+      const response = await axios.get(`/api/docs/${docName}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       return response.data.content;

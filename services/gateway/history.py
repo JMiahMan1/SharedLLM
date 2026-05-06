@@ -3,6 +3,9 @@ import os
 import json
 import redis
 import logging
+import time
+import httpx
+import asyncio
 
 log = logging.getLogger("gateway.history")
 
@@ -50,27 +53,93 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
     Retrieves relevant 'User Facts' from the RAG service to provide semantic memory.
     """
     try:
-        # Call RAG service to find facts for this user
-        from main import call_rag_service # Potential circular import, handle with care or move
-        res = await call_rag_service(
-            method="POST",
-            path="/rag/search",
-            payload={
-                "collection_name": "user_facts",
-                "query": query,
-                "user_id": user_id,
-                "k": 3
-            }
-        )
-        facts = res.get("results", [])
-        if not facts:
-            return ""
+        # We use a dedicated collection for static user facts (Mem0 style)
+        payload = {
+            "collection_name": "user_facts",
+            "query": query,
+            "user_id": user_id,
+            "k": 5
+        }
         
-        context = "\n".join([f"- {f['content']}" for f in facts])
-        return f"### User Preferences & Long-Term Memory\n{context}\n"
+        # We need to call RAG service. Since we are in history.py, we'll use a local client or pass one.
+        # For simplicity, we'll create one here or use a shared one.
+        INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+        RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{RAG_SVC}/rag/search",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code != 200:
+                return ""
+            
+            data = resp.json()
+            facts = data.get("results", [])
+            if not facts:
+                return ""
+            
+            context = "\n".join([f"- {f['content']}" for f in facts])
+            return f"### User Preferences & Facts (Long-term Memory)\n{context}\n"
     except Exception as e:
         log.warning(f"Failed to retrieve long-term memory: {e}")
         return ""
+
+async def extract_and_store_user_facts(user_id: str, history: list):
+    """
+    Asynchronous task to extract static facts from conversation and store in RAG.
+    """
+    if not history or len(history) < 2:
+        return
+
+    try:
+        ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "qwen2.5:7b")
+        OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+        INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+        RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
+
+        # Only look at the last turn
+        recent_text = ""
+        for m in history[-2:]:
+            role = "USER" if m.get("role") == "user" else "ASSISTANT"
+            recent_text += f"{role}: {m.get('content')}\n"
+
+        prompt = f"""Extract 1-3 permanent user facts, preferences, or life details from this exchange.
+Examples: 'User has a dog named Rex', 'User prefers dark mode', 'User is a software engineer'.
+Ignore temporary states like 'User is hungry'.
+Conversation:
+{recent_text}
+
+Return ONLY a bulleted list of facts, or 'NONE'.
+"""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False},
+            )
+            if resp.status_code != 200: return
+            
+            text = resp.json().get("response", "").strip()
+            if "NONE" in text.upper() or not text:
+                return
+
+            facts = [f.strip("- ").strip() for f in text.split("\n") if f.strip("- ").strip()]
+            for f in facts:
+                if len(f) < 5: continue
+                await client.post(
+                    f"{RAG_SVC}/rag/ingest",
+                    json={
+                        "collection_name": "user_facts",
+                        "content": f,
+                        "metadata": {"type": "user_fact", "timestamp": time.time()},
+                        "user_id": user_id
+                    },
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                log.info(f"[Mem0] Extracted fact for {user_id}: {f}")
+    except Exception as e:
+        log.error(f"Fact extraction failed: {e}")
 
 def ping_redis() -> bool:
     """Verifies Redis connectivity for health checks."""

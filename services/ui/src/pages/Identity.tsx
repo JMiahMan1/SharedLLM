@@ -162,25 +162,36 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
           </div>
 
           <div className="grid gap-4">
-            {Object.entries(configKeys).map(([label, key]) => (
-              <div key={key}>
-                <div className="flex items-center mb-2">
-                  <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
-                  <HelpTooltip docName="integrations.md" sectionTitle={name} label={label} />
+            {Object.entries(configKeys).map(([label, key]) => {
+              const isSecret = label.toLowerCase().includes('pass') || label.toLowerCase().includes('token') || label.toLowerCase().includes('secret');
+              const hasValue = !!(userData as Record<string, unknown>)?.[key];
+              const displayValue = form[key] === undefined && hasValue ? 'Saved ••••••••' : (form[key] as string) || '';
+              
+              return (
+                <div key={key}>
+                  <div className="flex items-center mb-2">
+                    <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
+                    <HelpTooltip docName="integrations.md" sectionTitle={name} label={label} />
+                  </div>
+                  <input 
+                    type={isSecret ? 'password' : 'text'}
+                    value={displayValue}
+                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                    onFocus={(e) => {
+                      if (e.target.value === 'Saved ••••••••') {
+                        setForm({ ...form, [key]: '' });
+                      }
+                    }}
+                    className="glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40"
+                    placeholder={`Enter ${label}...`}
+                  />
                 </div>
-                <input 
-                  type={label.toLowerCase().includes('pass') || label.toLowerCase().includes('token') || label.toLowerCase().includes('secret') ? 'password' : 'text'}
-                  value={(form[key] as string) || ''}
-                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                  className="glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40"
-                  placeholder={`Enter ${label}...`}
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="p-4 glass-card border-white/5 bg-white/5 rounded-xl">
-             <div className="flex items-center justify-between">
+             <div className="flex items-center justify-between mb-4">
                 <div>
                    <p className="text-xs font-bold text-white">Data Sharing Rule</p>
                    <p className="text-[10px] text-slate-500 mt-1">Allow Jarvis to index this service for all family members (RAG).</p>
@@ -195,6 +206,29 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                   <div className="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
                 </label>
              </div>
+
+             {name === 'Nextcloud' && (
+               <div className="pt-4 border-t border-white/5">
+                 <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest mb-3">Sync Preferences Matrix</p>
+                 <div className="space-y-2">
+                   {['Documents', 'Photos', 'Notes', 'Work'].map((folder) => (
+                     <div key={folder} className="flex items-center justify-between p-2 bg-black/20 rounded-lg">
+                        <span className="text-[10px] text-slate-300 font-bold">{folder}</span>
+                        <div className="flex gap-2">
+                           <button 
+                             onClick={() => toast(`Nextcloud/${folder} is now private`)}
+                             className="text-[8px] px-2 py-1 rounded bg-slate-800 text-slate-500 hover:text-white"
+                           >Private</button>
+                           <button 
+                             onClick={() => toast(`Nextcloud/${folder} is shared with Family`)}
+                             className="text-[8px] px-2 py-1 rounded bg-purple-600/30 text-purple-400 border border-purple-500/30"
+                           >Shared</button>
+                        </div>
+                     </div>
+                   ))}
+                 </div>
+               </div>
+             )}
           </div>
 
           {testResult && (
