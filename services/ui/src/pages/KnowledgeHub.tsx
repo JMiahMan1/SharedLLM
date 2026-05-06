@@ -33,7 +33,8 @@ const KnowledgeHub = () => {
   });
 
   const indexMutation = useMutation({
-    mutationFn: (path: string) => api.triggerIndexing(path, true),
+    mutationFn: ({ path, recursive = true }: { path: string; recursive?: boolean }) => 
+      api.triggerIndexing(path, recursive),
     onSuccess: () => {
       toast.success('Indexing started in background');
       queryClient.invalidateQueries({ queryKey: ['rag-stats'] });
@@ -63,7 +64,21 @@ const KnowledgeHub = () => {
   };
 
   const handleIndexFolder = (path: string) => {
-    indexMutation.mutate(path);
+    indexMutation.mutate({ path, recursive: true });
+  };
+
+  const handleManualIndex = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const path = (formData.get('path') as string).trim();
+    const recursive = formData.get('recursive') === 'on';
+    
+    if (path) {
+      indexMutation.mutate({ path, recursive });
+      e.currentTarget.reset();
+    } else {
+      toast.error('Please enter a valid path');
+    }
   };
 
   return (
@@ -139,6 +154,64 @@ const KnowledgeHub = () => {
           </div>
         </div>
       </div>
+
+      {/* Manual Ingestion Form */}
+      <section className="glass-panel p-6 border-white/5 relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
+          <HardDrive size={100} />
+        </div>
+        <div className="relative z-10">
+          <h3 className="text-lg font-bold text-white mb-2">Direct Ingestion</h3>
+          <p className="text-sm text-slate-400 mb-6 max-w-2xl">
+            Manually point to a NextCloud path or specific file to ingest it into the RAG system. 
+            Useful for paths not currently visible in the explorer.
+          </p>
+          
+          <form onSubmit={handleManualIndex} className="flex flex-col md:flex-row gap-4 items-start md:items-end">
+            <div className="flex-1 w-full space-y-2">
+              <label htmlFor="path" className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">
+                Storage Path
+              </label>
+              <div className="relative">
+                <Folder size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input 
+                  id="path"
+                  name="path"
+                  type="text" 
+                  placeholder="/Documents/Work/project-brief.pdf" 
+                  className="w-full bg-black/20 border border-white/10 rounded-lg py-2.5 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3 py-2.5 px-4 bg-white/5 rounded-lg border border-white/5">
+              <input 
+                id="recursive"
+                name="recursive"
+                type="checkbox" 
+                defaultChecked
+                className="w-4 h-4 rounded border-white/10 bg-black/20 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-black"
+              />
+              <label htmlFor="recursive" className="text-sm text-slate-300 cursor-pointer">
+                Recursive Ingestion
+              </label>
+            </div>
+
+            <button 
+              type="submit"
+              disabled={indexMutation.isPending}
+              className="glass-button w-full md:w-auto px-8 py-2.5 font-bold text-sm flex items-center justify-center gap-2"
+            >
+              {indexMutation.isPending && !indexMutation.variables?.path.startsWith('/') ? (
+                <RefreshCw size={16} className="animate-spin" />
+              ) : (
+                <Database size={16} />
+              )}
+              {indexMutation.isPending ? 'Ingesting...' : 'Ingest Path'}
+            </button>
+          </form>
+        </div>
+      </section>
 
       {/* File Explorer */}
       <section className="glass-panel overflow-hidden border-white/5">
@@ -246,7 +319,7 @@ const KnowledgeHub = () => {
                           disabled={indexMutation.isPending}
                           className="glass-button text-[10px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center gap-2 ml-auto hover:border-indigo-500/50 hover:text-indigo-300 transition-all"
                         >
-                          {indexMutation.isPending && indexMutation.variables === file.path ? (
+                          {indexMutation.isPending && indexMutation.variables?.path === file.path ? (
                              <RefreshCw size={12} className="animate-spin" />
                           ) : (
                             <RefreshCw size={12} />

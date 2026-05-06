@@ -10,9 +10,10 @@ try:
     from .schemas import (
         UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
-        CalendarRequest, NoteRequest, TimerRequest, TalkRequest, ExecutionResult
+        CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
+        WebSearchRequest, WebReadRequest, ExecutionResult
     )
-    from .handlers import light, media, climate, security, calendar, note, timer, talk
+    from .handlers import light, media, climate, security, calendar, note, timer, talk, browser
 except (ImportError, ValueError):
     try:
         from execution import ha_client
@@ -21,7 +22,7 @@ except (ImportError, ValueError):
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest, ExecutionResult
         )
-        from execution.handlers import light, media, climate, security, calendar, note, timer, talk
+        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser
     except ImportError:
         import ha_client
         from schemas import (
@@ -29,7 +30,7 @@ except (ImportError, ValueError):
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest, ExecutionResult
         )
-        from handlers import light, media, climate, security, calendar, note, timer, talk
+        from handlers import light, media, climate, security, calendar, note, timer, talk, browser
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -138,6 +139,14 @@ async def execute_timer(req: TimerRequest):
 @app.post("/execute/talk", response_model=ExecutionResult)
 async def execute_talk(req: TalkRequest):
     return await talk.handle_talk(req)
+
+@app.post("/execute/web_search", response_model=ExecutionResult)
+async def execute_web_search(req: WebSearchRequest):
+    return await browser.handle_web_search(req)
+
+@app.post("/execute/web_read", response_model=ExecutionResult)
+async def execute_web_read(req: WebReadRequest):
+    return await browser.handle_web_read(req)
 
 @app.get("/execute/timers")
 async def list_timers():

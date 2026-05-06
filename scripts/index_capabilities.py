@@ -48,6 +48,8 @@ def index_capabilities():
         "CalendarRequest": "Manages calendar events (list, add, delete).",
         "NoteRequest": "Manages personal notes and checklists.",
         "TimerRequest": "Sets, lists, or deletes timers and alarms.",
+        "WebSearchRequest": "Performs a web search via the private search engine.",
+        "WebReadRequest": "Fetches and converts a webpage to markdown.",
     }
     
     # Process Execution Schemas

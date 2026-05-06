@@ -162,3 +162,15 @@ class WorkspaceSyncAction(BaseModel):
     workspace_name: str
     path: Optional[str] = None  # None means sync full workspace
     direction: Literal["upload", "download"] = "upload"
+
+# ─── Browser / Web Agent ────────────────────────────────────────────────────────
+
+class WebSearchRequest(BaseModel):
+    """Performs a web search via search.sumemail.com."""
+    user_context: UserContext
+    query: str
+
+class WebReadRequest(BaseModel):
+    """Fetches a URL and returns the content as markdown."""
+    user_context: UserContext
+    url: str
