@@ -196,6 +196,15 @@ def get_http_client() -> httpx.AsyncClient:
         )
     return _global_http_client
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    log.info("Gateway starting up...")
+    engine.load()
+    yield
+    log.info("Gateway shutting down...")
+
+app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
+
 @app.on_event("startup")
 async def startup_event():
     # Initialize the client explicitly on startup
@@ -208,15 +217,6 @@ async def shutdown_event():
     if _global_http_client:
         await _global_http_client.aclose()
         _global_http_client = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    log.info("Gateway starting up...")
-    engine.load()
-    yield
-    log.info("Gateway shutting down...")
-
-app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
 
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
