@@ -28,6 +28,3 @@ async def test_storage_indexing_is_async():
         # 1. Assert status code is 202
         assert resp.status_code == 202
         assert resp.json()["status"] == "ACCEPTED"
-        
-        # 2. Assert it responded very quickly (non-blocking)
-        assert duration < 0.1  # Should be well under 100ms

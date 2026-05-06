@@ -18,7 +18,7 @@ async def test_workspace_path_traversal_blocked():
     
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.post("/api/files/write", json=malicious_payload)
+        resp = await ac.post("/files/write", json=malicious_payload)
         
         # Should be blocked by resolve_safe_path
         assert resp.status_code == 403
