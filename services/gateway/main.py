@@ -437,8 +437,8 @@ def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     q = (query or "").lower()
     if any(token in q for token in CODING_SIGNALS):
       return CODE_HELPER_SYSTEM_INSTRUCTION
-    if selected_model == LIBRARIAN_MODEL or any(token in q for token in LIBRARIAN_SIGNALS):
-      return LIBRARIAN_SYSTEM_INSTRUCTION
+    # Librarian is for research/knowledge queries. 
+    # For everything else, use the standard Librarian prompt which now includes hardware control.
     return LIBRARIAN_SYSTEM_INSTRUCTION
 
 
@@ -1255,12 +1255,18 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             hits = res.get("results", [])
             if hits:
                 rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
+                log.info(f"[RAG] Collection '{coll}' returned {len(hits)} hits.")
+            else:
+                log.info(f"[RAG] Collection '{coll}' returned NO hits.")
     except Exception as e:
         log.error(f"RAG Retrieval error: {e}")
 
     # 7. Slow Path Execution (LLM Pipeline)
     system_instruction = select_system_instruction_for_query(query, selected_model)
-    full_system = f"{system_instruction}\n\n{long_term}\n\n### Capability Context\n{rag_context}"
+    admin_tag = " (ADMIN)" if creds.is_admin else ""
+    user_info = f"Current User: {user_id}{admin_tag}"
+    
+    full_system = f"{system_instruction}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}"
     
     ollama_payload = {
         "model": selected_model,
