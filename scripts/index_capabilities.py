@@ -71,21 +71,9 @@ def index_capabilities():
                 })
                 log.info(f"Prepared workspace schema: {class_name}")
 
-    # 2. Index Intents from Phrasebook
-    if os.path.exists(PHRASEBOOK_PATH):
-        try:
-            with open(PHRASEBOOK_PATH, "r") as f:
-                phrasebook = json.load(f)
-                for intent, examples in phrasebook.items():
-                    capabilities.append({
-                        "name": intent,
-                        "description": f"Intent: {intent}. Examples: {', '.join(examples[:3])}",
-                        "schema": f"Intent label used for fast-path routing: {intent}",
-                        "type": "intent"
-                    })
-            log.info(f"Prepared {len(phrasebook)} intents from phrasebook.")
-        except Exception as e:
-            log.error(f"Failed to read phrasebook: {e}")
+    # 2. Skip legacy intents from phrasebook to avoid confusing the LLM with old action names.
+    # We want the LLM to strictly use the Pydantic schemas for tool usage.
+    log.info("Skipping legacy phrasebook intents.")
 
     # 3. Push to RAG Service
     if not capabilities:
