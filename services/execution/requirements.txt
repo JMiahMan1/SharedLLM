@@ -9,3 +9,6 @@ vobject
 python-dateutil
 python-multipart
 redis
+pytest
+pytest-asyncio
+pytest-mock
