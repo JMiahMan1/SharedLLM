@@ -57,7 +57,7 @@ sleep 15
 HEALTH_URL="http://localhost:11435/health/ready"
 log "Checking SOA Readiness at $HEALTH_URL via Docker internal network..."
 
-MAX_ATTEMPTS=6
+MAX_ATTEMPTS=12
 ATTEMPT=0
 HEALTHY=false
 
