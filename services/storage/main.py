@@ -94,9 +94,8 @@ async def _run_full_index_task(req: IndexScanRequest):
                 
                 # 4. Cleanup old entries
                 await client.post(
-                    f"{RAG_SVC}/rag/purge",
+                    f"{RAG_SVC}/rag/purge/{req.provider.kind}_files",
                     json={
-                        "collection_name": f"{req.provider.kind}_files",
                         "user_id": user_id,
                         "filter": {"session_id": {"$ne": session_id}}
                     },
@@ -124,8 +123,33 @@ def resume_indexing():
 async def list_provider_entries(req: IndexScanRequest):
     try:
         provider = build_provider(req.provider)
-        entries = provider.list_entries(path=req.path, recursive=req.recursive)
-        return {"status": "SUCCESS", "count": len(entries), "entries": [e.dict() for e in entries]}
+        from starlette.concurrency import run_in_threadpool
+        entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
+        
+        # Cross-reference with RAG to set indexed status
+        user_id = req.provider.settings.get("username", "admin")
+        indexed_paths = set()
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                # Query RAG for all indexed paths for this user
+                rag_resp = await client.get(
+                    f"{RAG_SVC}/rag/indexed-paths?user_id={user_id}",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if rag_resp.status_code == 200:
+                    indexed_paths = set(rag_resp.json().get("paths", []))
+            except Exception as e:
+                log.warning(f"Failed to fetch indexed paths from RAG: {e}")
+
+        # Map indexed status to entries
+        result_entries = []
+        for e in entries:
+            e_dict = e.dict()
+            e_dict["indexed"] = e_dict["path"] in indexed_paths
+            result_entries.append(e_dict)
+
+        return {"status": "SUCCESS", "count": len(result_entries), "entries": result_entries}
     except Exception as e:
         log.error(f"List failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

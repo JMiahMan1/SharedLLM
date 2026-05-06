@@ -130,22 +130,58 @@ async def search(req: SearchRequest):
 
 @app.get("/rag/stats", dependencies=[Depends(require_internal)])
 async def get_stats(user_id: str = "default"):
-    """Return counts and metadata for collections."""
+    """Return counts and metadata for collections in the format expected by the UI."""
     try:
         collections = ["nextcloud_files", "ha_entities"]
-        stats = {}
+        total_chunks = 0
+        total_documents = 0
+        providers = []
+        last_indexed = None
+
         for name in collections:
             coll = chroma_client.get_or_create_collection(name=name, embedding_function=embedding_fn)
             count = coll.count()
-            # Get 5 latest entries to show what's indexed
-            latest = coll.get(limit=5, include=["metadatas"])
-            stats[name] = {
-                "count": count,
-                "latest_previews": [m.get("path", m.get("friendly_name", "unknown")) for m in latest["metadatas"]] if latest["metadatas"] else []
-            }
-        return {"status": "SUCCESS", "stats": stats}
+            total_chunks += count
+            
+            if count > 0:
+                providers.append(name.split('_')[0])
+                # Query unique paths for this user to count documents
+                results = coll.get(where={"user_id": user_id}, include=["metadatas"])
+                if results and results["metadatas"]:
+                    unique_paths = {m.get("path") for m in results["metadatas"] if m.get("path")}
+                    total_documents += len(unique_paths)
+                    
+                    # Track last indexed timestamp if available in metadata
+                    for m in results["metadatas"]:
+                        indexed_at = m.get("indexed_at")
+                        if indexed_at:
+                            if not last_indexed or indexed_at > last_indexed:
+                                last_indexed = indexed_at
+
+        return {
+            "status": "SUCCESS",
+            "total_chunks": total_chunks,
+            "total_documents": total_documents,
+            "last_indexed": last_indexed,
+            "providers": providers,
+            "collections": collections # Keep for internal debug
+        }
     except Exception as e:
         log.error(f"Stats failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+@app.get("/rag/indexed-paths", dependencies=[Depends(require_internal)])
+async def get_indexed_paths(user_id: str = "default"):
+    """Return a list of all paths currently indexed for a user."""
+    try:
+        collection = chroma_client.get_or_create_collection(name="nextcloud_files", embedding_function=embedding_fn)
+        results = collection.get(where={"user_id": user_id}, include=["metadatas"])
+        if results and results["metadatas"]:
+            paths = {m.get("path") for m in results["metadatas"] if m.get("path")}
+            return {"status": "SUCCESS", "paths": list(paths)}
+        return {"status": "SUCCESS", "paths": []}
+    except Exception as e:
+        log.error(f"Failed to fetch indexed paths: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 @app.post("/rag/ingest", dependencies=[Depends(require_internal)])
