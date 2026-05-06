@@ -110,7 +110,7 @@ const Dashboard = () => {
     <div className="space-y-8 pb-12">
       <header className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">Nexus Dashboard</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-white">Jarvis Dashboard</h2>
           <p className="mt-1 text-slate-400">
             Welcome back, <span className="font-bold text-purple-400">{user?.full_name || user?.username}</span>
           </p>

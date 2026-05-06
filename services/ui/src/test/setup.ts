@@ -360,6 +360,23 @@ export const server = setupServer(
   http.get('/api/docs/:docName', () => HttpResponse.json({ content: '# Docs\n\nUseful documentation.' })),
   http.post('/api/auth/test-connection', () => HttpResponse.json({ status: 'SUCCESS', message: 'Connected' })),
   http.post('/api/users/me/enroll', () => HttpResponse.json({ status: 'SUCCESS', message: 'Enrolled' })),
+  http.post('/api/storage/list', () => HttpResponse.json({
+    status: 'SUCCESS',
+    entries: [
+      { path: '/Notes', name: 'Notes', is_dir: true, size: null, indexed: false },
+      { path: '/test.txt', name: 'test.txt', is_dir: false, size: 1024, indexed: true },
+    ]
+  })),
+  http.post('/api/storage/index', () => HttpResponse.json({
+    status: 'ACCEPTED',
+    message: 'Indexing started'
+  })),
+  http.get('/api/storage/stats', () => HttpResponse.json({
+    total_chunks: 1234,
+    total_documents: 42,
+    last_indexed: '2026-05-06T10:00:00Z',
+    providers: ['nextcloud']
+  })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -375,7 +392,7 @@ beforeEach(() => {
     ondataavailable: ((event: BlobEvent) => void) | null = null;
     onstop: (() => void) | null = null;
     state = 'inactive';
-    constructor(_stream: MediaStream) {}
+    constructor() {}
     start() {
       this.state = 'recording';
     }

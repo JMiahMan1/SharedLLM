@@ -95,18 +95,18 @@ def _make_openai_response(message: str, model: str, intent: str = None, debug_co
 
 # --- Imports from internal modules ---
 try:
-    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
+    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
     from .intent_engine import engine
     from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
     from .prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 except (ImportError, ValueError):
     try:
-      from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
+      from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
       from services.gateway.intent_engine import engine
       from services.gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
       from services.gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     except ImportError:
-      from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest
+      from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
       from intent_engine import engine
       from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
       from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
@@ -1905,6 +1905,67 @@ async def get_workspaces_proxy():
     except Exception as e:
         log.error(f"Workspaces proxy failed: {e}")
         return []
+
+@app.post("/api/storage/list")
+async def list_storage_files(request: Request, body: StorageListRequest):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("nextcloud_url") or not creds.get("nextcloud_user") or not creds.get("nextcloud_pass"):
+        raise HTTPException(status_code=400, detail="NextCloud credentials not configured for this user.")
+    
+    payload = {
+        "provider": {
+            "kind": "nextcloud",
+            "settings": {
+                "url": creds["nextcloud_url"],
+                "username": creds["nextcloud_user"],
+                "password": creds["nextcloud_pass"]
+            }
+        },
+        "path": body.path,
+        "recursive": body.recursive
+    }
+    
+    resp = await get_http_client().post(
+        f"{STORAGE_SVC}/providers/list",
+        json=payload,
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/storage/index")
+async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("nextcloud_url") or not creds.get("nextcloud_user") or not creds.get("nextcloud_pass"):
+        raise HTTPException(status_code=400, detail="NextCloud credentials not configured for this user.")
+    
+    payload = {
+        "provider": {
+            "kind": "nextcloud",
+            "settings": {
+                "url": creds["nextcloud_url"],
+                "username": creds["nextcloud_user"],
+                "password": creds["nextcloud_pass"]
+            }
+        },
+        "path": body.path,
+        "recursive": body.recursive
+    }
+    
+    resp = await get_http_client().post(
+        f"{STORAGE_SVC}/index/full",
+        json=payload,
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.get("/api/storage/stats")
+async def get_storage_stats():
+    # Proxies to RAG service stats
+    resp = await get_http_client().get(
+        f"{RAG_SVC}/rag/stats",
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 @app.post("/api/admin/tests/smoke")
 async def proxy_smoke_test(request: Request):
