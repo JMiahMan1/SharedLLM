@@ -29,6 +29,13 @@ def get_json_schema(model: Type[BaseModel]):
 def index_capabilities():
     capabilities = []
 
+    workspace_map = {
+        "FileWriteRequest": "Writes or patches files in a workspace. Use for code edits.",
+        "GitCommitRequest": "Commits staged changes to the workspace repository.",
+        "ProviderSyncFileRequest": "Synchronizes a single file with Nextcloud storage.",
+        "WorkflowWriteSyncCommitRequest": "Atomically writes a file, syncs to Nextcloud, and commits to Git. Use for complete save operations."
+    }
+
     # 1. Index Execution Schemas
     schema_map = {
         "LightControlRequest": "Controls smart lights, brightness, and colors. Use this for all light-related commands.",
@@ -42,12 +49,6 @@ def index_capabilities():
         "TimerRequest": "Sets, lists, or deletes timers and alarms.",
     }
     
-    workspace_map = {
-        "WorkspaceFileAction": "Orchestrates file writes and patches within a Git-backed workspace. Use for editing code.",
-        "WorkspaceGitAction": "Performs Git lifecycle operations (pull, commit, branch, status).",
-        "WorkspaceSyncAction": "Synchronizes workspace files with Nextcloud or other storage providers."
-    }
-
     for class_name, description in schema_map.items():
         model = getattr(exec_schemas, class_name, None)
         if model:
@@ -59,9 +60,12 @@ def index_capabilities():
             })
             log.info(f"Prepared execution schema: {class_name}")
 
-    if workspace_schemas:
+    # Import from workspace_runtime.main
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services', 'workspace_runtime'))
+    try:
+        import main as ws_main
         for class_name, description in workspace_map.items():
-            model = getattr(workspace_schemas, class_name, None)
+            model = getattr(ws_main, class_name, None)
             if model:
                 capabilities.append({
                     "name": class_name,
@@ -70,6 +74,8 @@ def index_capabilities():
                     "type": "execution_schema"
                 })
                 log.info(f"Prepared workspace schema: {class_name}")
+    except Exception as e:
+        log.warning(f"Failed to load workspace schemas: {e}")
 
     # 2. Skip legacy intents from phrasebook to avoid confusing the LLM with old action names.
     # We want the LLM to strictly use the Pydantic schemas for tool usage.
