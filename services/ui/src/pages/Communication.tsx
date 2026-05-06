@@ -108,12 +108,14 @@ const Communication = () => {
 
   useEffect(() => {
     if (!announcementDevice && mediaTargets.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAnnouncementDevice(mediaTargets[0].device_id);
     }
   }, [announcementDevice, mediaTargets]);
 
   useEffect(() => {
     if (!selectedTalkToken && talkConversations.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedTalkToken(talkConversations[0].token);
     }
   }, [selectedTalkToken, talkConversations]);
