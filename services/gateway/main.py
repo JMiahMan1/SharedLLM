@@ -1336,9 +1336,13 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
                         "noterequest": (EXECUTION_SVC, "/execute/note"),
                         "timerrequest": (EXECUTION_SVC, "/execute/timer"),
-                        "workspacefileaction": (WORKSPACE_RUNTIME_SVC, "/execute/file"),
-                        "workspacegitaction": (WORKSPACE_RUNTIME_SVC, "/execute/git"),
-                        "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/execute/sync"),
+                        "workspacefileaction": (WORKSPACE_RUNTIME_SVC, "/files/write"),
+                        "file_write": (WORKSPACE_RUNTIME_SVC, "/files/write"),
+                        "workspacegitaction": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
+                        "git_commit": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
+                        "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
+                        "nextcloud_sync": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
+                        "workflow_write_sync_commit": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
                     }
                     
                     # Normalize action name for lookup
@@ -1446,9 +1450,13 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
                 "noterequest": (EXECUTION_SVC, "/execute/note"),
                 "timerrequest": (EXECUTION_SVC, "/execute/timer"),
-                "workspacefileaction": (WORKSPACE_RUNTIME_SVC, "/execute/file"),
-                "workspacegitaction": (WORKSPACE_RUNTIME_SVC, "/execute/git"),
-                "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/execute/sync"),
+                "workspacefileaction": (WORKSPACE_RUNTIME_SVC, "/files/write"),
+                "file_write": (WORKSPACE_RUNTIME_SVC, "/files/write"),
+                "workspacegitaction": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
+                "git_commit": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
+                "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
+                "nextcloud_sync": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
+                "workflow_write_sync_commit": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
             }
             
             lookup_action = action.lower().strip() if action else ""
