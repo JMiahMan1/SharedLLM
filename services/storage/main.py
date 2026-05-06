@@ -70,7 +70,7 @@ async def _run_full_index_task(req: IndexScanRequest):
         chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
         
         # 3. Sync to RAG
-        user_id = req.provider.settings.get("username", "admin")
+        user_id = req.provider.settings.get("username", "admin").lower()
         import time
         session_id = str(int(time.time()))
         indexed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
