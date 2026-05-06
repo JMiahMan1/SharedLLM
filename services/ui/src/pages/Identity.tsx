@@ -568,7 +568,12 @@ const Identity = () => {
                      if (label) {
                         try {
                           const res = await api.generateAPIKey(label);
-                          toast.success('Key generated: ' + res.key);
+                          try {
+                            await navigator.clipboard.writeText(res.key);
+                            toast.success('Key copied to clipboard! Save it now, it will not be shown again.', { duration: 8000 });
+                          } catch (err) {
+                            prompt('Key generated! COPY IT NOW, it will not be shown again:', res.key);
+                          }
                           queryClient.invalidateQueries({ queryKey: ['api-keys'] });
                         } catch {
                           toast.error('Failed to generate key');
