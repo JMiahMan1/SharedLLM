@@ -79,7 +79,7 @@ const UserRow: FC<UserRowProps> = ({ user, onEdit, onDelete }) => (
           <span className={`text-[8px] uppercase font-black px-2 py-0.5 rounded-full border ${user.is_admin ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-slate-800 text-slate-500 border-white/5'}`}>
             {user.is_admin ? 'System Admin' : 'Family Member'}
           </span>
-          <span className="text-[8px] text-slate-600 uppercase font-bold">ID: {user.id.slice(0,8)}</span>
+          <span className="text-[8px] text-slate-600 uppercase font-bold">ID: {String(user.id).slice(0,8)}</span>
         </div>
       </div>
     </div>
