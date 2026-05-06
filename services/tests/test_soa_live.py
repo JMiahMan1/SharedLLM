@@ -14,7 +14,7 @@ def _run_query(title, payload):
     print(f"\n=== {title} ===")
     try:
         start_time = time.time()
-        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload, timeout=15)
+        resp = requests.post(f"{GATEWAY_URL}/api/chat", json=payload, timeout=30)
         duration = time.time() - start_time
         print(f"Status: {resp.status_code} ({duration:.2f}s)")
         print(json.dumps(resp.json(), indent=2))
