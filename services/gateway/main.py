@@ -1391,13 +1391,19 @@ async def proxy_generate(request: Request):
     try:
         body = await request.json()
         async with httpx.AsyncClient(timeout=None) as client:
-            resp = await client.post(f"{OLLAMA_URL}/api/generate", json=body)
+            # Use httpx.stream to proxy the streaming response
+            req = client.build_request("POST", f"{OLLAMA_URL}/api/generate", json=body)
+            resp = await client.send(req, stream=True)
             if resp.status_code != 200:
+                await resp.aread()
                 return JSONResponse({"status": "ERROR", "message": resp.text}, status_code=resp.status_code)
-            data = resp.json()
-            if not isinstance(data, dict):
-                return {"status": "ERROR", "message": str(data)}
-            return data
+            
+            async def generate():
+                async for chunk in resp.aiter_raw():
+                    yield chunk
+            
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(generate(), media_type="application/x-ndjson")
     except Exception as e:
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
