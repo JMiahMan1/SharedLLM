@@ -12,8 +12,8 @@ from fastapi import status
 async def test_gateway_timeout_degradation():
     from services.gateway.main import app
     
-    # Mock Ollama timeout
-    respx.post(url__regex=r".*/api/generate").mock(side_effect=httpx.ConnectTimeout)
+    # Mock Ollama timeout - covering both generate and chat
+    respx.post(url__regex=r".*/api/(generate|chat)").mock(side_effect=httpx.ConnectTimeout)
 
     # Mock Identity success - using regex to be robust
     respx.post(url__regex=r".*/api/resolve").return_value = httpx.Response(
