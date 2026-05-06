@@ -1,5 +1,6 @@
 import os
 import pytest
+from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 from contextlib import asynccontextmanager
 
@@ -23,16 +24,15 @@ def test_gateway_extracts_bearer_token(client, mocker):
     Test that the Gateway extracts the Bearer token from the Authorization header
     and passes it to the Identity service's /api/resolve endpoint.
     """
-    # Mock the resolve_identity call to capture the body passed to it
-    # Note: In gateway/main.py, resolve_identity is called as 'await resolve_identity(body)'
-    mock_resolve = mocker.patch("gateway.main.resolve_identity", return_value={"user": "testuser"})
+    # FIX: Use AsyncMock for all awaited functions
+    mock_resolve = mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={"user": "testuser"})
     
     # Mock other downstream calls to prevent errors
-    mocker.patch("gateway.main.get_history", return_value=[])
-    mocker.patch("gateway.main.fetch_ha_entities", return_value=[])
-    mocker.patch("gateway.main.contextualize_query", return_value="test query")
-    mocker.patch("gateway.main.decompose_command_query", return_value=[])
-    mocker.patch("gateway.main.update_history", return_value=None)
+    mocker.patch("gateway.main.get_history", new_callable=AsyncMock, return_value=[])
+    mocker.patch("gateway.main.fetch_ha_entities", new_callable=AsyncMock, return_value=[])
+    mocker.patch("gateway.main.contextualize_query", new_callable=AsyncMock, return_value="test query")
+    mocker.patch("gateway.main.decompose_command_query", new_callable=AsyncMock, return_value=[])
+    mocker.patch("gateway.main.update_history", new_callable=AsyncMock, return_value=None)
     
     # Mock the LLM response
     class MockResponse:
@@ -41,7 +41,7 @@ def test_gateway_extracts_bearer_token(client, mocker):
         def json(self):
             return {"message": {"content": "Test response"}}
     
-    mocker.patch("gateway.main.call_ollama", return_value=MockResponse())
+    mocker.patch("gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockResponse())
 
     # Send a request with a Bearer token
     resp = client.post(
