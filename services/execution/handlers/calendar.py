@@ -2,37 +2,22 @@
 import os
 import logging
 import asyncio
-import caldav
 from datetime import datetime, timedelta, date
 from dateutil import tz
-from typing import Dict, List, Optional, Union
 
 try:
     from ..schemas import CalendarRequest, ExecutionResult
-    from .. import ha_client # Still needed for potential context
+    from ..personal_data import resolve_personal_data_provider
 except ImportError:
     from schemas import CalendarRequest, ExecutionResult
-    import ha_client
+    from personal_data import resolve_personal_data_provider
 
 log = logging.getLogger("execution.calendar")
 
-# Settings from env (provided by .env via docker-compose)
-NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
-NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
-NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 LOCAL_TZ_NAME = os.getenv("TIMEZONE", "America/Phoenix")
 
 def _get_local_tz():
     return tz.gettz(LOCAL_TZ_NAME)
-
-def _get_cal_client(nc_pass: Optional[str] = None):
-    url = f"{NEXTCLOUD_URL.rstrip('/')}/remote.php/dav"
-    return caldav.DAVClient(
-        url=url, 
-        username=NEXTCLOUD_USER, 
-        password=nc_pass or NEXTCLOUD_PASS, 
-        timeout=60
-    )
 
 def _normalize_event_time(dt_value):
     """Converts ANY event time to AWARE local time."""
@@ -47,7 +32,8 @@ def _normalize_event_time(dt_value):
     return None
 
 async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
-    if not NEXTCLOUD_URL:
+    provider = resolve_personal_data_provider(req.user_context)
+    if not provider:
         return ExecutionResult(status="FAILURE", message="Nextcloud URL not configured.", service="calendar")
 
     action = req.action
@@ -59,7 +45,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
     try:
         if action == "list":
             def _list():
-                client = _get_cal_client()
+                client = provider.calendar_client()
                 calendars = client.principal().calendars()
                 valid = [f"- {c.name}" for c in calendars if "birthday" not in (c.name or "").lower()]
                 return "Available Calendars:\n" + "\n".join(valid) if valid else "No calendars found."
@@ -69,7 +55,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
 
         elif action == "read":
             def _read():
-                client = _get_cal_client()
+                client = provider.calendar_client()
                 found_events = []
                 calendars = client.principal().calendars()
                 local_tz = _get_local_tz()
@@ -103,14 +89,21 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_add")
             
             def _add():
-                client = _get_cal_client()
+                client = provider.calendar_client()
                 calendars = client.principal().calendars()
                 # Pick first writable calendar
                 selected = None
-                for c in calendars:
-                    if "personal" in (c.name or "").lower() or "default" in (c.name or "").lower():
-                        selected = c
-                        break
+                if req.calendar_name:
+                    target_name = req.calendar_name.strip().lower()
+                    for c in calendars:
+                        if (c.name or "").strip().lower() == target_name:
+                            selected = c
+                            break
+                if not selected:
+                    for c in calendars:
+                        if "personal" in (c.name or "").lower() or "default" in (c.name or "").lower():
+                            selected = c
+                            break
                 if not selected: selected = calendars[0]
                 
                 dt_utc = dt.astimezone(tz.tzutc())
