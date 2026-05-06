@@ -6,7 +6,7 @@ Manages user profiles, device assignments, and secure credential resolution.
 import os
 import logging
 from contextlib import asynccontextmanager
-from typing import List
+from typing import List, Optional, Any, Dict
 
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, status, File, UploadFile
 from sqlalchemy import inspect, text
