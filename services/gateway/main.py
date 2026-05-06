@@ -278,6 +278,9 @@ async def readiness():
             results["services"][name] = "UNREACHABLE"
             all_ok = False
 
+    # The Gateway itself is running if we are responding to this request
+    results["services"]["gateway"] = "OK"
+
     if ping_redis():
       results["services"]["redis"] = "OK"
     else:
