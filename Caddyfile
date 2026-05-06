@@ -1,5 +1,4 @@
-# Replace with your actual domain if different
-jarvis.sumemail.com {
+:80 {
     # 1. Route UI traffic to the React container
     handle /* {
         reverse_proxy ui:8008
