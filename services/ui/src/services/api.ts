@@ -177,17 +177,17 @@ export const api = {
 
   // Execution Service (Scheduler/Timer)
   async setTimer(duration: number, label: string): Promise<{ success: boolean }> {
-    const resp = await apiClient.post('/api/execute/timer', { duration, label });
+    const resp = await apiClient.post('/execute/timer', { duration, label });
     return resp.data;
   },
 
   async getTimers(): Promise<any[]> {
-    const resp = await apiClient.get('/api/execute/timers');
+    const resp = await apiClient.get('/execute/timers');
     return resp.data;
   },
 
   async scheduleTask(task: string, time: string): Promise<{ success: boolean }> {
-    const resp = await apiClient.post('/api/execute/calendar', { task, time });
+    const resp = await apiClient.post('/execute/calendar', { task, time });
     return resp.data;
   },
 
