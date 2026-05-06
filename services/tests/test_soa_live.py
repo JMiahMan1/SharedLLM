@@ -7,7 +7,8 @@ import requests
 import json
 import time
 
-GATEWAY_URL = "http://localhost:11435"
+import os
+GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:11435")
 
 def _run_query(title, payload):
     print(f"\n=== {title} ===")
