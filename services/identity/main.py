@@ -412,21 +412,36 @@ def list_devices_ui(session: Session = Depends(get_session), _: User = Depends(r
     ]
 
 @app.post("/api/users/devices", response_model=DeviceAssignmentRead)
-def add_device_ui(body: DeviceAssignmentCreate, session: Session = Depends(get_session), _: User = Depends(require_api_key)):
-    user = session.exec(select(User).where(User.username == body.username.lower())).first()
-    if not user:
+def add_device_ui(
+    body: DeviceAssignmentCreate, 
+    session: Session = Depends(get_session), 
+    authorization: str = Header(None),
+    x_internal_secret: str = Header(None, alias="X-Internal-Secret")
+):
+    # Determine if internal or user-authed
+    is_internal = x_internal_secret == INTERNAL_SECRET
+    user = None
+    if not is_internal:
+        # User-facing API calls require a valid API key
+        user = require_api_key(authorization, session)
+        if not user:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Internal calls (like auto-discovery from Gateway) bypass user auth
+    target_user = session.exec(select(User).where(User.username == body.username.lower())).first()
+    if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
         
     # Upsert logic: if device already assigned, reassign it
     existing = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == body.device_id)).first()
     if existing:
-        existing.user_id = user.id
+        existing.user_id = target_user.id
         session.add(existing)
         session.commit()
         session.refresh(existing)
-        return DeviceAssignmentRead(id=existing.id, device_id=existing.device_id, user_id=existing.user_id, username=user.username)
+        return DeviceAssignmentRead(id=existing.id, device_id=existing.device_id, user_id=existing.user_id, username=target_user.username)
 
-    assignment = DeviceAssignment(device_id=body.device_id, user_id=user.id)
+    assignment = DeviceAssignment(device_id=body.device_id, user_id=target_user.id)
     session.add(assignment)
     session.commit()
     session.refresh(assignment)
@@ -434,7 +449,7 @@ def add_device_ui(body: DeviceAssignmentCreate, session: Session = Depends(get_s
         id=assignment.id, 
         device_id=assignment.device_id, 
         user_id=assignment.user_id, 
-        username=user.username
+        username=target_user.username
     )
 
 # ─── Auth & Discovery ──────────────────────────────────────────────────────────
