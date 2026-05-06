@@ -1018,6 +1018,36 @@ async def resolve_identity(body: dict) -> dict:
       log.error(f"Identity service unreachable: {e}")
       raise HTTPException(status_code=503, detail="Identity service unreachable")
 
+
+def _auth_body_from_request(request: Request, body: dict | None = None) -> dict:
+    merged = dict(body or {})
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        merged["api_key"] = auth_header.split(" ", 1)[1]
+    return merged
+
+
+async def _resolve_identity_from_request(request: Request, body: dict | None = None) -> dict:
+    return await resolve_identity(_auth_body_from_request(request, body))
+
+
+async def _proxy_execution_with_identity(
+    request: Request,
+    endpoint: str,
+    payload: dict | None = None,
+    *,
+    method: str = "POST",
+) -> JSONResponse:
+    creds_data = await _resolve_identity_from_request(request)
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        if method.upper() == "GET":
+            resp = await client.get(f"{EXECUTION_SVC}{endpoint}", headers=headers)
+        else:
+            exec_payload = {"user_context": creds_data, **(payload or {})}
+            resp = await client.post(f"{EXECUTION_SVC}{endpoint}", json=exec_payload, headers=headers)
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 async def fetch_ha_entities(creds: dict) -> list:
     try:
       resp = await get_http_client().get(
@@ -1608,6 +1638,185 @@ async def proxy_users(request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.delete("/api/devices/{device_id:path}")
+async def proxy_delete_device(device_id: str, request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.delete(
+            f"{IDENTITY_SVC}/api/devices/{device_id}",
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.get("/api/communication/timers")
+async def proxy_list_timers(request: Request):
+    await _resolve_identity_from_request(request)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/timers",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.post("/api/communication/timers")
+async def proxy_add_timer(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "add",
+        "type": body.get("type", "timer"),
+        "title": body.get("title"),
+        "duration_str": body.get("duration_str"),
+        "time_str": body.get("time_str"),
+        "recurrence": body.get("recurrence"),
+        "target_device": body.get("target_device"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/timer", payload)
+
+
+@app.delete("/api/communication/timers")
+async def proxy_delete_timer(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "delete",
+        "type": body.get("type", "timer"),
+        "title": body.get("title"),
+        "query": body.get("query"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/timer", payload)
+
+
+@app.get("/api/communication/calendar/calendars")
+async def proxy_list_calendars(request: Request):
+    payload = {"action": "list"}
+    return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
+
+
+@app.get("/api/communication/calendar/events")
+async def proxy_read_calendar(request: Request):
+    payload = {"action": "read"}
+    return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
+
+
+@app.post("/api/communication/calendar/events")
+async def proxy_add_calendar_event(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "add",
+        "summary": body.get("summary"),
+        "start_time": body.get("start_time"),
+        "calendar_name": body.get("calendar_name"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
+
+
+@app.post("/api/communication/notes/create")
+async def proxy_create_note(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "create",
+        "title": body.get("title"),
+        "content": body.get("content"),
+        "category": body.get("category", "General"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+
+
+@app.post("/api/communication/notes/read")
+async def proxy_read_note(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "read",
+        "title": body.get("title"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+
+
+@app.post("/api/communication/notes/append")
+async def proxy_append_note(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "append",
+        "title": body.get("title"),
+        "content": body.get("content"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+
+
+@app.post("/api/communication/notes/delete")
+async def proxy_delete_note(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "delete",
+        "title": body.get("title"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+
+
+@app.post("/api/communication/announcements")
+async def proxy_send_announcement(request: Request):
+    body = await request.json()
+    payload = {
+        "entity_id": body.get("entity_id"),
+        "message": body.get("message"),
+        "volume": body.get("volume", 0.6),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/announce", payload)
+
+
+@app.get("/api/communication/talk/conversations")
+async def proxy_list_talk_conversations(request: Request):
+    payload = {"action": "list"}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.post("/api/communication/talk/conversations/open")
+async def proxy_open_talk_conversation(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "open",
+        "token": body.get("token"),
+        "target_user": body.get("target_user"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.get("/api/communication/talk/messages")
+async def proxy_get_talk_messages(request: Request):
+    payload = {
+        "action": "messages",
+        "token": request.query_params.get("token"),
+        "limit": int(request.query_params.get("limit", "50")),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.post("/api/communication/talk/messages")
+async def proxy_send_talk_message(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "send",
+        "token": body.get("token"),
+        "message": body.get("message"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.post("/api/communication/talk/voice")
+async def proxy_send_talk_voice(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "send_voice",
+        "token": body.get("token"),
+        "audio_base64": body.get("audio_base64"),
+        "mime_type": body.get("mime_type"),
+        "file_name": body.get("file_name"),
+        "caption": body.get("caption"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
 
 @app.post("/api/generate")
 async def proxy_generate(request: Request):

@@ -10,26 +10,26 @@ try:
     from .schemas import (
         UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
-        CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
+        CalendarRequest, NoteRequest, TimerRequest, TalkRequest, ExecutionResult
     )
-    from .handlers import light, media, climate, security, calendar, note, timer
+    from .handlers import light, media, climate, security, calendar, note, timer, talk
 except (ImportError, ValueError):
     try:
         from execution import ha_client
         from execution.schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
+            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, ExecutionResult
         )
-        from execution.handlers import light, media, climate, security, calendar, note, timer
+        from execution.handlers import light, media, climate, security, calendar, note, timer, talk
     except ImportError:
         import ha_client
         from schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, ExecutionResult
+            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, ExecutionResult
         )
-        from handlers import light, media, climate, security, calendar, note, timer
+        from handlers import light, media, climate, security, calendar, note, timer, talk
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -134,6 +134,10 @@ async def execute_note(req: NoteRequest):
 @app.post("/execute/timer", response_model=ExecutionResult)
 async def execute_timer(req: TimerRequest):
     return await timer.handle_timer(req)
+
+@app.post("/execute/talk", response_model=ExecutionResult)
+async def execute_talk(req: TalkRequest):
+    return await talk.handle_talk(req)
 
 @app.get("/execute/timers")
 async def list_timers():
