@@ -137,7 +137,7 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "60.0"))
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:8b")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", DEFAULT_MODEL)
-CODING_MODEL = os.getenv("CODING_MODEL", ASSISTANT_MODEL)
+CODING_MODEL = os.getenv("CODING_MODEL", "qwen3:8b")
 LIBRARIAN_MODEL = os.getenv("LIBRARIAN_MODEL", ASSISTANT_MODEL)
 
 CODING_SIGNALS = (
@@ -1260,6 +1260,8 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
             return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
     except Exception as e:
         log.warning(f"[ShadowExecution] Failed: {e}")
+        import traceback
+        log.error(traceback.format_exc())
     return ""
 
 
@@ -1613,7 +1615,22 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         
                         if exec_resp.status_code == 200:
                             exec_data = exec_resp.json()
-                            exec_msg = exec_data.get("message", "Action completed."); detail = exec_data.get("detail"); exec_msg += f"\n\n[DETAIL]\n{str(detail)[:10000]}" if detail else ""
+                            exec_msg = exec_data.get("message", "Action completed.");
+                            # PIPELINE HARDENING: Append detail (logs, code) for the agent to 'see'
+                            detail = exec_data.get("detail")
+                            if detail:
+                                if isinstance(detail, dict):
+                                    if "content" in detail:
+                                        detail_txt = str(detail["content"])
+                                    elif "logs" in detail:
+                                        detail_txt = str(detail["logs"])
+                                    else:
+                                        detail_txt = str(detail)
+                                else:
+                                    detail_txt = str(detail)
+                                exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
+
+                            log.info(f"[ToolExecution] Result: {exec_msg[:200]}...")
                     # PIPELINE HARDENING: Append results detail for assistant observation
                     detail = exec_data.get("detail")
                     log.info(f"[ToolResult] Detail type: {type(detail)} keys: {list(detail.keys()) if isinstance(detail, dict) else 'N/A'}")
