@@ -281,7 +281,14 @@ async def execute_announce(req: AnnouncementRequest):
     ctx = req.user_context
     log.info(f"[announce] user={ctx.user} entity={req.entity_id}")
     
-    # Set volume first
+    # 1. Ensure the device is turned on (crucial for TVs)
+    if req.entity_id.startswith("media_player."):
+        log.info(f"[announce] Powering on {req.entity_id}")
+        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", req.entity_id, {})
+        # Give it a tiny bit of time to wake up if it was off
+        await asyncio.sleep(1.0)
+
+    # 2. Set volume
     await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", req.entity_id, {"volume_level": req.volume})
     
     # Try modern tts.speak first
