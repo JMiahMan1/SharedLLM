@@ -44,6 +44,8 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./services/tests:/app/tests
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./:/workspace/SharedLLM
 
   rag:
     build: ./services/rag
