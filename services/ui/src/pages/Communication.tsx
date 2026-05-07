@@ -589,6 +589,12 @@ const Communication = () => {
                   Send Voice
                 </button>
               </div>
+              {recordedAudio && (
+                <div className="mt-4 rounded-xl border border-white/5 bg-white/5 p-3">
+                  <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-500">Recorded Preview</p>
+                  <audio controls src={recordedAudio.base64} className="w-full h-10" />
+                </div>
+              )}
               <p className="mt-3 text-xs text-slate-500">
                 {recordedAudio ? `Recorded clip ready: ${recordedAudio.fileName}` : 'No recorded clip yet.'}
               </p>
