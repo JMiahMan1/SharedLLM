@@ -172,7 +172,9 @@ def test_git_pull_webhook_accepts_api_prefix(monkeypatch):
         session.commit()
 
     def fake_run_command(workspace_path, args, timeout_seconds=30, env_overrides=None):
-        assert args == ["git", "pull", "origin", "main"]
+        if args[:3] == ["git", "config", "--get"]:
+            return {"returncode": 0, "stdout": "git@github.com:example/demo.git\n", "stderr": ""}
+        assert args == ["git", "pull", "https://github.com/example/demo.git", "main"]
         return {"returncode": 0, "stdout": "ok", "stderr": ""}
 
     monkeypatch.setattr(runtime, "_run_command", fake_run_command)
