@@ -452,6 +452,40 @@ async def sync_capabilities(payload: dict):
             raise HTTPException(status_code=500, detail="Sync failed")
     return {"status": "SUCCESS", "count": 0}
 
+@app.get("/rag/collection/{collection_name}", dependencies=[Depends(require_internal)])
+async def list_collection_documents(collection_name: str, user_id: str = "default", limit: int = 100):
+    """Retrieve documents and metadata from a specific collection for a user."""
+    try:
+        collection = chroma_client.get_or_create_collection(name=collection_name, embedding_function=embedding_fn)
+        # Always use default for system capabilities
+        target_user = "default" if collection_name == "system_capabilities" else user_id
+        
+        results = collection.get(
+            where={"user_id": target_user},
+            limit=limit,
+            include=["documents", "metadatas"]
+        )
+        
+        items = []
+        if results and results["ids"]:
+            for i in range(len(results["ids"])):
+                items.append({
+                    "id": results["ids"][i],
+                    "document": results["documents"][i],
+                    "metadata": results["metadatas"][i]
+                })
+        
+        return {
+            "status": "SUCCESS",
+            "collection": collection_name,
+            "user_id": target_user,
+            "count": len(items),
+            "items": items
+        }
+    except Exception as e:
+        log.error(f"Failed to list collection {collection_name}: {e}")
+        return {"status": "ERROR", "message": str(e)}
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "rag"}

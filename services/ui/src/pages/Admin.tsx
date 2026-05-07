@@ -100,6 +100,8 @@ const Admin = () => {
   const [discoveryFilter, setDiscoveryFilter] = useState('');
   const [passwordModalUser, setPasswordModalUser] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
+  const [inspectingCollection, setInspectingCollection] = useState<string | null>(null);
+  const [inspectLimit, setInspectLimit] = useState(50);
 
   const { data: users = [] } = useQuery<UserProfile[]>({
     queryKey: ['users'],
@@ -130,6 +132,12 @@ const Admin = () => {
   const { data: ragStats } = useQuery<RagStats>({
     queryKey: ['rag-stats'],
     queryFn: () => api.getRagStats(),
+  });
+
+  const { data: collectionDocs, isFetching: isFetchingDocs } = useQuery({
+    queryKey: ['collection-docs', inspectingCollection, inspectLimit],
+    queryFn: () => inspectingCollection ? api.getCollectionDocs(inspectingCollection, inspectLimit) : null,
+    enabled: !!inspectingCollection,
   });
 
   const saveUserMutation = useMutation({
@@ -566,11 +574,15 @@ const Admin = () => {
             </h3>
             
             <div className="space-y-4">
-               {ragStats?.breakdown && Object.entries(ragStats.breakdown).map(([name, stats]) => (
-                 <div key={name} className="glass-card p-4">
+                {ragStats?.breakdown && Object.entries(ragStats.breakdown).map(([name, stats]) => (
+                  <button
+                    key={name}
+                    onClick={() => setInspectingCollection(name)}
+                    className="w-full text-left glass-card p-4 transition hover:bg-white/5 active:scale-[0.98]"
+                  >
                     <div className="flex items-center justify-between mb-3">
                        <p className="font-bold text-white uppercase tracking-tighter">{name.replace('_', ' ')}</p>
-                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Live Collection</span>
+                       <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">View Data &rarr;</span>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                        <div className="bg-white/5 rounded-xl p-3 border border-white/5">
@@ -582,8 +594,8 @@ const Admin = () => {
                           <p className="text-xl font-bold text-white">{stats.documents.toLocaleString()}</p>
                        </div>
                     </div>
-                 </div>
-               ))}
+                  </button>
+                ))}
 
                <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 text-xs text-slate-400">
                   <p>
@@ -768,6 +780,68 @@ const Admin = () => {
               className="glass-button flex-1 px-4 py-3 bg-indigo-600/30 border-indigo-500/30 text-[10px] font-black uppercase tracking-widest text-indigo-300"
             >
               {setPasswordMutation.isPending ? 'Updating...' : 'Set Password'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(inspectingCollection)}
+        onClose={() => setInspectingCollection(null)}
+        title={`Inspect: ${inspectingCollection?.replace('_', ' ')}`}
+      >
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-400">
+              Displaying the latest {inspectLimit} documents from the vector database.
+            </p>
+            <select
+              value={inspectLimit}
+              onChange={(e) => setInspectLimit(Number(e.target.value))}
+              className="glass-input text-xs"
+            >
+              <option value={20}>20 rows</option>
+              <option value={50}>50 rows</option>
+              <option value={100}>100 rows</option>
+            </select>
+          </div>
+
+          {isFetchingDocs ? (
+            <div className="flex h-64 items-center justify-center">
+              <RefreshCcw className="animate-spin text-indigo-400" size={32} />
+            </div>
+          ) : (
+            <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+              {collectionDocs?.items?.map((item: any) => (
+                <div key={item.id} className="rounded-2xl border border-white/5 bg-black/40 p-4 font-mono text-[11px]">
+                  <div className="mb-2 flex items-center justify-between border-b border-white/5 pb-2">
+                    <span className="text-indigo-300">ID: {item.id}</span>
+                    <span className="text-slate-500 uppercase tracking-widest">{item.metadata?.type || 'Record'}</span>
+                  </div>
+                  <p className="mb-3 text-slate-200 whitespace-pre-wrap leading-relaxed">
+                    {item.document}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500">
+                    {Object.entries(item.metadata || {}).map(([k, v]) => (
+                      <div key={k} className="truncate">
+                        <span className="text-slate-600">{k}:</span> {String(v)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {!collectionDocs?.items?.length && (
+                <p className="py-12 text-center text-slate-500">No documents found in this collection.</p>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              onClick={() => setInspectingCollection(null)}
+              className="glass-button px-6 py-3 text-[10px] font-black uppercase tracking-widest"
+            >
+              Close Insights
             </button>
           </div>
         </div>
