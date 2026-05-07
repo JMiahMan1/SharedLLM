@@ -48,8 +48,7 @@ class LogEntry(BaseModel):
     message: str
     context: Optional[dict] = None
 
-@app.get("/logs")
-async def get_logs(service: Optional[str] = None, limit: int = 100):
+async def _fetch_logs(service: Optional[str] = None, limit: int = 100):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     query = "SELECT * FROM logs"
@@ -59,11 +58,20 @@ async def get_logs(service: Optional[str] = None, limit: int = 100):
         params.append(service)
     query += " ORDER BY timestamp DESC LIMIT ?"
     params.append(limit)
-    
     rows = conn.execute(query, params).fetchall()
     conn.close()
-    
     return [dict(r) for r in rows]
+
+# Direct service path (used internally)
+@app.get("/logs")
+async def get_logs(service: Optional[str] = None, limit: int = 100):
+    return await _fetch_logs(service=service, limit=limit)
+
+# /api/logs path — Caddy routes /api/logs* directly to logging:8006
+# so the logging service must handle the /api/logs path itself.
+@app.get("/api/logs")
+async def get_logs_api(service: Optional[str] = None, limit: int = 100):
+    return await _fetch_logs(service=service, limit=limit)
 
 # --- WebSocket Streaming ---
 from fastapi import WebSocket, WebSocketDisconnect
@@ -78,7 +86,8 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
         for connection in self.active_connections:
@@ -89,16 +98,24 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-@app.websocket("/api/logs/stream")
-async def websocket_endpoint(websocket: WebSocket):
+async def _ws_handler(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Just keep the connection alive
             await asyncio.sleep(10)
             await websocket.send_text(json.dumps({"ping": True}))
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+# Caddy routes /api/logs/stream → logging:8006 so we handle it here
+@app.websocket("/api/logs/stream")
+async def websocket_endpoint(websocket: WebSocket):
+    await _ws_handler(websocket)
+
+# Also handle /logs/stream for any direct calls
+@app.websocket("/logs/stream")
+async def websocket_endpoint_direct(websocket: WebSocket):
+    await _ws_handler(websocket)
 
 # Update add_log to broadcast
 @app.post("/log")
