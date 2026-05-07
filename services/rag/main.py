@@ -366,14 +366,14 @@ async def purge_collection_endpoint(collection_name: str, payload: dict):
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict, user_id: Optional[str] = None):
     entities = payload.get("entities", [])
-    # Prioritize query param, then payload, then default to admin
-    resolved_user = (user_id or payload.get("user_id", "admin")).lower()
+    # Prioritize query param, then payload, then default to 'default'
+    resolved_user = (user_id or payload.get("user_id", "default")).lower()
     collection = get_collection("ha_entities")
     now = int(time.time())
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     
     try:
-        existing = collection.get(where={"user_id": user_id})
+        existing = collection.get(where={"user_id": resolved_user})
         existing_ids = set(existing["ids"]) if existing and "ids" in existing else set()
     except:
         existing_ids = set()
