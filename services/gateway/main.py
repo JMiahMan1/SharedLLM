@@ -1110,53 +1110,54 @@ async def _proxy_execution_with_identity(
     return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 async def fetch_ha_entities(creds: dict) -> list:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/discovery/entities",
-            params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        
-        if resp.status_code != 200:
-            log.warning(f"Failed to fetch entities: {resp.status_code}")
-            return []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/discovery/entities",
+                params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            
+            if resp.status_code != 200:
+                log.warning(f"Failed to fetch entities: {resp.status_code}")
+                return []
 
-        try:
-            data = resp.json()
-        except Exception as e:
-            log.error(f"Failed to parse HA entities JSON: {e} | Body: {resp.text[:200]}")
-            return []
-        
-        entities = data.get("entities", []) if isinstance(data, dict) else []
-        if entities:
-          user_id = creds.get("user", "admin")
-          # 1. Sync to RAG for discovery
-          asyncio.create_task(get_http_client().post(
-            f"{RAG_SVC}/rag/sync/ha",
-            json={"entities": entities, "user_id": user_id},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-          ))
-          # 2. Auto-assign to user in Identity for RBAC bypass/mapping
-          async def auto_assign():
-              try:
-                  for e in entities:
-                      eid = e.get("entity_id")
-                      if not eid: continue
-                      await get_http_client().post(
-                          f"{IDENTITY_SVC}/api/users/devices",
-                          json={"username": user_id, "device_id": eid},
-                          headers={"X-Internal-Secret": INTERNAL_SECRET}
-                      )
-                  log.info(f"Auto-assigned {len(entities)} entities to {user_id}")
-              except Exception as ae:
-                  log.error(f"Auto-assign failed: {ae}")
-          
-          asyncio.create_task(auto_assign())
+            try:
+                data = resp.json()
+            except Exception as e:
+                log.error(f"Failed to parse HA entities JSON: {e} | Body: {resp.text[:200]}")
+                return []
+            
+            entities = data.get("entities", []) if isinstance(data, dict) else []
+            if entities:
+                user_id = creds.get("user", "admin")
+                # 1. Sync to RAG for discovery
+                asyncio.create_task(get_http_client().post(
+                    f"{RAG_SVC}/rag/sync/ha",
+                    json={"entities": entities, "user_id": user_id},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                ))
+                # 2. Auto-assign to user in Identity for RBAC bypass/mapping
+                async def auto_assign():
+                    try:
+                        for e in entities:
+                            eid = e.get("entity_id")
+                            if not eid: continue
+                            await get_http_client().post(
+                                f"{IDENTITY_SVC}/api/users/devices",
+                                json={"username": user_id, "device_id": eid},
+                                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                            )
+                        log.info(f"Auto-assigned {len(entities)} entities to {user_id}")
+                    except Exception as ae:
+                        log.error(f"Auto-assign failed: {ae}")
+                
+                asyncio.create_task(auto_assign())
 
-      return entities
+            return entities
     except Exception as e:
-      log.error(f"Entity discovery error: {e}")
-      return []
+        log.error(f"Entity discovery error: {e}")
+        return []
 
 async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> list:
     try:
