@@ -1473,6 +1473,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 log.info(f"[StreamGenerator] Block detected. Content preview: {full_ans[full_ans.find('```'):][:100]}...")
                 
             # Detect tool block (either ```json or raw ``` if it looks like JSON)
+            action = None
+            payload = {}
             if "```json" in full_ans or ("```" in full_ans and "action" in full_ans and "payload" in full_ans):
                 try:
                     # Find the start of the block
@@ -1482,8 +1484,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     tool_json = full_ans[start:end].strip()
                     tool_data = json.loads(tool_json)
                     action = tool_data.get("action")
-                    
-            payload = tool_data.get("payload", {})
+                    payload = tool_data.get("payload", {})
+                except Exception as e:
+                    log.warning(f"[ToolParsing] Failed to parse JSON: {e}")
+                    tool_data = {}
             
             # PIPELINE HARDENING: Infer action/payload if Jarvis flattens the schema or forgets the action field
             if not action:
