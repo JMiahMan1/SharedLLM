@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
   ArrowUpRight,
@@ -43,6 +43,7 @@ const SERVICE_ICON_MAP = {
 } as const;
 
 const Dashboard = () => {
+  const queryClient = useQueryClient();
   const [selectedService, setSelectedService] = useState<ServiceSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -195,12 +196,24 @@ const Dashboard = () => {
 
       <div className="grid gap-8 xl:grid-cols-[1.1fr_0.9fr]">
         <section className="glass-panel p-6">
-          <div className="mb-6 flex items-center gap-3">
-            <FileText size={20} className="text-blue-300" />
-            <div>
-              <h3 className="text-xl font-bold text-white">Recent Activity</h3>
-              <p className="text-sm text-slate-400">Actual log entries from the logging service.</p>
+          <div className="mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <FileText size={20} className="text-blue-300" />
+              <div>
+                <h3 className="text-xl font-bold text-white">Recent Activity</h3>
+                <p className="text-sm text-slate-400">Actual log entries from the logging service.</p>
+              </div>
             </div>
+            <button 
+              onClick={() => api.clearLogs().then(() => {
+                queryClient.invalidateQueries({ queryKey: ['recent-logs'] });
+                queryClient.invalidateQueries({ queryKey: ['header-notifications'] });
+                toast.success('Logs cleared');
+              })}
+              className="glass-button px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-500/10"
+            >
+              Clear Logs
+            </button>
           </div>
           <div className="space-y-3">
             {logs.map((log, index) => (
@@ -226,17 +239,30 @@ const Dashboard = () => {
               </div>
             </div>
             <div className="space-y-3">
-              {workspaces.map((workspace) => (
-                <div key={workspace.id} className="glass-card p-4">
-                  <div className="flex items-center justify-between gap-4 overflow-hidden">
-                    <p className="font-semibold text-white truncate">{workspace.name}</p>
-                    <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
-                      {workspace.available ? 'Available' : 'Unavailable'}
-                    </span>
+              {Array.isArray(workspaces) && workspaces.length > 0 ? (
+                workspaces.map((workspace) => (
+                  <div key={workspace.id} className="glass-card p-4 transition-all hover:border-emerald-500/20">
+                    <div className="flex items-center justify-between gap-4 overflow-hidden">
+                      <p className="font-semibold text-white truncate">{workspace.display_name || workspace.name || workspace.id}</p>
+                      <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 px-2 py-1 rounded-md ${workspace.available ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
+                        {workspace.available ? 'Online' : 'Unavailable'}
+                      </span>
+                    </div>
+                    <p className="mt-2 font-mono text-[10px] text-slate-500 break-all bg-black/20 p-2 rounded">
+                      {workspace.resolved_path || 'Path resolution failed'}
+                    </p>
+                    {!workspace.available && (
+                      <p className="mt-2 text-[10px] text-red-400/70 italic">
+                        Check workspace mount or local_path configuration.
+                      </p>
+                    )}
                   </div>
-                  <p className="mt-2 font-mono text-xs text-slate-500 break-all">{workspace.resolved_path}</p>
+                ))
+              ) : (
+                <div className="text-center py-8 glass-card border-dashed border-white/5">
+                  <p className="text-sm text-slate-500">No workspaces registered</p>
                 </div>
-              ))}
+              )}
             </div>
           </div>
 

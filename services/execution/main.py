@@ -228,6 +228,40 @@ async def execute_volumes(req: VolumeInventoryRequest):
     return await volume_handler.handle_volumes(req)
 
 
+@app.post("/execute/index_capabilities", response_model=ExecutionResult)
+async def execute_index_capabilities():
+    """
+    Triggers the JIT Capability Discovery indexing script.
+    Allows the agent to refresh its own tool definitions in RAG.
+    """
+    import subprocess
+    import sys
+    
+    script_path = os.path.join(os.getcwd(), "scripts", "index_capabilities.py")
+    if not os.path.exists(script_path):
+        # Fallback for different CWDs
+        script_path = "/app/scripts/index_capabilities.py"
+        
+    try:
+        log.info(f"Triggering capability indexing: {script_path}")
+        # Run the script with current python interpreter and env
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": os.getcwd()}
+        )
+        
+        if result.returncode == 0:
+            return _ok("Capabilities re-indexed successfully.", "capability_indexer", {"output": result.stdout})
+        else:
+            return _fail(f"Indexing failed (code {result.returncode})", "capability_indexer", {"error": result.stderr, "output": result.stdout})
+            
+    except Exception as e:
+        log.error(f"Failed to run indexing script: {e}")
+        return _fail(f"Subprocess error: {str(e)}", "capability_indexer")
+
+
 # ─── Infrastructure Endpoints ────────────────────────────────────────────────────────
 
 @app.post("/execute/announce", response_model=ExecutionResult)

@@ -455,15 +455,15 @@ def select_model_for_query(query: str) -> str:
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     try:
-        from .prompts import AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
+        from .prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT
     except (ImportError, ValueError):
         try:
-            from prompts import AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
+            from prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT
         except ImportError:
-            from gateway.prompts import AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
+            from gateway.prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT
     q = (query or "").lower()
     if any(token in q for token in AUTONOMOUS_SIGNALS):
-      return AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
+      return AUTONOMOUS_EVOLUTION_AGENT_PROMPT
     if any(token in q for token in CODING_SIGNALS):
       return CODE_HELPER_SYSTEM_INSTRUCTION
     # Librarian is for research/knowledge queries. 
@@ -1448,6 +1448,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
                         "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
                         "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
+                        "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
                     }
                     
                     # Normalize action name for lookup
@@ -1582,6 +1583,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
                 "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
                 "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
+                "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
             }
             
             lookup_action = action.lower().strip() if action else ""

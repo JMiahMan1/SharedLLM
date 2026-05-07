@@ -309,6 +309,11 @@ export const api = {
     return resp.data;
   },
 
+  async clearLogs(): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.delete('/api/logs');
+    return resp.data;
+  },
+
   getLogWebSocket(): WebSocket {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
