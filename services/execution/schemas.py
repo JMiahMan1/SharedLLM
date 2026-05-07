@@ -174,3 +174,40 @@ class WebReadRequest(BaseModel):
     """Fetches a URL and returns the content as markdown."""
     user_context: UserContext
     url: str
+
+
+# ─── Ouroboros Autonomous Loop ───────────────────────────────────────────────
+
+class DockerLogsRequest(BaseModel):
+    """
+    Fetches recent log output from a Docker container.
+    The container_name must start with 'sharedllm_' (enforced in handler).
+    """
+    user_context: UserContext
+    container_name: str = Field(..., description="Exact Docker container name, e.g. 'sharedllm_gateway'")
+    tail: int = Field(200, ge=1, le=2000, description="Number of log lines to retrieve")
+    filter_level: Optional[str] = Field(None, description="Filter to lines containing this keyword, e.g. 'ERROR' or 'WARN'")
+
+
+class GitOperationRequest(BaseModel):
+    """
+    Performs a Git lifecycle operation on the SharedLLM workspace.
+    push requires is_admin=True in user_context.
+    """
+    user_context: UserContext
+    action: Literal["status", "diff", "add", "commit", "pull", "push", "log"]
+    path: Optional[str] = Field(".", description="File path for 'add' action")
+    commit_message: Optional[str] = Field(None, description="Required for 'commit' action")
+    branch: Optional[str] = Field("microservices", description="Branch for pull/push")
+    log_count: Optional[int] = Field(10, ge=1, le=50, description="Number of commits for 'log'")
+
+
+class DeploymentRequest(BaseModel):
+    """
+    Controls a SharedLLM Docker container via the host socket.
+    Supports: restart, status, logs, list.
+    """
+    user_context: UserContext
+    action: Literal["restart", "status", "logs", "list"]
+    container_name: str = Field("sharedllm_gateway", description="Target container name")
+    tail: int = Field(100, ge=1, le=1000, description="Lines to fetch for 'logs' action")

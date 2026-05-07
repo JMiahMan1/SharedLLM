@@ -127,5 +127,23 @@
         "What’s the current status of our storage backend?",
         "storage status",
         "indexing report"
+    ],
+    "self_repair": [
+        "look into the error I just got",
+        "fix the bug in the execution service",
+        "analyze the logs and repair the gateway",
+        "self repair the system",
+        "debug the recent crash",
+        "find the root cause of the failure and fix it",
+        "autonomous repair mode"
+    ],
+    "dev_loop": [
+        "add a new tool to control the sprinklers",
+        "implement a new handler for weather reports",
+        "evolve the codebase to support solar panels",
+        "start the autonomous developer loop",
+        "build a new capability for the system",
+        "upgrade your own handlers",
+        "autonomous feature addition"
     ]
 }
