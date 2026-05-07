@@ -69,6 +69,8 @@ services:
       - huggingface_cache:/root/.cache/huggingface
       - qdrant_cache:/root/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
+      - ./services/rag/main.py:/app/main.py
+      - ./services/rag/schemas.py:/app/schemas.py
     # ADDED: Healthcheck so the sync script knows when to run
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
