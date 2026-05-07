@@ -598,6 +598,25 @@ def _git_remote_url(workspace_path: Path, remote_name: str) -> str:
     return remote_url
 
 
+def _git_webhook_pull_remote(remote_url: str, remote_name: str) -> str:
+    value = str(remote_url or "").strip()
+    if not value:
+        return remote_name
+
+    ssh_match = re.match(r"^git@([^:]+):(.+)$", value)
+    if ssh_match:
+        host, path = ssh_match.groups()
+        return f"https://{host}/{path}"
+
+    parsed = urlparse(value)
+    if parsed.scheme == "ssh" and parsed.hostname and parsed.username == "git":
+        path = (parsed.path or "").lstrip("/")
+        if path:
+            return f"https://{parsed.hostname}/{path}"
+
+    return remote_name
+
+
 def _workspace_provider_binding(workspace: dict[str, Any], identity: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
     provider_kind = str(workspace.get("provider_kind") or "").strip().lower()
     nextcloud_path = str(workspace.get("nextcloud_path") or "").strip()
@@ -1597,6 +1616,7 @@ async def git_pull_webhook(
             
             remote_name = (match.git_remote or "origin").strip()
             default_branch = (match.default_branch or "main").strip()
+            remote_url = _git_remote_url(workspace_path, remote_name)
         
         log.info(f"Webhook triggered git pull for workspace {workspace_id} on {remote_name}/{default_branch}")
         
@@ -1605,7 +1625,7 @@ async def git_pull_webhook(
         # 2. Or the server has SSH keys configured globally
         # 3. Or we use the credentials of a system user
         
-        args = ["git", "pull", remote_name, default_branch]
+        args = ["git", "pull", _git_webhook_pull_remote(remote_url, remote_name), default_branch]
         result = _run_command(workspace_path, args)
         
         if result["returncode"] != 0:
