@@ -30,6 +30,13 @@ export interface Workspace {
   auto_pull_enabled: boolean;
 }
 
+type WorkspaceListResponse =
+  | Workspace[]
+  | {
+      status?: string;
+      workspaces?: Workspace[];
+    };
+
 interface UserProfileRaw {
   id: string | number;
   username: string;
@@ -176,6 +183,16 @@ const mapUserPayload = (data: Partial<UserProfile>) => {
   return payload;
 };
 
+const normalizeWorkspaces = (data: WorkspaceListResponse): Workspace[] => {
+  if (Array.isArray(data)) {
+    return data;
+  }
+  if (Array.isArray(data?.workspaces)) {
+    return data.workspaces;
+  }
+  return [];
+};
+
 export const apiClient = axios.create({
   baseURL: BASE_URL,
   headers: {
@@ -310,8 +327,8 @@ export const api = {
   },
 
   async getWorkspaces(): Promise<Workspace[]> {
-    const resp = await apiClient.get('/api/workspaces');
-    return resp.data;
+    const resp = await apiClient.get<WorkspaceListResponse>('/api/workspaces');
+    return normalizeWorkspaces(resp.data);
   },
 
   async createWorkspace(data: Partial<Workspace> & { id: string }): Promise<Workspace> {
