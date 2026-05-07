@@ -19,6 +19,9 @@ import toast from 'react-hot-toast';
 import { api, type Workspace } from '../services/api';
 import Modal from '../components/ui/Modal';
 
+const generateWebhookToken = () =>
+  Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
 const Workspaces = () => {
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -82,7 +85,7 @@ const Workspaces = () => {
       default_branch: 'main',
       sync_mode: 'local_git_authoritative',
       auto_pull_enabled: false,
-      webhook_token: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+      webhook_token: generateWebhookToken(),
     });
     setIsModalOpen(true);
   };
@@ -98,6 +101,10 @@ const Workspaces = () => {
     const base = window.location.origin;
     return `${base}/api/webhook/git-pull/${id}${token ? `?token=${token}` : ''}`;
   };
+
+  const draftWorkspaceId = editingWs?.id || form.id || 'workspace-id';
+  const draftWebhookToken = form.webhook_token || '';
+  const draftWebhookUrl = getWebhookUrl(draftWorkspaceId, draftWebhookToken);
 
   return (
     <div className="space-y-8 pb-12 animate-in fade-in duration-500">
@@ -317,6 +324,8 @@ const Workspaces = () => {
                    <p className="text-xs text-slate-500">Trigger `git pull` via webhook notification.</p>
                 </div>
                 <button 
+                  type="button"
+                  aria-label="Toggle automated sync"
                   onClick={() => setForm({ ...form, auto_pull_enabled: !form.auto_pull_enabled })}
                   className={`w-12 h-6 rounded-full transition-colors relative ${form.auto_pull_enabled ? 'bg-indigo-500' : 'bg-slate-800'}`}
                 >
@@ -325,19 +334,98 @@ const Workspaces = () => {
              </div>
 
              {form.auto_pull_enabled && (
-               <label className="space-y-2 block animate-in slide-in-from-top-2 duration-300">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Webhook Secret Token</span>
-                  <div className="relative">
-                    <ShieldCheck size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
-                    <input 
-                      type="text" 
-                      value={form.webhook_token || ''}
-                      onChange={(e) => setForm({ ...form, webhook_token: e.target.value })}
-                      placeholder="Secret key for GitHub"
-                      className="glass-input w-full pl-10"
-                    />
+               <div className="space-y-4 animate-in slide-in-from-top-2 duration-300">
+                  <label className="space-y-2 block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Webhook Secret Token</span>
+                    <div className="relative">
+                      <ShieldCheck size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+                      <input 
+                        type="text" 
+                        value={form.webhook_token || ''}
+                        onChange={(e) => setForm({ ...form, webhook_token: e.target.value })}
+                        placeholder="Secret key for GitHub or GitLab"
+                        className="glass-input w-full pl-10 pr-24"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, webhook_token: generateWebhookToken() })}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-[10px] font-black uppercase tracking-widest text-indigo-300 hover:bg-white/5"
+                      >
+                        Regenerate
+                      </button>
+                    </div>
+                  </label>
+
+                  <div className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Webhook Setup</p>
+                        <p className="text-xs text-slate-500">Use these values when creating the repository webhook.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(draftWebhookUrl, `draft-${draftWorkspaceId}`)}
+                        className="rounded-md p-2 text-slate-500 transition-colors hover:bg-white/5 hover:text-white"
+                      >
+                        {copiedId === `draft-${draftWorkspaceId}` ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Payload URL</p>
+                      <div className="flex items-center gap-2 rounded-lg border border-white/5 bg-black/40 p-2">
+                        <div className="min-w-0 flex-1 font-mono text-[10px] text-slate-300 break-all">
+                          {draftWebhookUrl}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(draftWebhookUrl, `draft-url-${draftWorkspaceId}`)}
+                          className="rounded-md p-2 text-slate-500 transition-colors hover:bg-white/5 hover:text-white"
+                          aria-label="Copy payload URL"
+                        >
+                          {copiedId === `draft-url-${draftWorkspaceId}` ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Secret Token</p>
+                      <div className="flex items-center gap-2 rounded-lg border border-white/5 bg-black/40 p-2">
+                        <div className="min-w-0 flex-1 font-mono text-[10px] text-slate-300 break-all">
+                          {draftWebhookToken || 'Generate or enter a token to use as the webhook secret.'}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(draftWebhookToken || '', `draft-secret-${draftWorkspaceId}`)}
+                          className="rounded-md p-2 text-slate-500 transition-colors hover:bg-white/5 hover:text-white"
+                          aria-label="Copy secret token"
+                          disabled={!draftWebhookToken}
+                        >
+                          {copiedId === `draft-secret-${draftWorkspaceId}` ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GitHub</p>
+                        <p className="mt-1 text-xs text-slate-400">Content type: `application/json`</p>
+                        <p className="text-xs text-slate-400">Event: `Pushes`</p>
+                        <p className="text-xs text-slate-400">Secret: use the token above</p>
+                      </div>
+                      <div className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GitLab</p>
+                        <p className="mt-1 text-xs text-slate-400">Trigger: `Push events`</p>
+                        <p className="text-xs text-slate-400">Secret token: use the token above</p>
+                        <p className="text-xs text-slate-400">SSL verification: leave enabled</p>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-slate-500">
+                      Save the workspace first if you are creating a new one. The final webhook URL uses the workspace ID shown above.
+                    </p>
                   </div>
-               </label>
+               </div>
              )}
           </div>
 
