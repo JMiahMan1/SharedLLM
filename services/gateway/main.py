@@ -1230,6 +1230,7 @@ Example: ["Turn on the office light", "Play some jazz music"]
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks: BackgroundTasks = None):
+    exec_data = None
     client = get_http_client()
     # 1. Resolve Identity
     try:
@@ -1680,7 +1681,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         background_tasks.add_task(extract_and_store_user_facts, user_id, short_term + [{"role": "user", "content": query}])
 
     resp_data = {
-        "execution_result": exec_data if 'exec_data' in locals() else None,
+        "execution_result": exec_data,
         "intent": intent,
         "confidence": confidence if 'confidence' in locals() else 1.0
     }

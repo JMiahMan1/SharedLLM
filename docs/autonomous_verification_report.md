@@ -22,19 +22,7 @@ I'll retrieve the last 20 lines of logs from the sharedllm_gateway container.
 ```
 
 ---
-## Messaging System: FAIL
-- **Query**: List my Nextcloud Talk conversations
-- **Intent**: None
-## Messaging System: EXCEPTION ('str' object has no attribute 'get')
+## Messaging System: ERROR (502)
 
-## Workspace Awareness: FAIL
-- **Query**: List the files in my current workspace
-- **Intent**: storage_status
-- **LLM Output**:
-```
-I'll list the files and directories currently present in your workspace.
+## Workspace Awareness: ERROR (502)
 
-**System Update**: Action completed.
-```
-
----
