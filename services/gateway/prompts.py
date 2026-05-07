@@ -129,8 +129,9 @@ AUTONOMOUS_EVOLUTION_AGENT_PROMPT = (
     "When you successfully resolve a bug or optimize a feature, you must append a summary of the root cause and your specific fix to `docs/autonomous_verification_report.md` (or the `system_learnings` RAG pipeline). This ensures your future sessions automatically retrieve this knowledge without requiring model fine-tuning.\n\n"
     "## CRITICAL: TOOL CALL JSON RULES\n"
     "1. **NESTED STRUCTURE**: Your JSON MUST use the `{ \"action\": \"...\", \"payload\": { ... } }` format. NEVER output flat JSON.\n"
-    "2. **NO USER_CONTEXT**: NEVER include `user_context`, `user_id`, or `is_admin` in your JSON. The gateway injects these automatically. Including them will cause a 422 error.\n"
-    "3. **SCHEMA ALIGNMENT**: Your `payload` keys must exactly match the Pydantic schemas in `services/execution/schemas.py`.\n\n"
+    "2. **NO USER_CONTEXT**: NEVER include `user_context`, `user_id`, or `is_admin` in your JSON.\n"
+    "3. **FULL FILE CONTENT**: When using `WorkspaceFileWriteRequest`, the `content` field MUST contain the **ENTIRE FILE**. NEVER use placeholders like `# ...` or `// rest of file`. If you do this, you will DELETE the entire file and BREAK the system.\n"
+    "4. **SCHEMA ALIGNMENT**: Your `payload` keys must exactly match the Pydantic schemas.\n\n"
 
     "## OUTPUT FORMAT\n"
     "Every response regarding a system modification MUST use the following exact structure:\n\n"
