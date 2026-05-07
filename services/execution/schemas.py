@@ -66,6 +66,16 @@ class HAServiceRequest(BaseModel):
     entity_id: str
     service_data: Optional[Dict[str, Any]] = None
 
+class ClimateRequest(BaseModel):
+    user_context: UserContext
+    entity_id: str
+    temperature: float
+
+class SecurityRequest(BaseModel):
+    user_context: UserContext
+    entity_id: str
+    action: Literal["lock", "unlock", "open", "close", "status"]
+
 
 # ─── Announcements ──────────────────────────────────────────────────────────────
 

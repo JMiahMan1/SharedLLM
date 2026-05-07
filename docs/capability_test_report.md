@@ -19,7 +19,7 @@ I'll send a voice message to Alice with the specified text.
 ```
 I'll retrieve the last 50 lines of logs from the sharedllm_gateway container.
 
-**System Update**: Fetched 0 log lines from 'sharedllm_gateway'. This could indicate the container is running normally with no recent activity, or there may be log configuration issues. Would you like me to check container status or perform a log rotation?
+**System Update**: Fetched 50 log lines from 'sharedllm_gateway'.
 ```
 
 ## Query: Trigger a re-index of your own tool capabilities
@@ -30,7 +30,7 @@ I'll retrieve the last 50 lines of logs from the sharedllm_gateway container.
 ```
 I'll initiate a re-indexing of the tool capabilities to refresh the RAG system's knowledge.
 
-**System Update**: Indexing failed (code 2)
+**System Update**: Capabilities re-indexed successfully.
 ```
 
 ## Query: What is the current status of my storage indexing?

@@ -32,31 +32,56 @@ def index_capabilities():
     capabilities = []
 
     schema_map = {
-        "LightControlRequest": "Controls smart lights, brightness, and colors. Use this for all light-related commands.",
-        "MediaPlayRequest": "Controls media players, plays music, handles TV casting. Use for playing content.",
+        "LightControlRequest": "Controls smart lights, brightness, and colors.",
+        "MediaPlayRequest": "Controls media players, plays music, handles TV casting.",
         "MediaTransportRequest": "Handles pause, resume, stop, and volume for media players.",
-        "HAServiceRequest": "Generic Home Assistant service call for any domain not covered by specialized tools.",
+        "ClimateRequest": "Sets the temperature on climate control devices (HVAC).",
+        "SecurityRequest": "Controls locks and covers (open, close, lock, unlock).",
+        "HAServiceRequest": "Generic Home Assistant service call for any domain.",
         "AnnouncementRequest": "Broadcasts a text-to-speech message to a speaker.",
         "TVCastRequest": "Powers on a TV and casts media content.",
-        "CalendarRequest": "Manages calendar events (list, add, delete).",
+        "CalendarRequest": "Manages calendar events (list, add, delete, update).",
         "NoteRequest": "Manages personal notes and checklists.",
         "TimerRequest": "Sets, lists, or deletes timers and alarms.",
-        "TalkRequest": "Manages messaging, voice messages, and user presence.",
+        "TalkRequest": "Manages messaging, voice messages, and user presence via Nextcloud Talk.",
         "WebSearchRequest": "Performs a web search via the private search engine.",
         "WebReadRequest": "Fetches and converts a webpage to markdown.",
-        "WorkspaceFileAction": "Orchestrates file writes and patches within a Git-backed workspace. Primary tool for code edits.",
-        "WorkspaceGitAction": "Performs Git lifecycle operations like branch, commit, push, and pull.",
+        "WorkspaceFileAction": "High-level orchestration of file writes/patches in a workspace.",
+        "WorkspaceGitAction": "High-level Git operations (status, pull, commit, push) for workspaces.",
         "WorkspaceSyncAction": "Synchronizes workspace files with Nextcloud storage.",
-        "DockerLogsRequest": "Fetches recent log output from a Docker container for diagnostics.",
+        "DockerLogsRequest": "Fetches recent log output from a Docker container.",
         "GitOperationRequest": "Performs Git lifecycle operations specifically on the SharedLLM core repo.",
         "DeploymentRequest": "Restarts or inspects SharedLLM Docker containers.",
         "VolumeInventoryRequest": "Inspects Docker volume usage (Admin only).",
-        "CapabilityIndexRequest": "Triggers this re-indexing script to refresh tool definitions."
+        "CapabilityIndexRequest": "Triggers this re-indexing script to refresh tool definitions.",
+        "FileReadRequest": "Reads the content of a file from a workspace.",
+        "FileListRequest": "Lists files and directories in a workspace.",
+        "FileWriteRequest": "Writes or patches a file in a workspace.",
+        "PytestRequest": "Runs Pytest tests within a workspace.",
+        "DiffRequest": "Shows Git diffs for a workspace.",
+        "GitAddRequest": "Stages files in a workspace Git repository.",
+        "GitCommitRequest": "Commits changes in a workspace Git repository.",
+        "GitBranchCreateRequest": "Creates or switches branches in a workspace.",
+        "GitPushRequest": "Pushes changes to a remote Git repository.",
+        "GitFetchRequest": "Fetches updates from a remote Git repository.",
+        "GitPullRequest": "Pulls changes from a remote Git repository.",
+        "GitRebaseRequest": "Rebases the current branch in a workspace."
     }
     
-    # Process Execution Schemas
+    # Process Execution and Workspace Schemas
+    # We prioritize execution schemas first, then check workspace_runtime
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services', 'workspace_runtime'))
+    try:
+        import main as ws_main
+    except Exception as e:
+        log.warning(f"Failed to load workspace_runtime main: {e}")
+        ws_main = None
+
     for class_name, description in schema_map.items():
         model = getattr(exec_schemas, class_name, None)
+        if not model and ws_main:
+            model = getattr(ws_main, class_name, None)
+            
         if model:
             capabilities.append({
                 "name": class_name,
@@ -64,7 +89,7 @@ def index_capabilities():
                 "schema": get_json_schema(model),
                 "type": "execution_schema"
             })
-            log.info(f"Prepared execution schema: {class_name}")
+            log.info(f"Prepared schema: {class_name}")
 
     # Process Storage/Gateway Schemas
     storage_map = {
