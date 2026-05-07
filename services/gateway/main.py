@@ -163,7 +163,8 @@ WORKSPACE_README_ACTION_HINTS = (
 AUTONOMOUS_SIGNALS = (
   "look into the error", "analyze logs", "build the tool", "self repair", 
   "fix the error", "auto-fix", "debug the system", "ouroboros", "dev loop",
-  "check container logs", "rebuild service", "deploy fix"
+  "check container logs", "rebuild service", "deploy fix", "repair", "execute fix",
+  "fix it", "debug it", "fix the code", "apply the fix"
 )
 
 # --- Capability Configuration ---
@@ -1304,7 +1305,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "ouroboros", "audit", "develop", "refactor"]
         if any(k in (query or "").lower() for k in coding_keywords):
             # Check if specialized coder model is available (hardcoded preference for qwen2.5-coder)
-            selected_model = "qwen2.5-coder:7b"
+            selected_model = CODING_MODEL
             log.info(f"[ChatHandler] Specialized coding task detected. Routing to: {selected_model}")
 
     try:
