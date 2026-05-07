@@ -1652,6 +1652,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     log.info(f"[ChatHandler] Full response length: {len(ans)}")
     if "```" in ans:
         log.info(f"[ChatHandler] Block detected. Content preview: {ans[ans.find('```'):][:100]}...")
+        log.info(f"[ChatHandler] DEBUG FULL ANS: {ans}")
 
     if "```json" in ans or ("```" in ans and "action" in ans and "payload" in ans):
         try:
