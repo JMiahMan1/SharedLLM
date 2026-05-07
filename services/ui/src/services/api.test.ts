@@ -45,6 +45,23 @@ describe('api service', () => {
     expect(result.role).toEqual('admin');
   });
 
+  it('getWorkspaces should normalize object responses from the backend', async () => {
+    const mockWorkspaces = [{ id: 'ws1', display_name: 'SharedLLM', local_path: 'SharedLLM', sync_mode: 'local_git_authoritative', scope: 'user', capabilities: [], auto_pull_enabled: false }];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { status: 'SUCCESS', workspaces: mockWorkspaces } } as AxiosResponse);
+
+    const result = await api.getWorkspaces();
+    expect(apiClient.get).toHaveBeenCalledWith('/api/workspaces');
+    expect(result).toEqual(mockWorkspaces);
+  });
+
+  it('getWorkspaces should preserve legacy array responses', async () => {
+    const mockWorkspaces = [{ id: 'ws1', display_name: 'SharedLLM', local_path: 'SharedLLM', sync_mode: 'local_git_authoritative', scope: 'user', capabilities: [], auto_pull_enabled: false }];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: mockWorkspaces } as AxiosResponse);
+
+    const result = await api.getWorkspaces();
+    expect(result).toEqual(mockWorkspaces);
+  });
+
   it('globalSearch should call /api/search', async () => {
     const mockResults = { answer: 'test answer', files: [] };
     vi.mocked(apiClient.get).mockResolvedValue({ data: mockResults } as AxiosResponse);
