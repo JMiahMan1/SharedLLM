@@ -1,27 +1,26 @@
 # Autonomous Pipeline Verification Report
-**Date:** 2026-05-07
-**Status:** STABILIZED
+Generated: 2026-05-07
 
-## 1. Executive Summary
-The autonomous debugging and self-repair pipeline for the SharedLLM Gateway has been successfully stabilized. The system now reliably handles model-driven tool execution, including resilient parsing of malformed or "flat" JSON outputs, and has successfully demonstrated autonomous root-cause analysis and file-based patching.
+## Pipeline Status: STABLE
 
-## 2. Resolved Blockers
-| Issue | Root Cause | Resolution |
-| :--- | :--- | :--- |
-| **422 Unprocessable Entity** | Schema mismatch (missing 'path' or flat JSON). | Implemented 'Aggressive Payload Merging' and 'Smart Fallback' logic in `main.py`. |
-| **Ollama Timeouts** | Heavy reasoning load on `qwen3:8b`. | Increased global httpx and service timeouts to 120s. |
-| **JSON Hallucination** | Jarvis providing `user_context` or flat structures. | Hardened `AUTONOMOUS_EVOLUTION_AGENT_PROMPT` with mandatory structure rules and forbidden keys. |
+### Phase 1: Gateway Stabilization (COMPLETE)
+- [x] **Bug: Fact Extraction Timeout**: Resolved by increasing `httpx` timeout from 15s to 60s in `services/gateway/history.py`.
+- [x] **Bug: Tool Execution 422**: Fixed by adding recursive payload merging and "Smart Fallback" for flat JSON in `ChatHandler`.
+- [x] **Hardening: Prompt Safety**: Updated `AUTONOMOUS_EVOLUTION_AGENT_PROMPT` to explicitly forbid placeholders and mandate full-file content for write requests.
 
-## 3. Verified Autonomous Action
-**Target:** `services/gateway/history.py` (Fact Extraction Timeout)
-- **Observation:** `extract_and_store_user_facts` failing due to 15s timeout.
-- **Action:** Jarvis used `WorkspaceFileReadRequest` to locate the line and `WorkspaceFileWriteRequest` to update the timeout.
-- **Verification:** `grep "timeout =" history.py` returns `60.0`.
-- **Result:** **SUCCESS**
+### Phase 2: RAG Service & UI Stabilization (COMPLETE)
+- [x] **Bug: RAG NameError**: Fixed `target_user` scope issue in `list_collection_documents`.
+- [x] **Bug: Purge Typo**: Fixed `_require_internal_secret` typo in `purge_rag_collection`.
+- [x] **Infrastructure: Surgical Patching**: Implemented `WorkspaceFilePatchRequest` (alias: `patch`) to allow Jarvis to make targeted edits without full-file overwrites.
+- [x] **Deployment: Volume Sync**: Added host volume mounts for RAG code to ensure real-time updates.
+- [x] **Dependency: Cryptography**: Added missing `cryptography` dependency for Fernet support.
+- [x] **Data Visibility**: Verified `ha_entities` collection now returns 600+ documents for user `default`.
 
-## 4. Maintenance Guidance
-- **Tool Schemas:** All new tools MUST be registered in `action_map` (both streaming and non-streaming paths).
-- **Hardening:** Keep the `Smart Fallback` in `main.py` as a safety net for smaller models that may struggle with nested JSON.
-- **Timeouts:** Ensure `TIMEOUT_OLLAMA` remains at 120s for reasoning tasks.
+### Final Verification Results
+- **Gateway Pipeline**: STABLE. Timeouts increased, prompt hardened.
+- **RAG Service**: STABLE. All endpoints responding correctly via FastAPI.
+- **Autonomous Evolution**: ENHANCED. Jarvis now uses surgical patches, reducing data loss risk.
 
-**Verified by:** Antigravity AI
+## Next Steps
+1. **Model Monitoring**: Observe `qwen3:latest` behavior with the new `patch` tool.
+2. **Expansion**: Extend `patch` tool to handle multi-file diffs if needed.
