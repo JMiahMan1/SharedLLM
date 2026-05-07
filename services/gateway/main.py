@@ -2060,7 +2060,9 @@ async def get_storage_stats(request: Request):
     # Resolve user from request
     try:
         creds_data = await _resolve_identity_from_request(request)
-        user_id = creds_data.get("user", "default")
+        # Data is indexed under the Nextcloud username (from the storage service).
+        # Fall back to the Jarvis username if Nextcloud creds are not set.
+        user_id = creds_data.get("nextcloud_user") or creds_data.get("user", "default")
     except:
         user_id = "default"
 
