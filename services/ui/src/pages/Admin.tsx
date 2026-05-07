@@ -296,7 +296,7 @@ const Admin = () => {
       </header>
 
       <div className="grid gap-6 xl:gap-8 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className="glass-panel p-6">
+        <section className="glass-panel p-6 min-w-0 overflow-hidden">
           <div className="mb-6 flex items-center justify-between">
             <div>
               <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -355,7 +355,7 @@ const Admin = () => {
           </div>
         </section>
 
-        <section className="glass-panel p-6">
+        <section className="glass-panel p-6 min-w-0 overflow-hidden">
           <div className="mb-6 flex items-center justify-between">
             <div>
               <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -417,7 +417,7 @@ const Admin = () => {
       </div>
 
       <div className="grid gap-6 xl:gap-8 xl:grid-cols-[0.95fr_1.05fr]">
-        <section className="glass-panel p-6">
+        <section className="glass-panel p-6 min-w-0 overflow-hidden">
           <div className="mb-6 flex items-center justify-between">
             <div>
               <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -485,7 +485,7 @@ const Admin = () => {
           </div>
         </section>
 
-        <section className="space-y-8">
+        <section className="space-y-8 min-w-0 overflow-hidden">
           <div className="glass-panel p-6">
             <div className="mb-6 flex items-center justify-between">
               <div>
