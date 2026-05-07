@@ -506,6 +506,11 @@ export const api = {
     return resp.data;
   },
 
+  async getCollectionDocs(collectionName: string, limit: number = 100): Promise<any> {
+    const resp = await apiClient.get(`/api/storage/collection/${collectionName}?limit=${limit}`);
+    return resp.data;
+  },
+
   async purgeRagCollection(collectionName: string, userId: string, filter?: Record<string, unknown>): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post(`/api/storage/purge/${collectionName}`, { user_id: userId, filter });
     return resp.data;

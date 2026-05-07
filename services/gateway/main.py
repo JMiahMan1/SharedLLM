@@ -2222,6 +2222,20 @@ async def get_storage_stats(request: Request):
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
     return JSONResponse(status_code=resp.status_code, content=resp.json())
+    
+@app.get("/api/storage/collection/{collection_name}")
+async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
+    try:
+        creds_data = await _resolve_identity_from_request(request)
+        user_id = creds_data.get("nextcloud_user") or creds_data.get("user", "default")
+    except:
+        user_id = "default"
+
+    resp = await get_http_client().get(
+        f"{RAG_SVC}/rag/collection/{collection_name}?user_id={user_id}&limit={limit}",
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 
 @app.post("/api/storage/purge/{collection_name}")
