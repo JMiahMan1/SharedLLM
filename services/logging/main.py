@@ -86,6 +86,22 @@ async def get_logs_api(service: Optional[str] = None, limit: Optional[int] = Non
 async def get_logs_admin_api(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
     return await _fetch_logs(service=service, limit=_resolve_limit(limit, lines))
 
+@app.delete("/api/logs")
+async def clear_logs_api():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("DELETE FROM logs")
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "Logs cleared"}
+
+@app.delete("/api/admin/logs")
+async def clear_logs_admin_api():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("DELETE FROM logs")
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "Logs cleared"}
+
 # --- WebSocket Streaming ---
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio

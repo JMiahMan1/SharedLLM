@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Search, Bell, LogOut } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { Search, Bell, LogOut, Trash2 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { LogEntry } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -27,6 +27,23 @@ const Header = () => {
     queryFn: () => api.getLogs(5),
     refetchInterval: 15000,
   });
+
+  const queryClient = useQueryClient();
+  const clearMutation = useMutation({
+    mutationFn: () => api.clearLogs(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['header-notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['recent-logs'] });
+    },
+  });
+
+  const handleClearLogs = async () => {
+    try {
+      await clearMutation.mutateAsync();
+    } catch {
+      // Error handled by query client or toast if needed
+    }
+  };
 
   const [showNotifications, setShowNotifications] = useState(false);
   const isReady = health?.status === 'READY';
@@ -69,9 +86,16 @@ const Header = () => {
           
           {showNotifications && (
             <div className="absolute right-0 mt-4 w-80 max-w-[calc(100vw-2rem)] glass-panel p-4 z-50 animate-in slide-in-from-top-2 duration-200">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
                 <h4 className="text-sm font-bold text-white uppercase tracking-widest">Activity Feed</h4>
-                <span className="text-[10px] text-slate-500">Last {notifications.length} events</span>
+                <button 
+                  onClick={handleClearLogs}
+                  disabled={notifications.length === 0 || clearMutation.isPending}
+                  className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 transition-colors disabled:opacity-30"
+                >
+                  <Trash2 size={12} />
+                  {clearMutation.isPending ? '...' : 'Clear All'}
+                </button>
               </div>
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                 {notifications.length === 0 ? (
