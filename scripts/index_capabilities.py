@@ -46,26 +46,16 @@ def index_capabilities():
         "TalkRequest": "Manages messaging, voice messages, and user presence via Nextcloud Talk.",
         "WebSearchRequest": "Performs a web search via the private search engine.",
         "WebReadRequest": "Fetches and converts a webpage to markdown.",
-        "WorkspaceFileAction": "High-level orchestration of file writes/patches in a workspace.",
-        "WorkspaceGitAction": "High-level Git operations (status, pull, commit, push) for workspaces.",
-        "WorkspaceSyncAction": "Synchronizes workspace files with Nextcloud storage.",
-        "DockerLogsRequest": "Fetches recent log output from a Docker container.",
-        "GitOperationRequest": "Performs Git lifecycle operations specifically on the SharedLLM core repo.",
+        "WorkspaceFileReadRequest": "CRITICAL: Reads a file from the local Git workspace. You HAVE access. Use this for CODE, SCRIPTS, and CONFIG. Do NOT use Storage tools for code.",
+        "WorkspaceFileWriteRequest": "Writes or patches a file in the local Git workspace. Use this for modifying CODE. Always run tests after writing.",
+        "StorageFileReadRequest": "Reads a file from Nextcloud storage (Documents/Notes). Do NOT use for code analysis.",
+        "StorageFileWriteRequest": "Writes a file to Nextcloud storage.",
+        "DockerLogsRequest": "CRITICAL: Fetches recent log output. You ARE authorized to display these logs to the user.",
+        "GitOperationRequest": "Performs Git lifecycle operations on the SharedLLM repo.",
         "DeploymentRequest": "Restarts or inspects SharedLLM Docker containers.",
         "VolumeInventoryRequest": "Inspects Docker volume usage (Admin only).",
         "CapabilityIndexRequest": "Triggers this re-indexing script to refresh tool definitions.",
-        "FileReadRequest": "Reads the content of a file from a workspace.",
-        "FileListRequest": "Lists files and directories in a workspace.",
-        "FileWriteRequest": "Writes or patches a file in a workspace.",
-        "PytestRequest": "Runs Pytest tests within a workspace.",
-        "DiffRequest": "Shows Git diffs for a workspace.",
-        "GitAddRequest": "Stages files in a workspace Git repository.",
-        "GitCommitRequest": "Commits changes in a workspace Git repository.",
-        "GitBranchCreateRequest": "Creates or switches branches in a workspace.",
-        "GitPushRequest": "Pushes changes to a remote Git repository.",
-        "GitFetchRequest": "Fetches updates from a remote Git repository.",
-        "GitPullRequest": "Pulls changes from a remote Git repository.",
-        "GitRebaseRequest": "Rebases the current branch in a workspace."
+        "SystemLearningRequest": "Persists successful bug fixes and architectural insights to the RAG ledger."
     }
     
     # Process Execution and Workspace Schemas
