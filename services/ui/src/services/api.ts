@@ -20,7 +20,10 @@ export interface Workspace {
   id: string;
   display_name: string;
   local_path: string;
+  resolved_path?: string | null;
+  available?: boolean;
   nextcloud_path?: string | null;
+  repo_url?: string | null;
   git_remote?: string | null;
   default_branch?: string | null;
   sync_mode: string;
@@ -28,6 +31,7 @@ export interface Workspace {
   capabilities: string[];
   owner_user?: string | null;
   auto_pull_enabled: boolean;
+  webhook_token?: string | null;
 }
 
 type WorkspaceListResponse =
