@@ -31,13 +31,6 @@ def get_json_schema(model: Type[BaseModel]):
 def index_capabilities():
     capabilities = []
 
-    workspace_map = {
-        "FileWriteRequest": "Writes or patches files in a workspace. Use for code edits.",
-        "GitCommitRequest": "Commits staged changes to the workspace repository.",
-        "ProviderSyncFileRequest": "Synchronizes a single file with Nextcloud storage.",
-        "WorkflowWriteSyncCommitRequest": "Atomically writes a file, syncs to Nextcloud, and commits to Git. Use for complete save operations."
-    }
-
     schema_map = {
         "LightControlRequest": "Controls smart lights, brightness, and colors. Use this for all light-related commands.",
         "MediaPlayRequest": "Controls media players, plays music, handles TV casting. Use for playing content.",
@@ -48,8 +41,17 @@ def index_capabilities():
         "CalendarRequest": "Manages calendar events (list, add, delete).",
         "NoteRequest": "Manages personal notes and checklists.",
         "TimerRequest": "Sets, lists, or deletes timers and alarms.",
+        "TalkRequest": "Manages messaging, voice messages, and user presence.",
         "WebSearchRequest": "Performs a web search via the private search engine.",
         "WebReadRequest": "Fetches and converts a webpage to markdown.",
+        "WorkspaceFileAction": "Orchestrates file writes and patches within a Git-backed workspace. Primary tool for code edits.",
+        "WorkspaceGitAction": "Performs Git lifecycle operations like branch, commit, push, and pull.",
+        "WorkspaceSyncAction": "Synchronizes workspace files with Nextcloud storage.",
+        "DockerLogsRequest": "Fetches recent log output from a Docker container for diagnostics.",
+        "GitOperationRequest": "Performs Git lifecycle operations specifically on the SharedLLM core repo.",
+        "DeploymentRequest": "Restarts or inspects SharedLLM Docker containers.",
+        "VolumeInventoryRequest": "Inspects Docker volume usage (Admin only).",
+        "CapabilityIndexRequest": "Triggers this re-indexing script to refresh tool definitions."
     }
     
     # Process Execution Schemas
@@ -64,7 +66,7 @@ def index_capabilities():
             })
             log.info(f"Prepared execution schema: {class_name}")
 
-    # Process Storage Schemas
+    # Process Storage/Gateway Schemas
     storage_map = {
         "StorageIndexRequest": "Triggers a recursive scan and indexes all files/folders in NextCloud for use in RAG context.",
         "StorageListRequest": "Lists files and directories currently present in the configured storage provider.",
@@ -81,23 +83,6 @@ def index_capabilities():
                 "type": "execution_schema" 
             })
             log.info(f"Prepared storage schema: {class_name}")
-
-    # Process Workspace Schemas
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services', 'workspace_runtime'))
-    try:
-        import main as ws_main
-        for class_name, description in workspace_map.items():
-            model = getattr(ws_main, class_name, None)
-            if model:
-                capabilities.append({
-                    "name": class_name,
-                    "description": description,
-                    "schema": get_json_schema(model),
-                    "type": "execution_schema"
-                })
-                log.info(f"Prepared workspace schema: {class_name}")
-    except Exception as e:
-        log.warning(f"Failed to load workspace schemas: {e}")
 
     log.info("Skipping legacy phrasebook intents.")
 
