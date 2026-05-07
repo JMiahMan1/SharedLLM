@@ -134,7 +134,7 @@ WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://127.0.0.1
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "60.0"))
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120.0"))
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:8b")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", DEFAULT_MODEL)
 CODING_MODEL = os.getenv("CODING_MODEL", ASSISTANT_MODEL)
@@ -1197,7 +1197,7 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
           f"{EXECUTION_SVC}{endpoint}",
           json=payload,
           headers={"X-Internal-Secret": INTERNAL_SECRET},
-          timeout=30.0
+          timeout=120.0
       )
       data = resp.json()
       if not isinstance(data, dict):
@@ -1254,7 +1254,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
             "messages": [{"role": "user", "content": proposal_prompt}],
             "stream": False
         }
-        resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=30.0)
+        resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=120.0)
         if resp.status_code == 200:
             proposal = resp.json().get("message", {}).get("content", "")
             return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
@@ -1572,7 +1572,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             f"{svc_base}{endpoint}",
                             json=payload,
                             headers={"X-Internal-Secret": INTERNAL_SECRET},
-                            timeout=30.0
+                            timeout=120.0
                         )
                         
                         if exec_resp.status_code == 200:
@@ -1746,7 +1746,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     f"{svc_base}{endpoint}",
                     json=payload,
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=30.0
+                    timeout=120.0
                 )
                 
                 if exec_resp.status_code == 200:
@@ -2436,6 +2436,6 @@ async def proxy_admin_volumes(request: Request):
             f"{EXECUTION_SVC}/execute/volumes",
             json={"user_context": creds_data},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=30.0,
+            timeout=120.0,
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
