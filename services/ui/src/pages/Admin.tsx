@@ -595,16 +595,26 @@ const Admin = () => {
           </div>
 
           <div className="glass-panel p-6">
-            <h3 className="mb-6 text-xl font-bold text-white">Audit Trail</h3>
-            <div className="space-y-3">
-              {logs.map((log, index) => (
-                <div key={`${log.timestamp}-${index}`} className="glass-card p-4">
+            <h3 className="mb-2 text-xl font-bold text-white flex items-center gap-3">
+              <Database size={20} className="text-orange-300" />
+              Audit Trail
+            </h3>
+            <p className="mb-6 text-sm text-slate-400">Live service log events, refreshed every 10 seconds.</p>
+            <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
+              {logs.length === 0 ? (
+                <p className="text-center py-8 text-slate-500 text-sm italic">No log events yet. Services may still be starting.</p>
+              ) : logs.map((log, index) => (
+                <div key={`${log.timestamp}-${index}`} className="glass-card p-4 overflow-hidden">
                   <div className="flex items-center justify-between gap-4">
-                    <p className="font-semibold text-white">{log.service}</p>
-                    <span className="text-[10px] uppercase tracking-widest text-slate-500">{log.level}</span>
+                    <p className="font-semibold text-white truncate text-sm">{log.service}</p>
+                    <span className={`text-[9px] font-black uppercase tracking-widest shrink-0 ${
+                      log.level === 'ERROR' ? 'text-red-400' :
+                      log.level === 'WARNING' || log.level === 'WARN' ? 'text-yellow-400' :
+                      log.level === 'INFO' ? 'text-emerald-400' : 'text-slate-400'
+                    }`}>{log.level}</span>
                   </div>
-                  <p className="mt-2 text-sm text-slate-300">{log.message}</p>
-                  <p className="mt-2 text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</p>
+                  <p className="mt-1.5 text-sm text-slate-300 break-words">{log.message}</p>
+                  <p className="mt-1.5 text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</p>
                 </div>
               ))}
             </div>
