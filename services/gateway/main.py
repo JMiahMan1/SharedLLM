@@ -1655,7 +1655,19 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 
                 if exec_resp.status_code == 200:
                     exec_data = exec_resp.json()
-                    exec_msg = exec_data.get("message", "Action completed.")
+                    # If it's a standard ExecutionResult, use its message
+                    # Otherwise, use a default message and wrap the whole body as detail
+                    if "status" in exec_data and "message" in exec_data:
+                        exec_msg = exec_data.get("message", "Action completed.")
+                    else:
+                        exec_msg = "Action completed."
+                        # Wrap non-standard response into an ExecutionResult-like structure
+                        exec_data = {
+                            "status": exec_data.get("status", "SUCCESS"),
+                            "message": exec_msg,
+                            "service": lookup_action,
+                            "detail": exec_data
+                        }
                 else:
                     try:
                         err_detail = exec_resp.json().get("detail", exec_resp.text)
