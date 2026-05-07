@@ -1110,20 +1110,25 @@ async def _proxy_execution_with_identity(
     return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 async def fetch_ha_entities(creds: dict) -> list:
-    try:
-      resp = await get_http_client().get(
-          f"{EXECUTION_SVC}/discovery/entities",
-          params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
-          headers={"X-Internal-Secret": INTERNAL_SECRET},
-          timeout=5.0
-      )
-      if resp.status_code != 200:
-          log.warning(f"Failed to fetch entities: {resp.status_code}")
-          return []
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/discovery/entities",
+            params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        
+        if resp.status_code != 200:
+            log.warning(f"Failed to fetch entities: {resp.status_code}")
+            return []
 
-      data = resp.json()
-      entities = data.get("entities", []) if isinstance(data, dict) else []
-      if entities:
+        try:
+            data = resp.json()
+        except Exception as e:
+            log.error(f"Failed to parse HA entities JSON: {e} | Body: {resp.text[:200]}")
+            return []
+        
+        entities = data.get("entities", []) if isinstance(data, dict) else []
+        if entities:
           user_id = creds.get("user", "admin")
           # 1. Sync to RAG for discovery
           asyncio.create_task(get_http_client().post(
@@ -2235,7 +2240,14 @@ async def get_collection_docs(collection_name: str, request: Request, limit: int
         f"{RAG_SVC}/rag/collection/{collection_name}?user_id={user_id}&limit={limit}",
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    
+    try:
+        content = resp.json()
+    except Exception as e:
+        log.error(f"Failed to parse collection docs JSON: {e} | Body: {resp.text[:200]}")
+        content = {"status": "ERROR", "message": "Upstream RAG service returned non-JSON response", "detail": str(e)}
+        
+    return JSONResponse(status_code=resp.status_code, content=content)
 
 
 @app.post("/api/storage/purge/{collection_name}")
