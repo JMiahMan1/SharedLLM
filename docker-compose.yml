@@ -43,6 +43,8 @@ services:
       - TZ=America/Phoenix
     group_add:
       - "${DOCKER_GID:-980}"
+    security_opt:
+      - label=disable
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./services/tests:/app/tests
