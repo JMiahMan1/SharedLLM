@@ -19,7 +19,11 @@ import pytest
 
 import gateway.main as gateway_main
 from gateway.main import app, select_model_for_query, select_system_instruction_for_query
-from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION
+from gateway.prompts import (
+    AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION,
+    CODE_HELPER_SYSTEM_INSTRUCTION,
+    LIBRARIAN_SYSTEM_INSTRUCTION,
+)
 
 
 @pytest.fixture
@@ -80,6 +84,20 @@ def test_select_model_for_query_uses_coding_model_for_code_requests(query):
 )
 def test_select_model_for_query_uses_assistant_model_for_general_requests(query):
     assert select_model_for_query(query) == "qwen3:latest"
+
+
+def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
+    original_package = gateway_main.__package__
+    monkeypatch.setattr(gateway_main, "__package__", None)
+    try:
+        selected = select_system_instruction_for_query(
+            "Please analyze logs and self repair this service",
+            "qwen2.5-coder:7b",
+        )
+    finally:
+        monkeypatch.setattr(gateway_main, "__package__", original_package)
+
+    assert selected == AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
 
 
 @pytest.mark.local_only
