@@ -1679,9 +1679,22 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     if background_tasks:
         background_tasks.add_task(extract_and_store_user_facts, user_id, short_term + [{"role": "user", "content": query}])
 
+    resp_data = {
+        "execution_result": exec_data if 'exec_data' in locals() else None,
+        "intent": intent,
+        "confidence": confidence if 'confidence' in locals() else 1.0
+    }
+    
     if is_openai:
-        return _make_openai_response(ans, selected_model, intent)
-    return _make_ollama_response(ans, selected_model, intent)
+        return _make_openai_response(ans, selected_model, intent, extra_fields=resp_data)
+    
+    base_resp = _make_ollama_response(ans, selected_model, intent)
+    # Merge additional data into the Ollama response body
+    if isinstance(base_resp, JSONResponse):
+        final_content = json.loads(base_resp.body.decode())
+        final_content.update(resp_data)
+        return JSONResponse(status_code=base_resp.status_code, content=final_content)
+    return base_resp
 @app.post("/api/auth/login")
 async def proxy_login(request: Request):
     body = await request.json()
