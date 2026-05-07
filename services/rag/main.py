@@ -222,7 +222,7 @@ async def list_collection_documents(collection_name: str, user_id: str = "defaul
         # Always use default for system capabilities
         target_user = "default" if collection_name == "system_capabilities" else user_id
         
-        log.info(f"[RAG_GET] Collection {name}, User {target_user}, Limit {limit}")
+        log.info(f"[RAG_GET] Collection {collection_name}, User {target_user}, Limit {limit}")
         results = collection.get(
             where={"user_id": target_user},
             limit=limit,
@@ -486,51 +486,6 @@ async def sync_capabilities(payload: dict):
             log.error(f"Capability Sync failed: {e}")
             raise HTTPException(status_code=500, detail="Sync failed")
     return {"status": "SUCCESS", "count": 0}
-
-@app.get("/rag/stats", dependencies=[Depends(require_internal)])
-async def get_rag_stats(user_id: str = "default"):
-    """
-    Returns a breakdown of collections and their counts.
-    Used by the Admin UI and the autonomous evolution agent.
-    """
-    try:
-        collections = chroma_client.list_collections()
-        breakdown = {}
-        total_chunks = 0
-        total_documents = 0
-        
-        for coll_name in collections:
-            # list_collections returns objects in newer chromadb, or names in older
-            name = coll_name.name if hasattr(coll_name, "name") else str(coll_name)
-            col = chroma_client.get_collection(name=name, embedding_function=embedding_fn)
-            
-            # Filter by user_id
-            res = col.get(where={"user_id": user_id.lower()}, include=["metadatas"])
-            chunks = len(res["ids"]) if res and "ids" in res else 0
-            
-            # Unique documents by path or entity_id
-            docs = 0
-            if res and res["metadatas"]:
-                seen_docs = set()
-                for m in res["metadatas"]:
-                    doc_id = m.get("path") or m.get("entity_id") or m.get("id")
-                    if doc_id:
-                        seen_docs.add(doc_id)
-                docs = len(seen_docs)
-            
-            breakdown[name] = {"chunks": chunks, "documents": docs}
-            total_chunks += chunks
-            total_documents += docs
-            
-        return {
-            "status": "SUCCESS",
-            "total_chunks": total_chunks,
-            "total_documents": total_documents,
-            "breakdown": breakdown
-        }
-    except Exception as e:
-        log.error(f"RAG Stats failed: {e}")
-        return {"status": "ERROR", "message": str(e), "breakdown": {}}
 
 
 @app.get("/health")
