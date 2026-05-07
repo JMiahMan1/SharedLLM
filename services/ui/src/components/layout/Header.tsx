@@ -51,7 +51,7 @@ const Header = () => {
           </button>
           
           {showNotifications && (
-            <div className="absolute right-0 mt-4 w-80 glass-panel p-4 z-50 animate-in slide-in-from-top-2 duration-200">
+            <div className="absolute right-0 mt-4 w-80 max-w-[calc(100vw-2rem)] glass-panel p-4 z-50 animate-in slide-in-from-top-2 duration-200">
                <div className="flex items-center justify-between mb-4">
                   <h4 className="text-sm font-bold text-white uppercase tracking-widest">Notifications</h4>
                   <span className="text-[10px] text-slate-500">Live Feed</span>
