@@ -1,8 +1,8 @@
 # services/execution/handlers/climate.py
 import logging
 try:
-    from .. import ha_client
-    from ..schemas import UserContext, ExecutionResult
+    import ha_client
+    from schemas import UserContext, ExecutionResult
 except ImportError:
     import ha_client
     from schemas import UserContext, ExecutionResult

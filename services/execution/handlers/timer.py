@@ -8,7 +8,7 @@ import redis.asyncio as redis
 from typing import Optional
 
 try:
-    from ..schemas import TimerRequest, ExecutionResult
+    from schemas import TimerRequest, ExecutionResult
 except ImportError:
     from schemas import TimerRequest, ExecutionResult
 

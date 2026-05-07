@@ -43,9 +43,10 @@ except (ImportError, ValueError):
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
+            WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest
+            SystemLearningRequest, DiscoverySyncRequest
         )
         from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
         from handlers import docker_logs as docker_logs_handler
