@@ -2,7 +2,7 @@
 import os
 import logging
 import httpx
-from ..schemas import SystemLearningRequest, ExecutionResult
+from schemas import SystemLearningRequest, ExecutionResult
 
 log = logging.getLogger("execution.learning")
 

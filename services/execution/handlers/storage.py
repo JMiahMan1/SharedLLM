@@ -2,8 +2,8 @@
 import logging
 import requests
 from typing import Dict, Any
-from ..schemas import StorageFileReadRequest, StorageFileWriteRequest, ExecutionResult
-from ..nextcloud_client import resolve_credentials, webdav_url
+from schemas import StorageFileReadRequest, StorageFileWriteRequest, ExecutionResult
+from nextcloud_client import resolve_credentials, webdav_url
 
 log = logging.getLogger("execution.storage")
 

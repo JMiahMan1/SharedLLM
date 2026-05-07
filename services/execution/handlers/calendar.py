@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, date
 from dateutil import tz
 
 try:
-    from ..schemas import CalendarRequest, ExecutionResult
-    from ..personal_data import resolve_personal_data_provider
+    from schemas import CalendarRequest, ExecutionResult
+    from personal_data import resolve_personal_data_provider
 except ImportError:
     from schemas import CalendarRequest, ExecutionResult
     from personal_data import resolve_personal_data_provider

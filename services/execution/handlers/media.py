@@ -2,8 +2,8 @@
 import logging
 import asyncio
 try:
-    from .. import ha_client
-    from ..schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
+    import ha_client
+    from schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
 except ImportError:
     import ha_client
     from schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult

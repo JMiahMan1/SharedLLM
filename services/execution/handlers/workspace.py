@@ -3,7 +3,7 @@ import os
 import logging
 import difflib
 from typing import Dict, Any, Optional
-from ..schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, ExecutionResult
+from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, ExecutionResult
 
 log = logging.getLogger("execution.workspace")
 
