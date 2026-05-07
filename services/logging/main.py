@@ -62,16 +62,29 @@ async def _fetch_logs(service: Optional[str] = None, limit: int = 100):
     conn.close()
     return [dict(r) for r in rows]
 
+
+def _resolve_limit(limit: Optional[int], lines: Optional[int], default: int = 100) -> int:
+    """Support both legacy `lines` and current `limit` query params."""
+    value = lines if lines is not None else limit
+    if value is None:
+        return default
+    return max(1, min(int(value), 5000))
+
 # Direct service path (used internally)
 @app.get("/logs")
-async def get_logs(service: Optional[str] = None, limit: int = 100):
-    return await _fetch_logs(service=service, limit=limit)
+async def get_logs(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
+    return await _fetch_logs(service=service, limit=_resolve_limit(limit, lines))
 
 # /api/logs path — Caddy routes /api/logs* directly to logging:8006
 # so the logging service must handle the /api/logs path itself.
 @app.get("/api/logs")
-async def get_logs_api(service: Optional[str] = None, limit: int = 100):
-    return await _fetch_logs(service=service, limit=limit)
+async def get_logs_api(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
+    return await _fetch_logs(service=service, limit=_resolve_limit(limit, lines))
+
+
+@app.get("/api/admin/logs")
+async def get_logs_admin_api(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
+    return await _fetch_logs(service=service, limit=_resolve_limit(limit, lines))
 
 # --- WebSocket Streaming ---
 from fastapi import WebSocket, WebSocketDisconnect

@@ -454,7 +454,13 @@ def select_model_for_query(query: str) -> str:
 
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
-    from .prompts import AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
+    try:
+        from .prompts import AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
+    except (ImportError, ValueError):
+        try:
+            from prompts import AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
+        except ImportError:
+            from gateway.prompts import AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
     q = (query or "").lower()
     if any(token in q for token in AUTONOMOUS_SIGNALS):
       return AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
