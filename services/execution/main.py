@@ -11,9 +11,13 @@ try:
         UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
         CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
-        WebSearchRequest, WebReadRequest, ExecutionResult
+        WebSearchRequest, WebReadRequest, ExecutionResult,
+        DockerLogsRequest, GitOperationRequest, DeploymentRequest
     )
     from .handlers import light, media, climate, security, calendar, note, timer, talk, browser
+    from .handlers import docker_logs as docker_logs_handler
+    from .handlers import git as git_handler
+    from .handlers import deployment as deployment_handler
 except (ImportError, ValueError):
     try:
         from execution import ha_client
@@ -21,18 +25,26 @@ except (ImportError, ValueError):
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
-            WebSearchRequest, WebReadRequest, ExecutionResult
+            WebSearchRequest, WebReadRequest, ExecutionResult,
+            DockerLogsRequest, GitOperationRequest, DeploymentRequest
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser
+        from execution.handlers import docker_logs as docker_logs_handler
+        from execution.handlers import git as git_handler
+        from execution.handlers import deployment as deployment_handler
     except ImportError:
         import ha_client
         from schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
-            WebSearchRequest, WebReadRequest, ExecutionResult
+            WebSearchRequest, WebReadRequest, ExecutionResult,
+            DockerLogsRequest, GitOperationRequest, DeploymentRequest
         )
         from handlers import light, media, climate, security, calendar, note, timer, talk, browser
+        from handlers import docker_logs as docker_logs_handler
+        from handlers import git as git_handler
+        from handlers import deployment as deployment_handler
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -163,7 +175,48 @@ async def execute_trigger(payload: Dict[str, Any]):
     return _ok(f"Triggered {timer_data.get('title')}", "automation_trigger")
 
 
-# ─── Infrastructure Endpoints ───────────────────────────────────────────────────
+# ─── Ouroboros Autonomous Loop Endpoints ──────────────────────────────────────────────────
+
+@app.post("/execute/docker_logs")
+async def execute_docker_logs(req: DockerLogsRequest):
+    """
+    Fetch and optionally filter Docker container logs.
+    Part of the Ouroboros telemetry/OBSERVE phase.
+    Container name must start with 'sharedllm_'.
+    """
+    return await docker_logs_handler.handle_docker_logs(req)
+
+
+@app.get("/execute/docker_containers")
+async def list_docker_containers():
+    """
+    List all sharedllm_* containers and their statuses.
+    Used by the autonomous loop to understand the deployment landscape.
+    """
+    return await docker_logs_handler.handle_list_containers(type('Req', (), {})())
+
+
+@app.post("/execute/git")
+async def execute_git(req: GitOperationRequest):
+    """
+    Perform a Git lifecycle operation on /workspace/SharedLLM.
+    Supports: status, diff, add, commit, pull, push (admin), log.
+    Part of the Ouroboros ACT phase.
+    """
+    return await git_handler.handle_git(req)
+
+
+@app.post("/execute/deploy")
+async def execute_deploy(req: DeploymentRequest):
+    """
+    Control SharedLLM Docker containers: restart, status, logs, list.
+    Communicates via /var/run/docker.sock.
+    Part of the Ouroboros ACT/OBSERVE phase.
+    """
+    return await deployment_handler.handle_deployment(req)
+
+
+# ─── Infrastructure Endpoints ────────────────────────────────────────────────────────
 
 @app.post("/execute/announce", response_model=ExecutionResult)
 async def execute_announce(req: AnnouncementRequest):

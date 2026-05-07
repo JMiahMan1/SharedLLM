@@ -111,6 +111,15 @@ except (ImportError, ValueError):
       from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
       from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 
+# --- Ouroboros Worker ---
+try:
+    from .background_worker import worker as ouroboros_worker
+except ImportError:
+    try:
+        from background_worker import ouroboros_worker
+    except ImportError:
+        ouroboros_worker = None
+
 # --- Setup Logging ---
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -151,6 +160,11 @@ WORKSPACE_README_ACTION_HINTS = (
   "write readme", "create readme", "generate readme", "make readme",
   "readme.md", "readme file",
 )
+AUTONOMOUS_SIGNALS = (
+  "look into the error", "analyze logs", "build the tool", "self repair", 
+  "fix the error", "auto-fix", "debug the system", "ouroboros", "dev loop",
+  "check container logs", "rebuild service", "deploy fix"
+)
 
 # --- Capability Configuration ---
 # Maps intents to the credential fields required in ResolvedCredentials
@@ -171,7 +185,9 @@ INTENT_CAPABILITY_MAP = {
     "index_storage": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"],
     "storage_search": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"],
     "read_file": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"],
-    "storage_status": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"]
+    "storage_status": ["nextcloud_url", "nextcloud_user", "nextcloud_pass"],
+    "self_repair": [],
+    "dev_loop": []
 }
 
 HUMAN_READABLE_CAPABILITIES = {
@@ -200,8 +216,12 @@ def get_http_client() -> httpx.AsyncClient:
 async def lifespan(app: FastAPI):
     log.info("Gateway starting up...")
     engine.load()
+    if ouroboros_worker:
+        await ouroboros_worker.start()
     yield
     log.info("Gateway shutting down...")
+    if ouroboros_worker:
+        await ouroboros_worker.stop()
 
 app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
 
@@ -434,7 +454,10 @@ def select_model_for_query(query: str) -> str:
 
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
+    from .prompts import AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
     q = (query or "").lower()
+    if any(token in q for token in AUTONOMOUS_SIGNALS):
+      return AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
     if any(token in q for token in CODING_SIGNALS):
       return CODE_HELPER_SYSTEM_INSTRUCTION
     # Librarian is for research/knowledge queries. 
@@ -1384,6 +1407,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         "workflow_write_sync_commit": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
                         "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
                         "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
+                        "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
+                        "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
+                        "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
                     }
                     
                     # Normalize action name for lookup
@@ -1515,6 +1541,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "workflow_write_sync_commit": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
                 "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
                 "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
+                "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
+                "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
+                "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
             }
             
             lookup_action = action.lower().strip() if action else ""

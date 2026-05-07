@@ -14,3 +14,4 @@ pytest-asyncio
 pytest-mock
 playwright
 html2text
+docker>=7.0.0
