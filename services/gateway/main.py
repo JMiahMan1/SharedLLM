@@ -1692,6 +1692,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "storage_file_write": (EXECUTION_SVC, "/execute/storage_file_write"),
                 "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
                 "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
+                "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
             }
             
             lookup_action = action.lower().strip() if action else ""
