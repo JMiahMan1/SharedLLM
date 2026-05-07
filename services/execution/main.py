@@ -14,7 +14,7 @@ try:
         CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
-        WorkspaceFileReadRequest, WorkspaceFileWriteRequest, StorageFileReadRequest, StorageFileWriteRequest,
+        WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, StorageFileReadRequest, StorageFileWriteRequest,
         SystemLearningRequest, DiscoverySyncRequest
     )
     from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
@@ -245,10 +245,19 @@ async def execute_workspace_file_read(req: WorkspaceFileReadRequest):
 @app.post("/execute/workspace_file_write", response_model=ExecutionResult)
 async def execute_workspace_file_write(req: WorkspaceFileWriteRequest):
     """
-    Write or patch a file in the local Git workspace.
+    Write or overwrite a file in the local Git workspace.
     Used for autonomous bug fixing.
     """
     return await workspace.handle_workspace_write(req)
+
+
+@app.post("/execute/workspace_file_patch", response_model=ExecutionResult)
+async def execute_workspace_file_patch(req: WorkspaceFilePatchRequest):
+    """
+    Surgically patch a file in the local Git workspace.
+    Used for small bug fixes without full file overwrite.
+    """
+    return await workspace.handle_workspace_patch(req)
 
 
 @app.post("/execute/discovery_sync", response_model=ExecutionResult)
