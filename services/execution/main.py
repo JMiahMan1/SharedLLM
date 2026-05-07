@@ -239,17 +239,28 @@ async def execute_index_capabilities():
     
     script_path = os.path.join(os.getcwd(), "scripts", "index_capabilities.py")
     if not os.path.exists(script_path):
-        # Fallback for different CWDs
-        script_path = "/app/scripts/index_capabilities.py"
+        # Fallback for Docker environment
+        fallbacks = [
+            "/workspace/SharedLLM/scripts/index_capabilities.py",
+            "/app/scripts/index_capabilities.py"
+        ]
+        for fb in fallbacks:
+            if os.path.exists(fb):
+                script_path = fb
+                break
         
     try:
         log.info(f"Triggering capability indexing: {script_path}")
         # Run the script with current python interpreter and env
+        # Ensure PYTHONPATH includes the workspace root for imports
+        env = {**os.environ}
+        env["PYTHONPATH"] = f"{os.getcwd()}:/workspace/SharedLLM:/app"
+        
         result = subprocess.run(
             [sys.executable, script_path],
             capture_output=True,
             text=True,
-            env={**os.environ, "PYTHONPATH": os.getcwd()}
+            env=env
         )
         
         if result.returncode == 0:
