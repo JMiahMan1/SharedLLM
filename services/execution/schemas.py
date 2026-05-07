@@ -211,3 +211,11 @@ class DeploymentRequest(BaseModel):
     action: Literal["restart", "status", "logs", "list"]
     container_name: str = Field("sharedllm_gateway", description="Target container name")
     tail: int = Field(100, ge=1, le=1000, description="Lines to fetch for 'logs' action")
+
+
+class VolumeInventoryRequest(BaseModel):
+    """
+    Returns tracked Docker volume inventory and usage.
+    Admin only.
+    """
+    user_context: UserContext

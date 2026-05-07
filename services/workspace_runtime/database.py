@@ -28,6 +28,8 @@ def _migrate_workspace_table():
     with engine.begin() as conn:
         if "repo_url" not in columns:
             conn.execute(text("ALTER TABLE workspace ADD COLUMN repo_url VARCHAR"))
+        if "webhook_token_enc" not in columns:
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN webhook_token_enc VARCHAR"))
 
 
 def get_session():
