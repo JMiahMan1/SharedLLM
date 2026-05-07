@@ -3,7 +3,7 @@
 Pydantic schemas for all Execution Bridge endpoints.
 Strict validation is the primary defense against malformed gateway payloads.
 """
-from typing import Optional, Literal, Any, Dict
+from typing import Optional, Literal, Any, Dict, List
 from pydantic import BaseModel, Field
 
 
@@ -147,6 +147,44 @@ class TalkRequest(BaseModel):
     file_name: Optional[str] = None
     caption: Optional[str] = None
 
+# ─── File Operations (Workspace vs Storage) ───────────────────────────────────
+
+class WorkspaceFileReadRequest(BaseModel):
+    """
+    Reads a file from the local Git workspace (/workspace/SharedLLM).
+    Use this for reading CODE, SCRIPTS, and CONFIG.
+    """
+    user_context: UserContext
+    path: str = Field(..., description="Path relative to workspace root (e.g. 'services/gateway/main.py')")
+
+class WorkspaceFileWriteRequest(BaseModel):
+    """
+    Writes or patches a file in the local Git workspace.
+    Use this for modifying CODE and SCRIPTS.
+    """
+    user_context: UserContext
+    path: str = Field(..., description="Path relative to workspace root")
+    content: str
+    is_patch: bool = False
+    commit_after: bool = False
+    commit_message: Optional[str] = None
+
+class StorageFileReadRequest(BaseModel):
+    """
+    Reads a file from Nextcloud storage (Documents/Notes).
+    Do NOT use this for code. Use WorkspaceFileReadRequest instead.
+    """
+    user_context: UserContext
+    path: str = Field(..., description="Path within Nextcloud (e.g. '/Documents/memo.txt')")
+
+class StorageFileWriteRequest(BaseModel):
+    """
+    Writes a file to Nextcloud storage.
+    """
+    user_context: UserContext
+    path: str = Field(..., description="Path within Nextcloud")
+    content: str
+
 # ─── Workspace / Code Orchestration ──────────────────────────────────────────
 
 class WorkspaceFileAction(BaseModel):
@@ -196,8 +234,8 @@ class DockerLogsRequest(BaseModel):
     """
     user_context: UserContext
     container_name: str = Field(..., description="Exact Docker container name, e.g. 'sharedllm_gateway'")
-    tail: int = Field(200, ge=1, le=2000, description="Number of log lines to retrieve")
-    filter_level: Optional[str] = Field(None, description="Filter to lines containing this keyword, e.g. 'ERROR' or 'WARN'")
+    tail_lines: int = Field(200, ge=1, le=2000, description="Number of log lines to retrieve")
+    grep_filter: Optional[str] = Field(None, description="Filter to lines containing this keyword, e.g. 'ERROR' or 'WARN'")
 
 
 class GitOperationRequest(BaseModel):
@@ -238,3 +276,13 @@ class CapabilityIndexRequest(BaseModel):
     Refreshes the RAG system's knowledge of available tools.
     """
     user_context: UserContext
+
+class SystemLearningRequest(BaseModel):
+    """
+    Persists a successful solution or architectural insight to the System Learnings RAG.
+    This helps the agent 'remember' how to solve similar problems in the future.
+    """
+    user_context: UserContext
+    topic: str = Field(..., description="Subject of the learning (e.g. 'Fixing 502 error in Gateway')")
+    content: str = Field(..., description="Detailed description of the root cause and the fix applied.")
+    tags: List[str] = Field(default_factory=list, description="Keywords for retrieval (e.g. ['gateway', 'bugfix'])")

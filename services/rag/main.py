@@ -154,7 +154,7 @@ async def get_stats(user_id: str = "default"):
     user_id = user_id.lower()
     log.info(f"Fetching stats for user_id: {user_id}")
     try:
-        collections = ["nextcloud_files", "ha_entities", "system_capabilities"]
+        collections = ["nextcloud_files", "ha_entities", "system_capabilities", "system_learnings"]
         total_chunks = 0
         coll_chunks_map = {}
         coll_docs_map = {}
