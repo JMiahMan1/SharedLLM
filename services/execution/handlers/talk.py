@@ -8,9 +8,11 @@ from uuid import uuid4
 try:
     from ..schemas import ExecutionResult, TalkRequest
     from ..personal_data import resolve_personal_data_provider
+    from ..tts import text_to_speech
 except ImportError:
     from schemas import ExecutionResult, TalkRequest
     from personal_data import resolve_personal_data_provider
+    from tts import text_to_speech
 
 log = logging.getLogger("execution.talk")
 
@@ -154,17 +156,13 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             audio_bytes = b""
             if req.text_to_voice:
                 log.info(f"[talk] Generating TTS for: {req.text_to_voice}")
-                import edge_tts
-                import asyncio
-                communicate = edge_tts.Communicate(req.text_to_voice, "en-US-GuyNeural")
-                # We need to run this in a temporary file or buffer
-                audio_bytes = b""
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        audio_bytes += chunk["data"]
-                req.mime_type = "audio/mpeg"
-                if not req.file_name:
-                    req.file_name = f"tts-{uuid4().hex[:8]}.mp3"
+                try:
+                    audio_bytes = await text_to_speech(req.text_to_voice)
+                    req.mime_type = "audio/mpeg"
+                    if not req.file_name:
+                        req.file_name = f"tts-{uuid4().hex[:8]}.mp3"
+                except Exception as e:
+                    return ExecutionResult(status="FAILURE", message=f"TTS Generation failed: {e}", service="talk_send_voice")
             elif req.audio_base64:
                 audio_bytes = _decode_audio(req.audio_base64)
             else:

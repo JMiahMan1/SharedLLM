@@ -11,25 +11,25 @@ tests = [
         "name": "Self-Indexing Awareness",
         "query": "Trigger a re-index of your own tool capabilities",
         "expected_action": "CapabilityIndexRequest",
-        "validate": lambda d: d.get("execution_result", {}).get("status") == "SUCCESS"
+        "validate": lambda d: (d.get("execution_result") or {}).get("status") == "SUCCESS"
     },
     {
         "name": "Docker Log Telemetry",
         "query": "Show me the last 20 lines of logs for the sharedllm_gateway container",
         "expected_action": "DockerLogsRequest",
-        "validate": lambda d: d.get("execution_result", {}).get("status") == "SUCCESS" and len(d.get("execution_result", {}).get("detail", {}).get("lines", [])) > 0
+        "validate": lambda d: (d.get("execution_result") or {}).get("status") == "SUCCESS" and len((d.get("execution_result") or {}).get("detail", {}).get("lines", [])) > 0
     },
     {
         "name": "Messaging System",
         "query": "List my Nextcloud Talk conversations",
         "expected_action": "TalkRequest",
-        "validate": lambda d: d.get("execution_result", {}).get("status") == "SUCCESS"
+        "validate": lambda d: (d.get("execution_result") or {}).get("status") == "SUCCESS"
     },
     {
         "name": "Workspace Awareness",
         "query": "List the files in my current workspace",
         "expected_action": "FileListRequest",
-        "validate": lambda d: d.get("execution_result", {}).get("status") == "SUCCESS"
+        "validate": lambda d: (d.get("execution_result") or {}).get("status") == "SUCCESS"
     }
 ]
 
