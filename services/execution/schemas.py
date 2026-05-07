@@ -142,6 +142,7 @@ class TalkRequest(BaseModel):
     message: Optional[str] = None
     limit: int = Field(50, ge=1, le=200)
     audio_base64: Optional[str] = None
+    text_to_voice: Optional[str] = Field(None, description="If provided, converts this text to a voice message (TTS).")
     mime_type: Optional[str] = None
     file_name: Optional[str] = None
     caption: Optional[str] = None
