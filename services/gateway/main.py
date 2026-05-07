@@ -1640,7 +1640,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     if detail:
                         if isinstance(detail, dict):
                             if "lines" in detail:
-                                exec_msg += f"\n\n[LOG OUTPUTS]\n{'\n'.join(detail['lines'][:100])}"
+                                joined_lines = "\n".join(detail["lines"][:100])
+                                exec_msg += f"\n\n[LOG OUTPUTS]\n{joined_lines}"
                             elif "content" in detail:
                                 exec_msg += f"\n\n[FILE CONTENT]\n{str(detail['content'])[:30000]}"
                         elif isinstance(detail, str):
