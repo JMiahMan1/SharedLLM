@@ -2278,33 +2278,59 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
 
 @app.get("/api/storage/stats")
 async def get_storage_stats(request: Request):
-    # Resolve user from request
+    # Resolve user and nextcloud IDs from request
     try:
         creds_data = await _resolve_identity_from_request(request)
-        # Data is indexed under the Nextcloud username (from the storage service).
-        # Fall back to the Jarvis username if Nextcloud creds are not set.
-        user_id = creds_data.get("nextcloud_user") or creds_data.get("user", "default")
+        jarvis_user = creds_data.get("user", "default")
+        nc_user = creds_data.get("nextcloud_user")
     except:
-        user_id = "default"
+        jarvis_user = "default"
+        nc_user = None
 
-    # Proxies to RAG service stats
-    resp = await get_http_client().get(
-        f"{RAG_SVC}/rag/stats?user_id={user_id}",
+    # Helper to merge stats from multiple users
+    def merge_stats(base, extra):
+        if not extra or extra.get("status") != "SUCCESS":
+            return base
+        if base.get("status") != "SUCCESS":
+            return extra
+        
+        base["total_chunks"] = base.get("total_chunks", 0) + extra.get("total_chunks", 0)
+        base["total_documents"] = base.get("total_documents", 0) + extra.get("total_documents", 0)
+        
+        breakdown = base.get("breakdown", {})
+        for k, v in extra.get("breakdown", {}).items():
+            if k in breakdown:
+                # Merge individual collection counts
+                breakdown[k]["chunks"] = breakdown[k].get("chunks", 0) + v.get("chunks", 0)
+                breakdown[k]["documents"] = breakdown[k].get("documents", 0) + v.get("documents", 0)
+            else:
+                breakdown[k] = v
+        base["breakdown"] = breakdown
+        return base
+
+    # 1. Query for Jarvis User (typically HA entities and system learnings)
+    resp1 = await get_http_client().get(
+        f"{RAG_SVC}/rag/stats?user_id={jarvis_user}",
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    
     try:
-        content = resp.json()
+        content = resp1.json()
     except Exception as e:
-        log.error(f"Failed to parse RAG stats JSON: {e} | Body: {resp.text[:200]}")
-        content = {
-            "status": "ERROR",
-            "total_chunks": 0,
-            "total_documents": 0,
-            "breakdown": {}
-        }
+        log.error(f"Failed to parse Jarvis RAG stats: {e}")
+        content = {"status": "ERROR", "message": "Failed to fetch Jarvis stats", "breakdown": {}}
+
+    # 2. Query for Nextcloud User if different (typically file chunks)
+    if nc_user and nc_user != jarvis_user:
+        try:
+            resp2 = await get_http_client().get(
+                f"{RAG_SVC}/rag/stats?user_id={nc_user}",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            content = merge_stats(content, resp2.json())
+        except Exception as e:
+            log.warning(f"Failed to fetch or merge Nextcloud RAG stats: {e}")
         
-    return JSONResponse(status_code=resp.status_code, content=content)
+    return JSONResponse(status_code=200, content=content)
     
 @app.get("/api/storage/collection/{collection_name}")
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
