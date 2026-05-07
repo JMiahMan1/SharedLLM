@@ -1,5 +1,6 @@
 import os
 from sqlmodel import Session, SQLModel, create_engine, select
+from sqlalchemy import inspect, text
 try:
     from .models import Workspace
 except (ImportError, ValueError):
@@ -14,6 +15,19 @@ engine = create_engine(
 
 def init_db():
     SQLModel.metadata.create_all(engine)
+    _migrate_workspace_table()
+
+
+def _migrate_workspace_table():
+    inspector = inspect(engine)
+    try:
+        columns = {column["name"] for column in inspector.get_columns("workspace")}
+    except Exception:
+        return
+
+    with engine.begin() as conn:
+        if "repo_url" not in columns:
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN repo_url VARCHAR"))
 
 
 def get_session():

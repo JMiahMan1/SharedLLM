@@ -100,6 +100,44 @@ def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
     assert selected == AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
 
 
+@pytest.mark.asyncio
+async def test_resolve_chat_workspace_bootstraps_unavailable_workspace(monkeypatch):
+    calls = []
+
+    async def fake_runtime_request(method, path, *, json_payload=None, params=None):
+        calls.append((method, path, json_payload, params))
+        if method == "GET" and path == "/workspaces":
+            return {
+                "status": "SUCCESS",
+                "workspaces": [
+                    {
+                        "id": "sharedllm",
+                        "scope": "user",
+                        "available": False,
+                        "resolved_path": None,
+                    }
+                ],
+            }
+        if method == "POST" and path == "/workspaces/bootstrap":
+            return {
+                "status": "SUCCESS",
+                "workspace": {
+                    "id": "sharedllm",
+                    "scope": "user",
+                    "available": True,
+                    "resolved_path": "/workspace/SharedLLM",
+                },
+            }
+        raise AssertionError(f"Unexpected runtime request: {(method, path)}")
+
+    monkeypatch.setattr(gateway_main, "workspace_runtime_request", fake_runtime_request)
+
+    workspace = await gateway_main.resolve_chat_workspace({}, "alice")
+
+    assert workspace["id"] == "sharedllm"
+    assert any(path == "/workspaces/bootstrap" for _, path, _, _ in calls)
+
+
 @pytest.mark.local_only
 def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     captured = {}
