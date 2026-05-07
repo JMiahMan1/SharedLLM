@@ -574,6 +574,12 @@ const Admin = () => {
             </h3>
             
             <div className="space-y-4">
+                {ragStats?.status === "ERROR" && (
+                  <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+                    <p className="font-bold mb-1 uppercase tracking-widest">Database Sync Error</p>
+                    <p>{ragStats.message || "Failed to fetch database statistics."}</p>
+                  </div>
+                )}
                 {ragStats?.breakdown && Object.entries(ragStats.breakdown).map(([name, stats]) => (
                   <button
                     key={name}
