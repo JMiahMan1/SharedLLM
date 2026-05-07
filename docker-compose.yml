@@ -88,7 +88,9 @@ services:
     command: python3 scripts/index_capabilities.py
 
   gateway:
-    build: ./services/gateway
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
     container_name: sharedllm_gateway
     restart: unless-stopped
     env_file:
