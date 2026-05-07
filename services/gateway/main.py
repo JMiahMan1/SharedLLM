@@ -283,19 +283,6 @@ async def clear_history_endpoint(request: Request):
         log.error(f"History clear failed: {e}")
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
-@app.get("/api/rag/stats")
-async def get_rag_stats(request: Request):
-    try:
-        creds_data = await _resolve_identity_from_request(request)
-        user_id = creds_data.get("user", "default")
-    except:
-        user_id = "default"
-        
-    resp = await get_http_client().get(
-        f"{RAG_SVC}/rag/stats?user_id={user_id}",
-        headers={"X-Internal-Secret": INTERNAL_SECRET}
-    )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 @app.get("/health")
 def health():
