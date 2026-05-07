@@ -159,13 +159,27 @@ class WorkspaceFileReadRequest(BaseModel):
 
 class WorkspaceFileWriteRequest(BaseModel):
     """
-    Writes or patches a file in the local Git workspace.
-    Use this for modifying CODE and SCRIPTS.
+    Writes or overwrites a file in the local Git workspace.
+    Requires the FULL file content in the 'content' field.
     """
     user_context: UserContext
     path: str = Field(..., description="Path relative to workspace root")
     content: str
-    is_patch: bool = False
+    commit_after: bool = False
+    commit_message: Optional[str] = None
+
+class ReplacementChunk(BaseModel):
+    old_text: str = Field(..., description="The exact text to be replaced")
+    new_text: str = Field(..., description="The replacement text")
+
+class WorkspaceFilePatchRequest(BaseModel):
+    """
+    Surgically patches a file in the local Git workspace.
+    Use this for small fixes to avoid providing the full file content.
+    """
+    user_context: UserContext
+    path: str = Field(..., description="Path relative to workspace root")
+    chunks: List[ReplacementChunk]
     commit_after: bool = False
     commit_message: Optional[str] = None
 

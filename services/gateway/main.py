@@ -1732,6 +1732,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
                 "workspace_file_write": (EXECUTION_SVC, "/execute/workspace_file_write"),
                 "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "workspace_file_patch": (EXECUTION_SVC, "/execute/workspace_file_patch"),
+                "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
                 "storage_file_read": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storage_file_write": (EXECUTION_SVC, "/execute/storage_file_write"),
@@ -1740,6 +1742,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
                 "read": (EXECUTION_SVC, "/execute/workspace_file_read"),
                 "write": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "patch": (EXECUTION_SVC, "/execute/workspace_file_patch"),
                 "gitpull": (EXECUTION_SVC, "/execute/git_pull"),
             }
             

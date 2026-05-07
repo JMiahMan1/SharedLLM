@@ -129,7 +129,7 @@ def purge_rag_collection(
     filter: dict = {},
     x_internal_secret: Optional[str] = Header(default=None)
 ):
-    _require_internal_secret(x_internal_secret)
+    require_internal(x_internal_secret)
     try:
         user_id = user_id.lower()
         coll = chroma_client.get_collection(name=collection_name, embedding_function=embedding_fn)
