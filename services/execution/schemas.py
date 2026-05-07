@@ -219,3 +219,11 @@ class VolumeInventoryRequest(BaseModel):
     Admin only.
     """
     user_context: UserContext
+
+
+class CapabilityIndexRequest(BaseModel):
+    """
+    Triggers the JIT Capability Discovery indexing script.
+    Refreshes the RAG system's knowledge of available tools.
+    """
+    user_context: UserContext

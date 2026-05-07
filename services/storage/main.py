@@ -39,6 +39,16 @@ class IndexScanRequest(BaseModel):
 def health():
     return {"status": "ok", "service": "storage"}
 
+@app.get("/status")
+async def get_storage_status():
+    """Retrieves the current indexing status and file counts."""
+    # This is a placeholder that could be expanded to query RAG for counts
+    return {
+        "status": "SUCCESS",
+        "indexer": "IDLE",
+        "message": "Storage system healthy. Ready for discovery."
+    }
+
 @app.post("/index/full", status_code=202)
 async def sync_folder_to_chroma(req: IndexScanRequest, background_tasks: BackgroundTasks):
     """Scan structure, extract content, chunk, and sync to RAG in the background."""
