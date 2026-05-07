@@ -27,6 +27,10 @@
         reverse_proxy logging:8006
     }
 
+    handle /api/admin/logs* {
+        reverse_proxy logging:8006
+    }
+
     handle /execute* {
         reverse_proxy execution:8003
     }
