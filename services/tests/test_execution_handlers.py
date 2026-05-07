@@ -2,11 +2,11 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
-from services.execution.handlers import light, media, climate, security, talk
+from services.execution.handlers import light, media, climate, security, talk, volumes
 from services.execution.personal_data import resolve_personal_data_provider
 from services.execution.schemas import (
     LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-    TVCastRequest, TalkRequest, UserContext
+    TVCastRequest, TalkRequest, UserContext, VolumeInventoryRequest
 )
 
 @pytest.fixture
@@ -186,3 +186,72 @@ async def test_talk_send_voice_uploads_and_shares():
     provider.ensure_directory.assert_called_once()
     provider.upload_file.assert_called_once()
     provider.request.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_volume_inventory_requires_admin():
+    result = await volumes.handle_volumes(
+        VolumeInventoryRequest(user_context=UserContext(user="default", is_admin=False))
+    )
+
+    assert result["status"] == "FAILURE"
+    assert result["detail"]["error"] == "insufficient_permissions"
+
+
+@pytest.mark.asyncio
+async def test_volume_inventory_merges_manifest_and_docker(monkeypatch):
+    class FakeVolume:
+        def __init__(self, name, mountpoint="/var/lib/docker/volumes/demo/_data"):
+            self.name = name
+            self.attrs = {
+                "Mountpoint": mountpoint,
+                "CreatedAt": "2026-05-06T00:00:00Z",
+                "Labels": {"com.docker.compose.volume": name},
+            }
+
+    class FakeClient:
+        def df(self):
+            return {
+                "Volumes": [
+                    {"Name": "sharedllm_identity_db", "UsageData": {"Size": 4096, "RefCount": 1}},
+                    {"Name": "orphaned_volume", "UsageData": {"Size": 2048, "RefCount": 0}},
+                ]
+            }
+
+        class volumes:
+            @staticmethod
+            def list():
+                return [FakeVolume("sharedllm_identity_db"), FakeVolume("orphaned_volume")]
+
+    monkeypatch.setattr(volumes, "_get_docker_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        volumes,
+        "_load_manifest",
+        lambda: {
+            "volumes": [
+                {
+                    "name": "sharedllm_identity_db",
+                    "service": "identity",
+                    "mount_path": "/data",
+                    "category": "database",
+                    "criticality": "critical",
+                    "rebuildable": False,
+                    "backup_policy": "daily",
+                    "notes": "Encrypted identity state.",
+                }
+            ]
+        },
+    )
+
+    result = await volumes.handle_volumes(
+        VolumeInventoryRequest(user_context=UserContext(user="admin", is_admin=True))
+    )
+
+    assert result["status"] == "SUCCESS"
+    assert result["detail"]["tracked_volumes"] == 1
+    assert result["detail"]["unmanaged_volumes"] == 1
+    tracked = next(item for item in result["detail"]["volumes"] if item["name"] == "sharedllm_identity_db")
+    unmanaged = next(item for item in result["detail"]["volumes"] if item["name"] == "orphaned_volume")
+    assert tracked["size_bytes"] == 4096
+    assert tracked["backup_example"].startswith("docker run --rm")
+    assert unmanaged["category"] == "untracked"

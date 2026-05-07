@@ -6,6 +6,8 @@ Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.g
 """
 import os
 import logging
+import hmac
+import hashlib
 from cryptography.fernet import Fernet, InvalidToken
 
 log = logging.getLogger("identity.crypto")
@@ -41,3 +43,10 @@ def decrypt(ciphertext: str | None) -> str | None:
     except (InvalidToken, Exception) as e:
         log.error(f"[crypto] Decryption failed: {e}")
         return None
+
+
+def digest_secret(secret: str | None) -> str | None:
+    """Derive a stable HMAC-SHA256 fingerprint for lookup without storing plaintext."""
+    if not secret:
+        return None
+    return hmac.new(_KEY, secret.encode(), hashlib.sha256).hexdigest()

@@ -16,6 +16,8 @@ class User(SQLModel, table=True):
     is_system_default: bool = Field(default=False)
     password_hash: Optional[str] = Field(default=None)
     api_key: Optional[str] = Field(default=None, index=True)
+    api_key_enc: Optional[str] = Field(default=None)
+    api_key_hash: Optional[str] = Field(default=None, index=True)
 
     # Plain-text fields
     nextcloud_url: Optional[str] = None
@@ -56,7 +58,9 @@ class DeviceAssignment(SQLModel, table=True):
 class APIKey(SQLModel, table=True):
     """Secure access tokens for users and external clients."""
     id: Optional[int] = Field(default=None, primary_key=True)
-    key_value: str = Field(index=True, unique=True)
+    key_value: Optional[str] = Field(default=None, index=True, unique=True)
+    key_hash: Optional[str] = Field(default=None, index=True, unique=True)
+    key_prefix: Optional[str] = Field(default=None)
     label: str = Field(default="External Client")
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     user_id: int = Field(foreign_key="user.id")

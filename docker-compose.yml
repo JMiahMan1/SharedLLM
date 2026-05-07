@@ -145,6 +145,7 @@ services:
     environment:
       - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - FERNET_KEY=${FERNET_KEY}
       - IDENTITY_SVC_URL=http://identity:8001
       - STORAGE_SVC_URL=http://storage:8005
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json

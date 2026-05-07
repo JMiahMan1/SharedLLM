@@ -10,9 +10,10 @@ os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 os.environ["INIT_DB"] = "false"
 
 import identity.main as identity_main
-from identity.main import app, get_session
+from identity.main import app, get_session, _store_user_api_key
 from identity.models import User, APIKey
 from identity.schemas import ResolveRequest
+from identity.crypto import digest_secret
 
 # Use an in-memory SQLite database for testing
 test_engine = create_engine(
@@ -64,7 +65,7 @@ def test_api_key_generation_and_resolution(client, session):
     # Headers for admin requests (using internal secret for some, or just login normally)
     # The generate key endpoint uses require_api_key, so we need a way to call it.
     # For testing, we'll manually set an api_key for Dad first.
-    dad.api_key = "dad-session-token"
+    _store_user_api_key(dad, "dad-session-token")
     session.add(dad)
     session.commit()
     
@@ -78,9 +79,10 @@ def test_api_key_generation_and_resolution(client, session):
     assert generated_key.startswith("sk-")
     
     # Verify it's in the DB
-    db_key = session.exec(select(APIKey).where(APIKey.key_value == generated_key)).first()
+    db_key = session.exec(select(APIKey).where(APIKey.key_hash == digest_secret(generated_key))).first()
     assert db_key is not None
     assert db_key.user_id == dad.id
+    assert db_key.key_value is None
     
     # 3. Test Resolution Routing
     

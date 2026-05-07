@@ -18,9 +18,11 @@ from sqlmodel import Session, select
 try:
     from .models import Workspace
     from .database import engine, init_db, get_session
+    from .crypto import encrypt, decrypt
 except (ImportError, ValueError):
     from models import Workspace
     from database import engine, init_db, get_session
+    from crypto import encrypt, decrypt
 
 
 log = logging.getLogger("workspace_runtime")
@@ -196,7 +198,25 @@ def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
 def _load_registry() -> list[dict[str, Any]]:
     with Session(engine) as session:
         items = session.exec(select(Workspace)).all()
-        return [item.dict() for item in items]
+        return [_workspace_to_dict(item) for item in items]
+
+
+def _workspace_to_dict(item: Workspace) -> dict[str, Any]:
+    data = item.model_dump()
+    data["webhook_token"] = decrypt(item.webhook_token_enc) if item.webhook_token_enc else item.webhook_token
+    data.pop("webhook_token_enc", None)
+    return data
+
+
+def _store_workspace_secret_fields(workspace: Workspace, updates: dict[str, Any] | None = None) -> None:
+    incoming = updates if updates is not None else workspace.model_dump()
+    if "webhook_token" in incoming:
+        value = incoming.get("webhook_token")
+        if isinstance(value, str):
+            value = value.strip()
+        value = value or None
+        workspace.webhook_token_enc = encrypt(value) if value else None
+        workspace.webhook_token = None
 
 
 def _seed_db_from_json():
@@ -215,6 +235,7 @@ def _seed_db_from_json():
             workspaces_data = data.get("workspaces", []) if isinstance(data, dict) else data
             for ws_data in workspaces_data:
                 ws = Workspace(**ws_data)
+                _store_workspace_secret_fields(ws)
                 session.add(ws)
             session.commit()
             log.info("Successfully seeded %d workspaces", len(workspaces_data))
@@ -234,6 +255,18 @@ async def on_startup():
     except Exception as e:
         log.warning(f"Failed to set git safe.directory: {e}")
     _seed_db_from_json()
+    with Session(engine) as session:
+        pending = session.exec(select(Workspace).where(Workspace.webhook_token.is_not(None))).all()
+        migrated = 0
+        for workspace in pending:
+            if workspace.webhook_token_enc:
+                continue
+            _store_workspace_secret_fields(workspace)
+            session.add(workspace)
+            migrated += 1
+        if migrated:
+            session.commit()
+            log.info("Migrated %d workspace webhook secrets to encrypted storage", migrated)
 
 
 def _workspace_access_policy(entry: dict[str, Any]) -> str:
@@ -865,10 +898,11 @@ def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(de
         existing = session.get(Workspace, ws.id)
         if existing:
             raise HTTPException(status_code=400, detail=f"Workspace {ws.id} already exists")
+        _store_workspace_secret_fields(ws)
         session.add(ws)
         session.commit()
         session.refresh(ws)
-        return {"status": "SUCCESS", "workspace": ws}
+        return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
 
 
 @app.patch("/workspaces/{workspace_id}")
@@ -882,11 +916,12 @@ def update_workspace(workspace_id: str, updates: dict, x_internal_secret: Option
         for key, value in updates.items():
             if hasattr(ws, key):
                 setattr(ws, key, value)
+        _store_workspace_secret_fields(ws, updates)
         
         session.add(ws)
         session.commit()
         session.refresh(ws)
-        return {"status": "SUCCESS", "workspace": ws}
+        return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
 
 
 @app.delete("/workspaces/{workspace_id}")
@@ -1142,10 +1177,11 @@ def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(de
         existing = session.get(Workspace, ws.id)
         if existing:
             raise HTTPException(status_code=409, detail=f"Workspace with id '{ws.id}' already exists")
+        _store_workspace_secret_fields(ws)
         session.add(ws)
         session.commit()
         session.refresh(ws)
-        return {"status": "SUCCESS", "workspace": ws}
+        return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
 
 
 @app.put("/workspaces/{workspace_id}")
@@ -1159,11 +1195,12 @@ def update_workspace(workspace_id: str, updates: dict, x_internal_secret: Option
         for key, value in updates.items():
             if hasattr(ws, key):
                 setattr(ws, key, value)
+        _store_workspace_secret_fields(ws, updates)
         
         session.add(ws)
         session.commit()
         session.refresh(ws)
-        return {"status": "SUCCESS", "workspace": ws}
+        return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
 
 
 @app.delete("/workspaces/{workspace_id}")
@@ -1597,7 +1634,7 @@ async def git_pull_webhook(
                 raise HTTPException(status_code=404, detail="Workspace not found")
             
             # Verify secret (either workspace-specific or global)
-            expected_secret = match.webhook_token or webhook_secret
+            expected_secret = decrypt(match.webhook_token_enc) if match.webhook_token_enc else match.webhook_token or webhook_secret
             if not expected_secret:
                 log.warning(f"No webhook secret configured for workspace: {workspace_id}")
                 raise HTTPException(status_code=503, detail="Webhook service unavailable")

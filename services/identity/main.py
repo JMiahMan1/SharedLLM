@@ -21,7 +21,7 @@ try:
         LoginRequest, LoginResponse, DiscoverUser,
         GlobalSettingRead, GlobalSettingUpdate
     )
-    from .crypto import encrypt, decrypt
+    from .crypto import encrypt, decrypt, digest_secret
     from .seed import seed_from_env, pwd_context
 except (ImportError, ModuleNotFoundError):
     from models import User, DeviceAssignment, GlobalSetting, APIKey
@@ -32,7 +32,7 @@ except (ImportError, ModuleNotFoundError):
         LoginRequest, LoginResponse, DiscoverUser,
         GlobalSettingRead, GlobalSettingUpdate
     )
-    from crypto import encrypt, decrypt
+    from crypto import encrypt, decrypt, digest_secret
     from seed import seed_from_env, pwd_context
 
 import httpx
@@ -69,6 +69,10 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE user ADD COLUMN password_hash VARCHAR"))
             if "api_key" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN api_key VARCHAR"))
+            if "api_key_enc" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN api_key_enc VARCHAR"))
+            if "api_key_hash" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN api_key_hash VARCHAR"))
             if "github_url" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN github_url VARCHAR"))
             if "github_user" not in columns:
@@ -87,6 +91,14 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_user VARCHAR"))
             if "audiobookshelf_pass_enc" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR"))
+            conn.commit()
+    if "apikey" in inspector.get_table_names():
+        key_columns = {column["name"] for column in inspector.get_columns("apikey")}
+        with engine.connect() as conn:
+            if "key_hash" not in key_columns:
+                conn.execute(text("ALTER TABLE apikey ADD COLUMN key_hash VARCHAR"))
+            if "key_prefix" not in key_columns:
+                conn.execute(text("ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR"))
             conn.commit()
 
 
@@ -114,6 +126,7 @@ async def lifespan(app: FastAPI):
     with Session(engine) as session:
         seed_from_env(session)
         _ensure_default_settings(session)
+        _migrate_api_key_material(session)
     yield
 
 app = FastAPI(title="Jarvis OS Identity Service", lifespan=lifespan)
@@ -132,6 +145,73 @@ app.add_middleware(
 def get_session():
     with Session(engine) as session:
         yield session
+
+
+def _api_key_prefix(key_value: str | None) -> str | None:
+    if not key_value:
+        return None
+    return f"{key_value[:8]}..."
+
+
+def _store_user_api_key(user: User, key_value: str | None) -> str | None:
+    key_value = (key_value or "").strip() or None
+    user.api_key_enc = encrypt(key_value) if key_value else None
+    user.api_key_hash = digest_secret(key_value) if key_value else None
+    user.api_key = None
+    return key_value
+
+
+def _get_user_api_key(user: User) -> str | None:
+    return decrypt(user.api_key_enc) if user.api_key_enc else user.api_key
+
+
+def _store_generated_api_key(record: APIKey, key_value: str | None) -> str | None:
+    key_value = (key_value or "").strip() or None
+    record.key_hash = digest_secret(key_value) if key_value else None
+    record.key_prefix = _api_key_prefix(key_value)
+    record.key_value = None
+    return key_value
+
+
+def _find_user_for_api_key(session: Session, key_value: str) -> User | None:
+    key_hash = digest_secret(key_value)
+
+    api_key_obj = session.exec(select(APIKey).where(APIKey.key_hash == key_hash)).first() if key_hash else None
+    if not api_key_obj:
+        api_key_obj = session.exec(select(APIKey).where(APIKey.key_value == key_value)).first()
+        if api_key_obj and not api_key_obj.key_hash:
+            _store_generated_api_key(api_key_obj, key_value)
+            session.add(api_key_obj)
+            session.commit()
+            session.refresh(api_key_obj)
+    if api_key_obj:
+        return api_key_obj.user
+
+    user = session.exec(select(User).where(User.api_key_hash == key_hash)).first() if key_hash else None
+    if not user:
+        user = session.exec(select(User).where(User.api_key == key_value)).first()
+        if user and not user.api_key_hash:
+            _store_user_api_key(user, key_value)
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+    return user
+
+
+def _migrate_api_key_material(session: Session) -> None:
+    dirty = False
+    for user in session.exec(select(User)).all():
+        if user.api_key and not user.api_key_hash:
+            _store_user_api_key(user, user.api_key)
+            session.add(user)
+            dirty = True
+    for key in session.exec(select(APIKey)).all():
+        if key.key_value and not key.key_hash:
+            _store_generated_api_key(key, key.key_value)
+            session.add(key)
+            dirty = True
+    if dirty:
+        session.commit()
 
 @app.post("/api/users/{username}/password")
 def admin_set_password(username: str, req: dict, x_internal_secret: Optional[str] = Header(default=None)):
@@ -165,14 +245,8 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing API Key")
     key = authorization.split(" ")[1]
-    
-    # Check new APIKey table
-    api_key_obj = session.exec(select(APIKey).where(APIKey.key_value == key)).first()
-    if api_key_obj:
-        return api_key_obj.user
-        
-    # Fallback to legacy User.api_key (for session tokens)
-    user = session.exec(select(User).where(User.api_key == key)).first()
+
+    user = _find_user_for_api_key(session, key)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API Key")
     return user
@@ -188,13 +262,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     
     # Resolve by API Key first (for OpenWebUI & UI clients)
     if req.api_key:
-        # Check new APIKey table
-        api_key_obj = session.exec(select(APIKey).where(APIKey.key_value == req.api_key)).first()
-        if api_key_obj:
-            user = api_key_obj.user
-        else:
-            # Fallback to legacy User.api_key
-            user = session.exec(select(User).where(User.api_key == req.api_key)).first()
+        user = _find_user_for_api_key(session, req.api_key)
 
     elif req.rag_user:
         user = session.exec(select(User).where(User.username == req.rag_user.lower())).first()
@@ -384,7 +452,6 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         display_name=body.display_name,
         is_admin=body.is_admin,
         is_system_default=body.is_system_default,
-        api_key=body.api_key or os.urandom(24).hex(),
         nextcloud_url=_coerce(body.nextcloud_url),
         nextcloud_user=_coerce(body.nextcloud_user),
         nextcloud_pass_enc=encrypt(_coerce(body.nextcloud_pass)) if _coerce(body.nextcloud_pass) else None,
@@ -400,6 +467,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         audiobookshelf_user=_coerce(body.audiobookshelf_user),
         audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None
     )
+    _store_user_api_key(user, body.api_key or os.urandom(24).hex())
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -508,14 +576,15 @@ def login(req: LoginRequest, session: Session = Depends(get_session)):
     if not pwd_context.verify(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
-    if not user.api_key:
-        user.api_key = os.urandom(24).hex()
+    session_key = _get_user_api_key(user)
+    if not session_key:
+        session_key = _store_user_api_key(user, os.urandom(24).hex())
         session.add(user)
         session.commit()
         session.refresh(user)
 
     return LoginResponse(
-        api_key=user.api_key,
+        api_key=session_key or "",
         username=user.username,
         is_admin=user.is_admin
     )
@@ -614,7 +683,7 @@ def get_my_keys(session: Session = Depends(get_session), user: User = Depends(re
         {
             "id": k.id, 
             "label": k.label, 
-            "prefix": k.key_value[:8] + "...",
+            "prefix": k.key_prefix or _api_key_prefix(k.key_value) or "unavailable",
             "created_at": k.created_at
         } for k in user.api_keys
     ]
@@ -624,7 +693,8 @@ def generate_key(body: dict, session: Session = Depends(get_session), user: User
     """Generate a new API key for the current user."""
     import secrets
     new_key_value = "sk-" + secrets.token_hex(24)
-    new_key = APIKey(key_value=new_key_value, label=body.get("label", "New Key"), user_id=user.id)
+    new_key = APIKey(label=body.get("label", "New Key"), user_id=user.id)
+    _store_generated_api_key(new_key, new_key_value)
     session.add(new_key)
     session.commit()
     session.refresh(new_key)
