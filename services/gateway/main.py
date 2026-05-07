@@ -1482,6 +1482,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     tool_data = json.loads(tool_json)
                     action = tool_data.get("action")
                     payload = tool_data.get("payload", {})
+                    # PIPELINE HARDENING: Handle flat JSON tool calls (where keys are not nested in 'payload')
+                    if not payload and isinstance(tool_data, dict):
+                        payload = {k: v for k, v in tool_data.items() if k != "action"}
                     
                     action_map = {
                         "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
