@@ -176,9 +176,12 @@ export const server = setupServer(
       workspace_runtime: 'OK',
     },
   })),
-  http.get('/api/workspaces', () => HttpResponse.json([
-    { id: 'ws1', name: 'SharedLLM', resolved_path: '/workspace/SharedLLM', available: true, scope: 'system' },
-  ])),
+  http.get('/api/workspaces', () => HttpResponse.json({
+    status: 'SUCCESS',
+    workspaces: [
+      { id: 'ws1', display_name: 'SharedLLM', local_path: 'SharedLLM', resolved_path: '/workspace/SharedLLM', available: true, scope: 'system', capabilities: [], sync_mode: 'local_git_authoritative', auto_pull_enabled: false },
+    ],
+  })),
   http.get('/api/logs', () => HttpResponse.json(logs)),
   http.post('/api/admin/tests/smoke', () => HttpResponse.json({
     status: 'SUCCESS',
