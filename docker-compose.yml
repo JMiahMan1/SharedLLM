@@ -116,6 +116,10 @@ services:
       - TZ=America/Phoenix
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
+      - ./services/gateway/main.py:/app/main.py
+      - ./services/gateway/history.py:/app/history.py
+      - ./services/gateway/prompts.py:/app/prompts.py
+      - ./services/gateway/intent_engine.py:/app/intent_engine.py
       - huggingface_cache:/root/.cache/huggingface
       - qdrant_cache:/root/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
