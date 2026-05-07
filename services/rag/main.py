@@ -222,7 +222,6 @@ async def list_collection_documents(collection_name: str, user_id: str = "defaul
         # Always use default for system capabilities
         target_user = "default" if collection_name == "system_capabilities" else user_id
         
-        log.info(f"[RAG_GET] Collection {collection_name}, User {target_user}, Limit {limit}")
         results = collection.get(
             where={"user_id": target_user},
             limit=limit,
