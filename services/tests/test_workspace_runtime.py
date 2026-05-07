@@ -32,6 +32,11 @@ def runtime_env(tmp_path, monkeypatch):
     subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True, text=True)
     subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_dir, check=True, capture_output=True, text=True)
 
+    remote_dir = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote_dir)], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote_dir)], cwd=repo_dir, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo_dir, check=True, capture_output=True, text=True)
+
     registry_path = tmp_path / "workspaces.json"
     registry_path.write_text(
         json.dumps(
@@ -43,6 +48,16 @@ def runtime_env(tmp_path, monkeypatch):
                         "access_policy": "authenticated",
                         "local_path": "demo",
                         "nextcloud_path": "/Code/SharedLLM",
+                        "repo_url": str(remote_dir),
+                        "default_branch": "main",
+                    },
+                    {
+                        "id": "demo_missing",
+                        "display_name": "Missing Workspace",
+                        "access_policy": "authenticated",
+                        "local_path": "demo_missing",
+                        "nextcloud_path": "/Code/SharedLLM",
+                        "repo_url": str(remote_dir),
                         "default_branch": "main",
                     },
                     {
@@ -53,6 +68,7 @@ def runtime_env(tmp_path, monkeypatch):
                         "capabilities": ["read", "git_status", "git_diff"],
                         "local_path": "demo",
                         "nextcloud_path": "/Code/SharedLLM",
+                        "repo_url": str(remote_dir),
                         "default_branch": "main",
                     },
                     {
@@ -61,6 +77,7 @@ def runtime_env(tmp_path, monkeypatch):
                         "access_policy": "admin_only",
                         "local_path": "demo",
                         "nextcloud_path": "/Code/SharedLLM",
+                        "repo_url": str(remote_dir),
                         "default_branch": "main",
                     }
                 ]
@@ -70,7 +87,9 @@ def runtime_env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runtime, "INTERNAL_SECRET", "test-secret")
     monkeypatch.setattr(runtime, "WORKSPACE_ROOT", workspace_root.resolve())
+    monkeypatch.setattr(runtime, "_DEFAULT_WORKSPACE_ROOT", workspace_root.resolve())
     monkeypatch.setattr(runtime, "WORKSPACE_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setattr(runtime, "get_workspace_root", lambda: workspace_root.resolve())
     
     # DB Setup for test
     test_engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
@@ -123,6 +142,8 @@ def test_list_workspaces():
     assert data["status"] == "SUCCESS"
     assert data["workspaces"][0]["id"] == "demo"
     assert data["workspaces"][0]["available"] is True
+    missing = next(item for item in data["workspaces"] if item["id"] == "demo_missing")
+    assert missing["available"] is False
 
 
 def test_list_workspaces_allows_admin_override():
@@ -476,6 +497,50 @@ def test_git_branch_create_checks_out_new_branch():
     assert data["status"] == "SUCCESS"
     assert data["branch"] == "feature/runtime-git"
     assert data["current_branch"] == "feature/runtime-git"
+
+
+def test_bootstrap_workspace_clones_missing_repo():
+    data = runtime.bootstrap_workspace(
+        runtime.WorkspaceBootstrapRequest(workspace_id="demo_missing", rag_user="jeremiah"),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["bootstrapped"] is True
+    cloned_path = Path(data["workspace"]["resolved_path"])
+    assert (cloned_path / ".git").is_dir()
+    assert (cloned_path / "sample.py").exists()
+
+
+def test_bootstrap_workspace_returns_existing_checkout(runtime_env):
+    data = runtime.bootstrap_workspace(
+        runtime.WorkspaceBootstrapRequest(workspace_id="demo", rag_user="jeremiah"),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["already_present"] is True
+
+
+def test_bootstrap_workspace_can_create_user_owned_workspace():
+    repo_url = next(item["repo_url"] for item in runtime._load_registry() if item["id"] == "demo")
+    data = runtime.bootstrap_workspace(
+        runtime.WorkspaceBootstrapRequest(
+            workspace_id="agent-scratch",
+            rag_user="jeremiah",
+            repo_url=repo_url,
+            create_if_missing=True,
+        ),
+        "test-secret",
+    )
+    assert data["status"] == "SUCCESS"
+    assert data["workspace"]["owner_user"] == "jeremiah"
+    assert data["workspace"]["local_path"] == "users/jeremiah/workspaces/agent-scratch"
+    assert Path(data["workspace"]["resolved_path"]).joinpath(".git").is_dir()
+
+    all_for_owner = runtime.list_workspaces(rag_user="jeremiah", x_internal_secret="test-secret")
+    assert any(item["id"] == "agent-scratch" for item in all_for_owner["workspaces"])
+
+    all_for_other = runtime.list_workspaces(rag_user="alice", x_internal_secret="test-secret")
+    assert not any(item["id"] == "agent-scratch" for item in all_for_other["workspaces"])
 
 
 def test_system_workspace_blocks_git_write_for_non_admin(runtime_env):

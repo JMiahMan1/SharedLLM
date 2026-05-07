@@ -6,6 +6,7 @@
       "access_policy": "authenticated",
       "local_path": "SharedLLM",
       "nextcloud_path": "/Code/SharedLLM",
+      "repo_url": "https://github.com/JMiahMan1/SharedLLM.git",
       "git_remote": "origin",
       "default_branch": "microservices",
       "sync_mode": "local_git_authoritative"
@@ -18,6 +19,7 @@
       "capabilities": ["read", "git_status", "git_diff"],
       "local_path": "SharedLLM",
       "nextcloud_path": "/Code/SharedLLM",
+      "repo_url": "https://github.com/JMiahMan1/SharedLLM.git",
       "git_remote": "origin",
       "default_branch": "microservices",
       "sync_mode": "local_git_authoritative"

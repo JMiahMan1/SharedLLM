@@ -628,8 +628,30 @@ async def resolve_chat_workspace(body: dict, user_id: str) -> dict | None:
     if not isinstance(workspaces, list):
       return None
 
+    async def try_bootstrap(item: dict) -> dict | None:
+        if not isinstance(item, dict):
+            return None
+        candidate_id = str(item.get("id") or "").strip()
+        if not candidate_id:
+            return None
+        try:
+            bootstrap_data = await workspace_runtime_request(
+                "POST",
+                "/workspaces/bootstrap",
+                json_payload={"workspace_id": candidate_id, "rag_user": user_id},
+            )
+        except HTTPException:
+            return None
+        bootstrapped = bootstrap_data.get("workspace")
+        return bootstrapped if isinstance(bootstrapped, dict) else None
+
     available = [item for item in workspaces if isinstance(item, dict) and item.get("available")]
     if workspace_id:
+      requested = next((item for item in workspaces if isinstance(item, dict) and item.get("id") == workspace_id), None)
+      if requested and not requested.get("available"):
+          bootstrapped = await try_bootstrap(requested)
+          if bootstrapped:
+              return bootstrapped
       for item in available:
           if item.get("id") == workspace_id:
               return item
@@ -638,6 +660,16 @@ async def resolve_chat_workspace(body: dict, user_id: str) -> dict | None:
     for item in available:
         if str(item.get("scope") or "user") == "user":
             return item
+    for item in workspaces:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("scope") or "user") != "user":
+            continue
+        if item.get("available"):
+            continue
+        bootstrapped = await try_bootstrap(item)
+        if bootstrapped:
+            return bootstrapped
     return available[0] if available else None
 
 

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import subprocess
 import hashlib
 import tempfile
@@ -179,6 +180,14 @@ class WorkflowWriteSyncCommitRequest(WorkspaceRef):
     allow_empty_commit: bool = False
 
 
+class WorkspaceBootstrapRequest(WorkspaceRef):
+    repo_url: Optional[str] = None
+    branch: Optional[str] = None
+    remote: Optional[str] = None
+    display_name: Optional[str] = None
+    create_if_missing: bool = False
+
+
 def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Invalid internal secret")
@@ -311,6 +320,9 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="User context is required for this workspace")
     if access_policy == "admin_only" and not is_admin:
         raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' requires an admin identity")
+    owner_user = str(match.get("owner_user") or "").strip()
+    if owner_user and not is_admin and owner_user != resolved_user:
+        raise HTTPException(status_code=404, detail="Workspace not found")
 
     resolved_path = resolve_safe_path(get_workspace_root(), str(match["local_path"]))
     if not resolved_path.is_dir():
@@ -325,6 +337,98 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     if identity:
         workspace["resolved_identity"] = identity
     return workspace
+
+
+def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str, Any]:
+    registry = _load_registry()
+    identity = _resolve_identity_context(ref)
+    resolved_user = identity["user"] if identity else None
+    is_admin = bool(identity and identity.get("is_admin"))
+    match = None
+
+    if ref.workspace_id:
+        match = next((item for item in registry if item.get("id") == ref.workspace_id), None)
+    elif ref.local_path:
+        match = next((item for item in registry if item.get("local_path") == ref.local_path), None)
+        if match is None:
+            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "local_path": ref.local_path}
+    else:
+        raise HTTPException(status_code=400, detail="workspace_id or local_path is required")
+
+    if match is None:
+        if not ref.create_if_missing:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        if not resolved_user:
+            raise HTTPException(status_code=400, detail="User context is required to create a workspace")
+        repo_url = str(ref.repo_url or "").strip()
+        if not repo_url:
+            raise HTTPException(status_code=400, detail="repo_url is required to create a workspace")
+        workspace_id = _derive_workspace_id(ref.workspace_id, resolved_user, repo_url)
+        local_path = str(ref.local_path or _derive_workspace_local_path(workspace_id, resolved_user)).strip()
+        match = {
+            "id": workspace_id,
+            "display_name": str(ref.display_name or workspace_id).strip(),
+            "access_policy": "authenticated",
+            "local_path": local_path,
+            "repo_url": repo_url,
+            "git_remote": str(ref.remote or "origin").strip(),
+            "default_branch": str(ref.branch or "main").strip(),
+            "sync_mode": "local_git_authoritative",
+            "scope": "user",
+            "owner_user": resolved_user,
+        }
+        with Session(engine) as session:
+            existing = session.get(Workspace, workspace_id)
+            if existing:
+                raise HTTPException(status_code=409, detail=f"Workspace {workspace_id} already exists")
+            session.add(Workspace(**match))
+            session.commit()
+
+    access_policy = _workspace_access_policy(match)
+    if access_policy == "authenticated" and not resolved_user:
+        raise HTTPException(status_code=400, detail="User context is required for this workspace")
+    if access_policy == "admin_only" and not is_admin:
+        raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' requires an admin identity")
+    owner_user = str(match.get("owner_user") or "").strip()
+    if owner_user and not is_admin and owner_user != resolved_user:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    resolved_path = resolve_safe_path(get_workspace_root(), str(match["local_path"]), must_exist=False)
+    workspace = dict(match)
+    workspace["resolved_path"] = str(resolved_path)
+    workspace["exists"] = resolved_path.exists()
+    workspace["scope"] = str(workspace.get("scope") or "user")
+    workspace["access_policy"] = access_policy
+    workspace["capabilities"] = _workspace_capabilities(workspace)
+    if resolved_user:
+        workspace["resolved_user"] = resolved_user
+    if identity:
+        workspace["resolved_identity"] = identity
+    return workspace
+
+
+def _normalize_workspace_slug(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+    return cleaned or "workspace"
+
+
+def _derive_repo_name(repo_url: str) -> str:
+    parsed = urlparse(repo_url)
+    path = parsed.path if parsed.scheme else repo_url
+    candidate = path.rstrip("/").split("/")[-1].split(":")[-1]
+    if candidate.endswith(".git"):
+        candidate = candidate[:-4]
+    return _normalize_workspace_slug(candidate)
+
+
+def _derive_workspace_id(requested_id: Optional[str], resolved_user: str, repo_url: str) -> str:
+    if requested_id and requested_id.strip():
+        return requested_id.strip()
+    return f"{_normalize_workspace_slug(resolved_user)}-{_derive_repo_name(repo_url)}"
+
+
+def _derive_workspace_local_path(workspace_id: str, resolved_user: str) -> str:
+    return f"users/{_normalize_workspace_slug(resolved_user)}/workspaces/{_normalize_workspace_slug(workspace_id)}"
 
 
 def _workspace_capabilities(workspace: dict[str, Any]) -> list[str]:
@@ -620,6 +724,9 @@ def list_workspaces(
     for entry in _load_registry():
         item = dict(entry)
         access_policy = _workspace_access_policy(entry)
+        owner_user = str(item.get("owner_user") or "").strip()
+        if owner_user and not is_admin and owner_user != resolved_user:
+            continue
         if access_policy == "admin_only" and resolved_user and not is_admin:
             continue
         if access_policy in {"authenticated", "admin_only"} and not resolved_user:
@@ -651,6 +758,85 @@ def resolve_workspace(req: WorkspaceRef, x_internal_secret: Optional[str] = Head
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     return {"status": "SUCCESS", "workspace": workspace}
+
+
+@app.post("/workspaces/bootstrap")
+def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace_for_bootstrap(req)
+    _require_workspace_capability(workspace, "git_write")
+
+    target_path = Path(workspace["resolved_path"])
+    parent_path = target_path.parent
+    parent_path.mkdir(parents=True, exist_ok=True)
+
+    if target_path.exists():
+        if not target_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {target_path}")
+        if (target_path / ".git").is_dir():
+            remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
+            remote_url = None
+            try:
+                remote_url = _git_remote_url(target_path, remote_name)
+            except HTTPException:
+                remote_url = None
+            workspace["exists"] = True
+            workspace["available"] = True
+            return {
+                "status": "SUCCESS",
+                "workspace": workspace,
+                "bootstrapped": False,
+                "already_present": True,
+                "remote": remote_name,
+                "repo_url": remote_url,
+            }
+        if any(target_path.iterdir()):
+            raise HTTPException(status_code=409, detail=f"Workspace path exists and is not an empty git checkout: {target_path}")
+
+    repo_url = str(req.repo_url or workspace.get("repo_url") or "").strip()
+    if not repo_url:
+        raise HTTPException(status_code=400, detail="Workspace bootstrap requires a repo_url")
+
+    branch_name = str(req.branch or workspace.get("default_branch") or "main").strip()
+    remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
+    identity = workspace.get("resolved_identity") or {}
+
+    clone_args = ["git", "clone", "--single-branch"]
+    if branch_name:
+        clone_args.extend(["--branch", branch_name])
+    clone_args.extend([repo_url, str(target_path)])
+
+    result = _run_git_with_optional_askpass(
+        parent_path,
+        clone_args,
+        identity=identity,
+        remote_url=repo_url,
+        timeout_seconds=180,
+    )
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git clone failed")
+
+    if remote_name and remote_name != "origin":
+        rename_result = _run_command(target_path, ["git", "remote", "rename", "origin", remote_name])
+        if rename_result["returncode"] != 0:
+            raise HTTPException(
+                status_code=400,
+                detail=rename_result["stderr"].strip() or rename_result["stdout"].strip() or "git remote rename failed",
+            )
+
+    workspace["exists"] = True
+    workspace["available"] = True
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "bootstrapped": True,
+        "already_present": False,
+        "remote": remote_name,
+        "repo_url": repo_url,
+        "branch": branch_name,
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+    }
 
 
 @app.post("/workspaces")
