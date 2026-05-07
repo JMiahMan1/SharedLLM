@@ -1286,6 +1286,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     explicit_model = str(body.get("model") or "").strip()
     selected_model = explicit_model or ASSISTANT_MODEL
 
+    # Dynamic Model Routing: Use specialized coder model for engineering tasks
+    if not explicit_model:
+        coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "ouroboros", "audit", "develop", "refactor"]
+        if any(k in (query or "").lower() for k in coding_keywords):
+            # Check if specialized coder model is available (hardcoded preference for qwen2.5-coder)
+            selected_model = "qwen2.5-coder:7b"
+            log.info(f"[ChatHandler] Specialized coding task detected. Routing to: {selected_model}")
+
     # 2. Extract Query
     query = body.get("query")
     if not query and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
