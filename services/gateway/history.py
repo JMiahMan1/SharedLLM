@@ -113,7 +113,7 @@ Conversation:
 
 Return ONLY a bulleted list of facts, or 'NONE'.
 """
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{OLLAMA_URL}/api/generate",
                 json={"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False},
