@@ -12,7 +12,6 @@ import {
   Info,
   CheckCircle2,
   Clock,
-  ArrowRight,
   ShieldAlert,
   AlertTriangle,
 } from 'lucide-react';
@@ -357,8 +356,17 @@ const KnowledgeHub = () => {
                           Index Folder
                         </button>
                       ) : (
-                        <button className="text-slate-600 hover:text-white transition-colors">
-                          <ArrowRight size={14} />
+                        <button
+                          onClick={() => indexMutation.mutate({ path: file.path, recursive: false })}
+                          disabled={indexMutation.isPending}
+                          className="glass-button text-[10px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center gap-2 ml-auto hover:border-emerald-500/50 hover:text-emerald-300 transition-all"
+                        >
+                          {indexMutation.isPending && indexMutation.variables?.path === file.path ? (
+                            <RefreshCw size={12} className="animate-spin" />
+                          ) : (
+                            <Database size={12} />
+                          )}
+                          Index File
                         </button>
                       )}
                     </td>
