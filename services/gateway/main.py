@@ -1663,6 +1663,11 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             
             action = tool_data.get("action")
             payload = tool_data.get("payload", {})
+            # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
+            if isinstance(tool_data, dict):
+                for k, v in tool_data.items():
+                    if k not in ("action", "payload") and k not in payload:
+                        payload[k] = v
             
             # Map action to service endpoint
             action_map = {
@@ -1719,6 +1724,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
                 "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
                 "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
+                "read": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                "write": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "gitpull": (EXECUTION_SVC, "/execute/git_pull"),
             }
             
             lookup_action = action.lower().strip() if action else ""
