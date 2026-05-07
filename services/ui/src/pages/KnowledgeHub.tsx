@@ -281,8 +281,8 @@ const KnowledgeHub = () => {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto pb-4">
+          <table className="w-full min-w-[800px] text-left border-collapse">
             <thead>
               <tr className="text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-white/5">
                 <th className="px-6 py-4">Name</th>

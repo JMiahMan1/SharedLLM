@@ -149,9 +149,9 @@ const Workspaces = () => {
                       <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400">
                         <Database size={24} />
                       </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-white">{ws.display_name}</h3>
-                        <p className="text-xs font-mono text-slate-500">ID: {ws.id}</p>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-xl font-bold text-white truncate">{ws.display_name}</h3>
+                        <p className="text-xs font-mono text-slate-500 truncate">ID: {ws.id}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -179,7 +179,7 @@ const Workspaces = () => {
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Host Path</p>
                       <div className="flex items-center gap-2 text-sm text-slate-300">
                         <Folder size={14} className="text-slate-600" />
-                        <span className="font-mono">{ws.local_path}</span>
+                        <span className="font-mono truncate">{ws.local_path}</span>
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -206,7 +206,7 @@ const Workspaces = () => {
                         <div className="relative group/url">
                           <p className="text-[10px] text-slate-500 mb-1.5 ml-1">Payload URL</p>
                           <div className="flex items-center gap-2 p-2 rounded-lg bg-black/40 border border-white/5 font-mono text-[10px] text-slate-400 overflow-hidden">
-                            <span className="truncate flex-1">{getWebhookUrl(ws.id, ws.webhook_token)}</span>
+                            <span className="truncate flex-1 break-all">{getWebhookUrl(ws.id, ws.webhook_token)}</span>
                             <button 
                               onClick={() => copyToClipboard(getWebhookUrl(ws.id, ws.webhook_token), ws.id)}
                               className="p-1.5 rounded-md hover:bg-white/10 text-slate-500 hover:text-white transition-colors"

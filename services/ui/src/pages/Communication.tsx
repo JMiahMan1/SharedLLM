@@ -320,7 +320,7 @@ const Communication = () => {
             </div>
           </div>
 
-          <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_140px_auto]">
+          <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_140px_auto]">
             <input
               type="text"
               value={timerTitle}
@@ -353,8 +353,8 @@ const Communication = () => {
           <div className="space-y-3">
             {timers.map((timer) => (
               <div key={timer.id} className="glass-card flex items-center justify-between p-4">
-                <div>
-                  <p className="font-semibold text-white">{timer.title}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-white truncate">{timer.title}</p>
                   <p className="mt-1 text-xs text-slate-400">{new Date(timer.expires_at).toLocaleString()}</p>
                 </div>
                 <button
@@ -475,9 +475,9 @@ const Communication = () => {
                     : 'border-white/5 bg-white/5 hover:border-white/10 hover:bg-white/10'
                 }`}
               >
-                <p className="font-semibold text-white">{conversation.display_name}</p>
-                <p className="mt-1 text-xs text-slate-400">{conversation.description || conversation.token}</p>
-                <p className="mt-2 text-xs text-slate-500">{conversation.last_message || 'No messages yet.'}</p>
+                <p className="font-semibold text-white truncate">{conversation.display_name}</p>
+                <p className="mt-1 text-xs text-slate-400 truncate">{conversation.description || conversation.token}</p>
+                <p className="mt-2 text-xs text-slate-500 truncate">{conversation.last_message || 'No messages yet.'}</p>
               </button>
             ))}
             {!talkConversations.length && (
@@ -499,7 +499,7 @@ const Communication = () => {
                         {message.timestamp ? new Date(message.timestamp * 1000).toLocaleString() : 'Pending'}
                       </p>
                     </div>
-                    <p className="mt-2 text-sm text-slate-300">{message.message || message.system_message || 'Empty message'}</p>
+                    <p className="mt-2 text-sm text-slate-300 break-words">{message.message || message.system_message || 'Empty message'}</p>
                   </div>
                 ))}
                 {selectedTalkToken && !talkMessages.length && (
@@ -632,7 +632,7 @@ const Communication = () => {
             </label>
           </div>
 
-          <div className="mt-4 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_auto]">
+          <div className="mt-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_auto]">
             <input
               type="text"
               value={eventStartTime}
