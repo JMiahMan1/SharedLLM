@@ -280,11 +280,30 @@ async def execute_announce(req: AnnouncementRequest):
     # Announcements are currently cross-domain (Volume + TTS)
     ctx = req.user_context
     log.info(f"[announce] user={ctx.user} entity={req.entity_id}")
+    
+    # Set volume first
     await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", req.entity_id, {"volume_level": req.volume})
-    result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "speak", req.entity_id, {"message": req.message, "media_player_entity_id": req.entity_id})
+    
+    # Try modern tts.speak first
+    result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "speak", req.entity_id, {
+        "message": req.message, 
+        "media_player_entity_id": req.entity_id,
+        "cache": True
+    })
+    
+    if not result.get("ok"):
+        log.warning(f"[announce] tts.speak failed, trying fallback: {result.get('error')}")
+        # Fallback to common google_translate_say
+        # Many users have 'google_translate' or 'google_say'
+        # We'll try a few common ones or a generic tts call if possible
+        # For now, let's try the most common one: google_translate_say
+        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "google_translate_say", req.entity_id, {
+            "message": req.message
+        })
+
     if result.get("ok"):
         return _ok(f"Announcement sent to {req.entity_id}.", "announce")
-    return _fail(f"Announcement failed: {result.get('error')}", "announce", result)
+    return _fail(f"Announcement failed after fallback: {result.get('error')}", "announce", result)
 
 @app.post("/execute/ha_service", response_model=ExecutionResult)
 async def execute_ha_service(req: HAServiceRequest):

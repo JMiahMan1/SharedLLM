@@ -58,12 +58,20 @@ async def call_service(
             return {"ok": True, "status_code": resp.status_code}
         except httpx.HTTPStatusError as e:
             log.error(f"[ha_client] HTTP error: {e}")
+            detail = ""
+            try:
+                detail = e.response.json().get("detail", e.response.text)
+            except:
+                detail = e.response.text
             if e.response.status_code in (401, 403):
                 return {"ok": False, "error": "Your Home Assistant token is invalid or expired. Please update it in Jarvis.", "status_code": e.response.status_code}
-            return {"ok": False, "error": f"HA returned {e.response.status_code}", "status_code": e.response.status_code}
+            return {"ok": False, "error": f"HA returned {e.response.status_code}: {detail}", "status_code": e.response.status_code}
         except httpx.RequestError as e:
             log.error(f"[ha_client] Request error: {e}")
-            return {"ok": False, "error": "Home Assistant is unreachable. Please check your URL."}
+            return {"ok": False, "error": f"Home Assistant is unreachable: {e}"}
+        except Exception as e:
+            log.error(f"[ha_client] Unexpected error: {e}")
+            return {"ok": False, "error": str(e)}
 
 async def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
     """Retrieve the current state of an HA entity."""
