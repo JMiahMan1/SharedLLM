@@ -219,10 +219,10 @@ async def list_collection_documents(collection_name: str, user_id: str = "defaul
     """Retrieve documents and metadata from a specific collection for a user."""
     try:
         collection = chroma_client.get_or_create_collection(name=collection_name, embedding_function=embedding_fn)
-        # Always use default for system capabilities
-        # target_user = "default" if collection_name == "system_capabilities" else user_id
+        target_user = "default" if collection_name == "system_capabilities" else user_id
         
         results = collection.get(
+            where={"user_id": target_user},
             limit=limit,
             include=["documents", "metadatas"]
         )
