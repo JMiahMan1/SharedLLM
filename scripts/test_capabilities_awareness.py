@@ -15,8 +15,10 @@ tests = [
 
 def run_tests():
     print(f"Testing Gateway at {GATEWAY_URL}...")
+    report = "# Capability Awareness Test Report\n\n"
     for query in tests:
         print(f"\n[QUERY]: {query}")
+        report += f"## Query: {query}\n"
         try:
             resp = httpx.post(
                 GATEWAY_URL,
@@ -29,18 +31,26 @@ def run_tests():
                     "Authorization": f"Bearer {INTERNAL_SECRET}",
                     "X-Internal-Secret": INTERNAL_SECRET
                 },
-                timeout=60.0
+                timeout=120.0
             )
             if resp.status_code == 200:
                 data = resp.json()
                 print(f"[STATUS]: {data.get('status')}")
-                print(f"[INTENT]: {data.get('intent')}")
-                print(f"[EXECUTION]: {json.dumps(data.get('execution_result'), indent=2)}")
-                print(f"[MESSAGE]: {data.get('message')}")
+                report += f"- **Status**: {data.get('status')}\n"
+                report += f"- **Intent**: {data.get('intent')}\n"
+                report += f"- **LLM Response**:\n\n```\n{data.get('message', {}).get('content', '')}\n```\n\n"
+                if data.get('execution_result'):
+                    report += f"- **Execution Result**:\n\n```json\n{json.dumps(data.get('execution_result'), indent=2)}\n```\n\n"
             else:
-                print(f"[ERROR]: {resp.status_code} - {resp.text}")
+                print(f"[ERROR]: {resp.status_code}")
+                report += f"- **ERROR**: {resp.status_code}\n\n"
         except Exception as e:
             print(f"[EXCEPTION]: {e}")
+            report += f"- **EXCEPTION**: {e}\n\n"
+    
+    with open("docs/capability_test_report.md", "w") as f:
+        f.write(report)
+    print("\nReport generated at docs/capability_test_report.md")
 
 if __name__ == "__main__":
     run_tests()
