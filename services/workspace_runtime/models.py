@@ -17,3 +17,4 @@ class Workspace(SQLModel, table=True):
     owner_user: Optional[str] = None  # Tied to Identity service user
     auto_pull_enabled: bool = Field(default=False)
     webhook_token: Optional[str] = Field(default=None)
+    webhook_token_enc: Optional[str] = Field(default=None)

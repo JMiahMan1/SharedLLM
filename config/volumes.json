@@ -1,0 +1,94 @@
+{
+  "volumes": [
+    {
+      "name": "sharedllm_identity_db",
+      "service": "identity",
+      "mount_path": "/data",
+      "category": "database",
+      "criticality": "critical",
+      "rebuildable": false,
+      "backup_policy": "daily",
+      "notes": "User identities, encrypted credentials/API keys, and global settings."
+    },
+    {
+      "name": "sharedllm_workspace_runtime_data",
+      "service": "workspace_runtime",
+      "mount_path": "/data",
+      "category": "database",
+      "criticality": "critical",
+      "rebuildable": false,
+      "backup_policy": "daily",
+      "notes": "Workspace registry state, encrypted webhook secrets, and future agent-owned workspace metadata."
+    },
+    {
+      "name": "sharedllm_chroma_data",
+      "service": "rag",
+      "mount_path": "/data",
+      "category": "index",
+      "criticality": "important",
+      "rebuildable": true,
+      "backup_policy": "periodic",
+      "notes": "Persistent RAG/vector index state. Rebuildable, but expensive."
+    },
+    {
+      "name": "sharedllm_logging_data",
+      "service": "logging",
+      "mount_path": "/app/data",
+      "category": "logs",
+      "criticality": "important",
+      "rebuildable": false,
+      "backup_policy": "periodic",
+      "notes": "Structured log history and audit-adjacent operational state."
+    },
+    {
+      "name": "sharedllm_redis_data",
+      "service": "redis",
+      "mount_path": "/data",
+      "category": "cache",
+      "criticality": "optional",
+      "rebuildable": true,
+      "backup_policy": "none",
+      "notes": "Ephemeral queues/cache. Usually safe to prune if the application is stopped cleanly."
+    },
+    {
+      "name": "sharedllm_caddy_data",
+      "service": "caddy",
+      "mount_path": "/data",
+      "category": "tls",
+      "criticality": "important",
+      "rebuildable": false,
+      "backup_policy": "periodic",
+      "notes": "Caddy TLS/account state."
+    },
+    {
+      "name": "sharedllm_caddy_config",
+      "service": "caddy",
+      "mount_path": "/config",
+      "category": "config",
+      "criticality": "important",
+      "rebuildable": true,
+      "backup_policy": "periodic",
+      "notes": "Caddy runtime config cache."
+    },
+    {
+      "name": "sharedllm_huggingface_cache",
+      "service": "rag/gateway",
+      "mount_path": "/root/.cache/huggingface",
+      "category": "cache",
+      "criticality": "optional",
+      "rebuildable": true,
+      "backup_policy": "none",
+      "notes": "Model cache. Can be repopulated from upstream."
+    },
+    {
+      "name": "sharedllm_qdrant_cache",
+      "service": "rag/gateway",
+      "mount_path": "/root/.cache/qdrant",
+      "category": "cache",
+      "criticality": "optional",
+      "rebuildable": true,
+      "backup_policy": "none",
+      "notes": "Qdrant/embedding cache. Rebuildable."
+    }
+  ]
+}

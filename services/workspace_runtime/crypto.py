@@ -1,19 +1,15 @@
-# services/identity/crypto.py
 """
-Fernet encryption helpers for credential fields.
-The FERNET_KEY env var must be a URL-safe base64-encoded 32-byte key.
-Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+Fernet encryption helpers for workspace-scoped secrets.
 """
 import os
 import logging
-import hmac
-import hashlib
 from cryptography.fernet import Fernet, InvalidToken
 
-log = logging.getLogger("identity.crypto")
+log = logging.getLogger("workspace_runtime.crypto")
 
 _KEY = os.getenv("FERNET_KEY", "").encode()
 _fernet: Fernet | None = None
+
 
 def _get_fernet() -> Fernet:
     global _fernet
@@ -28,25 +24,16 @@ def _get_fernet() -> Fernet:
 
 
 def encrypt(plaintext: str | None) -> str | None:
-    """Encrypt a plaintext string. Returns None if input is None/empty."""
     if not plaintext:
         return None
     return _get_fernet().encrypt(plaintext.encode()).decode()
 
 
 def decrypt(ciphertext: str | None) -> str | None:
-    """Decrypt a Fernet ciphertext. Returns None if input is None/empty."""
     if not ciphertext:
         return None
     try:
         return _get_fernet().decrypt(ciphertext.encode()).decode()
-    except (InvalidToken, Exception) as e:
-        log.error(f"[crypto] Decryption failed: {e}")
+    except (InvalidToken, Exception) as exc:
+        log.error("[crypto] Decryption failed: %s", exc)
         return None
-
-
-def digest_secret(secret: str | None) -> str | None:
-    """Derive a stable HMAC-SHA256 fingerprint for lookup without storing plaintext."""
-    if not secret:
-        return None
-    return hmac.new(_KEY, secret.encode(), hashlib.sha256).hexdigest()

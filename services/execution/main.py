@@ -12,12 +12,13 @@ try:
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
         CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
-        DockerLogsRequest, GitOperationRequest, DeploymentRequest
+        DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest
     )
     from .handlers import light, media, climate, security, calendar, note, timer, talk, browser
     from .handlers import docker_logs as docker_logs_handler
     from .handlers import git as git_handler
     from .handlers import deployment as deployment_handler
+    from .handlers import volumes as volume_handler
 except (ImportError, ValueError):
     try:
         from execution import ha_client
@@ -26,12 +27,13 @@ except (ImportError, ValueError):
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, GitOperationRequest, DeploymentRequest
+            DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser
         from execution.handlers import docker_logs as docker_logs_handler
         from execution.handlers import git as git_handler
         from execution.handlers import deployment as deployment_handler
+        from execution.handlers import volumes as volume_handler
     except ImportError:
         import ha_client
         from schemas import (
@@ -39,12 +41,13 @@ except (ImportError, ValueError):
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, GitOperationRequest, DeploymentRequest
+            DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest
         )
         from handlers import light, media, climate, security, calendar, note, timer, talk, browser
         from handlers import docker_logs as docker_logs_handler
         from handlers import git as git_handler
         from handlers import deployment as deployment_handler
+        from handlers import volumes as volume_handler
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -214,6 +217,15 @@ async def execute_deploy(req: DeploymentRequest):
     Part of the Ouroboros ACT/OBSERVE phase.
     """
     return await deployment_handler.handle_deployment(req)
+
+
+@app.post("/execute/volumes")
+async def execute_volumes(req: VolumeInventoryRequest):
+    """
+    Inspect tracked Docker volumes, sizes, and backup/prune examples.
+    Admin only.
+    """
+    return await volume_handler.handle_volumes(req)
 
 
 # ─── Infrastructure Endpoints ────────────────────────────────────────────────────────

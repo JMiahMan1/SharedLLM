@@ -2196,3 +2196,19 @@ async def proxy_smoke_test(request: Request):
             timeout=65.0
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.get("/api/admin/volumes")
+async def proxy_admin_volumes(request: Request):
+    creds_data = await _resolve_identity_from_request(request)
+    if not creds_data.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    async with get_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/volumes",
+            json={"user_context": creds_data},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=30.0,
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())

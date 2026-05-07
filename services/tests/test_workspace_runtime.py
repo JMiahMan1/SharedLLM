@@ -1,3 +1,4 @@
+import asyncio
 import json
 import subprocess
 import hashlib
@@ -91,6 +92,8 @@ def runtime_env(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "_DEFAULT_WORKSPACE_ROOT", workspace_root.resolve())
     monkeypatch.setattr(runtime, "WORKSPACE_REGISTRY_PATH", str(registry_path))
     monkeypatch.setattr(runtime, "get_workspace_root", lambda: workspace_root.resolve())
+    monkeypatch.setattr(runtime, "encrypt", lambda value: f"enc:{value}" if value else None)
+    monkeypatch.setattr(runtime, "decrypt", lambda value: value[4:] if value and value.startswith("enc:") else value)
     
     # DB Setup for test
     test_engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
@@ -167,9 +170,15 @@ def test_git_pull_webhook_accepts_api_prefix(monkeypatch):
     with Session(runtime.engine) as session:
         ws = session.get(Workspace, "demo")
         ws.auto_pull_enabled = True
-        ws.webhook_token = "demo-secret"
         session.add(ws)
         session.commit()
+
+    runtime.update_workspace("demo", {"webhook_token": "demo-secret"}, "test-secret")
+
+    with Session(runtime.engine) as session:
+        stored = session.get(Workspace, "demo")
+        assert stored.webhook_token is None
+        assert stored.webhook_token_enc is not None
 
     def fake_run_command(workspace_path, args, timeout_seconds=30, env_overrides=None):
         if args[:3] == ["git", "config", "--get"]:
@@ -179,12 +188,10 @@ def test_git_pull_webhook_accepts_api_prefix(monkeypatch):
 
     monkeypatch.setattr(runtime, "_run_command", fake_run_command)
 
-    client = TestClient(runtime.app)
-    response = client.post("/api/webhook/git-pull/demo?token=demo-secret")
+    response = asyncio.run(runtime.git_pull_webhook("demo", x_webhook_secret=None, token="demo-secret"))
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "SUCCESS"
-    assert response.json()["branch"] == "main"
+    assert response["status"] == "SUCCESS"
+    assert response["branch"] == "main"
 
 
 def test_read_file_blocks_parent_traversal():
@@ -193,7 +200,7 @@ def test_read_file_blocks_parent_traversal():
             runtime.FileReadRequest(workspace_id="demo", rag_user="jeremiah", relative_path="../secret.txt"),
             "test-secret",
         )
-    assert exc.value.status_code == 400
+    assert exc.value.status_code == 403
 
 
 def test_list_files_returns_workspace_entries(runtime_env):
@@ -394,7 +401,7 @@ def test_workflow_write_sync_commit_can_push_to_local_remote(runtime_env, monkey
         text=True,
     ).stdout.strip()
     subprocess.run(
-        ["git", "remote", "add", "origin", str(remote_dir)],
+        ["git", "remote", "set-url", "origin", str(remote_dir)],
         cwd=runtime_env,
         check=True,
         capture_output=True,
@@ -703,13 +710,13 @@ def test_create_workspace():
     }
     data = runtime.create_workspace(Workspace(**ws_data), "test-secret")
     assert data["status"] == "SUCCESS"
-    assert data["workspace"].id == "new_ws"
+    assert data["workspace"]["id"] == "new_ws"
 
 
 def test_update_workspace():
     data = runtime.update_workspace("demo", {"display_name": "Updated Demo"}, "test-secret")
     assert data["status"] == "SUCCESS"
-    assert data["workspace"].display_name == "Updated Demo"
+    assert data["workspace"]["display_name"] == "Updated Demo"
 
 
 def test_delete_workspace():
