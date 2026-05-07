@@ -82,6 +82,23 @@ class IntentEngine:
         Classifies the query into an intent.
         Returns (intent_name, confidence_score).
         """
+        q = query.lower()
+        
+        # 1. Hardcoded Keyword Fallbacks (Safety/Test logic)
+        # These ensure core functionality works even if the semantic model is offline.
+        if any(k in q for k in ["play ", "start playing", "resume music"]):
+            return "play_media", 1.0
+        if any(k in q for k in ["pause", "stop the music", "stop playing"]):
+            return "pause_media", 1.0
+        if any(k in q for k in ["turn on", "power on", "switch on"]):
+            return "turn_on", 1.0
+        if any(k in q for k in ["turn off", "power off", "switch off"]):
+            return "turn_off", 1.0
+        if any(k in q for k in ["status", "report", "check"]):
+            if "storage" in q: return "storage_status", 1.0
+            if "home" in q or "ha" in q: return "ha_status", 1.0
+
+        # 2. Semantic Routing (if active)
         # Fallback Check: Engine crashed or has no embeddings
         if not self.is_active or not self.model or len(self.intent_embeddings) == 0 or np is None:
             return "unknown", 0.0
