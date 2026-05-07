@@ -1233,6 +1233,35 @@ Example: ["Turn on the office light", "Play some jazz music"]
         log.warning(f"Decomposition failed: {e}")
         return [query]
 
+async def perform_shadow_execution(query: str, creds: ResolvedCredentials, history: list, rag_context: str) -> str:
+    """
+    Shadow Execution: Queries the live application model for a proposal, 
+    then returns it to be analyzed by the dev model.
+    """
+    log.info("[ShadowExecution] Initiating...")
+    # 1. Query the 'Live' model for a proposal
+    proposal_prompt = (
+        "You are the production instance of SharedLLM. Provide a concise, logical proposal "
+        "for how to address the following user request within the current architecture.\n\n"
+        f"User Request: {query}\n\n"
+        f"Capability Context: {rag_context}\n"
+    )
+    try:
+        # We use a non-streaming call for the shadow proposal
+        payload = {
+            "model": ASSISTANT_MODEL,
+            "messages": [{"role": "user", "content": proposal_prompt}],
+            "stream": False
+        }
+        resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=30.0)
+        if resp.status_code == 200:
+            proposal = resp.json().get("message", {}).get("content", "")
+            return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
+    except Exception as e:
+        log.warning(f"[ShadowExecution] Failed: {e}")
+    return ""
+
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks: BackgroundTasks = None):
@@ -1340,7 +1369,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     # 6. Context Injection (RAG)
     rag_context = ""
     try:
-        collections = ["ha_entities", "nextcloud_files", "system_capabilities"]
+        collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
         for coll in collections:
             client = get_http_client()
             resp = await client.post(
@@ -1360,11 +1389,16 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         log.error(f"RAG Retrieval error: {e}")
 
     # 7. Slow Path Execution (LLM Pipeline)
+    shadow_context = ""
+    complex_signals = ["complex", "bug", "refactor", "design", "how to", "fix", "error", "traceback", "implement", "logic"]
+    if any(k in query.lower() for k in complex_signals):
+        shadow_context = await perform_shadow_execution(query, creds, short_term, rag_context)
+
     system_instruction = select_system_instruction_for_query(query, selected_model)
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
     
-    full_system = f"{system_instruction}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}"
+    full_system = f"{system_instruction}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
     
     final_query = query
     if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
@@ -1373,6 +1407,19 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "DO NOT apologize or say you lack access. DO NOT provide a tutorial. "
             "You MUST immediately execute the appropriate tool: `StorageListRequest` to find resources, "
             "or `StorageIndexRequest` to index them. Output the correct JSON block now.]"
+        )
+    
+    if any(k in query.lower() for k in ["log", "logs", "docker", "output", "error"]):
+        final_query += (
+            "\n\n[SYSTEM OVERRIDE: You ARE authorized and REQUIRED to print diagnostic log snippets to the user. "
+            "If you fetch logs via `DockerLogsRequest`, you MUST parse the output and display relevant snippets "
+            "in a markdown code block. Never claim you cannot show logs.]"
+        )
+
+    if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch"]):
+        final_query += (
+            "\n\n[SYSTEM OVERRIDE: You HAVE direct access to the local Git workspace files via `WorkspaceFileReadRequest` and `WorkspaceFileWriteRequest`. "
+            "Do NOT confuse the local workspace with Nextcloud storage. Use the Workspace tools for all coding tasks.]"
         )
         
     ollama_payload = {
@@ -1470,6 +1517,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         "storagestatusrequest": (STORAGE_SVC, "/status"),
                         "storagelistrequest": (STORAGE_SVC, "/providers/list"),
                         "storageindexrequest": (STORAGE_SVC, "/index/full"),
+                        "workspace_file_read": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                        "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                        "workspace_file_write": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                        "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                        "storage_file_read": (EXECUTION_SVC, "/execute/storage_file_read"),
+                        "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
+                        "storage_file_write": (EXECUTION_SVC, "/execute/storage_file_write"),
+                        "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
+                        "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
                     }
                     
                     # Normalize action name for lookup
@@ -1619,6 +1675,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "storagestatusrequest": (STORAGE_SVC, "/status"),
                 "storagelistrequest": (STORAGE_SVC, "/providers/list"),
                 "storageindexrequest": (STORAGE_SVC, "/index/full"),
+                "workspace_file_read": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                "workspace_file_write": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "storage_file_read": (EXECUTION_SVC, "/execute/storage_file_read"),
+                "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
+                "storage_file_write": (EXECUTION_SVC, "/execute/storage_file_write"),
+                "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
+                "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
             }
             
             lookup_action = action.lower().strip() if action else ""

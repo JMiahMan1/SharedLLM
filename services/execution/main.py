@@ -12,9 +12,11 @@ try:
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
         CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
-        DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest
+        DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+        WorkspaceFileReadRequest, WorkspaceFileWriteRequest, StorageFileReadRequest, StorageFileWriteRequest,
+        SystemLearningRequest
     )
-    from .handlers import light, media, climate, security, calendar, note, timer, talk, browser
+    from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
     from .handlers import docker_logs as docker_logs_handler
     from .handlers import git as git_handler
     from .handlers import deployment as deployment_handler
@@ -40,10 +42,11 @@ except (ImportError, ValueError):
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
-            WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest
+            DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+            WorkspaceFileReadRequest, WorkspaceFileWriteRequest, StorageFileReadRequest, StorageFileWriteRequest,
+            SystemLearningRequest
         )
-        from handlers import light, media, climate, security, calendar, note, timer, talk, browser
+        from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
         from handlers import docker_logs as docker_logs_handler
         from handlers import git as git_handler
         from handlers import deployment as deployment_handler
@@ -226,6 +229,49 @@ async def execute_volumes(req: VolumeInventoryRequest):
     Admin only.
     """
     return await volume_handler.handle_volumes(req)
+
+
+@app.post("/execute/workspace_file_read", response_model=ExecutionResult)
+async def execute_workspace_file_read(req: WorkspaceFileReadRequest):
+    """
+    Read a file from the local Git workspace. 
+    Use this for source code analysis.
+    """
+    return await workspace.handle_workspace_read(req)
+
+
+@app.post("/execute/workspace_file_write", response_model=ExecutionResult)
+async def execute_workspace_file_write(req: WorkspaceFileWriteRequest):
+    """
+    Write or patch a file in the local Git workspace.
+    Used for autonomous bug fixing.
+    """
+    return await workspace.handle_workspace_write(req)
+
+
+@app.post("/execute/storage_file_read", response_model=ExecutionResult)
+async def execute_storage_file_read(req: StorageFileReadRequest):
+    """
+    Read a file from Nextcloud storage.
+    Used for document discovery.
+    """
+    return await storage.handle_storage_read(req)
+
+
+@app.post("/execute/storage_file_write", response_model=ExecutionResult)
+async def execute_storage_file_write(req: StorageFileWriteRequest):
+    """
+    Write a file to Nextcloud storage.
+    """
+    return await storage.handle_storage_write(req)
+
+
+@app.post("/execute/learning", response_model=ExecutionResult)
+async def execute_system_learning(req: SystemLearningRequest):
+    """
+    Persist architectural insights and bug resolutions to the RAG ledger.
+    """
+    return await learning.handle_system_learning(req)
 
 
 @app.post("/execute/index_capabilities", response_model=ExecutionResult)

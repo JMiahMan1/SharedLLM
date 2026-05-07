@@ -38,12 +38,12 @@ async def handle_docker_logs(req) -> dict:
 
     req fields (from DockerLogsRequest):
         container_name: str  — exact container name (must start with sharedllm_)
-        tail: int            — number of lines to fetch (default 200)
-        filter_level: str    — "ERROR", "WARN", "INFO", or None (all)
+        tail_lines: int      — number of lines to fetch (default 200)
+        grep_filter: str     — "ERROR", "WARN", "INFO", or None (all)
     """
     container_name: str = req.container_name
-    tail: int = getattr(req, "tail", 200)
-    filter_level: Optional[str] = getattr(req, "filter_level", None)
+    tail: int = getattr(req, "tail_lines", 200)
+    filter_level: Optional[str] = getattr(req, "grep_filter", None)
 
     # --- Security: enforce allowlist ---
     if not container_name.startswith(CONTAINER_ALLOWLIST_PREFIX):
