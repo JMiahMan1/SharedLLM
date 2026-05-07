@@ -65,9 +65,9 @@ const OverviewPane = () => {
         </div>
         <div className="space-y-3">
           {Object.entries(health?.services || {}).map(([service, status]) => (
-            <div key={service} className="glass-card flex items-center justify-between p-4">
-              <span className="font-semibold text-white">{service}</span>
-              <span className={`text-[10px] font-black uppercase tracking-widest ${status === 'OK' ? 'text-emerald-300' : 'text-red-300'}`}>
+            <div key={service} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
+              <span className="font-semibold text-white truncate">{service}</span>
+              <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${status === 'OK' ? 'text-emerald-300' : 'text-red-300'}`}>
                 {status}
               </span>
             </div>
@@ -86,13 +86,13 @@ const OverviewPane = () => {
         <div className="space-y-3">
           {workspaces.map((workspace) => (
             <div key={workspace.id} className="glass-card p-4">
-              <div className="flex items-center justify-between">
-                <p className="font-semibold text-white">{workspace.name}</p>
-                <span className={`text-[10px] font-black uppercase tracking-widest ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
+              <div className="flex items-center justify-between gap-4 overflow-hidden">
+                <p className="font-semibold text-white truncate">{workspace.name}</p>
+                <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
                   {workspace.available ? 'Available' : 'Unavailable'}
                 </span>
               </div>
-              <p className="mt-2 font-mono text-xs text-slate-400">{workspace.resolved_path}</p>
+              <p className="mt-2 font-mono text-xs text-slate-400 break-all">{workspace.resolved_path}</p>
             </div>
           ))}
         </div>
@@ -192,12 +192,12 @@ const LogTelemetryStream = () => {
       </div>
       <div className="space-y-3">
         {logs.map((log, index) => (
-          <div key={`${log.timestamp}-${index}`} className="glass-card p-4">
-            <div className="flex items-center justify-between">
-              <p className="font-semibold text-white">{log.service}</p>
-              <span className="text-[10px] uppercase tracking-widest text-slate-500">{log.level}</span>
+          <div key={`${log.timestamp}-${index}`} className="glass-card p-4 overflow-hidden">
+            <div className="flex items-center justify-between gap-4">
+              <p className="font-semibold text-white truncate">{log.service}</p>
+              <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0">{log.level}</span>
             </div>
-            <p className="mt-2 text-sm text-slate-300">{log.message}</p>
+            <p className="mt-2 text-sm text-slate-300 break-words">{log.message}</p>
             <p className="mt-2 text-xs text-slate-500">{log.timestamp}</p>
           </div>
         ))}

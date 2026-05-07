@@ -205,11 +205,11 @@ const Dashboard = () => {
           <div className="space-y-3">
             {logs.map((log, index) => (
               <div key={`${log.timestamp}-${index}`} className="glass-card p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <p className="font-semibold text-white">{log.service}</p>
-                  <span className="text-[10px] uppercase tracking-widest text-slate-500">{log.level}</span>
+                <div className="flex items-center justify-between gap-4 overflow-hidden">
+                  <p className="font-semibold text-white truncate">{log.service}</p>
+                  <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0">{log.level}</span>
                 </div>
-                <p className="mt-2 text-sm text-slate-300">{log.message}</p>
+                <p className="mt-2 text-sm text-slate-300 break-words">{log.message}</p>
                 <p className="mt-2 text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</p>
               </div>
             ))}
@@ -228,13 +228,13 @@ const Dashboard = () => {
             <div className="space-y-3">
               {workspaces.map((workspace) => (
                 <div key={workspace.id} className="glass-card p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-white">{workspace.name}</p>
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
+                  <div className="flex items-center justify-between gap-4 overflow-hidden">
+                    <p className="font-semibold text-white truncate">{workspace.name}</p>
+                    <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
                       {workspace.available ? 'Available' : 'Unavailable'}
                     </span>
                   </div>
-                  <p className="mt-2 font-mono text-xs text-slate-500">{workspace.resolved_path}</p>
+                  <p className="mt-2 font-mono text-xs text-slate-500 break-all">{workspace.resolved_path}</p>
                 </div>
               ))}
             </div>
@@ -250,11 +250,11 @@ const Dashboard = () => {
             </div>
             <div className="space-y-3">
               {settings.map((setting) => (
-                <div key={setting.key} className="glass-card p-4">
-                  <p className="font-mono text-sm text-white">{setting.key}</p>
-                  <p className="mt-2 text-sm text-slate-300">{setting.value}</p>
+                <div className="overflow-hidden">
+                  <p className="font-mono text-sm text-white truncate">{setting.key}</p>
+                  <p className="mt-2 text-sm text-slate-300 break-words">{setting.value}</p>
                   {setting.description && (
-                    <p className="mt-2 text-xs text-slate-500">{setting.description}</p>
+                    <p className="mt-2 text-xs text-slate-500 italic">{setting.description}</p>
                   )}
                 </div>
               ))}

@@ -310,8 +310,8 @@ const Admin = () => {
 
           <div className="space-y-3">
             {users.map((user) => (
-              <div key={user.username} className="glass-card flex items-center justify-between p-4">
-                <div>
+              <div key={user.username} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-3">
                     <p className="font-semibold text-white">{user.full_name || user.username}</p>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${
@@ -321,7 +321,7 @@ const Admin = () => {
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-slate-400">@{user.username}</p>
-                  <p className="mt-2 text-[11px] text-slate-500">
+                  <p className="mt-2 text-[11px] text-slate-500 truncate">
                     HA: {user.ha_url || 'Not configured'} | Nextcloud: {user.nextcloud_url || 'Not configured'}
                   </p>
                 </div>
@@ -394,9 +394,9 @@ const Admin = () => {
           <div className="space-y-3">
             {filteredDiscoveredUsers.map((user) => (
               <div key={`${user.source}-${user.username}`} className="glass-card flex items-center justify-between p-4">
-                <div>
-                  <p className="font-semibold text-white">{user.display_name || user.username}</p>
-                  <p className="text-xs text-slate-400">@{user.username}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-white truncate">{user.display_name || user.username}</p>
+                  <p className="text-xs text-slate-400 truncate">@{user.username}</p>
                   <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-500">{user.source}</p>
                 </div>
                 <button
@@ -429,7 +429,7 @@ const Admin = () => {
             <HelpTooltip docName="architecture.md" sectionTitle="Identity Service" label="Device Assignments" />
           </div>
 
-          <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_220px_auto]">
+          <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_220px_auto]">
             <input
               type="text"
               value={deviceId}
@@ -469,8 +469,8 @@ const Admin = () => {
           <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-2">
             {devices.map((device) => (
               <div key={device.device_id} className="glass-card flex items-center justify-between p-4">
-                <div>
-                  <p className="font-mono text-sm text-white">{device.device_id}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-mono text-sm text-white truncate">{device.device_id}</p>
                   <p className="mt-1 text-xs text-slate-400">Assigned to @{device.username}</p>
                 </div>
                 <button
@@ -526,7 +526,7 @@ const Admin = () => {
               ))}
             </div>
 
-            <div className="mt-6 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_1fr_auto]">
+            <div className="mt-6 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
               <input
                 type="text"
                 value={newSettingKey}
