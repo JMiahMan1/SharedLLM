@@ -84,8 +84,11 @@ async def handle_docker_logs(req) -> dict:
 
     # --- Optional level filter ---
     if filter_level:
-        pattern = re.compile(re.escape(filter_level.upper()))
-        lines = [l for l in lines if pattern.search(l)]
+        try:
+            pattern = re.compile(filter_level, re.IGNORECASE)
+            lines = [l for l in lines if pattern.search(l)]
+        except Exception:
+            lines = [l for l in lines if filter_level.lower() in l.lower()]
 
     log.info(
         f"[DockerLogs] {container_name}: fetched {len(lines)} lines "

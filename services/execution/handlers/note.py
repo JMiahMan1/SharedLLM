@@ -3,8 +3,8 @@ import logging
 import requests
 
 try:
-    from ..schemas import NoteRequest, ExecutionResult
-    from ..personal_data import resolve_personal_data_provider
+    from schemas import NoteRequest, ExecutionResult
+    from personal_data import resolve_personal_data_provider
 except ImportError:
     from schemas import NoteRequest, ExecutionResult
     from personal_data import resolve_personal_data_provider

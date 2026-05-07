@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 from typing import Optional
 
 try:
-    from ..schemas import ExecutionResult, WebSearchRequest, WebReadRequest
+    from schemas import ExecutionResult, WebSearchRequest, WebReadRequest
 except ImportError:
     from schemas import ExecutionResult, WebSearchRequest, WebReadRequest
 
