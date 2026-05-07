@@ -28,9 +28,10 @@ log "Branch: $(git rev-parse --abbrev-ref HEAD)"
 log "Commit: $(git rev-parse --short HEAD)"
 log "========================================="
 
-# --- Step 1: Check if Dockerfile or requirements changed ---
-# If so, we need a full rebuild; otherwise just restart.
-CODE_CHANGE=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -E "^services/|^docker-compose|^scripts/|^Dockerfile" || true)
+# --- Step 1: Check what changed ---
+CHANGED_FILES=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || true)
+CODE_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^services/|^docker-compose|^scripts/|^Dockerfile" || true)
+CADDY_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^Caddyfile$" || true)
 NEEDS_REBUILD=false
 
 if [ -n "$CODE_CHANGE" ]; then
@@ -40,6 +41,10 @@ else
     log "No infrastructure changes — fast restart only."
 fi
 
+if [ -n "$CADDY_CHANGE" ]; then
+    log "Caddy configuration change detected."
+fi
+
 # --- Step 2: Restart or Rebuild ---
 if [ "$NEEDS_REBUILD" = true ]; then
     log "Running: $COMPOSE up -d --build"
@@ -47,6 +52,11 @@ if [ "$NEEDS_REBUILD" = true ]; then
 else
     log "Running: $COMPOSE restart"
     $COMPOSE restart 2>&1 | tee -a "$LOG_FILE"
+fi
+
+if [ -n "$CADDY_CHANGE" ]; then
+    log "Running: $COMPOSE restart caddy"
+    $COMPOSE restart caddy 2>&1 | tee -a "$LOG_FILE"
 fi
 
 log "Waiting 15s for SOA stack to initialize..."
