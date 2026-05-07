@@ -40,6 +40,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - REDIS_URL=redis://redis:6379/0
+      - RAG_SVC_URL=http://rag:8004
       - TZ=America/Phoenix
     group_add:
       - "${DOCKER_GID:-980}"
