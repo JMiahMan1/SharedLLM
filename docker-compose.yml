@@ -41,6 +41,8 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - REDIS_URL=redis://redis:6379/0
       - TZ=America/Phoenix
+    group_add:
+      - "${DOCKER_GID:-980}"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./services/tests:/app/tests
