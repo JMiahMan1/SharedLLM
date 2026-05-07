@@ -2226,7 +2226,19 @@ async def get_storage_stats(request: Request):
         f"{RAG_SVC}/rag/stats?user_id={user_id}",
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    
+    try:
+        content = resp.json()
+    except Exception as e:
+        log.error(f"Failed to parse RAG stats JSON: {e} | Body: {resp.text[:200]}")
+        content = {
+            "status": "ERROR",
+            "total_chunks": 0,
+            "total_documents": 0,
+            "breakdown": {}
+        }
+        
+    return JSONResponse(status_code=resp.status_code, content=content)
     
 @app.get("/api/storage/collection/{collection_name}")
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
