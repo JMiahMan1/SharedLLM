@@ -185,6 +185,12 @@ class StorageFileWriteRequest(BaseModel):
     path: str = Field(..., description="Path within Nextcloud")
     content: str
 
+class DiscoverySyncRequest(BaseModel):
+    """
+    Triggers a synchronization of Home Assistant entities into the RAG database for discovery.
+    """
+    user_context: UserContext
+
 # ─── Workspace / Code Orchestration ──────────────────────────────────────────
 
 class WorkspaceFileAction(BaseModel):
