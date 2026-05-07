@@ -137,7 +137,7 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "60.0"))
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:8b")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", DEFAULT_MODEL)
-CODING_MODEL = os.getenv("CODING_MODEL", "qwen3:8b")
+CODING_MODEL = os.getenv("CODING_MODEL", ASSISTANT_MODEL)
 LIBRARIAN_MODEL = os.getenv("LIBRARIAN_MODEL", ASSISTANT_MODEL)
 
 CODING_SIGNALS = (
@@ -1130,9 +1130,8 @@ async def fetch_ha_entities(creds: dict) -> list:
             
             entities = data.get("entities", []) if isinstance(data, dict) else []
             if entities:
-                user_id = creds.get("user", "admin")
+                user_id = creds.get("user", "default")
                 # 1. Sync to RAG for discovery
-                log.info(f"[RAG_SYNC] Sending {len(entities)} entities for user {user_id}")
                 asyncio.create_task(get_http_client().post(
                     f"{RAG_SVC}/rag/sync/ha",
                     json={"entities": entities, "user_id": user_id},
@@ -1260,8 +1259,6 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
             return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
     except Exception as e:
         log.warning(f"[ShadowExecution] Failed: {e}")
-        import traceback
-        log.error(traceback.format_exc())
     return ""
 
 
@@ -1306,7 +1303,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "ouroboros", "audit", "develop", "refactor"]
         if any(k in (query or "").lower() for k in coding_keywords):
             # Check if specialized coder model is available (hardcoded preference for qwen2.5-coder)
-            selected_model = "qwen3:8b"
+            selected_model = "qwen2.5-coder:7b"
             log.info(f"[ChatHandler] Specialized coding task detected. Routing to: {selected_model}")
 
     try:
@@ -1473,8 +1470,6 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 log.info(f"[StreamGenerator] Block detected. Content preview: {full_ans[full_ans.find('```'):][:100]}...")
                 
             # Detect tool block (either ```json or raw ``` if it looks like JSON)
-            action = None
-            payload = {}
             if "```json" in full_ans or ("```" in full_ans and "action" in full_ans and "payload" in full_ans):
                 try:
                     # Find the start of the block
@@ -1485,31 +1480,6 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     tool_data = json.loads(tool_json)
                     action = tool_data.get("action")
                     payload = tool_data.get("payload", {})
-                except Exception as e:
-                    log.warning(f"[ToolParsing] Failed to parse JSON: {e}")
-                    tool_data = {}
-            
-            # PIPELINE HARDENING: Infer action/payload if Jarvis flattens the schema or forgets the action field
-            if not action:
-                if "container_name" in tool_data or "container" in tool_data:
-                    action = "dockerlogsrequest"
-                    payload = tool_data
-                elif ("path" in tool_data or "relative_path" in tool_data) and "content" in tool_data:
-                    action = "workspacefilewriterequest"
-                    payload = tool_data
-                elif "path" in tool_data or "relative_path" in tool_data:
-                    action = "workspacefilereadrequest"
-                    payload = tool_data
-                elif "action" not in tool_data and len(tool_data) > 0:
-                    # Generic fallback if it looks like a tool but missing action
-                    # This helps if the model is hallucinating but intent is clear from keys
-                    pass
-            
-            if not payload or len(payload) == 0:
-                # If payload was empty but tool_data has other keys, use tool_data as payload
-                if any(k not in ("action", "payload") for k in tool_data.keys()):
-                    payload = tool_data
-
                     
                     action_map = {
                         "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
@@ -1586,19 +1556,6 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     
                     if lookup_action in action_map:
                         svc_base, endpoint = action_map[lookup_action]
-                # BRIDGE: Robust schema normalization for autonomous tools
-                if isinstance(payload, dict):
-                    # Path normalization
-                    if "path" in payload and "relative_path" not in payload:
-                        payload["relative_path"] = payload["path"]
-                    elif "relative_path" in payload and "path" not in payload:
-                        payload["path"] = payload["relative_path"]
-                    # DockerLogs normalization
-                    if lookup_action == "dockerlogsrequest":
-                        if "container" in payload and "container_name" not in payload:
-                            payload["container_name"] = payload["container"]
-                        if "regex" in payload and "grep_filter" not in payload:
-                            payload["grep_filter"] = payload["regex"]
                         
                         # ALWAYS overwrite user context with real resolved credentials
                         # Filtered for compatibility with Execution schemas
@@ -1619,7 +1576,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         
                         if exec_resp.status_code == 200:
                             exec_data = exec_resp.json()
-                            exec_msg = exec_data.get("message", "Action completed.");
+                            exec_msg = exec_data.get("message", "Action completed.")
                             # PIPELINE HARDENING: Append detail (logs, code) for the agent to 'see'
                             detail = exec_data.get("detail")
                             if detail:
@@ -1628,27 +1585,177 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                                         detail_txt = str(detail["content"])
                                     elif "logs" in detail:
                                         detail_txt = str(detail["logs"])
+                                    elif "lines" in detail:
+                                        detail_txt = "\n".join(detail["lines"][:100])
                                     else:
                                         detail_txt = str(detail)
                                 else:
                                     detail_txt = str(detail)
                                 exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
+                        else:
+                            try:
+                                err_detail = exec_resp.json().get("detail", exec_resp.text)
+                            except:
+                                err_detail = exec_resp.text
+                            exec_msg = f"Failed: {err_detail}"
+                        
+                        update_text = f"\n\n**System Update**: {exec_msg}"
+                        full_ans = full_ans[:full_ans.find("```json")].strip() + update_text
+                        
+                        if is_openai:
+                            yield f"data: {json.dumps({'choices': [{'delta': {'content': update_text}}]})}\n\n"
+                        else:
+                            # Ollama format chunk
+                            final_chunk = {"message": {"role": "assistant", "content": update_text}, "done": False}
+                            yield json.dumps(final_chunk) + "\n"
+                except Exception as e:
+                    log.error(f"Streaming tool execution failed: {e}")
 
-                            log.info(f"[ToolExecution] Result: {exec_msg[:200]}...")
-                    # PIPELINE HARDENING: Append results detail for assistant observation
-                    detail = exec_data.get("detail")
-                    if detail:
-                        if isinstance(detail, dict):
-                            if "lines" in detail:
-                                joined_lines = "\n".join(detail["lines"][:100])
-                                exec_msg += f"\n\n[LOG OUTPUTS]\n{joined_lines}"
-                            elif "content" in detail:
-                                exec_msg += f"\n\n[FILE CONTENT]\n{str(detail['content'])[:30000]}"
-                        elif isinstance(detail, str):
-                            exec_msg += f"\n\n[RESULT DETAIL]\n{detail[:10000]}"
+            if not is_background_task:
+                await update_history(user_id, "user", query)
+                await update_history(user_id, "assistant", full_ans)
+            else:
+                log.info(f"[Background] Skipping history update for task: {query[:50]}...")
+                
+            if not is_openai:
+                yield json.dumps({"done": True}) + "\n"
+
+        return StreamingResponse(stream_generator(), media_type="text/event-stream" if is_openai else "application/x-ndjson")
+
+    # Non-streaming
+    try:
+        resp = await call_ollama(ollama_payload, use_chat=True)
+        if resp.status_code != 200:
+            return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
+        data = resp.json()
+        ans = data.get("message", {}).get("content", "Error.")
+    except (httpx.TimeoutException, httpx.ConnectError):
+        ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
+        # Ensure we return a 200 OK with the degradation message as per hardening requirements
+        if is_openai:
+            return _make_openai_response(ans, selected_model, "degraded")
+        return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
+    
+    # 8. Tool Execution
+    # Intercept JSON blocks for execution as defined in prompts.py
+    log.info(f"[ChatHandler] Full response length: {len(ans)}")
+    if "```" in ans:
+        log.info(f"[ChatHandler] Block detected. Content preview: {ans[ans.find('```'):][:100]}...")
+
+    if "```json" in ans or ("```" in ans and "action" in ans and "payload" in ans):
+        try:
+            tag = "```json" if "```json" in ans else "```"
+            start = ans.find(tag) + len(tag)
+            end = ans.find("```", start)
+            tool_json = ans[start:end].strip()
+            tool_data = json.loads(tool_json)
+            
+            action = tool_data.get("action")
+            payload = tool_data.get("payload", {})
+            
+            # Map action to service endpoint
+            action_map = {
+                "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
+                "light_control": (EXECUTION_SVC, "/execute/light"),
+                "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
+                "media_play": (EXECUTION_SVC, "/execute/media/play"),
+                "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
+                "media_transport": (EXECUTION_SVC, "/execute/media/transport"),
+                "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
+                "tv_cast": (EXECUTION_SVC, "/execute/tv_cast"),
+                "climaterequest": (EXECUTION_SVC, "/execute/climate"),
+                "securityrequest": (EXECUTION_SVC, "/execute/security"),
+                "announcementrequest": (EXECUTION_SVC, "/execute/announce"),
+                "haservicerequest": (EXECUTION_SVC, "/execute/ha_service"),
+                "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
+                "noterequest": (EXECUTION_SVC, "/execute/note"),
+                "timerrequest": (EXECUTION_SVC, "/execute/timer"),
+                "talkrequest": (EXECUTION_SVC, "/execute/talk"),
+                "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
+                "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
+                "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
+                "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
+                "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
+                "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
+                "volumeinventoryrequest": (EXECUTION_SVC, "/execute/volumes"),
+                "workspacefileaction": (WORKSPACE_RUNTIME_SVC, "/files/write"),
+                "workspacegitaction": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
+                "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
+                "filereadrequest": (WORKSPACE_RUNTIME_SVC, "/files/read"),
+                "filelistrequest": (WORKSPACE_RUNTIME_SVC, "/files/list"),
+                "filewriterequest": (WORKSPACE_RUNTIME_SVC, "/files/write"),
+                "pytestrequest": (WORKSPACE_RUNTIME_SVC, "/tests/pytest"),
+                "diffrequest": (WORKSPACE_RUNTIME_SVC, "/git/diff"),
+                "gitaddrequest": (WORKSPACE_RUNTIME_SVC, "/git/add"),
+                "gitcommitrequest": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
+                "gitstatusrequest": (WORKSPACE_RUNTIME_SVC, "/git/status"),
+                "gitdiffrequest": (WORKSPACE_RUNTIME_SVC, "/git/diff"),
+                "gitbranchcreaterequest": (WORKSPACE_RUNTIME_SVC, "/git/branch/create"),
+                "gitpushrequest": (WORKSPACE_RUNTIME_SVC, "/git/push"),
+                "gitfetchrequest": (WORKSPACE_RUNTIME_SVC, "/git/fetch"),
+                "gitpullrequest": (WORKSPACE_RUNTIME_SVC, "/git/pull"),
+                "gitrebaserequest": (WORKSPACE_RUNTIME_SVC, "/git/rebase"),
+                "storagestatusrequest": (STORAGE_SVC, "/status"),
+                "storagelistrequest": (STORAGE_SVC, "/providers/list"),
+                "storageindexrequest": (STORAGE_SVC, "/index/full"),
+                "workspace_file_read": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                "workspace_file_write": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "storage_file_read": (EXECUTION_SVC, "/execute/storage_file_read"),
+                "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
+                "storage_file_write": (EXECUTION_SVC, "/execute/storage_file_write"),
+                "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
+                "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
+                "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
+            }
+            
+            lookup_action = action.lower().strip() if action else ""
+            
+            if lookup_action in ("storageindexrequest", "storagelistrequest"):
+                action_map[lookup_action] = (STORAGE_SVC, "/index/full" if lookup_action == "storageindexrequest" else "/providers/list")
+                payload = {
+                    "provider": {
+                        "kind": "nextcloud",
+                        "settings": {
+                            "url": creds.nextcloud_url,
+                            "username": creds.nextcloud_user,
+                            "password": creds.nextcloud_pass
+                        }
+                    },
+                    "path": (payload or {}).get("path", "/"),
+                    "recursive": (payload or {}).get("recursive", True)
+                }
+            
+            if lookup_action in action_map:
+                svc_base, endpoint = action_map[lookup_action]
+                
+                # ALWAYS overwrite user context with real resolved credentials
+                # Filter to only fields expected by Execution (user, ha_url, ha_token)
+                # to avoid 422 validation errors from extra fields in ResolvedCredentials
+                payload["user_context"] = {
+                    "user": creds.user,
+                    "is_admin": creds.is_admin,
+                    "ha_url": creds.ha_url,
+                    "ha_token": creds.ha_token
+                }
+                
+                log.info(f"[ToolExecution] Triggering {action} via {svc_base}{endpoint}")
+                exec_resp = await get_http_client().post(
+                    f"{svc_base}{endpoint}",
+                    json=payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=30.0
+                )
+                
+                if exec_resp.status_code == 200:
+                    exec_data = exec_resp.json()
+                    # If it's a standard ExecutionResult, use its message
+                    # Otherwise, use a default message and wrap the whole body as detail
+                    if "status" in exec_data and "message" in exec_data:
+                        exec_msg = exec_data.get("message", "Action completed.")
                     else:
-                        if not exec_msg:
-                            exec_msg = "Action completed."
+                        exec_msg = "Action completed."
                         # Wrap non-standard response into an ExecutionResult-like structure
                         exec_data = {
                             "status": exec_data.get("status", "SUCCESS"),
@@ -1656,6 +1763,22 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             "service": lookup_action,
                             "detail": exec_data
                         }
+                    # PIPELINE HARDENING: Append detail (logs, code) for the agent to 'see'
+                    detail = exec_data.get("detail")
+                    if detail:
+                        if isinstance(detail, dict):
+                            if "content" in detail:
+                                detail_txt = str(detail["content"])
+                            elif "logs" in detail:
+                                detail_txt = str(detail["logs"])
+                            elif "lines" in detail:
+                                joined_lines = "\n".join(detail["lines"][:100])
+                                detail_txt = joined_lines
+                            else:
+                                detail_txt = str(detail)
+                        else:
+                            detail_txt = str(detail)
+                        exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
                 else:
                     try:
                         err_detail = exec_resp.json().get("detail", exec_resp.text)
@@ -1669,8 +1792,6 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 log.info(f"[ToolExecution] Result: {exec_msg}")
         except Exception as e:
             log.error(f"Tool execution failed: {e}")
-            exec_msg = f"Tool execution failed: {str(e)}"
-            ans = f"{ans}\n\n**System Update**: {exec_msg}. Please verify your tool selection and parameters."
             # Optionally keep the answer as is or append error
     
     if not is_background_task:
