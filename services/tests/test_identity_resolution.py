@@ -82,7 +82,7 @@ def test_api_key_generation_and_resolution(client, session):
     db_key = session.exec(select(APIKey).where(APIKey.key_hash == digest_secret(generated_key))).first()
     assert db_key is not None
     assert db_key.user_id == dad.id
-    assert db_key.key_value is None
+    assert db_key.key_value == digest_secret(generated_key)
     
     # 3. Test Resolution Routing
     

@@ -167,9 +167,10 @@ def _get_user_api_key(user: User) -> str | None:
 
 def _store_generated_api_key(record: APIKey, key_value: str | None) -> str | None:
     key_value = (key_value or "").strip() or None
-    record.key_hash = digest_secret(key_value) if key_value else None
+    key_hash = digest_secret(key_value) if key_value else None
+    record.key_hash = key_hash
     record.key_prefix = _api_key_prefix(key_value)
-    record.key_value = None
+    record.key_value = key_hash
     return key_value
 
 
