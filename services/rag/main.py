@@ -229,6 +229,7 @@ async def get_indexed_paths(user_id: str = "default"):
 async def ingest(req: IngestRequest):
     collection = get_collection(req.collection_name)
     import uuid
+    doc_id = str(uuid.uuid4())
     # Enforce user_id in metadata for privacy
     meta = req.metadata.copy()
     meta["user_id"] = req.user_id.lower()
