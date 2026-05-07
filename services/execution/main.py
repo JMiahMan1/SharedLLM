@@ -2,6 +2,7 @@
 import os
 import logging
 import asyncio
+import httpx
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
@@ -14,7 +15,7 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest
+        SystemLearningRequest, DiscoverySyncRequest
     )
     from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
     from .handlers import docker_logs as docker_logs_handler
@@ -247,6 +248,30 @@ async def execute_workspace_file_write(req: WorkspaceFileWriteRequest):
     Used for autonomous bug fixing.
     """
     return await workspace.handle_workspace_write(req)
+
+
+@app.post("/execute/discovery_sync", response_model=ExecutionResult)
+async def execute_discovery_sync(req: DiscoverySyncRequest):
+    """
+    Trigger a Home Assistant discovery sync into the RAG database.
+    Proxies to Gateway internal discovery API.
+    """
+    # Note: Gateway is usually at http://gateway:8002 in docker
+    GATEWAY_INTERNAL = os.getenv("GATEWAY_INTERNAL_URL", "http://gateway:8002")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{GATEWAY_INTERNAL}/api/discovery/sync",
+                json={"api_key": "internal"}, # Simplified for internal bridge
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return _ok(f"Discovery sync completed. Found {data.get('entities_count', 0)} entities.", "discovery")
+            else:
+                return _fail(f"Discovery sync failed with status {resp.status_code}", "discovery")
+    except Exception as e:
+        return _fail(f"Discovery sync bridge error: {e}", "discovery")
 
 
 @app.post("/execute/storage_file_read", response_model=ExecutionResult)
