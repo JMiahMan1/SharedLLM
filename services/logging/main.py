@@ -26,7 +26,7 @@ DB_PATH = "/app/data/logs.db"
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +49,7 @@ class LogEntry(BaseModel):
     context: Optional[dict] = None
 
 async def _fetch_logs(service: Optional[str] = None, limit: int = 100):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     query = "SELECT * FROM logs"
     params = []
@@ -129,7 +129,7 @@ async def add_log(entry: LogEntry):
         "context": entry.context
     }
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute(
         "INSERT INTO logs (timestamp, service, level, message, context) VALUES (?, ?, ?, ?, ?)",
         (now, entry.service, entry.level, entry.message, json.dumps(entry.context) if entry.context else None)
