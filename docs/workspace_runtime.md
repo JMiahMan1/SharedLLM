@@ -19,6 +19,8 @@ files that need the same safe local mutation model.
 Current implemented capabilities:
 
 - load a read-only workspace registry from `config/workspaces.json`
+- persist workspace registry state in the workspace runtime database so edits
+  survive container recreates
 - bootstrap missing workspaces from Git into the local workspace root
 - create per-user workspace records when a user-scoped repo is requested for
   the first time
