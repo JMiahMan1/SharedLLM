@@ -1633,31 +1633,17 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             log.info(f"[ToolExecution] Result: {exec_msg[:200]}...")
                     # PIPELINE HARDENING: Append results detail for assistant observation
                     detail = exec_data.get("detail")
-                    log.info(f"[ToolResult] Detail type: {type(detail)} keys: {list(detail.keys()) if isinstance(detail, dict) else 'N/A'}")
                     if detail:
                         if isinstance(detail, dict):
                             if "lines" in detail:
-                                exec_msg += "
-
-[LOG OUTPUTS]
-" + "
-".join(detail["lines"][:100])
+                                exec_msg += f"\n\n[LOG OUTPUTS]\n{'\n'.join(detail['lines'][:100])}"
                             elif "content" in detail:
-                                log.info(f"[ToolResult] Appending content ({len(str(detail['content']))} chars)")
-                                exec_msg += "
-
-[FILE CONTENT]
-" + str(detail["content"])[:30000]
+                                exec_msg += f"\n\n[FILE CONTENT]\n{str(detail['content'])[:30000]}"
                         elif isinstance(detail, str):
-                            exec_msg += "
-
-[RESULT DETAIL]
-" + detail[:10000]
-                    
-                        elif isinstance(detail, str):
-                            exec_msg += "\n\n[RESULT DETAIL]\n" + detail[:5000]
+                            exec_msg += f"\n\n[RESULT DETAIL]\n{detail[:10000]}"
                     else:
-                        exec_msg = "Action completed."
+                        if not exec_msg:
+                            exec_msg = "Action completed."
                         # Wrap non-standard response into an ExecutionResult-like structure
                         exec_data = {
                             "status": exec_data.get("status", "SUCCESS"),
