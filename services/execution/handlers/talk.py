@@ -148,11 +148,32 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             )
 
         if action == "send_voice":
-            if not req.token or not req.audio_base64:
-                return ExecutionResult(status="FAILURE", message="Conversation token and audio are required.", service="talk_send_voice")
+            if not req.token:
+                return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_send_voice")
 
-            audio_bytes = _decode_audio(req.audio_base64)
-            extension = ".m4a" if (req.mime_type or "").endswith("mp4") else ".webm"
+            audio_bytes = b""
+            if req.text_to_voice:
+                log.info(f"[talk] Generating TTS for: {req.text_to_voice}")
+                import edge_tts
+                import asyncio
+                communicate = edge_tts.Communicate(req.text_to_voice, "en-US-GuyNeural")
+                # We need to run this in a temporary file or buffer
+                audio_bytes = b""
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_bytes += chunk["data"]
+                req.mime_type = "audio/mpeg"
+                if not req.file_name:
+                    req.file_name = f"tts-{uuid4().hex[:8]}.mp3"
+            elif req.audio_base64:
+                audio_bytes = _decode_audio(req.audio_base64)
+            else:
+                return ExecutionResult(status="FAILURE", message="Either text_to_voice or audio_base64 is required.", service="talk_send_voice")
+
+            if not audio_bytes:
+                return ExecutionResult(status="FAILURE", message="Failed to generate or decode audio.", service="talk_send_voice")
+
+            extension = ".mp3" if (req.mime_type or "").endswith("mpeg") else (".m4a" if (req.mime_type or "").endswith("mp4") else ".webm")
             file_name = provider.sanitize_filename(req.file_name or f"voice-{uuid4().hex}{extension}", f"voice-{uuid4().hex}{extension}")
             remote_path = f"{TALK_UPLOAD_DIR}/{file_name}"
             provider.ensure_directory(TALK_UPLOAD_DIR)
