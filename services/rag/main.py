@@ -330,9 +330,10 @@ async def purge_collection_endpoint(collection_name: str, payload: dict):
         raise HTTPException(status_code=500, detail="Purge failed")
 
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
-async def sync_ha(payload: dict):
+async def sync_ha(payload: dict, user_id: Optional[str] = None):
     entities = payload.get("entities", [])
-    user_id = payload.get("user_id", "admin").lower()
+    # Prioritize query param, then payload, then default to admin
+    resolved_user = (user_id or payload.get("user_id", "admin")).lower()
     collection = get_collection("ha_entities")
     now = int(time.time())
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -371,7 +372,7 @@ async def sync_ha(payload: dict):
             "entity_id": eid,
             "friendly_name": fname,
             "area": area,
-            "user_id": user_id,
+            "user_id": resolved_user,
             "type": "ha_entity",
             "updated_at": now,
             "created_at": created_at,
@@ -382,9 +383,9 @@ async def sync_ha(payload: dict):
         try:
             collection.upsert(ids=ids, documents=docs, metadatas=metas)
             collection.upsert(
-                ids=[f"sync_status:{user_id}"],
-                documents=[f"Last HA sync for {user_id} at {now}. Total: {len(docs)}, New: {new_count}"],
-                metadatas=[{"type": "sync_status", "user_id": user_id, "timestamp": now, "count": len(docs), "new_count": new_count, "indexed_at": now_ts}]
+                ids=[f"sync_status:{resolved_user}"],
+                documents=[f"Last HA sync for {resolved_user} at {now}. Total: {len(docs)}, New: {new_count}"],
+                metadatas=[{"type": "sync_status", "user_id": resolved_user, "timestamp": now, "count": len(docs), "new_count": new_count, "indexed_at": now_ts}]
             )
             return {"status": "SUCCESS", "count": len(docs), "new_count": new_count}
         except Exception as e:
