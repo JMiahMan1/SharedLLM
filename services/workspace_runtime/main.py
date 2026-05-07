@@ -1557,6 +1557,7 @@ def git_rebase(req: GitRebaseRequest, x_internal_secret: Optional[str] = Header(
 
 
 @app.post("/webhook/git-pull/{workspace_id}")
+@app.post("/api/webhook/git-pull/{workspace_id}")
 async def git_pull_webhook(
     workspace_id: str,
     x_webhook_secret: Optional[str] = Header(None, alias="X-Webhook-Secret"),
@@ -1620,6 +1621,8 @@ async def git_pull_webhook(
             "message": f"Successfully pulled latest changes for {workspace_id}",
             "branch": default_branch
         }
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Webhook error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

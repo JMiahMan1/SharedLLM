@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 import workspace_runtime.main as runtime
 from workspace_runtime.models import Workspace
@@ -160,6 +161,28 @@ def test_list_workspaces_hides_admin_only_from_non_admin():
     assert "demo" in ids
     assert "demo_system" in ids
     assert "demo_admin" not in ids
+
+
+def test_git_pull_webhook_accepts_api_prefix(monkeypatch):
+    with Session(runtime.engine) as session:
+        ws = session.get(Workspace, "demo")
+        ws.auto_pull_enabled = True
+        ws.webhook_token = "demo-secret"
+        session.add(ws)
+        session.commit()
+
+    def fake_run_command(workspace_path, args, timeout_seconds=30, env_overrides=None):
+        assert args == ["git", "pull", "origin", "main"]
+        return {"returncode": 0, "stdout": "ok", "stderr": ""}
+
+    monkeypatch.setattr(runtime, "_run_command", fake_run_command)
+
+    client = TestClient(runtime.app)
+    response = client.post("/api/webhook/git-pull/demo?token=demo-secret")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "SUCCESS"
+    assert response.json()["branch"] == "main"
 
 
 def test_read_file_blocks_parent_traversal():
