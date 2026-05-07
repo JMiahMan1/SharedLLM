@@ -22,6 +22,12 @@
     handle /api/discovery* {
         reverse_proxy gateway:11435
     }
+    handle /api/docs* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/workspaces* {
+        reverse_proxy gateway:11435
+    }
 
     handle /api/logs* {
         reverse_proxy logging:8006

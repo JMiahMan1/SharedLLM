@@ -10,11 +10,18 @@ Its purpose is to give the system a safe, explicit runtime for repository and
 workspace inspection rather than pretending that storage-backed snapshots are a
 live coding environment.
 
+A workspace is not limited to source code. A workspace can also contain notes,
+documents, media assets, generated outputs, transcripts, and other user-owned
+files that need the same safe local mutation model.
+
 ## What It Does Today
 
 Current implemented capabilities:
 
 - load a read-only workspace registry from `config/workspaces.json`
+- bootstrap missing workspaces from Git into the local workspace root
+- create per-user workspace records when a user-scoped repo is requested for
+  the first time
 - resolve a caller's user identity through the Identity service when user
   context is provided
 - resolve a workspace ID to a real mounted local path
@@ -26,11 +33,14 @@ Current implemented capabilities:
 - read files from a workspace safely
 - list workspace files safely for context gathering
 - write files to authorized workspaces with optional optimistic conflict checks
+- use the same file APIs for non-code assets and generated artifacts alongside
+  source files
 - report `git status`
 - return `git diff`
 - stage files with `git add`
 - create commits with Git author metadata derived from Identity
 - create branches for isolated changesets
+- fetch, pull, and rebase Git branches through configured remotes
 - push branches through configured Git remotes using resolved provider credentials
 - scan a workspace's designated provider folder through the Storage service
 - sync changed local files into the designated provider path
@@ -50,6 +60,8 @@ become the runtime substrate for workspace-scoped agentic tasks, including:
 - synthesis of master documents or rollups from multiple workspace files
 - metadata sidecar creation for workspace assets
 - orchestration of local enrichment tools such as transcription pipelines
+- storage of STT transcripts, TTS outputs, and other generated media artifacts
+  under the same workspace root
 - eventual coordination with provider sync flows after local changes are
   finalized
 
@@ -99,6 +111,7 @@ service created specifically to fill that gap.
 - `GET /health`
 - `GET /workspaces`
 - `POST /workspace/resolve`
+- `POST /workspaces/bootstrap`
 - `POST /files/read`
 - `POST /files/list`
 - `POST /files/write`
@@ -107,6 +120,9 @@ service created specifically to fill that gap.
 - `POST /git/add`
 - `POST /git/commit`
 - `POST /git/branch/create`
+- `POST /git/fetch`
+- `POST /git/pull`
+- `POST /git/rebase`
 - `POST /git/push`
 - `POST /provider/scan`
 - `POST /provider/sync/file`

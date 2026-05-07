@@ -2039,36 +2039,63 @@ async def get_workspaces_proxy():
         log.error(f"Workspaces proxy failed: {e}")
         return []
 
-@app.post("/api/workspaces")
-async def create_workspace_proxy(request: Request):
-    """Proxy to workspace runtime."""
-    body = await request.json()
-    resp = await get_http_client().post(
-        f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+async def _proxy_workspace_runtime_json(method: str, path: str, request: Request | None = None):
+    body = await request.json() if request is not None else None
+    resp = await get_http_client().request(
+        method,
+        f"{WORKSPACE_RUNTIME_SVC}{path}",
         json=body,
-        headers={"X-Internal-Secret": INTERNAL_SECRET}
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
     )
     return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/workspaces")
+async def create_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/workspaces", request)
+
+@app.post("/api/workspaces/bootstrap")
+async def bootstrap_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/workspaces/bootstrap", request)
+
+@app.post("/api/workspaces/resolve")
+async def resolve_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/workspace/resolve", request)
 
 @app.patch("/api/workspaces/{workspace_id}")
 async def update_workspace_proxy(workspace_id: str, request: Request):
-    """Proxy to workspace runtime."""
-    body = await request.json()
-    resp = await get_http_client().patch(
-        f"{WORKSPACE_RUNTIME_SVC}/workspaces/{workspace_id}",
-        json=body,
-        headers={"X-Internal-Secret": INTERNAL_SECRET}
-    )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return await _proxy_workspace_runtime_json("PATCH", f"/workspaces/{workspace_id}", request)
 
 @app.delete("/api/workspaces/{workspace_id}")
 async def delete_workspace_proxy(workspace_id: str):
-    """Proxy to workspace runtime."""
-    resp = await get_http_client().delete(
-        f"{WORKSPACE_RUNTIME_SVC}/workspaces/{workspace_id}",
-        headers={"X-Internal-Secret": INTERNAL_SECRET}
-    )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return await _proxy_workspace_runtime_json("DELETE", f"/workspaces/{workspace_id}")
+
+@app.post("/api/workspaces/files/read")
+async def read_workspace_file_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/files/read", request)
+
+@app.post("/api/workspaces/files/list")
+async def list_workspace_files_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/files/list", request)
+
+@app.post("/api/workspaces/files/write")
+async def write_workspace_file_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/files/write", request)
+
+@app.post("/api/workspaces/git/status")
+async def git_status_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/status", request)
+
+@app.post("/api/workspaces/git/pull")
+async def git_pull_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/pull", request)
+
+@app.post("/api/workspaces/tests/pytest")
+async def pytest_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/tests/pytest", request)
+
+@app.post("/api/workspaces/workflow/write-sync-commit")
+async def write_sync_commit_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/workflow/write-sync-commit", request)
 
 @app.post("/api/storage/list")
 async def list_storage_files(request: Request, body: StorageListRequest):

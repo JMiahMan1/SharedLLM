@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ os.environ.setdefault("ASSISTANT_MODEL", "qwen3:latest")
 os.environ.setdefault("CODING_MODEL", "qwen2.5-coder:7b")
 
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 import pytest
 
 import gateway.main as gateway_main
@@ -57,6 +59,23 @@ class MockOllamaResponse:
 
     def json(self):
         return {"message": {"content": self._content}}
+
+
+def _json_request(payload: dict) -> Request:
+    body = json.dumps(payload).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
 
 
 @pytest.mark.parametrize(
@@ -136,6 +155,79 @@ async def test_resolve_chat_workspace_bootstraps_unavailable_workspace(monkeypat
 
     assert workspace["id"] == "sharedllm"
     assert any(path == "/workspaces/bootstrap" for _, path, _, _ in calls)
+
+
+@pytest.mark.asyncio
+async def test_workspace_bootstrap_proxy_uses_gateway_route(monkeypatch):
+    captured = {}
+
+    async def fake_request(method, url, json=None, headers=None):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {"status": "SUCCESS", "workspace": {"id": "alice-demo"}},
+            text="",
+        )
+
+    monkeypatch.setattr(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request))
+
+    response = await gateway_main.bootstrap_workspace_proxy(
+        _json_request(
+            {
+                "workspace_id": "alice-demo",
+                "rag_user": "alice",
+                "repo_url": "https://example.com/demo.git",
+                "create_if_missing": True,
+            }
+        )
+    )
+
+    payload = json.loads(response.body)
+    assert response.status_code == 200
+    assert payload["workspace"]["id"] == "alice-demo"
+    assert captured["method"] == "POST"
+    assert captured["url"].endswith("/workspaces/bootstrap")
+    assert captured["json"]["workspace_id"] == "alice-demo"
+    assert captured["headers"]["X-Internal-Secret"] == "test-secret"
+
+
+@pytest.mark.asyncio
+async def test_workspace_pytest_proxy_uses_gateway_route(monkeypatch):
+    captured = {}
+
+    async def fake_request(method, url, json=None, headers=None):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {"status": "SUCCESS", "exit_code": 0},
+            text="",
+        )
+
+    monkeypatch.setattr(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request))
+
+    response = await gateway_main.pytest_workspace_proxy(
+        _json_request(
+            {
+                "workspace_id": "alice-demo",
+                "rag_user": "alice",
+                "targets": ["tests/test_demo.py"],
+            }
+        )
+    )
+
+    payload = json.loads(response.body)
+    assert response.status_code == 200
+    assert payload["exit_code"] == 0
+    assert captured["method"] == "POST"
+    assert captured["url"].endswith("/tests/pytest")
+    assert captured["json"]["targets"] == ["tests/test_demo.py"]
+    assert captured["headers"]["X-Internal-Secret"] == "test-secret"
 
 
 @pytest.mark.local_only
