@@ -1488,6 +1488,13 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             if k not in ("action", "payload") and k not in payload:
                                 payload[k] = v
                     
+                    if not action:
+                        if "path" in payload and ("content" in payload or "is_patch" in payload):
+                            action = "WorkspaceFileWriteRequest"
+                            log.info(f"[StreamToolExecution] Falling back to WorkspaceFileWriteRequest for flat JSON")
+                        elif "path" in payload:
+                            action = "WorkspaceFileReadRequest"
+                            log.info(f"[StreamToolExecution] Falling back to WorkspaceFileReadRequest for flat JSON")
                     action_map = {
                         "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
                         "light_control": (EXECUTION_SVC, "/execute/light"),
@@ -1652,7 +1659,6 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     log.info(f"[ChatHandler] Full response length: {len(ans)}")
     if "```" in ans:
         log.info(f"[ChatHandler] Block detected. Content preview: {ans[ans.find('```'):][:100]}...")
-        log.info(f"[ChatHandler] DEBUG FULL ANS: {ans}")
 
     if "```json" in ans or ("```" in ans and "action" in ans and "payload" in ans):
         try:
@@ -1670,6 +1676,13 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     if k not in ("action", "payload") and k not in payload:
                         payload[k] = v
             
+            if not action:
+                if "path" in payload and ("content" in payload or "is_patch" in payload):
+                    action = "WorkspaceFileWriteRequest"
+                    log.info(f"[ToolExecution] Falling back to WorkspaceFileWriteRequest for flat JSON")
+                elif "path" in payload:
+                    action = "WorkspaceFileReadRequest"
+                    log.info(f"[ToolExecution] Falling back to WorkspaceFileReadRequest for flat JSON")
             # Map action to service endpoint
             action_map = {
                 "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
