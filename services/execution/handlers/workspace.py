@@ -3,7 +3,7 @@ import os
 import logging
 import difflib
 from typing import Dict, Any, Optional
-from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, ExecutionResult
+from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, ExecutionResult
 
 log = logging.getLogger("execution.workspace")
 
@@ -69,4 +69,40 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
         return _ok(message, {"path": req.path, "bytes": len(new_content)})
     except Exception as e:
         log.error(f"Workspace write failed: {e}")
+        return _fail(str(e))
+async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionResult:
+    try:
+        abs_path = resolve_safe_path(req.path)
+        if not os.path.exists(abs_path):
+            return _fail(f"File not found for patching: {req.path}")
+        
+        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        
+        applied_count = 0
+        failed_chunks = []
+        
+        for chunk in req.chunks:
+            if chunk.old_text in content:
+                content = content.replace(chunk.old_text, chunk.new_text, 1) # Only replace first occurrence
+                applied_count += 1
+            else:
+                failed_chunks.append(chunk.old_text)
+        
+        if applied_count == 0:
+            return _fail(f"Patch failed: No chunks matched the target file {req.path}")
+        
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(content)
+            
+        message = f"Applied {applied_count}/{len(req.chunks)} patches to {req.path}."
+        if failed_chunks:
+            message += f" Failed to match {len(failed_chunks)} chunks."
+            
+        if req.commit_after:
+            message += " (Commit pending)"
+            
+        return _ok(message, {"path": req.path, "applied": applied_count, "failed": len(failed_chunks)})
+    except Exception as e:
+        log.error(f"Workspace patch failed: {e}")
         return _fail(str(e))

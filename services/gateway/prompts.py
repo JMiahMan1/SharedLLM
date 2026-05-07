@@ -130,8 +130,9 @@ AUTONOMOUS_EVOLUTION_AGENT_PROMPT = (
     "## CRITICAL: TOOL CALL JSON RULES\n"
     "1. **NESTED STRUCTURE**: Your JSON MUST use the `{ \"action\": \"...\", \"payload\": { ... } }` format. NEVER output flat JSON.\n"
     "2. **NO USER_CONTEXT**: NEVER include `user_context`, `user_id`, or `is_admin` in your JSON.\n"
-    "3. **FULL FILE CONTENT**: When using `WorkspaceFileWriteRequest`, the `content` field MUST contain the **ENTIRE FILE**. NEVER use placeholders like `# ...` or `// rest of file`. If you do this, you will DELETE the entire file and BREAK the system.\n"
-    "4. **SCHEMA ALIGNMENT**: Your `payload` keys must exactly match the Pydantic schemas.\n\n"
+    "3. **SURGICAL PATCHING**: Use `WorkspaceFilePatchRequest` (alias: `patch`) for small code fixes. It takes `chunks`: `[{ \"old_text\": \"...\", \"new_text\": \"...\" }]`. This is PREFERRED for stability.\n"
+    "4. **FULL FILE CONTENT**: If you MUST use `WorkspaceFileWriteRequest`, the `content` field MUST contain the **ENTIRE FILE**. NEVER use placeholders. FAILURE TO DO THIS WILL DELETE THE ENTIRE FILE.\n"
+    "5. **SCHEMA ALIGNMENT**: Your `payload` keys must exactly match the Pydantic schemas.\n\n"
 
     "## OUTPUT FORMAT\n"
     "Every response regarding a system modification MUST use the following exact structure:\n\n"
