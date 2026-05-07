@@ -8,6 +8,7 @@ class Workspace(SQLModel, table=True):
     access_policy: str = Field(default="authenticated")
     local_path: str
     nextcloud_path: Optional[str] = None
+    repo_url: Optional[str] = None
     git_remote: Optional[str] = Field(default="origin")
     default_branch: Optional[str] = Field(default="main")
     sync_mode: str = Field(default="local_git_authoritative")
