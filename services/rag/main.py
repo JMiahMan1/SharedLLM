@@ -154,7 +154,7 @@ async def get_stats(user_id: str = "default"):
     user_id = user_id.lower()
     log.info(f"Fetching stats for user_id: {user_id}")
     try:
-        collections = ["nextcloud_files", "ha_entities"]
+        collections = ["nextcloud_files", "ha_entities", "system_capabilities"]
         total_chunks = 0
         coll_chunks_map = {}
         coll_docs_map = {}
@@ -165,8 +165,12 @@ async def get_stats(user_id: str = "default"):
         for name in collections:
             coll = chroma_client.get_or_create_collection(name=name, embedding_function=embedding_fn)
             
+            # For system_capabilities, we always use the 'default' user_id
+            # For others, we use the provided user_id
+            target_user = "default" if name == "system_capabilities" else user_id
+            
             # Query all entries for this user to get counts and documents
-            results = coll.get(where={"user_id": user_id}, include=["metadatas"])
+            results = coll.get(where={"user_id": target_user}, include=["metadatas"])
             if results and results["ids"]:
                 total_chunks += len(results["ids"])
                 coll_chunks_map[name] = len(results["ids"])
