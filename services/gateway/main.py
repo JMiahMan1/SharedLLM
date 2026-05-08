@@ -1613,7 +1613,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ALLOWED_TOOLS = [
                 "WorkspaceFileReadRequest", "WorkspaceFilePatchRequest", 
                 "WorkspaceFileWriteRequest", "WorkspaceSearchRequest", 
-                "WorkspaceLintRequest", "WorkspaceFileDeleteRequest"
+                "WorkspaceLintRequest", "WorkspaceFileDeleteRequest",
+                "ripgrep", "read_file", "patch_file", "grep", "search"
             ]
             action = tool_data.get("type") or tool_data.get("action") if tool_data else None
             if action and action not in ALLOWED_TOOLS:
