@@ -1437,6 +1437,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | "
                  f"total elapsed {iter_start - loop_start:.0f}s")
+        log.info(f"[AgentLoop] System prompt preview: {full_system[:300]}...")
 
         # ── Heartbeat task ──────────────────────────────────────────────────
         heartbeat_stop = asyncio.Event()
