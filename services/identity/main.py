@@ -62,6 +62,11 @@ DEFAULT_GLOBAL_SETTINGS = [
         "description": "System-wide architectural and behavioral protocols for the Raven autonomous agent."
     },
     {
+        "key": "assistant_model", 
+        "value": "auto", 
+        "description": "Primary conversational model for general queries and contextualization."
+    },
+    {
         "key": "librarian_model", 
         "value": "auto", 
         "description": "The LLM model used for background fact extraction and long-term memory maintenance."
