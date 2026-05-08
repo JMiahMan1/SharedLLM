@@ -1651,14 +1651,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             
             # SCHEMA_WHITELIST: Strictly enforce allowed workspace tools
             ALLOWED_TOOLS = [
-                "WorkspaceFileReadRequest", "WorkspaceFilePatchRequest", 
-                "WorkspaceFileWriteRequest", "WorkspaceSearchRequest", 
-                "WorkspaceLintRequest", "WorkspaceFileDeleteRequest",
-                "WorkspaceBootstrapRequest", "WorkspaceShellRequest",
+                "workspacefilereadrequest", "workspacefilepatchrequest", 
+                "workspacefilewriterequest", "workspacesearchrequest", 
+                "workspacelintrequest", "workspacefiledeleterequest",
+                "workspacebootstraprequest", "workspaceshellrequest",
                 "ripgrep", "read_file", "patch_file", "grep", "search", "shell"
             ]
             action = tool_data.get("type") or tool_data.get("action") if tool_data else None
-            if action and action not in ALLOWED_TOOLS:
+            if action and action.lower().strip() not in ALLOWED_TOOLS:
                 log.warning(f"[AgentLoop] Hallucinated tool detected: {action} — triggering protocol correction")
                 tool_data = None
         
