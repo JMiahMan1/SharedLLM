@@ -106,3 +106,70 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
     except Exception as e:
         log.error(f"Workspace patch failed: {e}")
         return _fail(str(e))
+
+
+async def handle_workspace_lint(req) -> ExecutionResult:
+    """Auto-detect and run the appropriate linter for the given file."""
+    import subprocess
+    try:
+        abs_path = resolve_safe_path(req.path)
+        if not os.path.exists(abs_path):
+            return _fail(f"File not found: {req.path}")
+
+        ext = os.path.splitext(req.path)[1].lower()
+        forced = (req.linter or "").strip().lower()
+        results = []
+        passed = True
+
+        def _run(cmd):
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+        # ── Python ───────────────────────────────────────────────────────────
+        if ext == ".py" or forced in ("black", "flake8", "python"):
+            if forced != "flake8":
+                black_args = [str(abs_path)] if req.fix else ["--check", "--diff", str(abs_path)]
+                rc, out, err = _run(["black"] + black_args)
+                results.append({"tool": "black", "returncode": rc, "output": out or err})
+                if rc != 0:
+                    passed = False
+            if forced != "black":
+                rc, out, err = _run(["flake8", "--max-line-length=120", str(abs_path)])
+                results.append({"tool": "flake8", "returncode": rc, "output": out or err})
+                if rc != 0:
+                    passed = False
+
+        # ── JavaScript / TypeScript ───────────────────────────────────────────
+        elif ext in (".js", ".ts", ".jsx", ".tsx", ".mjs") or forced == "eslint":
+            fix_flag = ["--fix"] if req.fix else []
+            rc, out, err = _run(["eslint"] + fix_flag + [str(abs_path)])
+            results.append({"tool": "eslint", "returncode": rc, "output": out or err})
+            if rc != 0:
+                passed = False
+
+        # ── JSON ─────────────────────────────────────────────────────────────
+        elif ext == ".json" or forced == "json":
+            rc, out, err = _run(["python3", "-m", "json.tool", str(abs_path)])
+            results.append({"tool": "json.tool", "returncode": rc, "output": out or err})
+            if rc != 0:
+                passed = False
+
+        # ── YAML ─────────────────────────────────────────────────────────────
+        elif ext in (".yaml", ".yml") or forced == "yamllint":
+            rc, out, err = _run(["yamllint", "-d", "relaxed", str(abs_path)])
+            results.append({"tool": "yamllint", "returncode": rc, "output": out or err})
+            if rc != 0:
+                passed = False
+
+        else:
+            return _ok(f"No linter configured for {ext} files — skipping.", {"path": req.path, "skipped": True})
+
+        summary = "PASSED" if passed else "FAILED"
+        detail = "\n".join(f"[{r['tool']}] rc={r['returncode']}\n{r['output']}" for r in results)
+        msg = f"Lint {summary} for {req.path}:\n{detail}"
+        return _ok(msg, {"path": req.path, "passed": passed, "results": results}) if passed \
+            else _fail(msg)
+
+    except Exception as e:
+        log.error(f"Workspace lint failed: {e}")
+        return _fail(str(e))

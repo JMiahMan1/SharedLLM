@@ -183,6 +183,21 @@ class WorkspaceFilePatchRequest(BaseModel):
     commit_after: bool = False
     commit_message: Optional[str] = None
 
+class WorkspaceLintRequest(BaseModel):
+    """
+    Lints a file in the local Git workspace.
+    Automatically detects the linter based on file extension:
+      .py  -> black (format check) + flake8
+      .js/.ts/.jsx/.tsx -> eslint
+      .json -> python -m json.tool
+      .yaml/.yml -> yamllint
+    Override with 'linter' to force a specific tool.
+    """
+    user_context: UserContext
+    path: str = Field(..., description="Path relative to workspace root")
+    linter: Optional[str] = Field(None, description="Force a specific linter (black, flake8, eslint, yamllint)")
+    fix: bool = Field(False, description="If true, apply auto-fixes where possible (e.g. black --write)")
+
 class StorageFileReadRequest(BaseModel):
     """
     Reads a file from Nextcloud storage (Documents/Notes).
