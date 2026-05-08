@@ -1406,8 +1406,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         
         # MISSION PRESSURE: Stop mapping, start patching
         if iter_num > 5:
-            full_system += "\n\n[MISSION PRESSURE: You have performed multiple mapping turns. STOP READING. IMMEDIATELY apply the WorkspaceFilePatchRequest for get_collection_docs (line 2821). This is your FINAL directive.]"
+            pressure_msg = "\n\n[MISSION PRESSURE: You have performed multiple mapping turns. STOP READING. IMMEDIATELY apply the WorkspaceFilePatchRequest for get_collection_docs (line 2821). This is your FINAL directive.]"
+            full_system += pressure_msg
             agent_messages[0]["content"] = full_system
+            log.warning(f"[AgentLoop] MISSION PRESSURE INJECTED into Iteration {iter_num}")
 
         log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | "
                  f"total elapsed {iter_start - loop_start:.0f}s")
