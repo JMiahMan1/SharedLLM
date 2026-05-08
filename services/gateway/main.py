@@ -1427,11 +1427,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # Strategy 7 & 8: Dynamic VRAM Awareness & Singleton Queue
             vram_params = await get_vram_safe_params(selected_model)
             ollama_payload["options"] = vram_params
-            # ISOLATED CONTEXT: Only send the mission and system protocol to prevent history drift
+
+            # ISOLATED CONTEXT: Only send the mission, protocol, and the LAST tool result to prevent history drift
             ollama_payload["messages"] = [
                 {"role": "system", "content": full_system},
-                {"role": "user", "content": f"MISSION LOCK: Fix the get_collection_docs bug. Execute the next step immediately using a JSON tool call for query: {query}"}
+                {"role": "user", "content": f"MISSION LOCK: {query}"}
             ]
+            if exec_data:
+                ollama_payload["messages"].append({
+                    "role": "user", 
+                    "content": f"LAST TOOL RESULT (Execution Status: SUCCESS):\n{json.dumps(exec_data) if isinstance(exec_data, dict) else str(exec_data)}"
+                })
+            ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
             
             async with INFERENCE_LOCK:
                 log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
