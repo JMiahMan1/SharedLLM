@@ -2637,16 +2637,11 @@ async def get_storage_stats(request: Request):
     
 @app.get("/api/storage/collection/{collection_name}")
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
-    # HA entities and system capabilities are global, ingested under 'default'
-    GLOBAL_COLLECTIONS = {"ha_entities", "system_capabilities", "system_learnings"}
-    if collection_name in GLOBAL_COLLECTIONS:
+    try:
+        creds_data = await _resolve_identity_from_request(request)
+        user_id = creds_data.get("nextcloud_user") or creds_data.get("user", "default")
+    except:
         user_id = "default"
-    else:
-        try:
-            creds_data = await _resolve_identity_from_request(request)
-            user_id = creds_data.get("nextcloud_user") or creds_data.get("user", "default")
-        except:
-            user_id = "default"
 
     resp = await get_http_client().get(
         f"{RAG_SVC}/rag/collection/{collection_name}?user_id={user_id}&limit={limit}",
