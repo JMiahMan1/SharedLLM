@@ -399,3 +399,33 @@ The librarian/guru layer should not merely know that a file exists. It should
 know what sort of information it contains and which tools can derive value from
 it. That makes the system extensible across multiple storage backends without
 re-implementing heuristics in every downstream tool.
+
+---
+
+## 7. Autonomous Pipeline & Edge-AI Optimization
+
+To maintain high autonomy on constrained hardware (e.g., 8GB VRAM edge devices), the system employs a hardened **Raven Pipeline** designed to maximize context efficiency and resilience.
+
+### A. Context Compression & Semantic Mapping (Strategy 3)
+The system avoids "Context Poisoning" (overloading the LLM with massive files) through tiered retrieval:
+1. **Semantic Mapping**: Agents use `summary_only=True` to retrieve a file's AST (Abstract Syntax Tree) map (signatures/docstrings) in <1KB.
+2. **Chunked Windowing**: Agents use `offset_lines` and `limit_lines` to read specific blocks of code, staying within the **12KB hard context limit**.
+
+### B. Payload Normalization (Strategy 6)
+To support diverse model behaviors (OpenAI-style vs. Raw JSON), the Gateway's `AgentLoop` includes a normalization layer:
+* **Nesting Hoisting**: Automatically flattens `arguments`, `payload`, `args`, or `json` keys to the top level.
+* **Parameter Mapping**: Maps common hallucinations (e.g., `offset` -> `offset_lines`, `limit` -> `limit_lines`) to ensure schema compatibility without agent-side retries.
+
+### C. Resilience & Fallback Parsing (Strategy 4 & 5)
+The pipeline is designed to "Catch the Agent" when it drifts from strict formatting:
+1. **Markdown Block Fallback**: If the model fails to return raw JSON, the parser extracts code from markdown blocks.
+2. **XML-Tag Fallback**: Supports structural tags (e.g., `<action>`, `<commit>`) for models that struggle with JSON escaping in large context windows.
+
+### D. Hardware-Specific Optimization
+* **Prefix Caching**: System prompts and tool schemas are positioned at the absolute start of the prompt to leverage Ollama's KV Cache reuse.
+* **12KB Constraint Awareness**: Agents are explicitly informed of their hardware context window to prevent silent truncation on the inference backend.
+
+### E. Advanced VRAM Orchestration (Strategies 7 & 8)
+To prevent "VRAM Congestion" on 8GB hardware:
+1. **Singleton Inference Queue (Strategy 8)**: A global `INFERENCE_LOCK` in the Gateway serializes all LLM requests. This ensures only one context window is loaded at a time, preventing OOM crashes during concurrent triggers.
+2. **Hardware-Aware Downshifting (Strategy 7)**: The Gateway polls Ollama's `/api/ps` endpoint before every request. If VRAM pressure is detected (e.g., multiple models or large context active), it dynamically "downshifts" the `num_ctx` (context window) to preserve stability.
