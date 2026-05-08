@@ -1,6 +1,6 @@
 # services/gateway/background_worker.py
 """
-Ouroboros Background Worker — The "heartbeat" of the autonomous system.
+Raven Background Worker — The "heartbeat" of the autonomous system.
 
 This module implements a background loop that periodically scrapes Docker logs
 for errors and, if detected, submits a self-repair request to the Gateway's 
@@ -16,13 +16,13 @@ from datetime import datetime
 log = logging.getLogger("gateway.background_worker")
 
 # Configuration
-CHECK_INTERVAL_SECONDS = int(os.getenv("OUROBOROS_CHECK_INTERVAL", "300"))  # Default 5 minutes
-ERROR_THRESHOLD = int(os.getenv("OUROBOROS_ERROR_THRESHOLD", "5"))          # Min errors to trigger repair
+CHECK_INTERVAL_SECONDS = int(os.getenv("RAVEN_CHECK_INTERVAL", "300"))  # Default 5 minutes
+ERROR_THRESHOLD = int(os.getenv("RAVEN_ERROR_THRESHOLD", "5"))          # Min errors to trigger repair
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
 GATEWAY_SVC = "http://localhost:8000" # Internal to container
 
-class OuroborosWorker:
+class RavenWorker:
     def __init__(self):
         self.is_running = False
         self._task = None
@@ -32,7 +32,7 @@ class OuroborosWorker:
             return
         self.is_running = True
         self._task = asyncio.create_task(self._loop())
-        log.info("Ouroboros Background Worker started.")
+        log.info("Raven Background Worker started.")
 
     async def stop(self):
         self.is_running = False
@@ -42,7 +42,7 @@ class OuroborosWorker:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        log.info("Ouroboros Background Worker stopped.")
+        log.info("Raven Background Worker stopped.")
 
     async def _loop(self):
         while self.is_running:
@@ -50,11 +50,11 @@ class OuroborosWorker:
                 await asyncio.sleep(CHECK_INTERVAL_SECONDS)
                 await self.perform_health_check()
             except Exception as e:
-                log.error(f"Error in Ouroboros loop: {e}")
+                log.error(f"Error in Raven loop: {e}")
 
     async def perform_health_check(self):
         """Scrapes logs and triggers repair if errors are found."""
-        log.info("Performing Ouroboros health check...")
+        log.info("Performing Raven health check...")
         
         # 1. Discover containers
         containers = await self._get_containers()
@@ -77,7 +77,7 @@ class OuroborosWorker:
 
         # 3. If errors exceed threshold, trigger self-repair
         if problematic_containers:
-            log.warning(f"Ouroboros detected {total_errors} errors across {len(problematic_containers)} services.")
+            log.warning(f"Raven detected {total_errors} errors across {len(problematic_containers)} services.")
             await self.trigger_self_repair(problematic_containers)
         else:
             log.info("System healthy. No critical error patterns detected.")
@@ -100,7 +100,7 @@ class OuroborosWorker:
     async def _get_errors(self, container_name):
         try:
             payload = {
-                "user_context": {"user": "ouroboros", "is_admin": True},
+                "user_context": {"user": "raven", "is_admin": True},
                 "container_name": container_name,
                 "tail": 100,
                 "filter_level": "ERROR"
@@ -124,7 +124,7 @@ class OuroborosWorker:
         summary = "\n".join([f"- {c['name']}: {c['count']} errors (Sample: {c['sample'][0] if c['sample'] else 'N/A'})" for c in problematic_containers])
         
         query = (
-            f"SYSTEM ALERT: Ouroboros health check detected multiple errors.\n\n"
+            f"SYSTEM ALERT: Raven health check detected multiple errors.\n\n"
             f"Problematic Services:\n{summary}\n\n"
             f"Analyze the logs for these services, identify the root cause, and implement a fix. "
             f"If it's a transient Docker issue, restart the container. If it's a code bug, fix the file, commit, and redeploy."
@@ -134,10 +134,10 @@ class OuroborosWorker:
         
         try:
             # We use /api/chat with the internal secret to bypass normal auth
-            # The Gateway will see 'Ouroboros' signals and use the Autonomous prompt.
+            # The Gateway will see 'Raven' signals and use the Autonomous prompt.
             payload = {
                 "query": query,
-                "user": "ouroboros_admin",
+                "user": "raven_admin",
                 "is_admin": True,
                 "stream": False
             }
@@ -158,4 +158,5 @@ class OuroborosWorker:
             log.error(f"Failed to trigger self-repair: {e}")
 
 # Global instance
-worker = OuroborosWorker()
+worker = RavenWorker()
+
