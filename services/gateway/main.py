@@ -1515,9 +1515,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "```\n"
             "Do NOT just talk about what you will do. Output the JSON tool call immediately."
         )
-        
+
     vram_params = await get_vram_safe_params(selected_model)
-    
+
+    # 6. Raven Autonomous Loop (Strategy 7 & 8 implementation)
+    if is_autonomous:
+        log.info("[ShadowExecution] Routing to autonomous AgentLoop...")
+        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user"))
+
     ollama_payload = {
         "model": selected_model,
         "messages": [
