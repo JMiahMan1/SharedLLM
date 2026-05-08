@@ -44,6 +44,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 
 DATABASE_URL = os.getenv("IDENTITY_DATABASE_URL", "sqlite:////data/identity.db")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 
 engine = create_engine(
     DATABASE_URL, 
@@ -55,6 +56,21 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
     {"key": "rag_sync_interval", "value": "3600", "description": "Frequency in seconds for RAG background re-indexing"},
     {"key": "workspace_runtime_root", "value": "/workspace", "description": "Root folder where workspaces and files will be saved"},
+    {
+        "key": "system_autonomous_protocols", 
+        "value": "# Raven Autonomous Protocols (v1.0)\n*Status: ENFORCED*\n\n## 1. Identity Resolution\n- Priority 1: request.query_params.get(\"user_id\")\n- Priority 2: creds_data.get(\"nextcloud_user\")\n- Priority 3: creds_data.get(\"user\", \"default\")\n\n## 2. Tooling & Workspace\n- Search: WorkspaceSearchRequest (Aliases: ripgrep, grep)\n- Read: WorkspaceFileReadRequest\n- Patch: WorkspaceFilePatchRequest\n- Commit: GitOperationRequest (action: \"commit\")\n\n## 3. Mission Focus\n- Stop Reading if in a Mapping Loop (>3 reads of same file).\n- Avoid hallucinating Git tools.", 
+        "description": "System-wide architectural and behavioral protocols for the Raven autonomous agent."
+    },
+    {
+        "key": "librarian_model", 
+        "value": "auto", 
+        "description": "The LLM model used for background fact extraction and long-term memory maintenance."
+    },
+    {
+        "key": "coding_model", 
+        "value": "auto", 
+        "description": "The LLM model used for autonomous workspace repairs and coding tasks."
+    },
 ]
 
 
@@ -102,15 +118,42 @@ def _ensure_schema_upgrades() -> None:
             conn.commit()
 
 
-def _ensure_default_settings(session: Session) -> None:
+async def _ensure_default_settings(session: Session) -> None:
     existing_keys = {
         setting.key
         for setting in session.exec(select(GlobalSetting)).all()
     }
+    
+    # Try to fetch available models from Ollama to provide better 'auto' defaults
+    available_models = []
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            if resp.status_code == 200:
+                available_models = [m["name"] for m in resp.json().get("models", [])]
+    except Exception as e:
+        log.warning(f"Could not reach Ollama to resolve 'auto' defaults: {e}")
+
+    def resolve_best_model(pattern: str, fallback: str) -> str:
+        if not available_models: return fallback
+        # Priority 1: Exact match
+        for m in available_models:
+            if pattern in m: return m
+        # Priority 2: First available
+        return available_models[0]
+
     inserted = False
     for setting in DEFAULT_GLOBAL_SETTINGS:
         if setting["key"] in existing_keys:
             continue
+        
+        # Dynamic Resolution for models
+        if setting.get("value") == "auto":
+            if setting["key"] == "coding_model":
+                setting["value"] = resolve_best_model("coder", "qwen2.5-coder:7b")
+            elif setting["key"] == "librarian_model":
+                setting["value"] = resolve_best_model("3.5", "qwen3.5:9b")
+
         session.add(GlobalSetting(**setting))
         inserted = True
     if inserted:
@@ -125,7 +168,7 @@ async def lifespan(app: FastAPI):
     # Run initial seed if needed
     with Session(engine) as session:
         seed_from_env(session)
-        _ensure_default_settings(session)
+        await _ensure_default_settings(session)
         _migrate_api_key_material(session)
     yield
 
@@ -276,10 +319,13 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             user = assignment.user
 
     if not user:
-        # Fallback to system default if user not found or not specified
-        user = session.exec(select(User).where(User.username == "default")).first()
+        # Fallback to system account (ID 1)
+        user = session.exec(select(User).where(User.id == 1)).first()
         if not user:
-            raise HTTPException(status_code=404, detail="No valid identity found")
+            # Last resort fallback to "default" username if ID 1 somehow missing
+            user = session.exec(select(User).where(User.username == "default")).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="No valid identity found")
 
     # Decrypt sensitive fields
     return ResolvedCredentials(
