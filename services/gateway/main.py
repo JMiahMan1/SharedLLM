@@ -157,29 +157,40 @@ async def get_vram_safe_params(model: str) -> dict:
     Strategy 7: Dynamic VRAM Awareness & Elastic Scaling.
     Checks Ollama's current load and adjusts context parameters.
     Scales UP if VRAM is free, scales DOWN if under pressure.
+    Bypasses throttling if running against external APIs (OpenRouter/OpenAI).
     """
     # Environment-aware ceiling
     max_ctx = int(os.getenv("MAX_CONTEXT_WINDOW", "32768"))
     target_ctx = int(os.getenv("DEFAULT_CONTEXT_WINDOW", "12288"))
     
+    # EXTERNAL API BYPASS: If using a cloud provider, assume unlimited/large context
+    external_indicators = ("openrouter.ai", "openai.com", "anthropic.com", "groq.com")
+    if any(ind in OLLAMA_URL.lower() for ind in external_indicators):
+        log.info(f"[Strategy 7] External API detected ({OLLAMA_URL}). Unlocking full context: {max_ctx}")
+        return {"num_ctx": max_ctx}
+
     params = {"num_ctx": target_ctx}
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
+            # Note: /api/ps only works for local Ollama instances
             resp = await client.get(f"{OLLAMA_URL}/api/ps")
             if resp.status_code == 200:
                 ps = resp.json()
                 models = ps.get("models", [])
                 
                 # CASE A: High Pressure (Multiple models or massive model active)
+                # Threshold of 7GB is tailored for 8GB cards. 
+                # If we have a model > 7GB, we downshift to ensure room for the KV cache.
                 if len(models) > 1 or any(m.get("size", 0) > 7*1024*1024*1024 for m in models):
-                    log.warning("[Strategy 7] VRAM pressure detected. Downshifting to 4096.")
+                    log.warning("[Strategy 7] VRAM pressure detected (local). Downshifting to 4096.")
                     params["num_ctx"] = 4096
-                # CASE B: Free Capacity (Zero or tiny models active)
+                # CASE B: Free Capacity (Zero models active)
                 elif len(models) == 0:
                     log.info(f"[Strategy 7] VRAM is clear. Up-shifting to {max_ctx}.")
                     params["num_ctx"] = max_ctx
     except Exception as e:
-        log.warning(f"[Strategy 7] Could not poll VRAM state: {e}")
+        # Fallback if ps endpoint is unavailable or blocked
+        log.warning(f"[Strategy 7] Could not poll VRAM state (ps unavailable): {e}")
     
     return params
 
