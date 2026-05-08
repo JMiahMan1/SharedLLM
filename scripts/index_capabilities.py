@@ -60,6 +60,7 @@ def index_capabilities():
         "DeploymentRequest": "Restarts or inspects SharedLLM Docker containers.",
         "VolumeInventoryRequest": "Inspects Docker volume usage (Admin only).",
         "CapabilityIndexRequest": "Triggers this re-indexing script to refresh tool definitions.",
+        "WorkspaceBootstrapRequest": "Autonomously initializes or clones a repository into a workspace path if it is missing.",
         "SystemLearningRequest": "Persists successful bug fixes and architectural insights to the RAG ledger."
     }
     

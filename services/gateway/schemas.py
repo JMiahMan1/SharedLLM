@@ -109,3 +109,10 @@ class SystemLearningRequest(BaseModel):
     key: str
     content: str
     category: str = "general"
+
+class WorkspaceBootstrapRequest(BaseModel):
+    workspace_id: Optional[str] = None
+    local_path: Optional[str] = None
+    repo_url: Optional[str] = None
+    branch: Optional[str] = None
+    create_if_missing: bool = True
