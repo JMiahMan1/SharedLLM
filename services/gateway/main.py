@@ -1439,10 +1439,13 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch"]):
         final_query += (
-            "\n\n[SYSTEM OVERRIDE: You HAVE direct access to the local Git workspace files via `WorkspaceFileReadRequest`, `WorkspaceFileWriteRequest`, and `WorkspaceFilePatchRequest`. "
-            "Do NOT confuse the local workspace with Nextcloud storage. "
-            "CRITICAL: You MUST use a standard markdown JSON block for your tool calls. DO NOT USE XML TAGS. "
-            "If you use XML tags, the system will fail.]"
+            "\n\n[SYSTEM OVERRIDE: You HAVE direct access to the local Git workspace files. "
+            "EVERY action (read, write, patch, commit) MUST be a JSON tool call. "
+            "To READ a file: {\"type\": \"WorkspaceFileReadRequest\", \"path\": \"...\"}. "
+            "To WRITE/REPLACE a file: {\"type\": \"WorkspaceFileWriteRequest\", \"path\": \"...\", \"content\": \"full file content\"}. "
+            "To PATCH a file: {\"type\": \"WorkspaceFilePatchRequest\", \"path\": \"...\", \"chunks\": [{\"old_text\": \"...\", \"new_text\": \"...\"}]}. "
+            "To COMMIT: {\"type\": \"GitOperationRequest\", \"action\": \"commit\", \"commit_message\": \"...\"}. "
+            "NEVER output raw code blocks. ALWAYS wrap in a JSON tool call.]"
         )
         
     ollama_payload = {
