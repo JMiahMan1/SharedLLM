@@ -1840,6 +1840,37 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                                 log.info(f"[AgentLoop] Parsed raw markdown block into {action}")
             except Exception as e:
                 log.error(f"[AgentLoop] Error parsing raw markdown block: {e}")
+
+        # Strategy 5: Fallback for XML-like tags (e.g. <commit>, <tool>, <action>)
+        if tool_data is None and "<" in ans and ">" in ans:
+            try:
+                # Basic regex-less extraction for performance and safety
+                start = ans.find("<")
+                end = ans.find(">", start)
+                if start != -1 and end != -1:
+                    tag_content = ans[start+1:end]
+                    # Check for action/type/path attributes
+                    if "action=" in tag_content or "path=" in tag_content:
+                        # Convert pseudo-tag attributes to tool_data
+                        # This is a heuristic parser for LLM format drift
+                        attrs = {}
+                        import re
+                        for match in re.finditer(r'(\w+)=["\']([^"\']+)["\']', tag_content):
+                            attrs[match.group(1)] = match.group(2)
+                        
+                        action_val = attrs.get("action") or attrs.get("type")
+                        path_val = attrs.get("path")
+                        
+                        if action_val:
+                            # Map shorthand actions
+                            action_map = {"read": "WorkspaceFileReadRequest", "patch": "WorkspaceFilePatchRequest"}
+                            tool_data = {
+                                "action": action_map.get(action_val, action_val),
+                                "payload": {"path": path_val}
+                            }
+                            log.info(f"[AgentLoop] Parsed pseudo-tag <{tag_content}> into {tool_data['action']}")
+            except Exception as e:
+                log.error(f"[AgentLoop] Error parsing pseudo-tag: {e}")
         
         if tool_data is None:
             log.info(f"[AgentLoop] No valid JSON object or array found — final response at iteration {agent_iter + 1}")
