@@ -1427,7 +1427,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # Strategy 7 & 8: Dynamic VRAM Awareness & Singleton Queue
             vram_params = await get_vram_safe_params(selected_model)
             ollama_payload["options"] = vram_params
-            ollama_payload["messages"] = agent_messages
+            # ISOLATED CONTEXT: Only send the mission and system protocol to prevent history drift
+            ollama_payload["messages"] = [
+                {"role": "system", "content": full_system},
+                {"role": "user", "content": f"MISSION LOCK: Fix the get_collection_docs bug. Execute the next step immediately using a JSON tool call for query: {query}"}
+            ]
             
             async with INFERENCE_LOCK:
                 log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
@@ -1587,6 +1591,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 if old_key in tool_data and new_key not in tool_data:
                     log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
                     tool_data[new_key] = tool_data.pop(old_key)
+            
+            if "properties" in tool_data and "type" in tool_data:
+                # Detect schema hallucinations
+                log.warning(f"[AgentLoop] Detected schema hallucination — triggering protocol correction")
+                tool_data = None
         
         if not tool_data:
             log.warning(f"[AgentLoop] No valid JSON tool call found in iteration {agent_iter + 1}. Conversational output detected.")
