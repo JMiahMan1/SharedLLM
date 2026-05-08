@@ -1361,12 +1361,19 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
             "stream": False,
             "options": vram_params
         }
+        log.info(f"[ShadowExecution] Requesting proposal from {get_assistant_model()} (Timeout: {OLLAMA_TIMEOUT}s)")
+        start_t = asyncio.get_event_loop().time()
         resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
+        elapsed = asyncio.get_event_loop().time() - start_t
+        log.info(f"[ShadowExecution] Ollama responded in {elapsed:.1f}s with status {resp.status_code}")
+        
         if resp.status_code == 200:
             proposal = resp.json().get("message", {}).get("content", "")
             return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
+        else:
+            log.warning(f"[ShadowExecution] Non-200 response: {resp.status_code} - {resp.text}")
     except Exception as e:
-        log.warning(f"[ShadowExecution] Failed: {e}")
+        log.warning(f"[ShadowExecution] Failed: {type(e).__name__}: {e}")
     return ""
 
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials) -> Any:
