@@ -1439,7 +1439,11 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "in a markdown code block. Never claim you cannot show logs.]"
         )
 
-    if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch", "commit", "branch"]):
+    # Detection of autonomous agent engagement
+    is_autonomous = any(k in query.lower() for k in ["raven:", "<raven>", "ouroboros:", "jarvis:", "fix the", "patch the", "implement", "autonomous:"])
+    
+    if is_autonomous:
+        # Specialized coding keywords to ensure the system override is descriptive
         final_query += (
             "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
             "You are Raven, an autonomous system repair agent. "
