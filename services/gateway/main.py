@@ -1493,13 +1493,13 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     tool_json = full_ans[start:end].strip()
                     tool_data = json.loads(tool_json)
                     
-                    action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name")
+                    action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
                     payload = tool_data.get("payload", {})
                     # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
                     if isinstance(tool_data, dict):
                         for k, v in tool_data.items():
-                            if k not in ("action", "payload", "tool", "name") and k not in payload:
-                                if k == "file_path":
+                            if k not in ("action", "payload", "tool", "name", "type") and k not in payload:
+                                if "path" in k.lower():
                                     payload["path"] = v
                                 else:
                                     payload[k] = v
@@ -1688,14 +1688,13 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             tool_json = ans[start:end].strip()
             tool_data = json.loads(tool_json)
             
-            action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name")
+            action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
             payload = tool_data.get("payload", {})
             # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
             if isinstance(tool_data, dict):
                 for k, v in tool_data.items():
-                    if k not in ("action", "payload", "tool", "name") and k not in payload:
-                        # Alias file_path to path
-                        if k == "file_path":
+                    if k not in ("action", "payload", "tool", "name", "type") and k not in payload:
+                        if "path" in k.lower():
                             payload["path"] = v
                         else:
                             payload[k] = v
