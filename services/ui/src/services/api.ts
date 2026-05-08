@@ -106,8 +106,6 @@ export interface GatewayConfig {
   coding_model: string;
   librarian_model: string;
 }
-  description?: string | null;
-}
 
 export interface ExecutionResponse {
   status: 'SUCCESS' | 'FAILURE' | 'PARTIAL';
