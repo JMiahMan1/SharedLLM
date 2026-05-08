@@ -96,7 +96,7 @@ class IntentEngine:
             return "turn_off", 1.0
         if any(k in q for k in ["status", "report", "check"]):
             if "storage" in q: return "storage_status", 1.0
-            if "home" in q or "ha" in q: return "ha_status", 1.0
+            if "home" in q or " ha " in q or q.startswith("ha ") or q.endswith(" ha"): return "ha_status", 1.0
 
         # 2. Semantic Routing (if active)
         # Fallback Check: Engine crashed or has no embeddings
