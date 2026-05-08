@@ -1487,19 +1487,22 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             # Detect tool block (either ```json or raw ``` if it looks like JSON)
             if "```json" in full_ans or ("```" in full_ans and "action" in full_ans and "payload" in full_ans):
                 try:
-                    # Find the start of the block
                     tag = "```json" if "```json" in full_ans else "```"
                     start = full_ans.find(tag) + len(tag)
                     end = full_ans.find("```", start)
                     tool_json = full_ans[start:end].strip()
                     tool_data = json.loads(tool_json)
-                    action = tool_data.get("action")
+                    
+                    action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name")
                     payload = tool_data.get("payload", {})
                     # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
                     if isinstance(tool_data, dict):
                         for k, v in tool_data.items():
-                            if k not in ("action", "payload") and k not in payload:
-                                payload[k] = v
+                            if k not in ("action", "payload", "tool", "name") and k not in payload:
+                                if k == "file_path":
+                                    payload["path"] = v
+                                else:
+                                    payload[k] = v
                     
                     if not action:
                         if "path" in payload:
@@ -1685,13 +1688,17 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             tool_json = ans[start:end].strip()
             tool_data = json.loads(tool_json)
             
-            action = tool_data.get("action")
+            action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name")
             payload = tool_data.get("payload", {})
             # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
             if isinstance(tool_data, dict):
                 for k, v in tool_data.items():
-                    if k not in ("action", "payload") and k not in payload:
-                        payload[k] = v
+                    if k not in ("action", "payload", "tool", "name") and k not in payload:
+                        # Alias file_path to path
+                        if k == "file_path":
+                            payload["path"] = v
+                        else:
+                            payload[k] = v
             
             if not action:
                 if "path" in payload:
