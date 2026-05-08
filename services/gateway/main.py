@@ -1883,12 +1883,19 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         
         # Strategy 6: Payload Normalization (Flatten 'arguments', 'payload', 'args', or 'json')
         if tool_data and isinstance(tool_data, dict):
-            # If the model nested everything under common keys, hoist it
+            # 1. Nesting Hoisting
             for nest_key in ("arguments", "payload", "args", "json"):
                 if nest_key in tool_data and isinstance(tool_data[nest_key], dict):
                     log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
                     nested_vals = tool_data.pop(nest_key)
                     tool_data.update(nested_vals)
+            
+            # 2. Parameter Mapping (Synonym Correction)
+            mapping = {"offset": "offset_lines", "limit": "limit_lines"}
+            for old_key, new_key in mapping.items():
+                if old_key in tool_data and new_key not in tool_data:
+                    log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
+                    tool_data[new_key] = tool_data.pop(old_key)
         
         if tool_data is None:
             log.info(f"[AgentLoop] No valid JSON object or array found — final response at iteration {agent_iter + 1}")

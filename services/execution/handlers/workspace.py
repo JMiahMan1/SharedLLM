@@ -33,9 +33,36 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
             return _fail(f"Path is not a file: {req.path}")
         
         with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
+            lines = f.readlines()
+        
+        # Strategy 3: Semantic Extraction (Signatures Only)
+        if req.summary_only and req.path.endswith(".py"):
+            import ast
+            try:
+                tree = ast.parse("".join(lines))
+                summary = []
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef):
+                        summary.append(f"Class: {node.name} (line {node.lineno})")
+                    elif isinstance(node, ast.FunctionDef):
+                        summary.append(f"Function: {node.name}({[a.arg for a in node.args.args]}) (line {node.lineno})")
+                
+                content = "\n".join(summary)
+                return _ok(f"Semantic map for {req.path} ({len(summary)} symbols found)", {"content": content, "path": req.path})
+            except Exception as e:
+                log.warning(f"AST parse failed for {req.path}, falling back to chunked read: {e}")
+
+        # Chunked Reading (Windowing)
+        start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
+        end = start + req.limit_lines
+        chunk = lines[start:end]
+        content = "".join(chunk)
+        
+        msg = f"Read {len(chunk)} lines from {req.path} (offset={req.offset_lines})"
+        if end < len(lines):
+            msg += f" | TRUNCATED: file has {len(lines)} lines total."
             
-        return _ok(f"Read {len(content)} bytes from {req.path}", {"content": content, "path": req.path})
+        return _ok(msg, {"content": content, "path": req.path, "total_lines": len(lines), "start_line": start + 1})
     except Exception as e:
         log.error(f"Workspace read failed: {e}")
         return _fail(str(e))
