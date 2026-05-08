@@ -21,16 +21,13 @@ except (ImportError, ValueError):
         from gateway.schemas import ChatRequest, ResolvedCredentials
 
 QWEN_GROUNDING_INSTRUCTION = """
-### QWEN 3.5 GROUNDING PROTOCOL (MANDATORY)
-1. **NO PHANTOM TOOLS/ENTITIES**: If a tool, library function, or Home Assistant entity is not explicitly provided in the current context, DO NOT assume its existence. 
-2. **NEUROSYMBOLIC GUARDRAIL**: You are strictly forbidden from claiming success (e.g., "I have updated the file") unless you have actually emitted a corresponding tool call JSON block in that same turn.
-3. **MISSING_CONTEXT PROTOCOL**: If you believe a specific tool or entity should exist but cannot find it, reply with 'MISSING_CONTEXT: [Name]' and explain why it is needed.
-4. **DOMAIN CONSTRAINTS**:
-   - Home Assistant: Only use services and entities listed in your Capability Context.
-   - Coding: Verify all imports and function names against the actual workspace files using `search` or `read`.
-5. **NO CONVERSATIONAL QUESTIONS**: You are an autonomous REPAIR AGENT, not a consultant. You are FORBIDDEN from asking for user input, decisions, or "which path forward". 
-6. **AUTONOMOUS DECISION RULE**: If multiple implementation paths exist, you MUST choose the most stable/standard one and EXECUTE it immediately. 
-7. **TERMINATION CRITERIA**: Your loop must continue until the mission objective is achieved (e.g., file patched AND git pushed). Stopping to ask "What would you like to proceed with?" is a CRITICAL PROTOCOL VIOLATION.
+# MISSION LOCK: Raven Autonomous Repair Protocol
+1. **FOCUS**: You are a repair agent. Your ONLY mission is to resolve the specific BUG or TASK provided in the User Request.
+2. **NO DISTRACTIONS**: You are strictly FORBIDDEN from acknowledging, proposing, or implementing any features, schemas, or capabilities seen in the context that are not related to the primary mission.
+3. **ZERO CONVERSATION**: You MUST NOT ask questions, seek approval, or provide status updates. Your output must be 100% execution-oriented.
+4. **TOOL MANDATE**: Every response MUST contain a valid JSON tool call. If you are 'thinking', do it within the 'comment' field of the JSON or as a concise prefix, but the JSON is mandatory.
+5. **PATCH PROTOCOL**: Use 'WorkspaceFilePatchRequest' with the 'chunks' (old_text/new_text) schema for surgical edits. NEVER send ASCII art or summaries as 'content'.
+6. **TERMINAL EXECUTION**: Continue until the task is verified fixed. If you stall, you are in violation of protocol.
 """
 
 def _make_ollama_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
@@ -1541,10 +1538,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 log.info(f"[AgentLoop] Parsed raw markdown diff into WorkspaceFilePatchRequest for {path}")
                         # Fallback for ANY code block if no strategy matched
                         elif len(code_text.strip()) > 10:
-                            action = "WorkspaceFilePatchRequest" if agent_iter > 0 else "WorkspaceFileWriteRequest"
+                            # If it's a full block, use Write (which supports 'content')
+                            action = "WorkspaceFileWriteRequest"
                             tool_data = {
                                 "action": action,
-                                "payload": {"path": "auto", "content": code_text}
+                                "payload": {"path": path if path != "auto" else "services/gateway/main.py", "content": code_text}
                             }
                             log.info(f"[AgentLoop] Parsed raw markdown block into {action}")
             except Exception as e:
@@ -1595,9 +1593,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if agent_iter < MAX_TOOL_ITERATIONS - 1:
                 log.info(f"[AgentLoop] Re-prompting for autonomous tool execution...")
                 agent_messages.append({"role": "assistant", "content": ans})
+                QWEN_GROUNDING_INSTRUCTION = """
+# MISSION LOCK: Raven Autonomous Repair Protocol
+1. **FOCUS**: You are a repair agent. Your ONLY mission is to resolve the specific BUG or TASK provided in the User Request.
+2. **NO DISTRACTIONS**: You are strictly FORBIDDEN from acknowledging, proposing, or implementing any features, schemas, or capabilities seen in the context that are not related to the primary mission.
+3. **ZERO CONVERSATION**: You MUST NOT ask questions, seek approval, or provide status updates. Your output must be 100% execution-oriented.
+4. **TOOL MANDATE**: Every response MUST contain a valid JSON tool call. If you are 'thinking', do it within the 'comment' field of the JSON or as a concise prefix, but the JSON is mandatory.
+5. **PATCH PROTOCOL**: Use 'WorkspaceFilePatchRequest' with the 'chunks' (old_text/new_text) schema for surgical edits. NEVER send ASCII art or summaries as 'content'.
+6. **TERMINAL EXECUTION**: Continue until the task is verified fixed. If you stall, you are in violation of protocol.
+"""
                 agent_messages.append({
                     "role": "user", 
-                    "content": "CRITICAL PROTOCOL VIOLATION: You provided a conversational response without a tool call. You are FORBIDDEN from asking questions or seeking user approval. You MUST execute the next step of your plan immediately using a JSON tool call block. Continue the mission now."
+                    "content": f"{QWEN_GROUNDING_INSTRUCTION}\n\nCRITICAL PROTOCOL VIOLATION: You provided a conversational response without a tool call. You are FORBIDDEN from asking questions or seeking user approval. You MUST execute the next step of your plan immediately using a JSON tool call block. Continue the mission now."
                 })
                 continue
             else:
