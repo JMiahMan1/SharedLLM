@@ -1779,6 +1779,66 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     tool_data = json.loads(ans[first_bracket:last_bracket+1])
                 except Exception:
                     pass
+
+        # Strategy 4: Fallback for raw markdown code blocks (Diffs or Full Code)
+        if tool_data is None and "```" in ans:
+            try:
+                parts = ans.split("```")
+                if len(parts) >= 3:
+                    block_content = parts[1]
+                    first_nl = block_content.find('\n')
+                    if first_nl != -1:
+                        code_text = block_content[first_nl+1:]
+                        # Simple detection for unified diff
+                        if "--- " in code_text and "+++ " in code_text and "@@ " in code_text:
+                            # It's a diff
+                            path = "auto"
+                            chunks = []
+                            current_old = []
+                            current_new = []
+                            in_hunk = False
+                            for line in code_text.splitlines():
+                                if line.startswith("+++ b/") or line.startswith("+++ "):
+                                    path = line.split("+++ ")[-1].replace("b/", "", 1).strip()
+                                elif line.startswith("@@"):
+                                    if in_hunk and (current_old or current_new):
+                                        # To avoid trailing newlines breaking the replace, we strip right spaces if it fails, but basic join here
+                                        chunks.append({
+                                            "old_text": "\n".join(current_old) + "\n" if current_old else "",
+                                            "new_text": "\n".join(current_new) + "\n" if current_new else ""
+                                        })
+                                        current_old, current_new = [], []
+                                    in_hunk = True
+                                elif in_hunk:
+                                    if line.startswith("-"):
+                                        current_old.append(line[1:])
+                                    elif line.startswith("+"):
+                                        current_new.append(line[1:])
+                                    elif line.startswith(" "):
+                                        current_old.append(line[1:])
+                                        current_new.append(line[1:])
+                            if in_hunk and (current_old or current_new):
+                                chunks.append({
+                                    "old_text": "\n".join(current_old) + "\n" if current_old else "",
+                                    "new_text": "\n".join(current_new) + "\n" if current_new else ""
+                                })
+                            
+                            if chunks:
+                                tool_data = {
+                                    "action": "WorkspaceFilePatchRequest",
+                                    "payload": {"path": path, "chunks": chunks}
+                                }
+                                log.info(f"[AgentLoop] Parsed raw markdown diff into WorkspaceFilePatchRequest for {path}")
+                        else:
+                            # It's full code without diff markers
+                            if "def " in code_text or "import " in code_text or "class " in code_text:
+                                tool_data = {
+                                    "action": "WorkspaceFileWriteRequest",
+                                    "payload": {"path": "auto", "content": code_text}
+                                }
+                                log.info(f"[AgentLoop] Parsed raw markdown code into WorkspaceFileWriteRequest")
+            except Exception as e:
+                log.error(f"[AgentLoop] Error parsing raw markdown block: {e}")
         
         if tool_data is None:
             log.info(f"[AgentLoop] No valid JSON object or array found — final response at iteration {agent_iter + 1}")
