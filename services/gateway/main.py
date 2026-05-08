@@ -28,6 +28,9 @@ QWEN_GROUNDING_INSTRUCTION = """
 4. **DOMAIN CONSTRAINTS**:
    - Home Assistant: Only use services and entities listed in your Capability Context.
    - Coding: Verify all imports and function names against the actual workspace files using `search` or `read`.
+5. **NO CONVERSATIONAL QUESTIONS**: You are an autonomous REPAIR AGENT, not a consultant. You are FORBIDDEN from asking for user input, decisions, or "which path forward". 
+6. **AUTONOMOUS DECISION RULE**: If multiple implementation paths exist, you MUST choose the most stable/standard one and EXECUTE it immediately. 
+7. **TERMINATION CRITERIA**: Your loop must continue until the mission objective is achieved (e.g., file patched AND git pushed). Stopping to ask "What would you like to proceed with?" is a CRITICAL PROTOCOL VIOLATION.
 """
 
 def _make_ollama_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
