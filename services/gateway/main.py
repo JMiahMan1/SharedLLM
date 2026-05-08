@@ -1664,8 +1664,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 break
 
         except Exception as e:
-            log.error(f"[AgentLoop] Tool execution failed: {e}")
-            break
+            import traceback
+            tb = traceback.format_exc()
+            log.error(f"[AgentLoop] Tool execution failed: {e}\n{tb}")
+            agent_messages.append({"role": "assistant", "content": ans})
+            agent_messages.append({
+                "role": "user",
+                "content": f"[FATAL ERROR IN TOOL EXECUTION]: {e}\n\nTraceback:\n{tb}\n\nPlease analyze this failure, adjust your approach or parameters, and continue the mission."
+            })
+            continue
 
     return JSONResponse({"status": "SUCCESS", "message": ans})
 
