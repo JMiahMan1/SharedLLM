@@ -1688,22 +1688,57 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     # Non-streaming — Agent Loop
     # Supports multi-turn tool execution: call Ollama, execute tool, feed result back, repeat.
     MAX_TOOL_ITERATIONS = 5
+    HEARTBEAT_INTERVAL = 15   # seconds between heartbeat log lines
+    HUNG_THRESHOLD = 240      # seconds before a HUNG WARNING is emitted
     agent_messages = ollama_payload.get("messages", [])[:]  # shallow copy
     exec_data = None
     ans = ""
+    loop_start = asyncio.get_event_loop().time()
 
     for agent_iter in range(MAX_TOOL_ITERATIONS):
-        log.info(f"[AgentLoop] Iteration {agent_iter + 1}/{MAX_TOOL_ITERATIONS}")
+        iter_start = asyncio.get_event_loop().time()
+        log.info(f"[AgentLoop] Iteration {agent_iter + 1}/{MAX_TOOL_ITERATIONS} | "
+                 f"total elapsed {iter_start - loop_start:.0f}s")
+
+        # ── Heartbeat task ──────────────────────────────────────────────────
+        heartbeat_stop = asyncio.Event()
+
+        async def _heartbeat(iter_n: int, t0: float) -> None:
+            elapsed = 0.0
+            while not heartbeat_stop.is_set():
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                if heartbeat_stop.is_set():
+                    break
+                elapsed = asyncio.get_event_loop().time() - t0
+                if elapsed > HUNG_THRESHOLD:
+                    log.warning(
+                        f"[AgentLoop] ⚠ HUNG WARNING — iter {iter_n} has been waiting "
+                        f"{elapsed:.0f}s for Ollama response (threshold={HUNG_THRESHOLD}s)"
+                    )
+                else:
+                    log.info(
+                        f"[AgentLoop] ♥ heartbeat — iter {iter_n} | "
+                        f"waiting for Ollama {elapsed:.0f}s | stage=inference"
+                    )
+
+        hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
 
         try:
             ollama_payload["messages"] = agent_messages
             resp = await call_ollama(ollama_payload, use_chat=True)
+            heartbeat_stop.set()
+            await hb_task
             if resp.status_code != 200:
                 return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
             data = resp.json()
             ans = data.get("message", {}).get("content", "Error.")
+            ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
+            log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
         except (httpx.TimeoutException, httpx.ConnectError):
+            heartbeat_stop.set()
+            await hb_task
             ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
+            log.warning(f"[AgentLoop] Ollama timeout/connect error on iter {agent_iter + 1}")
             if is_openai:
                 return _make_openai_response(ans, selected_model, "degraded")
             return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
