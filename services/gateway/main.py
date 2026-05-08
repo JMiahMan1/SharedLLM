@@ -1575,7 +1575,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "write_file": "WorkspaceFileWriteRequest",
                 "patch_file": "WorkspaceFilePatchRequest",
                 "lint_file": "WorkspaceLintRequest",
-                "lint": "WorkspaceLintRequest"
+                "lint": "WorkspaceLintRequest",
+                "ripgrep": "WorkspaceSearchRequest",
+                "grep": "WorkspaceSearchRequest",
+                "search": "WorkspaceSearchRequest"
             }
             if action in action_map_aliases:
                 action = action_map_aliases[action]
@@ -1604,6 +1607,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
                 "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
                 "workspacelintrequest": (EXECUTION_SVC, "/execute/workspace_lint"),
+                "workspacesearchrequest": (EXECUTION_SVC, "/execute/workspace_search"),
                 "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
                 "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
