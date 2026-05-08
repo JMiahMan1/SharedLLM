@@ -1694,8 +1694,21 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         if "```" in ans:
             log.info(f"[AgentLoop] Block detected. Content preview: {ans[ans.find('```'):][:100]}...")
 
-        # Check if the response contains a tool call
+        # Check if the response contains a tool call (fenced or bare JSON)
         has_tool_block = "```json" in ans or ("```" in ans and ("action" in ans or "type" in ans or "tool" in ans))
+
+        # Also detect bare JSON objects (no code fences)
+        bare_json = False
+        ans_stripped = ans.strip()
+        if not has_tool_block and ans_stripped.startswith("{") and ans_stripped.endswith("}"):
+            try:
+                test_data = json.loads(ans_stripped)
+                if isinstance(test_data, dict) and any(k in test_data for k in ("action", "type", "tool", "name")):
+                    has_tool_block = True
+                    bare_json = True
+                    log.info(f"[AgentLoop] Bare JSON tool call detected (no code fences)")
+            except json.JSONDecodeError:
+                pass
 
         if not has_tool_block:
             log.info(f"[AgentLoop] No tool call detected — final response at iteration {agent_iter + 1}")
@@ -1703,13 +1716,17 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
         # Extract and execute the tool call
         try:
-            tag = "```json" if "```json" in ans else "```"
-            start = ans.find(tag) + len(tag)
-            end = ans.find("```", start)
-            if end <= start:
-                log.warning(f"[AgentLoop] Malformed code block — no closing fence")
-                break
-            tool_json = ans[start:end].strip()
+            if bare_json:
+                tool_json = ans_stripped
+            else:
+                tag = "```json" if "```json" in ans else "```"
+                start = ans.find(tag) + len(tag)
+                end = ans.find("```", start)
+                if end <= start:
+                    log.warning(f"[AgentLoop] Malformed code block — no closing fence")
+                    break
+                tool_json = ans[start:end].strip()
+
             tool_data = json.loads(tool_json)
             # Handle model wrapping tool call in an array
             if isinstance(tool_data, list) and len(tool_data) > 0:
