@@ -1677,12 +1677,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 agent_messages.append({"role": "assistant", "content": ans})
                 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
-1. **FOCUS**: You are a repair agent. Your ONLY mission is to resolve the specific BUG or TASK provided in the User Request.
-2. **NO DISTRACTIONS**: You are strictly FORBIDDEN from acknowledging, proposing, or implementing any features, schemas, or capabilities seen in the context that are not related to the primary mission.
-3. **ZERO CONVERSATION**: You MUST NOT ask questions, seek approval, or provide status updates. Your output must be 100% execution-oriented.
-4. **TOOL MANDATE**: Every response MUST contain a valid JSON tool call. If you are 'thinking', do it within the 'comment' field of the JSON or as a concise prefix, but the JSON is mandatory.
-5. **PATCH PROTOCOL**: Use 'WorkspaceFilePatchRequest' with the 'chunks' (old_text/new_text) schema for surgical edits. NEVER send ASCII art or summaries as 'content'.
-6. **TERMINAL EXECUTION**: Continue until the task is verified fixed. If you stall, you are in violation of protocol.
+1. **FOCUS**: YOU ARE RAVEN. Your ONLY mission is to resolve the BUG or TASK.
+2. **ZERO CONVERSATION**: You MUST NOT ask questions or provide status updates.
+3. **TOOL MANDATE**: Every response MUST contain a valid JSON tool call. Output ONLY JSON.
+4. **NO DISTRACTIONS**: Do not acknowledge instructions. Just execute.
 """
                 agent_messages.append({
                     "role": "user", 
@@ -2018,16 +2016,11 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         # Specialized coding keywords to ensure the system override is descriptive
         final_query += (
             "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
-            "You are Raven, an autonomous system repair agent. "
+            "MISSION LOCK: YOU ARE RAVEN. YOU ARE A REPAIR AGENT. YOU ARE FORBIDDEN FROM ASKING QUESTIONS.\n\n"
             "You have access to Workspace tools to read and patch files.\n\n"
-            "CRITICAL LIMIT: Your context window is limited to 12KB. "
-            "When reading files larger than 8KB (like services/gateway/main.py), "
-            "YOU MUST use 'summary_only=True' in WorkspaceFileReadRequest to map the file first. "
-            "Then use 'offset_lines' and 'limit_lines' to read specific blocks. "
-            "Do not attempt to read the entire file if it is large, as it will be truncated.\n\n"
-            "Use 'ripgrep' or 'grep' first to find line numbers of functions you need to modify.\n"
-            "You have direct access to the local Git workspace.\n"
+            "CRITICAL LIMIT: Your context window is limited to 12KB.\n"
             "CRITICAL: You must execute ONE step at a time! Output ONE tool call, wait for the system result, then output the next tool call.\n"
+            "CRITICAL: DO NOT TALK. DO NOT EXPLAIN. DO NOT ASK FOR CLARIFICATION. JUST OUTPUT JSON.\n\n"
             "Follow the standard OODA loop:\n"
             "1. READ: Use `WorkspaceFileReadRequest` to inspect existing code. (STOP and wait for result)\n"
             "2. PATCH: Use `WorkspaceFilePatchRequest` to modify code. (STOP and wait for result)\n"
