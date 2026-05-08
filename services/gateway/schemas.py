@@ -81,3 +81,31 @@ class StorageStatusRequest(BaseModel):
     Requires no parameters.
     """
     pass
+
+class WorkspaceFileReadRequest(BaseModel):
+    path: str
+
+class WorkspaceFileWriteRequest(BaseModel):
+    path: str
+    content: str
+
+class WorkspaceFilePatchRequest(BaseModel):
+    path: str
+    chunks: List[Dict[str, str]]  # List of {"old_text": "...", "new_text": "..."}
+
+class WorkspaceShellRequest(BaseModel):
+    command: str
+
+class GitOperationRequest(BaseModel):
+    action: Literal["status", "pull", "fetch", "branch", "commit", "push"]
+    message: Optional[str] = None
+    branch: Optional[str] = "microservices"
+
+class DeploymentRequest(BaseModel):
+    service: str
+    action: Literal["restart", "build", "stop"]
+
+class SystemLearningRequest(BaseModel):
+    key: str
+    content: str
+    category: str = "general"
