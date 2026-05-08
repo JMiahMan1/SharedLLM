@@ -142,11 +142,36 @@ CONFIG = {
     "librarian_model": os.getenv("LIBRARIAN_MODEL", "qwen3:8b")
 }
 
+# Global Inference Lock (Strategy 8: Singleton Queue)
+# Ensures only one LLM request is processed at a time to protect 8GB VRAM.
+INFERENCE_LOCK = asyncio.Lock()
+
 def get_assistant_model():
     return CONFIG["assistant_model"]
 
 def get_coding_model():
     return CONFIG["coding_model"]
+
+async def get_vram_safe_params(model: str) -> dict:
+    """
+    Strategy 7: Dynamic VRAM Awareness.
+    Checks Ollama's current load and adjusts context parameters to fit in 8GB VRAM.
+    """
+    params = {"num_ctx": 12288} # Default target for 8GB Q4 models
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/ps")
+            if resp.status_code == 200:
+                ps = resp.json()
+                models = ps.get("models", [])
+                # If multiple models are loaded, or a large model is active, downshift
+                if len(models) > 1 or any(m.get("size", 0) > 6*1024*1024*1024 for m in models):
+                    log.warning("[Strategy 7] VRAM pressure detected. Downshifting num_ctx to 4096.")
+                    params["num_ctx"] = 4096
+    except Exception as e:
+        log.warning(f"[Strategy 7] Could not poll VRAM state: {e}")
+    
+    return params
 
 def get_librarian_model():
     return CONFIG["librarian_model"]
@@ -1481,11 +1506,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "Do NOT just talk about what you will do. Output the JSON tool call immediately."
         )
         
+    vram_params = await get_vram_safe_params(selected_model)
+    
     ollama_payload = {
         "model": selected_model,
         "messages": [
             {"role": "system", "content": full_system}
         ] + short_term + [{"role": "user", "content": final_query}],
+        "options": vram_params,
         "stream": should_stream
     }
 
@@ -1493,26 +1521,28 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         async def stream_generator():
             full_ans = ""
             suppressing = False
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=ollama_payload) as resp:
-                    async for line in resp.aiter_lines():
-                        if not line: continue
-                        try:
-                            chunk = json.loads(line)
-                            content = chunk.get("message", {}).get("content", "")
-                            if content:
-                                full_ans += content
-                                # Detection of ANY code block OR raw background JSON to start suppression
-                                if ("```" in full_ans or '"follow_ups":' in full_ans) and not suppressing:
-                                    suppressing = True
-                                
-                                if not suppressing:
-                                    if is_openai:
-                                        yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
-                                    else:
-                                        yield line + "\n"
-                            if chunk.get("done"): break
-                        except: pass
+            async with INFERENCE_LOCK:
+                log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model}")
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=ollama_payload) as resp:
+                        async for line in resp.aiter_lines():
+                            if not line: continue
+                            try:
+                                chunk = json.loads(line)
+                                content = chunk.get("message", {}).get("content", "")
+                                if content:
+                                    full_ans += content
+                                    # Detection of ANY code block OR raw background JSON to start suppression
+                                    if not suppressing and ("```json" in full_ans or (full_ans.strip().startswith("{") and len(full_ans.strip()) > 10)):
+                                        suppressing = True
+                                    if not suppressing:
+                                        if is_openai:
+                                            yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
+                                        else:
+                                            yield line + "\n"
+                                if chunk.get("done"): break
+                            except: pass
+                log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
             
             # 8. Handle tool execution at the end of the stream
             log.info(f"[StreamGenerator] Full response length: {len(full_ans)}")
@@ -1738,8 +1768,16 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
 
         try:
+            # Strategy 7 & 8: Dynamic VRAM Awareness & Singleton Queue
+            vram_params = await get_vram_safe_params(selected_model)
+            ollama_payload["options"] = vram_params
             ollama_payload["messages"] = agent_messages
-            resp = await call_ollama(ollama_payload, use_chat=True)
+            
+            async with INFERENCE_LOCK:
+                log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
+                resp = await call_ollama(ollama_payload, use_chat=True)
+                log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
+                
             heartbeat_stop.set()
             await hb_task
             if resp.status_code != 200:
