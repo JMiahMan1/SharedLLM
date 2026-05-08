@@ -428,4 +428,4 @@ The pipeline is designed to "Catch the Agent" when it drifts from strict formatt
 ### E. Advanced VRAM Orchestration (Strategies 7 & 8)
 To prevent "VRAM Congestion" on 8GB hardware:
 1. **Singleton Inference Queue (Strategy 8)**: A global `INFERENCE_LOCK` in the Gateway serializes all LLM requests. This ensures only one context window is loaded at a time, preventing OOM crashes during concurrent triggers.
-2. **Hardware-Aware Downshifting (Strategy 7)**: The Gateway polls Ollama's `/api/ps` endpoint before every request. If VRAM pressure is detected (e.g., multiple models or large context active), it dynamically "downshifts" the `num_ctx` (context window) to preserve stability.
+2. **Elastic Hardware-Aware Scaling (Strategy 7)**: The Gateway polls Ollama's `/api/ps` endpoint before every request. It proactively "Up-shifts" to larger context windows (up to 32KB) when VRAM is clear and dynamically "downshifts" to 4KB if pressure is detected, ensuring optimal cognitive depth for the available hardware.
