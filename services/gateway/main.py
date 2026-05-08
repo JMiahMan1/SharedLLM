@@ -1442,7 +1442,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch", "commit", "branch"]):
         final_query += (
             "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
-            "You are Jarvis, an autonomous developer. You have direct access to the local Git workspace.\n"
+            "You are Raven, an autonomous system repair agent. "
+            "You have access to Workspace tools to read and patch files.\n\n"
+            "CRITICAL LIMIT: Your context window is limited to 12KB. "
+            "When reading files larger than 8KB (like services/gateway/main.py), "
+            "YOU MUST use 'offset' and 'limit' in WorkspaceFileReadRequest to read specific blocks. "
+            "Do not attempt to read the entire file if it is large, as it will be truncated.\n\n"
+            "Use 'ripgrep' or 'grep' first to find line numbers of functions you need to modify.\n"
+            "You have direct access to the local Git workspace.\n"
             "CRITICAL: You must execute ONE step at a time! Output ONE tool call, wait for the system result, then output the next tool call.\n"
             "Follow the standard OODA loop:\n"
             "1. READ: Use `WorkspaceFileReadRequest` to inspect existing code. (STOP and wait for result)\n"
