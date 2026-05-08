@@ -107,6 +107,23 @@ def index_capabilities():
 
     try:
         log.info(f"Attempting to sync with RAG at {RAG_SVC_URL}...")
+        
+        # ADDED: Wait for RAG to be ready with a loop
+        max_retries = 10
+        for i in range(max_retries):
+            try:
+                # Use the health endpoint to check readiness
+                h_resp = requests.get(f"{RAG_SVC_URL}/health", timeout=5)
+                if h_resp.status_code == 200:
+                    log.info("RAG service is healthy and ready.")
+                    break
+            except Exception:
+                pass
+            
+            log.info(f"RAG not ready yet (attempt {i+1}/{max_retries}), waiting 5s...")
+            import time
+            time.sleep(5)
+            
         resp = requests.post(
             f"{RAG_SVC_URL}/rag/sync/capabilities",
             json={"capabilities": capabilities},
