@@ -48,6 +48,9 @@
     }
 
     # 3. Route Identity/Auth API traffic
+    handle /api/auth* {
+        reverse_proxy identity:8001
+    }
     handle /api/users* {
         reverse_proxy identity:8001
     }
