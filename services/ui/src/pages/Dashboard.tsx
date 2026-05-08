@@ -275,7 +275,9 @@ const Dashboard = () => {
               </div>
             </div>
             <div className="space-y-3">
-              {settings.map((setting) => (
+              {settings
+                .filter((s) => !['assistant_model', 'coding_model', 'librarian_model'].includes(s.key))
+                .map((setting) => (
                 <div className="overflow-hidden">
                   <p className="font-mono text-sm text-white truncate">{setting.key}</p>
                   <p className="mt-2 text-sm text-slate-300 break-words">{setting.value}</p>

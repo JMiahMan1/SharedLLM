@@ -570,7 +570,9 @@ const Admin = () => {
             </div>
 
             <div className="space-y-3">
-              {settings.map((setting) => (
+              {settings
+                .filter((s) => !['assistant_model', 'coding_model', 'librarian_model'].includes(s.key))
+                .map((setting) => (
                 <div key={setting.key} className="glass-card p-4">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="font-mono text-sm text-white">{setting.key}</p>
