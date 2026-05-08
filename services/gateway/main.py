@@ -2824,7 +2824,7 @@ async def get_storage_stats(request: Request):
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
     try:
         creds_data = await _resolve_identity_from_request(request)
-        user_id = creds_data.get("nextcloud_user") or creds_data.get("user", "default")
+        user_id = request.query_params.get("user_id") or creds_data.get("nextcloud_user") or creds_data.get("user", "default")
     except:
         user_id = "default"
 
