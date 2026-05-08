@@ -1440,10 +1440,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch"]):
         final_query += (
             "\n\n[SYSTEM OVERRIDE: You HAVE direct access to the local Git workspace files via `WorkspaceFileReadRequest`, `WorkspaceFileWriteRequest`, `WorkspaceFilePatchRequest`, and `GitOperationRequest`. "
-            "Do NOT confuse the local workspace with Nextcloud storage. "
+            "CRITICAL: When modifying existing files, you MUST use `WorkspaceFilePatchRequest` instead of rewriting the file. "
+            "Patch schema: {\"type\": \"WorkspaceFilePatchRequest\", \"path\": \"...\", \"chunks\": [{\"old_text\": \"exact old lines to replace\", \"new_text\": \"new lines\"}]}. "
             "CRITICAL: You MUST use a standard markdown JSON block for your tool calls. DO NOT USE XML TAGS. "
-            "If you use XML tags, the system will fail. "
-            "NEVER output raw python code blocks to write files. ALWAYS wrap your code inside a `WorkspaceFileWriteRequest` or `WorkspaceFilePatchRequest` JSON tool call.]"
+            "NEVER output raw python code blocks. ALWAYS wrap your code inside a JSON tool call.]"
         )
         
     ollama_payload = {
