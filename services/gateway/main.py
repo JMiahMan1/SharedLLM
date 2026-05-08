@@ -1998,6 +1998,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         is_autonomous = True
     
     log.info(f"[Intent] query='{query[:100]}...' is_autonomous={is_autonomous}")
+    
+    if is_autonomous:
         # Specialized coding keywords to ensure the system override is descriptive
         final_query += (
             "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
