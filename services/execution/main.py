@@ -14,7 +14,7 @@ try:
         CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
-        WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, StorageFileReadRequest, StorageFileWriteRequest,
+        WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
         SystemLearningRequest, DiscoverySyncRequest
     )
     from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
@@ -31,7 +31,7 @@ except (ImportError, ValueError):
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
-            WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, StorageFileReadRequest, StorageFileWriteRequest,
+            WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
             SystemLearningRequest, DiscoverySyncRequest
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
