@@ -1879,7 +1879,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     # 6. Raven Autonomous Loop (Strategy 7 & 8 implementation)
     if is_autonomous:
         log.info("[ShadowExecution] Routing to autonomous AgentLoop...")
-        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user"))
+        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user"), creds)
 
     ollama_payload = {
         "model": selected_model,
