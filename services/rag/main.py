@@ -287,7 +287,7 @@ async def ingest(req: IngestRequest):
 @app.post("/rag/sync/files", dependencies=[Depends(require_internal)])
 async def sync_files(payload: dict):
     chunks = payload.get("chunks", [])
-    user_id = payload.get("user_id", "admin").lower()
+    user_id = payload.get("user_id", "default").lower()
     collection_name = payload.get("collection_name", "nextcloud_files")
     collection = get_collection(collection_name)
     

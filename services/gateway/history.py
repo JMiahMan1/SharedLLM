@@ -11,10 +11,27 @@ log = logging.getLogger("gateway.history")
 
 # Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 
 def _get_history_key(user: str) -> str:
     return f"rag:history:{user}"
+
+async def fetch_librarian_model() -> str:
+    """Fetches the designated Librarian model from Identity Service GlobalSettings."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/settings/librarian_model",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("value", "qwen3.5:9b")
+    except Exception as e:
+        log.warning(f"Failed to fetch librarian_model: {e}")
+    return "qwen3.5:9b" # Safe fallback
 
 async def get_history(user_id: str) -> list:
     """Retrieves conversation history as a list of dicts."""
@@ -94,10 +111,8 @@ async def extract_and_store_user_facts(user_id: str, history: list):
         return
 
     try:
-        ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "qwen3:8b")
+        LIBRARIAN_MODEL = await fetch_librarian_model()
         OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-        INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
-        RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 
         # Only look at the last turn
         recent_text = ""
@@ -116,7 +131,7 @@ Return ONLY a bulleted list of facts, or 'NONE'.
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{OLLAMA_URL}/api/generate",
-                json={"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False},
+                json={"model": LIBRARIAN_MODEL, "prompt": prompt, "stream": False},
             )
             if resp.status_code != 200: return
             
