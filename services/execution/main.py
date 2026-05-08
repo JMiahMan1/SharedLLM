@@ -30,9 +30,11 @@ except (ImportError, ValueError):
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest
+            DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+            WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, StorageFileReadRequest, StorageFileWriteRequest,
+            SystemLearningRequest, DiscoverySyncRequest
         )
-        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser
+        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
         from execution.handlers import docker_logs as docker_logs_handler
         from execution.handlers import git as git_handler
         from execution.handlers import deployment as deployment_handler
