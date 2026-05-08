@@ -31,6 +31,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            user_id TEXT DEFAULT 'system',
             service TEXT,
             level TEXT,
             message TEXT,
@@ -43,21 +44,33 @@ def init_db():
 init_db()
 
 class LogEntry(BaseModel):
+    user_id: str = "system"
     service: str
     level: str = "INFO"
     message: str
     context: Optional[dict] = None
 
-async def _fetch_logs(service: Optional[str] = None, limit: int = 100):
+async def _fetch_logs(service: Optional[str] = None, user_id: Optional[str] = None, limit: int = 100):
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     query = "SELECT * FROM logs"
+    filters = []
     params = []
+    
     if service:
-        query += " WHERE service = ?"
+        filters.append("service = ?")
         params.append(service)
+    
+    if user_id and user_id != "admin": # Admins see all, others only their own
+        filters.append("user_id = ?")
+        params.append(user_id)
+        
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
+        
     query += " ORDER BY timestamp DESC LIMIT ?"
     params.append(limit)
+    
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -72,19 +85,18 @@ def _resolve_limit(limit: Optional[int], lines: Optional[int], default: int = 10
 
 # Direct service path (used internally)
 @app.get("/logs")
-async def get_logs(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
-    return await _fetch_logs(service=service, limit=_resolve_limit(limit, lines))
+async def get_logs(user_id: Optional[str] = None, service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
+    return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
 # /api/logs path — Caddy routes /api/logs* directly to logging:8006
-# so the logging service must handle the /api/logs path itself.
 @app.get("/api/logs")
-async def get_logs_api(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
-    return await _fetch_logs(service=service, limit=_resolve_limit(limit, lines))
-
+async def get_logs_api(user_id: Optional[str] = None, service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
+    return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
 @app.get("/api/admin/logs")
 async def get_logs_admin_api(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
-    return await _fetch_logs(service=service, limit=_resolve_limit(limit, lines))
+    # Admins can see everything
+    return await _fetch_logs(service=service, user_id="admin", limit=_resolve_limit(limit, lines))
 
 @app.delete("/api/logs")
 async def clear_logs_api():
@@ -148,25 +160,26 @@ async def websocket_endpoint_direct(websocket: WebSocket):
 
 # Update add_log to broadcast
 @app.post("/log")
-async def add_log(entry: LogEntry):
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_dict = {
-        "timestamp": now,
-        "service": entry.service,
-        "level": entry.level,
-        "message": entry.message,
-        "context": entry.context
-    }
-    
+@app.post("/logs")
+@app.post("/api/logs")
+async def log_event(entry: LogEntry):
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute(
-        "INSERT INTO logs (timestamp, service, level, message, context) VALUES (?, ?, ?, ?, ?)",
-        (now, entry.service, entry.level, entry.message, json.dumps(entry.context) if entry.context else None)
+        "INSERT INTO logs (user_id, service, level, message, context) VALUES (?, ?, ?, ?, ?)",
+        (entry.user_id, entry.service, entry.level, entry.message, json.dumps(entry.context or {}))
     )
     conn.commit()
     conn.close()
     
     # Broadcast to websocket clients
+    log_dict = {
+        "user_id": entry.user_id,
+        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "service": entry.service,
+        "level": entry.level,
+        "message": entry.message,
+        "context": entry.context
+    }
     await manager.broadcast(json.dumps(log_dict))
     
     return {"status": "success"}
