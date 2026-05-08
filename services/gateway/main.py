@@ -139,7 +139,7 @@ def _make_openai_response(message: str, model: str, intent: str = None, debug_co
 
 # --- Imports from internal modules ---
 try:
-    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, DeploymentRequest, SystemLearningRequest
+    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, DeploymentRequest, SystemLearningRequest, WorkspaceBootstrapRequest
     from .intent_engine import engine
     from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
     from .prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
@@ -1591,7 +1591,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             action = "WorkspaceFileWriteRequest"
                             tool_data = {
                                 "action": action,
-                                "payload": {"path": path if path != "auto" else "services/gateway/main.py", "content": code_text}
+                                "payload": {"path": path if path != "auto" else "auto", "content": code_text}
                             }
                             log.info(f"[AgentLoop] Parsed raw markdown block into {action}")
             except Exception as e:
@@ -1647,6 +1647,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "WorkspaceFileReadRequest", "WorkspaceFilePatchRequest", 
                 "WorkspaceFileWriteRequest", "WorkspaceSearchRequest", 
                 "WorkspaceLintRequest", "WorkspaceFileDeleteRequest",
+                "WorkspaceBootstrapRequest",
                 "ripgrep", "read_file", "patch_file", "grep", "search"
             ]
             action = tool_data.get("type") or tool_data.get("action") if tool_data else None
@@ -1746,6 +1747,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
                 "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
+                "workspacebootstraprequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/bootstrap"),
                 "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
                 "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
             }
