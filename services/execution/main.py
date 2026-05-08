@@ -61,6 +61,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(n
 log = logging.getLogger("execution")
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
+
+async def resolve_internal_user(user_id: str) -> Optional[Dict[str, Any]]:
+    """Query Identity Service for full user credentials using internal secret."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC_URL}/api/resolve",
+                json={"rag_user": user_id},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        log.error(f"Failed to resolve internal user {user_id}: {e}")
+    return None
 
 async def require_internal(request: Request, x_internal_secret: str = Header(None)):
     if request.url.path == "/health":
@@ -180,9 +196,39 @@ async def list_timers(user_id: Optional[str] = None):
 async def execute_trigger(payload: Dict[str, Any]):
     """Internal endpoint for Automation scheduler."""
     timer_data = payload.get("timer", {})
-    log.info(f"ALARM TRIGGERED: {timer_data.get('title')}")
-    # Legacy: This is where we'd play audio on target_device
-    return _ok(f"Triggered {timer_data.get('title')}", "automation_trigger")
+    user_id = payload.get("user_id") or timer_data.get("user_id")
+    
+    log.info(f"ALARM TRIGGERED: {timer_data.get('title')} for user {user_id}")
+    
+    if not user_id:
+        return _ok(f"Triggered {timer_data.get('title')} (no user context)", "automation_trigger")
+
+    # Resolve full credentials for the user (to get HA token)
+    creds = await resolve_internal_user(user_id)
+    if not creds:
+        log.error(f"Trigger failed: could not resolve credentials for user {user_id}")
+        return _ok(f"Triggered {timer_data.get('title')} (failed to resolve creds)", "automation_trigger")
+
+    # Execute the actual alert via Home Assistant
+    try:
+        # Construct a fake UserContext for the handler
+        context = UserContext(**creds)
+        target_device = timer_data.get("target_device")
+        
+        if target_device:
+            log.info(f"Dispatching media alert to {target_device}")
+            await media.handle_media_play(
+                MediaPlayRequest(
+                    media_id="media-source://tts/google?message=" + f"Timer {timer_data.get('title')} is done",
+                    entity_id=target_device
+                ),
+                context
+            )
+        
+        return _ok(f"Triggered {timer_data.get('title')} on {target_device}", "automation_trigger")
+    except Exception as e:
+        log.error(f"Trigger execution error: {e}")
+        return _ok(f"Triggered {timer_data.get('title')} but alert failed: {e}", "automation_trigger")
 
 
 # ─── Ouroboros Autonomous Loop Endpoints ──────────────────────────────────────────────────

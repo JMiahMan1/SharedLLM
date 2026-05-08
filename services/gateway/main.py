@@ -261,9 +261,6 @@ async def get_vram_safe_params(model: str) -> dict:
     
     return params
 
-def get_librarian_model():
-    return CONFIG["librarian_model"]
-
 CODING_SIGNALS = (
   "python", "javascript", "typescript", "node", "react", "fastapi", "sql", "regex",
   "docker", "dockerfile", "bash", "shell", "pytest", "bug", "fix", "refactor",
@@ -384,12 +381,12 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    tb = traceback.format_exc()
     err_msg = f"Gateway Error: {type(exc).__name__}: {str(exc)}"
-    log.error(f"{err_msg}\n{traceback.format_exc()}")
-    await emit_log("ERROR", err_msg, {"trace": traceback.format_exc()})
+    log.error(f"{err_msg}\n{tb}")
     return JSONResponse(
       status_code=500,
-      content={"status": "ERROR", "message": "Internal Gateway Error", "detail": str(exc)}
+      content={"status": "ERROR", "message": "Internal Gateway Error", "detail": str(exc), "traceback": tb.splitlines()}
     )
 
 # --- Global Health & Readiness ---
@@ -2946,11 +2943,15 @@ async def update_gateway_config(new_config: dict):
         for key in ["assistant_model", "coding_model", "librarian_model"]:
             if key in new_config:
                 val = new_config[key]
-                await client.post(
-                    f"{IDENTITY_SVC}/api/settings",
-                    json={"key": key, "value": val},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
+                # Identity Service uses PATCH /api/settings/{key} with a body {"value": val}
+                try:
+                    await client.patch(
+                        f"{IDENTITY_SVC}/api/settings/{key}",
+                        json={"value": val},
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                except Exception as e:
+                    log.error(f"Failed to update {key} in Identity Service: {e}")
                 CONFIG[key] = val # Update local cache too
     
     log.info(f"Updated Gateway Config via Identity SVC: {new_config}")

@@ -28,7 +28,7 @@ def set_indexer_pause(paused: bool):
         PAUSE_EXPIRY = time.time() + 60.0
 
 def is_indexer_paused():
-    global INDEXER_PAUSED, PAUSE_EXPIRY
+    global INDEXER_PAUSED
     if INDEXER_PAUSED:
         import time
         if time.time() > PAUSE_EXPIRY:
