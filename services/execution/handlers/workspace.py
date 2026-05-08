@@ -3,7 +3,7 @@ import os
 import logging
 import difflib
 from typing import Dict, Any, Optional
-from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceSearchRequest, ExecutionResult
+from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceSearchRequest, WorkspaceShellRequest, ExecutionResult
 
 log = logging.getLogger("execution.workspace")
 
@@ -143,6 +143,43 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
         return _ok(f"Found {len(matches)} matches for '{req.query}'", {"matches": matches})
     except Exception as e:
         log.error(f"Workspace search failed: {e}")
+        return _fail(str(e))
+
+async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
+    """Executes an arbitrary shell command in the workspace."""
+    import subprocess
+    try:
+        # Resolve safe CWD
+        abs_cwd = resolve_safe_path(req.cwd)
+        
+        log.info(f"Executing shell command: {req.command} in {abs_cwd}")
+        # Enforce a max timeout of 300s
+        safe_timeout = min(req.timeout, 300)
+        
+        proc = subprocess.run(
+            req.command,
+            shell=True,
+            cwd=abs_cwd,
+            capture_output=True,
+            text=True,
+            timeout=safe_timeout
+        )
+        
+        detail = {
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "returncode": proc.returncode
+        }
+        
+        if proc.returncode == 0:
+            return _ok(f"Command executed successfully: {req.command[:50]}...", detail)
+        else:
+            return _fail(f"Command failed with exit code {proc.returncode}", detail)
+            
+    except subprocess.TimeoutExpired:
+        return _fail(f"Command timed out after {req.timeout}s")
+    except Exception as e:
+        log.error(f"Workspace shell execution failed: {e}")
         return _fail(str(e))
 
 async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionResult:

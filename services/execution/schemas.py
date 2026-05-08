@@ -186,6 +186,16 @@ class WorkspaceFilePatchRequest(BaseModel):
     commit_after: bool = False
     commit_message: Optional[str] = None
 
+class WorkspaceShellRequest(BaseModel):
+    """
+    Executes a shell command in the workspace root.
+    Use this for advanced operations not covered by other tools.
+    """
+    user_context: UserContext
+    command: str = Field(..., description="The shell command to execute")
+    cwd: Optional[str] = Field(".", description="Working directory relative to root")
+    timeout: int = Field(60, ge=1, le=300, description="Command timeout in seconds")
+
 class WorkspaceSearchRequest(BaseModel):
     """
     Performs a codebase-wide search in the Git workspace using ripgrep or grep.
