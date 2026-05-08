@@ -1500,12 +1500,16 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                                 payload[k] = v
                     
                     if not action:
-                        if "path" in payload and ("content" in payload or "is_patch" in payload):
-                            action = "WorkspaceFileWriteRequest"
-                            log.info(f"[StreamToolExecution] Falling back to WorkspaceFileWriteRequest for flat JSON")
-                        elif "path" in payload:
-                            action = "WorkspaceFileReadRequest"
-                            log.info(f"[StreamToolExecution] Falling back to WorkspaceFileReadRequest for flat JSON")
+                        if "path" in payload:
+                            if (payload.get("is_patch") or "chunks" in payload):
+                                action = "WorkspaceFilePatchRequest"
+                                log.info(f"[StreamToolExecution] Falling back to WorkspaceFilePatchRequest for flat JSON")
+                            elif payload.get("content") is not None:
+                                action = "WorkspaceFileWriteRequest"
+                                log.info(f"[StreamToolExecution] Falling back to WorkspaceFileWriteRequest for flat JSON")
+                            else:
+                                action = "WorkspaceFileReadRequest"
+                                log.info(f"[StreamToolExecution] Falling back to WorkspaceFileReadRequest for flat JSON (content was null)")
                     action_map = {
                         "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
                         "light_control": (EXECUTION_SVC, "/execute/light"),
@@ -1688,12 +1692,16 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         payload[k] = v
             
             if not action:
-                if "path" in payload and ("content" in payload or "is_patch" in payload):
-                    action = "WorkspaceFileWriteRequest"
-                    log.info(f"[ToolExecution] Falling back to WorkspaceFileWriteRequest for flat JSON")
-                elif "path" in payload:
-                    action = "WorkspaceFileReadRequest"
-                    log.info(f"[ToolExecution] Falling back to WorkspaceFileReadRequest for flat JSON")
+                if "path" in payload:
+                    if (payload.get("is_patch") or "chunks" in payload):
+                        action = "WorkspaceFilePatchRequest"
+                        log.info(f"[ToolExecution] Falling back to WorkspaceFilePatchRequest for flat JSON")
+                    elif payload.get("content") is not None:
+                        action = "WorkspaceFileWriteRequest"
+                        log.info(f"[ToolExecution] Falling back to WorkspaceFileWriteRequest for flat JSON")
+                    else:
+                        action = "WorkspaceFileReadRequest"
+                        log.info(f"[ToolExecution] Falling back to WorkspaceFileReadRequest for flat JSON (content was null)")
             # Map action to service endpoint
             action_map = {
                 "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
