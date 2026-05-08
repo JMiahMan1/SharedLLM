@@ -2945,14 +2945,21 @@ async def update_gateway_config(new_config: dict):
                 val = new_config[key]
                 # Identity Service uses PATCH /api/settings/{key} with a body {"value": val}
                 try:
-                    await client.patch(
+                    resp = await client.patch(
                         f"{IDENTITY_SVC}/api/settings/{key}",
                         json={"value": val},
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
+                    if resp.status_code != 200:
+                        log.error(f"Failed to sync global config {key}: Identity SVC returned {resp.status_code}")
+                        raise HTTPException(status_code=resp.status_code, detail=f"Identity Service error for {key}")
+                    
+                    # Refresh the internal CONFIG cache ONLY on success
+                    CONFIG[key] = val
+                    log.info(f"Synchronized global config: {key} -> {val}")
                 except Exception as e:
-                    log.error(f"Failed to update {key} in Identity Service: {e}")
-                CONFIG[key] = val # Update local cache too
+                    log.error(f"Exception during global config sync for {key}: {e}")
+                    raise HTTPException(status_code=500, detail=str(e))
     
     log.info(f"Updated Gateway Config via Identity SVC: {new_config}")
     return {"status": "SUCCESS", "config": new_config}

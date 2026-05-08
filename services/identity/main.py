@@ -290,6 +290,30 @@ def require_internal(authorization: str = Header(None), x_internal_secret: str =
     if token != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Invalid internal token")
 
+def require_admin_or_internal(
+    authorization: str = Header(None), 
+    x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
+    session: Session = Depends(get_session)
+):
+    # Trust internal services
+    if x_internal_secret == INTERNAL_SECRET:
+        return True
+    
+    # Trust bearer tokens matching internal secret
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        if token == INTERNAL_SECRET:
+            return True
+            
+    # Trust admin API keys
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        user = _find_user_for_api_key(session, token)
+        if user and user.is_admin:
+            return True
+            
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
 def require_api_key(authorization: str = Header(None), session: Session = Depends(get_session)) -> User:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing API Key")
@@ -846,9 +870,7 @@ def get_setting(key: str, session: Session = Depends(get_session)):
     return setting
 
 @app.patch("/api/settings/{key}", response_model=GlobalSettingRead)
-def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
-    if not admin.is_admin:
-        raise HTTPException(status_code=403, detail="Forbidden")
+def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
         
     setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
     if not setting:
