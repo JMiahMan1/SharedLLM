@@ -1311,6 +1311,350 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         log.warning(f"[ShadowExecution] Failed: {e}")
     return ""
 
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials) -> Any:
+    """
+    Raven Autonomous Loop (Strategy 7 & 8 implementation).
+    Supports multi-turn tool execution: call Ollama, execute tool, feed result back, repeat.
+    """
+    # Initialize the base payload for the loop
+    ollama_payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": full_system}
+        ] + short_term + [{"role": "user", "content": query}],
+        "stream": False # AgentLoop is always non-streaming for the brain
+    }
+
+    MAX_TOOL_ITERATIONS = 5
+    HEARTBEAT_INTERVAL = 15   # seconds between heartbeat log lines
+    HUNG_THRESHOLD = 240      # seconds before a HUNG WARNING is emitted
+    agent_messages = ollama_payload.get("messages", [])[:]  # shallow copy
+    exec_data = None
+    ans = ""
+    loop_start = asyncio.get_event_loop().time()
+
+    for agent_iter in range(MAX_TOOL_ITERATIONS):
+        iter_start = asyncio.get_event_loop().time()
+        log.info(f"[AgentLoop] Iteration {agent_iter + 1}/{MAX_TOOL_ITERATIONS} | "
+                 f"total elapsed {iter_start - loop_start:.0f}s")
+
+        # ── Heartbeat task ──────────────────────────────────────────────────
+        heartbeat_stop = asyncio.Event()
+
+        async def _heartbeat(iter_n: int, t0: float) -> None:
+            elapsed = 0.0
+            while not heartbeat_stop.is_set():
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                if heartbeat_stop.is_set():
+                    break
+                elapsed = asyncio.get_event_loop().time() - t0
+                if elapsed > HUNG_THRESHOLD:
+                    log.warning(
+                        f"[AgentLoop] ⚠ HUNG WARNING — iter {iter_n} has been waiting "
+                        f"{elapsed:.0f}s for Ollama response (threshold={HUNG_THRESHOLD}s)"
+                    )
+                else:
+                    log.info(
+                        f"[AgentLoop] ♥ heartbeat — iter {iter_n} | "
+                        f"waiting for Ollama {elapsed:.0f}s | stage=inference"
+                    )
+
+        hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
+
+        try:
+            # Strategy 7 & 8: Dynamic VRAM Awareness & Singleton Queue
+            vram_params = await get_vram_safe_params(selected_model)
+            ollama_payload["options"] = vram_params
+            ollama_payload["messages"] = agent_messages
+            
+            async with INFERENCE_LOCK:
+                log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
+                resp = await call_ollama(ollama_payload, use_chat=True)
+                log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
+                
+            heartbeat_stop.set()
+            await hb_task
+            if resp.status_code != 200:
+                return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
+            data = resp.json()
+            ans = data.get("message", {}).get("content", "Error.")
+            ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
+            log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
+        except (httpx.TimeoutException, httpx.ConnectError):
+            heartbeat_stop.set()
+            await hb_task
+            ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
+            log.warning(f"[AgentLoop] Ollama timeout/connect error on iter {agent_iter + 1}")
+            return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
+
+        # 8. Tool Execution — Intercept JSON blocks for execution
+        log.info(f"[AgentLoop] Response length: {len(ans)}")
+        
+        tool_data = None
+        
+        # Strategy 1: Code fences
+        tag = "```json" if "```json" in ans else "```"
+        start = ans.find(tag)
+        if start != -1:
+            start += len(tag)
+            end = ans.find("```", start)
+            if end > start:
+                try:
+                    tool_data = json.loads(ans[start:end].strip())
+                except Exception:
+                    pass
+
+        # Strategy 2: First { to last }
+        if tool_data is None:
+            first_brace = ans.find("{")
+            last_brace = ans.rfind("}")
+            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                try:
+                    tool_data = json.loads(ans[first_brace:last_brace+1])
+                except Exception:
+                    pass
+
+        # Strategy 3: First [ to last ] (for array-wrapped)
+        if tool_data is None:
+            first_bracket = ans.find("[")
+            last_bracket = ans.rfind("]")
+            if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+                try:
+                    tool_data = json.loads(ans[first_bracket:last_bracket+1])
+                except Exception:
+                    pass
+
+        # Strategy 4: Fallback for raw markdown code blocks (Diffs or Full Code)
+        if tool_data is None and "```" in ans:
+            try:
+                parts = ans.split("```")
+                if len(parts) >= 3:
+                    block_content = parts[1]
+                    first_nl = block_content.find('\n')
+                    if first_nl != -1:
+                        code_text = block_content[first_nl+1:]
+                        # Simple detection for unified diff
+                        if "--- " in code_text and "+++ " in code_text and "@@ " in code_text:
+                            # It's a diff
+                            path = "auto"
+                            chunks = []
+                            current_old = []
+                            current_new = []
+                            in_hunk = False
+                            for line in code_text.splitlines():
+                                if line.startswith("+++ b/") or line.startswith("+++ "):
+                                    path = line.split("+++ ")[-1].replace("b/", "", 1).strip()
+                                elif line.startswith("@@"):
+                                    if in_hunk and (current_old or current_new):
+                                        chunks.append({
+                                            "old_text": "\n".join(current_old) + "\n" if current_old else "",
+                                            "new_text": "\n".join(current_new) + "\n" if current_new else ""
+                                        })
+                                        current_old, current_new = [], []
+                                    in_hunk = True
+                                elif in_hunk:
+                                    if line.startswith("-"):
+                                        current_old.append(line[1:])
+                                    elif line.startswith("+"):
+                                        current_new.append(line[1:])
+                                    elif line.startswith(" "):
+                                        current_old.append(line[1:])
+                                        current_new.append(line[1:])
+                            if in_hunk and (current_old or current_new):
+                                chunks.append({
+                                    "old_text": "\n".join(current_old) + "\n" if current_old else "",
+                                    "new_text": "\n".join(current_new) + "\n" if current_new else ""
+                                })
+                            
+                            if chunks:
+                                tool_data = {
+                                    "action": "WorkspaceFilePatchRequest",
+                                    "payload": {"path": path, "chunks": chunks}
+                                }
+                                log.info(f"[AgentLoop] Parsed raw markdown diff into WorkspaceFilePatchRequest for {path}")
+                        # Fallback for ANY code block if no strategy matched
+                        elif len(code_text.strip()) > 10:
+                            action = "WorkspaceFilePatchRequest" if agent_iter > 0 else "WorkspaceFileWriteRequest"
+                            tool_data = {
+                                "action": action,
+                                "payload": {"path": "auto", "content": code_text}
+                            }
+                            log.info(f"[AgentLoop] Parsed raw markdown block into {action}")
+            except Exception as e:
+                log.error(f"[AgentLoop] Error parsing raw markdown block: {e}")
+
+        # Strategy 5: Fallback for XML-like tags (e.g. <commit>, <tool>, <action>)
+        if tool_data is None and "<" in ans and ">" in ans:
+            try:
+                start = ans.find("<")
+                end = ans.find(">", start)
+                if start != -1 and end != -1:
+                    tag_content = ans[start+1:end]
+                    if "action=" in tag_content or "path=" in tag_content:
+                        attrs = {}
+                        import re
+                        for match in re.finditer(r'(\w+)=["\']([^"\']+)["\']', tag_content):
+                            attrs[match.group(1)] = match.group(2)
+                        
+                        action_val = attrs.get("action") or attrs.get("type")
+                        path_val = attrs.get("path")
+                        
+                        if action_val:
+                            action_map_shorthand = {"read": "WorkspaceFileReadRequest", "patch": "WorkspaceFilePatchRequest"}
+                            tool_data = {
+                                "action": action_map_shorthand.get(action_val, action_val),
+                                "payload": {"path": path_val}
+                            }
+                            log.info(f"[AgentLoop] Parsed pseudo-tag <{tag_content}> into {tool_data['action']}")
+            except Exception as e:
+                log.error(f"[AgentLoop] Error parsing pseudo-tag: {e}")
+        
+        # Strategy 6: Payload Normalization
+        if tool_data and isinstance(tool_data, dict):
+            for nest_key in ("arguments", "payload", "args", "json"):
+                if nest_key in tool_data and isinstance(tool_data[nest_key], dict):
+                    log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
+                    nested_vals = tool_data.pop(nest_key)
+                    tool_data.update(nested_vals)
+            
+            mapping = {"offset": "offset_lines", "limit": "limit_lines"}
+            for old_key, new_key in mapping.items():
+                if old_key in tool_data and new_key not in tool_data:
+                    log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
+                    tool_data[new_key] = tool_data.pop(old_key)
+        
+        if tool_data is None:
+            log.info(f"[AgentLoop] No valid JSON object or array found — final response at iteration {agent_iter + 1}")
+            break
+            
+        if isinstance(tool_data, list) and len(tool_data) > 0:
+            tool_data = tool_data[0]
+            
+        if not isinstance(tool_data, dict):
+            log.info(f"[AgentLoop] Parsed JSON is not a dictionary — breaking loop")
+            break
+
+        log.info(f"[AgentLoop] Dispatching action: {json.dumps({k: v for k, v in tool_data.items() if k != 'user_context'}, indent=2)}")
+
+        try:
+            action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
+            payload = tool_data.get("payload", {})
+            if isinstance(tool_data, dict):
+                for k, v in tool_data.items():
+                    if k not in ("action", "payload", "tool", "name", "type") and k not in payload:
+                        if "path" in k.lower():
+                            payload["path"] = v
+                        else:
+                            payload[k] = v
+
+            if not action:
+                if "path" in payload:
+                    if (payload.get("is_patch") or "chunks" in payload):
+                        action = "WorkspaceFilePatchRequest"
+                    elif payload.get("content") is not None:
+                        action = "WorkspaceFileWriteRequest"
+                    else:
+                        action = "WorkspaceFileReadRequest"
+
+            action_map_aliases = {
+                "read_file": "WorkspaceFileReadRequest",
+                "write_file": "WorkspaceFileWriteRequest",
+                "patch_file": "WorkspaceFilePatchRequest",
+                "lint_file": "WorkspaceLintRequest",
+                "lint": "WorkspaceLintRequest"
+            }
+            if action in action_map_aliases:
+                action = action_map_aliases[action]
+
+            action_map = {
+                "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
+                "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
+                "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
+                "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
+                "climaterequest": (EXECUTION_SVC, "/execute/climate"),
+                "securityrequest": (EXECUTION_SVC, "/execute/security"),
+                "announcementrequest": (EXECUTION_SVC, "/execute/announce"),
+                "haservicerequest": (EXECUTION_SVC, "/execute/ha_service"),
+                "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
+                "noterequest": (EXECUTION_SVC, "/execute/note"),
+                "timerrequest": (EXECUTION_SVC, "/execute/timer"),
+                "talkrequest": (EXECUTION_SVC, "/execute/talk"),
+                "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
+                "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
+                "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
+                "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
+                "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
+                "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
+                "volumeinventoryrequest": (EXECUTION_SVC, "/execute/volumes"),
+                "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
+                "workspacelintrequest": (EXECUTION_SVC, "/execute/workspace_lint"),
+                "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
+                "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
+                "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
+                "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
+            }
+
+            lookup_action = action.lower().strip() if action else ""
+
+            if lookup_action in action_map:
+                svc_base, endpoint = action_map[lookup_action]
+                payload["user_context"] = {
+                    "user": creds.user,
+                    "is_admin": creds.is_admin,
+                    "ha_url": creds.ha_url,
+                    "ha_token": creds.ha_token
+                }
+
+                log.info(f"[AgentLoop] Triggering {action} via {svc_base}{endpoint} (iter {agent_iter + 1})")
+                exec_resp = await get_http_client().post(
+                    f"{svc_base}{endpoint}",
+                    json=payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=120.0
+                )
+
+                exec_msg = ""
+                if exec_resp.status_code == 200:
+                    exec_data = exec_resp.json()
+                    exec_msg = exec_data.get("message", "Action completed.")
+                    detail = exec_data.get("detail")
+                    if detail:
+                        if isinstance(detail, dict):
+                            if "content" in detail:
+                                detail_txt = str(detail["content"])
+                            elif "logs" in detail:
+                                detail_txt = str(detail["logs"])
+                            else:
+                                detail_txt = str(detail)
+                        else:
+                            detail_txt = str(detail)
+                        exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
+                else:
+                    try:
+                        err_detail = exec_resp.json().get("detail", exec_resp.text)
+                    except:
+                        err_detail = exec_resp.text
+                    exec_msg = f"Failed: {err_detail}"
+
+                log.info(f"[AgentLoop] Tool result (iter {agent_iter + 1}): {exec_msg[:200]}...")
+                agent_messages.append({"role": "assistant", "content": ans})
+                agent_messages.append({
+                    "role": "user",
+                    "content": f"[TOOL RESULT for {action}]: {exec_msg[:8000]}\n\nContinue with your plan."
+                })
+                continue
+            else:
+                log.warning(f"[AgentLoop] Unknown action '{action}' — breaking loop")
+                break
+
+        except Exception as e:
+            log.error(f"[AgentLoop] Tool execution failed: {e}")
+            break
+
+    return JSONResponse({"status": "SUCCESS", "message": ans})
+
 
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
@@ -1744,437 +2088,20 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream" if is_openai else "application/x-ndjson")
 
-    # Non-streaming — Agent Loop
-    # Supports multi-turn tool execution: call Ollama, execute tool, feed result back, repeat.
-    MAX_TOOL_ITERATIONS = 5
-    HEARTBEAT_INTERVAL = 15   # seconds between heartbeat log lines
-    HUNG_THRESHOLD = 240      # seconds before a HUNG WARNING is emitted
-    agent_messages = ollama_payload.get("messages", [])[:]  # shallow copy
-    exec_data = None
-    ans = ""
-    loop_start = asyncio.get_event_loop().time()
+    # Non-streaming — Standard Response
+    async with INFERENCE_LOCK:
+        log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model}")
+        resp = await call_ollama(ollama_payload, use_chat=True)
+        log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
 
-    for agent_iter in range(MAX_TOOL_ITERATIONS):
-        iter_start = asyncio.get_event_loop().time()
-        log.info(f"[AgentLoop] Iteration {agent_iter + 1}/{MAX_TOOL_ITERATIONS} | "
-                 f"total elapsed {iter_start - loop_start:.0f}s")
-
-        # ── Heartbeat task ──────────────────────────────────────────────────
-        heartbeat_stop = asyncio.Event()
-
-        async def _heartbeat(iter_n: int, t0: float) -> None:
-            elapsed = 0.0
-            while not heartbeat_stop.is_set():
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
-                if heartbeat_stop.is_set():
-                    break
-                elapsed = asyncio.get_event_loop().time() - t0
-                if elapsed > HUNG_THRESHOLD:
-                    log.warning(
-                        f"[AgentLoop] ⚠ HUNG WARNING — iter {iter_n} has been waiting "
-                        f"{elapsed:.0f}s for Ollama response (threshold={HUNG_THRESHOLD}s)"
-                    )
-                else:
-                    log.info(
-                        f"[AgentLoop] ♥ heartbeat — iter {iter_n} | "
-                        f"waiting for Ollama {elapsed:.0f}s | stage=inference"
-                    )
-
-        hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
-
-        try:
-            # Strategy 7 & 8: Dynamic VRAM Awareness & Singleton Queue
-            vram_params = await get_vram_safe_params(selected_model)
-            ollama_payload["options"] = vram_params
-            ollama_payload["messages"] = agent_messages
-            
-            async with INFERENCE_LOCK:
-                log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
-                resp = await call_ollama(ollama_payload, use_chat=True)
-                log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
-                
-            heartbeat_stop.set()
-            await hb_task
-            if resp.status_code != 200:
-                return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
-            data = resp.json()
-            ans = data.get("message", {}).get("content", "Error.")
-            ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
-            log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
-        except (httpx.TimeoutException, httpx.ConnectError):
-            heartbeat_stop.set()
-            await hb_task
-            ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
-            log.warning(f"[AgentLoop] Ollama timeout/connect error on iter {agent_iter + 1}")
-            if is_openai:
-                return _make_openai_response(ans, selected_model, "degraded")
-            return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
-
-        # 8. Tool Execution — Intercept JSON blocks for execution
-        log.info(f"[AgentLoop] Response length: {len(ans)}")
-        
-        tool_data = None
-        
-        # Strategy 1: Code fences
-        tag = "```json" if "```json" in ans else "```"
-        start = ans.find(tag)
-        if start != -1:
-            start += len(tag)
-            end = ans.find("```", start)
-            if end > start:
-                try:
-                    tool_data = json.loads(ans[start:end].strip())
-                except Exception:
-                    pass
-
-        # Strategy 2: First { to last }
-        if tool_data is None:
-            first_brace = ans.find("{")
-            last_brace = ans.rfind("}")
-            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                try:
-                    tool_data = json.loads(ans[first_brace:last_brace+1])
-                except Exception:
-                    pass
-
-        # Strategy 3: First [ to last ] (for array-wrapped)
-        if tool_data is None:
-            first_bracket = ans.find("[")
-            last_bracket = ans.rfind("]")
-            if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
-                try:
-                    tool_data = json.loads(ans[first_bracket:last_bracket+1])
-                except Exception:
-                    pass
-
-        # Strategy 4: Fallback for raw markdown code blocks (Diffs or Full Code)
-        if tool_data is None and "```" in ans:
-            try:
-                parts = ans.split("```")
-                if len(parts) >= 3:
-                    block_content = parts[1]
-                    first_nl = block_content.find('\n')
-                    if first_nl != -1:
-                        code_text = block_content[first_nl+1:]
-                        # Simple detection for unified diff
-                        if "--- " in code_text and "+++ " in code_text and "@@ " in code_text:
-                            # It's a diff
-                            path = "auto"
-                            chunks = []
-                            current_old = []
-                            current_new = []
-                            in_hunk = False
-                            for line in code_text.splitlines():
-                                if line.startswith("+++ b/") or line.startswith("+++ "):
-                                    path = line.split("+++ ")[-1].replace("b/", "", 1).strip()
-                                elif line.startswith("@@"):
-                                    if in_hunk and (current_old or current_new):
-                                        # To avoid trailing newlines breaking the replace, we strip right spaces if it fails, but basic join here
-                                        chunks.append({
-                                            "old_text": "\n".join(current_old) + "\n" if current_old else "",
-                                            "new_text": "\n".join(current_new) + "\n" if current_new else ""
-                                        })
-                                        current_old, current_new = [], []
-                                    in_hunk = True
-                                elif in_hunk:
-                                    if line.startswith("-"):
-                                        current_old.append(line[1:])
-                                    elif line.startswith("+"):
-                                        current_new.append(line[1:])
-                                    elif line.startswith(" "):
-                                        current_old.append(line[1:])
-                                        current_new.append(line[1:])
-                            if in_hunk and (current_old or current_new):
-                                chunks.append({
-                                    "old_text": "\n".join(current_old) + "\n" if current_old else "",
-                                    "new_text": "\n".join(current_new) + "\n" if current_new else ""
-                                })
-                            
-                            if chunks:
-                                tool_data = {
-                                    "action": "WorkspaceFilePatchRequest",
-                                    "payload": {"path": path, "chunks": chunks}
-                                }
-                                log.info(f"[AgentLoop] Parsed raw markdown diff into WorkspaceFilePatchRequest for {path}")
-                            # Fallback for ANY code block if no strategy matched
-                            if len(code_text.strip()) > 10:
-                                # If it looks like a patch but missing diff markers, or just raw code
-                                action = "WorkspaceFilePatchRequest" if agent_iter > 0 else "WorkspaceFileWriteRequest"
-                                tool_data = {
-                                    "action": action,
-                                    "payload": {"path": "auto", "content": code_text}
-                                }
-                                log.info(f"[AgentLoop] Parsed raw markdown block into {action}")
-            except Exception as e:
-                log.error(f"[AgentLoop] Error parsing raw markdown block: {e}")
-
-        # Strategy 5: Fallback for XML-like tags (e.g. <commit>, <tool>, <action>)
-        if tool_data is None and "<" in ans and ">" in ans:
-            try:
-                # Basic regex-less extraction for performance and safety
-                start = ans.find("<")
-                end = ans.find(">", start)
-                if start != -1 and end != -1:
-                    tag_content = ans[start+1:end]
-                    # Check for action/type/path attributes
-                    if "action=" in tag_content or "path=" in tag_content:
-                        # Convert pseudo-tag attributes to tool_data
-                        # This is a heuristic parser for LLM format drift
-                        attrs = {}
-                        import re
-                        for match in re.finditer(r'(\w+)=["\']([^"\']+)["\']', tag_content):
-                            attrs[match.group(1)] = match.group(2)
-                        
-                        action_val = attrs.get("action") or attrs.get("type")
-                        path_val = attrs.get("path")
-                        
-                        if action_val:
-                            # Map shorthand actions
-                            action_map = {"read": "WorkspaceFileReadRequest", "patch": "WorkspaceFilePatchRequest"}
-                            tool_data = {
-                                "action": action_map.get(action_val, action_val),
-                                "payload": {"path": path_val}
-                            }
-                            log.info(f"[AgentLoop] Parsed pseudo-tag <{tag_content}> into {tool_data['action']}")
-            except Exception as e:
-                log.error(f"[AgentLoop] Error parsing pseudo-tag: {e}")
-        
-        # Strategy 6: Payload Normalization (Flatten 'arguments', 'payload', 'args', or 'json')
-        if tool_data and isinstance(tool_data, dict):
-            # 1. Nesting Hoisting
-            for nest_key in ("arguments", "payload", "args", "json"):
-                if nest_key in tool_data and isinstance(tool_data[nest_key], dict):
-                    log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
-                    nested_vals = tool_data.pop(nest_key)
-                    tool_data.update(nested_vals)
-            
-            # 2. Parameter Mapping (Synonym Correction)
-            mapping = {"offset": "offset_lines", "limit": "limit_lines"}
-            for old_key, new_key in mapping.items():
-                if old_key in tool_data and new_key not in tool_data:
-                    log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
-                    tool_data[new_key] = tool_data.pop(old_key)
-        
-        if tool_data is None:
-            log.info(f"[AgentLoop] No valid JSON object or array found — final response at iteration {agent_iter + 1}")
-            break
-            
-        # Handle model wrapping tool call in an array
-        if isinstance(tool_data, list) and len(tool_data) > 0:
-            tool_data = tool_data[0]
-            
-        if not isinstance(tool_data, dict):
-            log.info(f"[AgentLoop] Parsed JSON is not a dictionary — breaking loop")
-            break
-
-        # DEEP TELEMETRY: Log normalized tool data
-        log.info(f"[AgentLoop] Dispatching action: {json.dumps({k: v for k, v in tool_data.items() if k != 'user_context'}, indent=2)}")
-
-        try:
-            action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
-            payload = tool_data.get("payload", {})
-            # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
-            if isinstance(tool_data, dict):
-                for k, v in tool_data.items():
-                    if k not in ("action", "payload", "tool", "name", "type") and k not in payload:
-                        if "path" in k.lower():
-                            payload["path"] = v
-                        else:
-                            payload[k] = v
-
-            if not action:
-                if "path" in payload:
-                    if (payload.get("is_patch") or "chunks" in payload):
-                        action = "WorkspaceFilePatchRequest"
-                        log.info(f"[AgentLoop] Falling back to WorkspaceFilePatchRequest for flat JSON")
-                    elif payload.get("content") is not None:
-                        action = "WorkspaceFileWriteRequest"
-                        log.info(f"[AgentLoop] Falling back to WorkspaceFileWriteRequest for flat JSON")
-                    else:
-                        action = "WorkspaceFileReadRequest"
-                        log.info(f"[AgentLoop] Falling back to WorkspaceFileReadRequest for flat JSON (content was null)")
-
-            # Map common hallucinations to real schemas
-            action_map_aliases = {
-                "read_file": "WorkspaceFileReadRequest",
-                "write_file": "WorkspaceFileWriteRequest",
-                "patch_file": "WorkspaceFilePatchRequest",
-                "lint_file": "WorkspaceLintRequest"
-            }
-            if action in action_map_aliases:
-                action = action_map_aliases[action]
-
-            # Map action to service endpoint
-            action_map = {
-                "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
-                "light_control": (EXECUTION_SVC, "/execute/light"),
-                "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
-                "media_play": (EXECUTION_SVC, "/execute/media/play"),
-                "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
-                "media_transport": (EXECUTION_SVC, "/execute/media/transport"),
-                "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
-                "tv_cast": (EXECUTION_SVC, "/execute/tv_cast"),
-                "climaterequest": (EXECUTION_SVC, "/execute/climate"),
-                "securityrequest": (EXECUTION_SVC, "/execute/security"),
-                "announcementrequest": (EXECUTION_SVC, "/execute/announce"),
-                "haservicerequest": (EXECUTION_SVC, "/execute/ha_service"),
-                "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
-                "noterequest": (EXECUTION_SVC, "/execute/note"),
-                "timerrequest": (EXECUTION_SVC, "/execute/timer"),
-                "talkrequest": (EXECUTION_SVC, "/execute/talk"),
-                "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
-                "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
-                "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
-                "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
-                "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
-                "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
-                "volumeinventoryrequest": (EXECUTION_SVC, "/execute/volumes"),
-                "workspacefileaction": (WORKSPACE_RUNTIME_SVC, "/files/write"),
-                "workspacegitaction": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
-                "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
-                "filereadrequest": (WORKSPACE_RUNTIME_SVC, "/files/read"),
-                "filelistrequest": (WORKSPACE_RUNTIME_SVC, "/files/list"),
-                "filewriterequest": (WORKSPACE_RUNTIME_SVC, "/files/write"),
-                "pytestrequest": (WORKSPACE_RUNTIME_SVC, "/tests/pytest"),
-                "diffrequest": (WORKSPACE_RUNTIME_SVC, "/git/diff"),
-                "gitaddrequest": (WORKSPACE_RUNTIME_SVC, "/git/add"),
-                "gitcommitrequest": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
-                "gitstatusrequest": (WORKSPACE_RUNTIME_SVC, "/git/status"),
-                "gitdiffrequest": (WORKSPACE_RUNTIME_SVC, "/git/diff"),
-                "gitbranchcreaterequest": (WORKSPACE_RUNTIME_SVC, "/git/branch/create"),
-                "gitpushrequest": (WORKSPACE_RUNTIME_SVC, "/git/push"),
-                "gitfetchrequest": (WORKSPACE_RUNTIME_SVC, "/git/fetch"),
-                "gitpullrequest": (WORKSPACE_RUNTIME_SVC, "/git/pull"),
-                "gitrebaserequest": (WORKSPACE_RUNTIME_SVC, "/git/rebase"),
-                "storagestatusrequest": (STORAGE_SVC, "/status"),
-                "storagelistrequest": (STORAGE_SVC, "/providers/list"),
-                "storageindexrequest": (STORAGE_SVC, "/index/full"),
-                "workspace_file_read": (EXECUTION_SVC, "/execute/workspace_file_read"),
-                "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
-                "workspace_file_write": (EXECUTION_SVC, "/execute/workspace_file_write"),
-                "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
-                "workspace_file_patch": (EXECUTION_SVC, "/execute/workspace_file_patch"),
-                "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
-                "workspace_file_lint": (EXECUTION_SVC, "/execute/workspace_lint"),
-                "workspacelintrequeset": (EXECUTION_SVC, "/execute/workspace_lint"),
-                "workspacelintequest": (EXECUTION_SVC, "/execute/workspace_lint"),
-                "lint": (EXECUTION_SVC, "/execute/workspace_lint"),
-                "storage_file_read": (EXECUTION_SVC, "/execute/storage_file_read"),
-                "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
-                "storage_file_write": (EXECUTION_SVC, "/execute/storage_file_write"),
-                "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
-                "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
-                "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
-                "read": (EXECUTION_SVC, "/execute/workspace_file_read"),
-                "write": (EXECUTION_SVC, "/execute/workspace_file_write"),
-                "patch": (EXECUTION_SVC, "/execute/workspace_file_patch"),
-                "gitpull": (EXECUTION_SVC, "/execute/git_pull"),
-            }
-
-            lookup_action = action.lower().strip() if action else ""
-
-            if lookup_action in ("storageindexrequest", "storagelistrequest"):
-                action_map[lookup_action] = (STORAGE_SVC, "/index/full" if lookup_action == "storageindexrequest" else "/providers/list")
-                payload = {
-                    "provider": {
-                        "kind": "nextcloud",
-                        "settings": {
-                            "url": creds.nextcloud_url,
-                            "username": creds.nextcloud_user,
-                            "password": creds.nextcloud_pass
-                        }
-                    },
-                    "path": (payload or {}).get("path", "/"),
-                    "recursive": (payload or {}).get("recursive", True)
-                }
-
-            if lookup_action in action_map:
-                svc_base, endpoint = action_map[lookup_action]
-
-                # ALWAYS overwrite user context with real resolved credentials
-                payload["user_context"] = {
-                    "user": creds.user,
-                    "is_admin": creds.is_admin,
-                    "ha_url": creds.ha_url,
-                    "ha_token": creds.ha_token
-                }
-
-                log.info(f"[AgentLoop] Triggering {action} via {svc_base}{endpoint} (iter {agent_iter + 1})")
-                exec_resp = await get_http_client().post(
-                    f"{svc_base}{endpoint}",
-                    json=payload,
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=120.0
-                )
-
-                exec_msg = ""
-                if exec_resp.status_code == 200:
-                    exec_data = exec_resp.json()
-                    if "status" in exec_data and "message" in exec_data:
-                        exec_msg = exec_data.get("message", "Action completed.")
-                    else:
-                        exec_msg = "Action completed."
-                        exec_data = {
-                            "status": exec_data.get("status", "SUCCESS"),
-                            "message": exec_msg,
-                            "service": lookup_action,
-                            "detail": exec_data
-                        }
-                    # Extract detail text for feeding back to the model
-                    detail = exec_data.get("detail")
-                    if detail:
-                        if isinstance(detail, dict):
-                            if "content" in detail:
-                                detail_txt = str(detail["content"])
-                            elif "logs" in detail:
-                                detail_txt = str(detail["logs"])
-                            elif "lines" in detail:
-                                detail_txt = "\n".join(detail["lines"][:100])
-                            else:
-                                detail_txt = str(detail)
-                        else:
-                            detail_txt = str(detail)
-                        exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
-                else:
-                    try:
-                        err_detail = exec_resp.json().get("detail", exec_resp.text)
-                    except Exception:
-                        err_detail = exec_resp.text
-                    exec_msg = f"Failed: {err_detail}"
-
-                log.info(f"[AgentLoop] Tool result (iter {agent_iter + 1}): {exec_msg[:200]}...")
-
-                # ── AGENT LOOP CONTINUATION ──
-                # Feed the tool result back to Ollama so it can decide the next step.
-                agent_messages.append({"role": "assistant", "content": ans})
-                agent_messages.append({
-                    "role": "user",
-                    "content": (
-                        f"[TOOL RESULT for {action}]: {exec_msg[:8000]}\n\n"
-                        "Continue with your plan. If you need another tool, output a JSON block. "
-                        "If you are done, respond with a final summary (no JSON block)."
-                    )
-                })
-                # Continue the loop — Ollama will be called again at the top
-                continue
-            else:
-                log.warning(f"[AgentLoop] Unknown action '{action}' (lookup: '{lookup_action}') — breaking loop")
-                break
-
-        except json.JSONDecodeError as e:
-            log.error(f"[AgentLoop] JSON parse error: {e}")
-            break
-        except Exception as e:
-            log.error(f"[AgentLoop] Tool execution failed: {e}")
-            break
-
-    # Clean up the final answer — strip raw JSON blocks from user-facing text
-    if "```json" in ans:
-        clean_ans = ans[:ans.find("```json")].strip()
-        if clean_ans:
-            ans = clean_ans
+    if resp.status_code != 200:
+        return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
     
-    if not is_background_task:
+    data = resp.json()
+    ans = data.get("message", {}).get("content", "Error.")
+    
+    # Update History
+    if not is_openai:
         await update_history(user_id, "user", query)
         await update_history(user_id, "assistant", ans)
     else:
