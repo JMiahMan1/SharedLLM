@@ -1495,6 +1495,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     end = full_ans.find("```", start)
                     tool_json = full_ans[start:end].strip()
                     tool_data = json.loads(tool_json)
+                    # Handle model wrapping tool call in an array
+                    if isinstance(tool_data, list) and len(tool_data) > 0:
+                        tool_data = tool_data[0]
                     
                     action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
                     payload = tool_data.get("payload", {})
@@ -1708,6 +1711,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 break
             tool_json = ans[start:end].strip()
             tool_data = json.loads(tool_json)
+            # Handle model wrapping tool call in an array
+            if isinstance(tool_data, list) and len(tool_data) > 0:
+                tool_data = tool_data[0]
 
             action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
             payload = tool_data.get("payload", {})
