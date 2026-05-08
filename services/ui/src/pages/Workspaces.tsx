@@ -36,7 +36,8 @@ const Workspaces = () => {
     default_branch: 'main',
     sync_mode: 'local_git_authoritative',
     auto_pull_enabled: false,
-    webhook_token: ''
+    webhook_token: '',
+    repo_url: ''
   });
 
   const { data: workspaces = [], isLoading } = useQuery({
@@ -86,6 +87,7 @@ const Workspaces = () => {
       sync_mode: 'local_git_authoritative',
       auto_pull_enabled: false,
       webhook_token: generateWebhookToken(),
+      repo_url: ''
     });
     setIsModalOpen(true);
   };
@@ -196,6 +198,15 @@ const Workspaces = () => {
                         <span>{ws.git_remote}/{ws.default_branch}</span>
                       </div>
                     </div>
+                    {ws.repo_url && (
+                      <div className="space-y-1 col-span-2">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Source Repository</p>
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
+                          <Globe size={14} className="text-slate-600" />
+                          <span className="truncate">{ws.repo_url}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -275,6 +286,21 @@ const Workspaces = () => {
               />
             </label>
           </div>
+
+          <label className="space-y-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Repository URL (GitHub/GitLab)</span>
+            <div className="relative">
+              <Globe size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+              <input 
+                type="text" 
+                value={form.repo_url || ''}
+                onChange={(e) => setForm({ ...form, repo_url: e.target.value })}
+                placeholder="https://github.com/user/repo.git"
+                className="glass-input w-full pl-10"
+              />
+            </div>
+            <p className="text-[10px] text-slate-600 italic">Required for autonomous bootstrapping and fresh pulls.</p>
+          </label>
 
           <label className="space-y-2">
             <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Local Path (Relative to Root)</span>
