@@ -154,20 +154,30 @@ def get_coding_model():
 
 async def get_vram_safe_params(model: str) -> dict:
     """
-    Strategy 7: Dynamic VRAM Awareness.
-    Checks Ollama's current load and adjusts context parameters to fit in 8GB VRAM.
+    Strategy 7: Dynamic VRAM Awareness & Elastic Scaling.
+    Checks Ollama's current load and adjusts context parameters.
+    Scales UP if VRAM is free, scales DOWN if under pressure.
     """
-    params = {"num_ctx": 12288} # Default target for 8GB Q4 models
+    # Environment-aware ceiling
+    max_ctx = int(os.getenv("MAX_CONTEXT_WINDOW", "32768"))
+    target_ctx = int(os.getenv("DEFAULT_CONTEXT_WINDOW", "12288"))
+    
+    params = {"num_ctx": target_ctx}
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{OLLAMA_URL}/api/ps")
             if resp.status_code == 200:
                 ps = resp.json()
                 models = ps.get("models", [])
-                # If multiple models are loaded, or a large model is active, downshift
-                if len(models) > 1 or any(m.get("size", 0) > 6*1024*1024*1024 for m in models):
-                    log.warning("[Strategy 7] VRAM pressure detected. Downshifting num_ctx to 4096.")
+                
+                # CASE A: High Pressure (Multiple models or massive model active)
+                if len(models) > 1 or any(m.get("size", 0) > 7*1024*1024*1024 for m in models):
+                    log.warning("[Strategy 7] VRAM pressure detected. Downshifting to 4096.")
                     params["num_ctx"] = 4096
+                # CASE B: Free Capacity (Zero or tiny models active)
+                elif len(models) == 0:
+                    log.info(f"[Strategy 7] VRAM is clear. Up-shifting to {max_ctx}.")
+                    params["num_ctx"] = max_ctx
     except Exception as e:
         log.warning(f"[Strategy 7] Could not poll VRAM state: {e}")
     
