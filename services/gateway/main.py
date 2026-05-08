@@ -1392,7 +1392,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         "stream": False # AgentLoop is always non-streaming for the brain
     }
 
-    MAX_TOOL_ITERATIONS = 5
+    MAX_TOOL_ITERATIONS = 10
     HEARTBEAT_INTERVAL = 15   # seconds between heartbeat log lines
     HUNG_THRESHOLD = 240      # seconds before a HUNG WARNING is emitted
     agent_messages = ollama_payload.get("messages", [])[:]  # shallow copy
