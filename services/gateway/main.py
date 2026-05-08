@@ -1446,7 +1446,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "You have access to Workspace tools to read and patch files.\n\n"
             "CRITICAL LIMIT: Your context window is limited to 12KB. "
             "When reading files larger than 8KB (like services/gateway/main.py), "
-            "YOU MUST use 'offset' and 'limit' in WorkspaceFileReadRequest to read specific blocks. "
+            "YOU MUST use 'summary_only=True' in WorkspaceFileReadRequest to map the file first. "
+            "Then use 'offset_lines' and 'limit_lines' to read specific blocks. "
             "Do not attempt to read the entire file if it is large, as it will be truncated.\n\n"
             "Use 'ripgrep' or 'grep' first to find line numbers of functions you need to modify.\n"
             "You have direct access to the local Git workspace.\n"
@@ -1908,6 +1909,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         if not isinstance(tool_data, dict):
             log.info(f"[AgentLoop] Parsed JSON is not a dictionary — breaking loop")
             break
+
+        # DEEP TELEMETRY: Log normalized tool data
+        log.info(f"[AgentLoop] Dispatching action: {json.dumps({k: v for k, v in tool_data.items() if k != 'user_context'}, indent=2)}")
 
         try:
             action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
