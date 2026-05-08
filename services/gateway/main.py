@@ -1663,10 +1663,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspacefilewriterequest", "workspacesearchrequest", 
                 "workspacelintrequest", "workspacefiledeleterequest",
                 "workspacebootstraprequest", "workspaceshellrequest",
-                "gitoperationrequest", "dockerlogsrequest",
-                "ripgrep", "read_file", "patch_file", "grep", "search", "shell", "git", "logs"
+                "gitoperationrequest", "dockerlogsrequest", "dockercomposerequest",
+                "ripgrep", "read_file", "patch_file", "grep", "search", "shell", "git", "logs", "compose"
             ]
-            action = tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_name") if tool_data else None
+            action = tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_name") or tool_data.get("tool_choice") if tool_data else None
             if action and action.lower().strip() not in ALLOWED_TOOLS:
                 log.warning(f"[AgentLoop] Hallucinated tool detected: {action} — triggering protocol correction")
                 tool_data = None
@@ -1695,7 +1695,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info(f"[AgentLoop] Dispatching action: {json.dumps({k: v for k, v in tool_data.items() if k != 'user_context'}, indent=2)}")
 
         try:
-            action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type") or tool_data.get("tool_name")
+            action = (
+                tool_data.get("action") or 
+                tool_data.get("tool") or 
+                tool_data.get("name") or 
+                tool_data.get("type") or 
+                tool_data.get("tool_name") or 
+                tool_data.get("tool_choice")
+            )
             payload = tool_data.get("payload", {})
             if isinstance(tool_data, dict):
                 for k, v in tool_data.items():
