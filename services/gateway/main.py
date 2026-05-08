@@ -190,11 +190,32 @@ CONFIG = {
 # Ensures only one LLM request is processed at a time to protect 8GB VRAM.
 INFERENCE_LOCK = asyncio.Lock()
 
-def get_assistant_model():
-    return CONFIG["assistant_model"]
+async def fetch_global_setting(key: str, default: str = "") -> str:
+    """Fetch a global setting from the Identity Service."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/settings/{key}",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                return resp.json().get("value", default)
+    except Exception as e:
+        log.warning(f"Failed to fetch global setting '{key}': {e}")
+    return default
 
-def get_coding_model():
-    return CONFIG["coding_model"]
+async def get_assistant_model():
+    return await fetch_global_setting("assistant_model", CONFIG["assistant_model"])
+
+async def get_coding_model():
+    return await fetch_global_setting("coding_model", CONFIG["coding_model"])
+
+async def get_librarian_model():
+    return await fetch_global_setting("librarian_model", CONFIG["librarian_model"])
+
+async def fetch_autonomous_protocols() -> str:
+    """Fetch the latest autonomous protocols from the Identity Service GlobalSettings."""
+    return await fetch_global_setting("system_autonomous_protocols")
 
 async def get_vram_safe_params(model: str) -> dict:
     """
@@ -536,7 +557,8 @@ async def contextualize_query(query: str, history: list) -> str:
 
     prompt = f"Given history:\n{hist_str}\nRewrite follow-up to standalone command.\nFollow-up: {query}\nCommand:"
     try:
-        payload = {"model": get_assistant_model(), "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
+        assistant = await get_assistant_model()
+        payload = {"model": assistant, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
         resp = await get_http_client().post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
         if resp.status_code == 200:
             data = resp.json()
@@ -549,15 +571,15 @@ async def contextualize_query(query: str, history: list) -> str:
     return query
 
 
-def select_model_for_query(query: str) -> str:
+async def select_model_for_query(query: str) -> str:
     """Route obvious coding and librarian tasks to specialized models."""
     q = (query or "").lower()
 
     if any(token in q for token in CODING_SIGNALS):
-      return get_coding_model()
+      return await get_coding_model()
     if any(token in q for token in LIBRARIAN_SIGNALS):
-      return get_librarian_model()
-    return get_assistant_model()
+      return await get_librarian_model()
+    return await get_assistant_model()
 
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
@@ -1132,7 +1154,7 @@ async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
     )
     try:
       resp = await call_ollama(
-          {"model": get_assistant_model(), "prompt": prompt, "stream": False},
+          {"model": await get_assistant_model(), "prompt": prompt, "stream": False},
           use_chat=False,
       )
       if resp.status_code != 200:
@@ -1189,6 +1211,9 @@ async def resolve_identity(body: dict) -> dict:
 
 def _auth_body_from_request(request: Request, body: dict | None = None) -> dict:
     merged = dict(body or {})
+    user_id = request.query_params.get("user_id")
+    if user_id:
+        merged["rag_user"] = user_id
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         merged["api_key"] = auth_header.split(" ", 1)[1]
@@ -1210,7 +1235,8 @@ async def _proxy_execution_with_identity(
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with httpx.AsyncClient(timeout=60.0) as client:
         if method.upper() == "GET":
-            resp = await client.get(f"{EXECUTION_SVC}{endpoint}", headers=headers)
+            params = {"user_id": creds_data.get("user", "default")}
+            resp = await client.get(f"{EXECUTION_SVC}{endpoint}", headers=headers, params=params)
         else:
             exec_payload = {"user_context": creds_data, **(payload or {})}
             resp = await client.post(f"{EXECUTION_SVC}{endpoint}", json=exec_payload, headers=headers)
@@ -1328,7 +1354,7 @@ Request: "{query}"
 Return a simple JSON list of strings.
 Example: ["Turn on the office light", "Play some jazz music"]
 """
-        resp = await call_ollama({"model": get_assistant_model(), "prompt": prompt, "stream": False}, use_chat=False)
+        resp = await call_ollama({"model": await get_assistant_model(), "prompt": prompt, "stream": False}, use_chat=False)
         text = resp.json().get("response", "").strip()
         if "[" in text and "]" in text:
             import json
@@ -1355,15 +1381,16 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
     )
     try:
         # Strategy 7: Dynamic VRAM Awareness for Shadow Execution
-        vram_params = await get_vram_safe_params(get_assistant_model())
+        assistant = await get_assistant_model()
+        vram_params = await get_vram_safe_params(assistant)
         
         payload = {
-            "model": get_assistant_model(),
+            "model": assistant,
             "messages": [{"role": "user", "content": proposal_prompt}],
             "stream": False,
             "options": vram_params
         }
-        log.info(f"[ShadowExecution] Requesting proposal from {get_assistant_model()} (Timeout: {OLLAMA_TIMEOUT}s)")
+        log.info(f"[ShadowExecution] Requesting proposal from {assistant} (Timeout: {OLLAMA_TIMEOUT}s)")
         start_t = asyncio.get_event_loop().time()
         resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
         elapsed = asyncio.get_event_loop().time() - start_t
@@ -1815,7 +1842,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
     explicit_model = str(body.get("model") or "").strip()
-    selected_model = explicit_model or get_assistant_model()
+    selected_model = explicit_model or await get_assistant_model()
 
     # 2. Extract Query
     query = body.get("query")
@@ -1834,7 +1861,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "raven", "audit", "develop", "refactor"]
         if any(k in (query or "").lower() for k in coding_keywords):
             # Check if specialized coder model is available (hardcoded preference for qwen2.5-coder)
-            selected_model = get_coding_model()
+            selected_model = await get_coding_model()
             log.info(f"[ChatHandler] Specialized coding task detected. Routing to: {selected_model}")
 
     try:
@@ -1941,7 +1968,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
     
-    full_system = f"{system_instruction}\n\n{QWEN_GROUNDING_INSTRUCTION}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
+    protocols = await fetch_autonomous_protocols()
+    full_system = f"{system_instruction}\n\n{QWEN_GROUNDING_INSTRUCTION}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
     
     final_query = query
     if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
@@ -2401,13 +2429,7 @@ async def proxy_delete_device(device_id: str, request: Request):
 
 @app.get("/api/communication/timers")
 async def proxy_list_timers(request: Request):
-    await _resolve_identity_from_request(request)
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/timers",
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-        )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return await _proxy_execution_with_identity(request, "/execute/timers", method="GET")
 
 
 @app.post("/api/communication/timers")
@@ -2904,16 +2926,32 @@ async def get_ollama_models():
 
 @app.get("/api/config")
 async def get_gateway_config():
-    return {"status": "SUCCESS", "config": CONFIG}
+    # Fetch all three model settings from Identity Service to ensure UI is in sync
+    assistant = await get_assistant_model()
+    coding = await get_coding_model()
+    librarian = await get_librarian_model()
+    return {
+        "status": "SUCCESS", 
+        "config": {
+            "assistant_model": assistant,
+            "coding_model": coding,
+            "librarian_model": librarian
+        }
+    }
 
 @app.post("/api/config")
 async def update_gateway_config(new_config: dict):
-    global CONFIG
-    if "assistant_model" in new_config:
-        CONFIG["assistant_model"] = new_config["assistant_model"]
-    if "coding_model" in new_config:
-        CONFIG["coding_model"] = new_config["coding_model"]
-    if "librarian_model" in new_config:
-        CONFIG["librarian_model"] = new_config["librarian_model"]
-    log.info(f"Updated Gateway Config: {CONFIG}")
-    return {"status": "SUCCESS", "config": CONFIG}
+    # Save the new configuration to the Identity Service GlobalSettings
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for key in ["assistant_model", "coding_model", "librarian_model"]:
+            if key in new_config:
+                val = new_config[key]
+                await client.post(
+                    f"{IDENTITY_SVC}/api/settings",
+                    json={"key": key, "value": val},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                CONFIG[key] = val # Update local cache too
+    
+    log.info(f"Updated Gateway Config via Identity SVC: {new_config}")
+    return {"status": "SUCCESS", "config": new_config}

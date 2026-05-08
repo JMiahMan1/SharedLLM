@@ -51,9 +51,11 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message="Could not determine timer duration/time.", service="timer_add")
 
             # 2. Save to Redis
+            user_id = req.user_context.user
             timer_id = str(uuid.uuid4())
             timer_obj = {
                 "id": timer_id,
+                "user_id": user_id,
                 "type": req.type,
                 "title": req.title or f"{req.type.title()} {timer_id[:4]}",
                 "expires_at": expires_at.isoformat(),
@@ -62,13 +64,14 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 "target_device": req.target_device
             }
             
-            await r.set(f"timer:{timer_id}", json.dumps(timer_obj))
+            await r.set(f"timer:{user_id}:{timer_id}", json.dumps(timer_obj))
             
             msg = f"Set {req.type} '{timer_obj['title']}' for {expires_at.strftime('%I:%M %p')}."
             return ExecutionResult(status="SUCCESS", message=msg, service="timer_add", detail={"timer_id": timer_id})
 
         elif action == "list":
-            keys = await r.keys("timer:*")
+            user_id = req.user_context.user
+            keys = await r.keys(f"timer:{user_id}:*")
             timers = []
             for k in keys:
                 data = await r.get(k)
@@ -82,7 +85,8 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
 
         elif action == "delete":
             # For simplicity, delete by title match
-            keys = await r.keys("timer:*")
+            user_id = req.user_context.user
+            keys = await r.keys(f"timer:{user_id}:*")
             deleted_count = 0
             for k in keys:
                 data = await r.get(k)
@@ -102,9 +106,10 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
         log.error(f"Timer error: {e}")
         return ExecutionResult(status="FAILURE", message=f"Timer error: {str(e)}", service="timer")
 
-async def get_active_timers():
+async def get_active_timers(user_id: Optional[str] = None):
     r = await get_redis()
-    keys = await r.keys("timer:*")
+    pattern = f"timer:{user_id}:*" if user_id else "timer:*:*"
+    keys = await r.keys(pattern)
     timers = []
     for k in keys:
         data = await r.get(k)

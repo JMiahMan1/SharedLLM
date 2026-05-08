@@ -173,8 +173,8 @@ async def execute_web_read(req: WebReadRequest):
     return await browser.handle_web_read(req)
 
 @app.get("/execute/timers")
-async def list_timers():
-    return await timer.get_active_timers()
+async def list_timers(user_id: Optional[str] = None):
+    return await timer.get_active_timers(user_id=user_id)
 
 @app.post("/execute/trigger", response_model=ExecutionResult)
 async def execute_trigger(payload: Dict[str, Any]):
