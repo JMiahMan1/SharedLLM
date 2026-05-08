@@ -1409,16 +1409,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         except (httpx.TimeoutException, httpx.ConnectError):
             heartbeat_stop.set()
             await hb_task
-            ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
+                            ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
             log.warning(f"[AgentLoop] Ollama timeout/connect error on iter {agent_iter + 1}")
             return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
 
         # 8. Tool Execution — Intercept JSON blocks for execution
-        log.info(f"[AgentLoop] Response length: {len(ans)}")
+        resp_content = ans
+        log.info(f"[AgentLoop] Response length: {len(resp_content)}")
+        log.info(f"[AgentLoop] Raw response: {resp_content}")
         
-        tool_data = None
+        # 4. Extract Tool Call
+        tool_data = extract_action_json(resp_content)
         
-        # Strategy 1: Code fences
         tag = "```json" if "```json" in ans else "```"
         start = ans.find(tag)
         if start != -1:
