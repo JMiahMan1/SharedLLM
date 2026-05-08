@@ -1440,11 +1440,12 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch", "commit", "branch"]):
         final_query += (
             "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
-            "You are Jarvis, an autonomous developer. You have direct access to the local Git workspace. "
-            "You must follow the standard OODA loop for code modifications:\n"
-            "1. READ: Use `WorkspaceFileReadRequest` to inspect existing code.\n"
-            "2. PATCH: Use `WorkspaceFilePatchRequest` to modify code (avoid full rewrites for large files).\n"
-            "3. LINT/TEST: (Optional) Use `PytestRequest` or shell commands to verify syntax if needed.\n"
+            "You are Jarvis, an autonomous developer. You have direct access to the local Git workspace.\n"
+            "CRITICAL: You must execute ONE step at a time! Output ONE tool call, wait for the system result, then output the next tool call.\n"
+            "Follow the standard OODA loop:\n"
+            "1. READ: Use `WorkspaceFileReadRequest` to inspect existing code. (STOP and wait for result)\n"
+            "2. PATCH: Use `WorkspaceFilePatchRequest` to modify code. (STOP and wait for result)\n"
+            "3. LINT/TEST: (Optional) Use `PytestRequest` or shell commands to verify syntax if needed. (STOP and wait for result)\n"
             "4. COMMIT: Use `GitOperationRequest` (action: 'commit') to save changes.\n\n"
             "[GIT & BRANCH RULES]\n"
             "- Branch: You may commit to the current working branch (like `microservices`) or create a new branch. NEVER push directly to `main` or `development`.\n"
