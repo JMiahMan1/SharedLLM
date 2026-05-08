@@ -13,6 +13,12 @@
     handle /api/chat* {
         reverse_proxy gateway:11435
     }
+    handle /api/config* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/settings* {
+        reverse_proxy identity:8001
+    }
     handle /api/generate* {
         reverse_proxy gateway:11435
     }
