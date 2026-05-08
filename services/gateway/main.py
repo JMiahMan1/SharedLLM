@@ -1691,47 +1691,54 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
         # 8. Tool Execution — Intercept JSON blocks for execution
         log.info(f"[AgentLoop] Response length: {len(ans)}")
-        if "```" in ans:
-            log.info(f"[AgentLoop] Block detected. Content preview: {ans[ans.find('```'):][:100]}...")
+        
+        tool_data = None
+        
+        # Strategy 1: Code fences
+        tag = "```json" if "```json" in ans else "```"
+        start = ans.find(tag)
+        if start != -1:
+            start += len(tag)
+            end = ans.find("```", start)
+            if end > start:
+                try:
+                    tool_data = json.loads(ans[start:end].strip())
+                except Exception:
+                    pass
 
-        # Check if the response contains a tool call (fenced or bare JSON)
-        has_tool_block = "```json" in ans or ("```" in ans and ("action" in ans or "type" in ans or "tool" in ans))
+        # Strategy 2: First { to last }
+        if tool_data is None:
+            first_brace = ans.find("{")
+            last_brace = ans.rfind("}")
+            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                try:
+                    tool_data = json.loads(ans[first_brace:last_brace+1])
+                except Exception:
+                    pass
 
-        # Also detect bare JSON objects (no code fences)
-        bare_json = False
-        ans_stripped = ans.strip()
-        if not has_tool_block and ans_stripped.startswith("{") and ans_stripped.endswith("}"):
-            try:
-                test_data = json.loads(ans_stripped)
-                if isinstance(test_data, dict) and any(k in test_data for k in ("action", "type", "tool", "name")):
-                    has_tool_block = True
-                    bare_json = True
-                    log.info(f"[AgentLoop] Bare JSON tool call detected (no code fences)")
-            except json.JSONDecodeError:
-                pass
-
-        if not has_tool_block:
-            log.info(f"[AgentLoop] No tool call detected — final response at iteration {agent_iter + 1}")
+        # Strategy 3: First [ to last ] (for array-wrapped)
+        if tool_data is None:
+            first_bracket = ans.find("[")
+            last_bracket = ans.rfind("]")
+            if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+                try:
+                    tool_data = json.loads(ans[first_bracket:last_bracket+1])
+                except Exception:
+                    pass
+        
+        if tool_data is None:
+            log.info(f"[AgentLoop] No valid JSON object or array found — final response at iteration {agent_iter + 1}")
+            break
+            
+        # Handle model wrapping tool call in an array
+        if isinstance(tool_data, list) and len(tool_data) > 0:
+            tool_data = tool_data[0]
+            
+        if not isinstance(tool_data, dict):
+            log.info(f"[AgentLoop] Parsed JSON is not a dictionary — breaking loop")
             break
 
-        # Extract and execute the tool call
         try:
-            if bare_json:
-                tool_json = ans_stripped
-            else:
-                tag = "```json" if "```json" in ans else "```"
-                start = ans.find(tag) + len(tag)
-                end = ans.find("```", start)
-                if end <= start:
-                    log.warning(f"[AgentLoop] Malformed code block — no closing fence")
-                    break
-                tool_json = ans[start:end].strip()
-
-            tool_data = json.loads(tool_json)
-            # Handle model wrapping tool call in an array
-            if isinstance(tool_data, list) and len(tool_data) > 0:
-                tool_data = tool_data[0]
-
             action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
             payload = tool_data.get("payload", {})
             # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
