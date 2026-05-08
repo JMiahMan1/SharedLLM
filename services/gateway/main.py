@@ -135,10 +135,21 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120.0"))
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen3:8b")
-ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", DEFAULT_MODEL)
-CODING_MODEL = os.getenv("CODING_MODEL", ASSISTANT_MODEL)
-LIBRARIAN_MODEL = os.getenv("LIBRARIAN_MODEL", ASSISTANT_MODEL)
+# ---- Dynamic Model Config ----
+CONFIG = {
+    "assistant_model": os.getenv("ASSISTANT_MODEL", os.getenv("DEFAULT_MODEL", "qwen3:8b")),
+    "coding_model": os.getenv("CODING_MODEL", "qwen3:8b"),
+    "librarian_model": os.getenv("LIBRARIAN_MODEL", "qwen3:8b")
+}
+
+def get_assistant_model():
+    return CONFIG["assistant_model"]
+
+def get_coding_model():
+    return CONFIG["coding_model"]
+
+def get_librarian_model():
+    return CONFIG["librarian_model"]
 
 CODING_SIGNALS = (
   "python", "javascript", "typescript", "node", "react", "fastapi", "sql", "regex",
@@ -431,7 +442,7 @@ async def contextualize_query(query: str, history: list) -> str:
 
     prompt = f"Given history:\n{hist_str}\nRewrite follow-up to standalone command.\nFollow-up: {query}\nCommand:"
     try:
-        payload = {"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
+        payload = {"model": get_assistant_model(), "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
         resp = await get_http_client().post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
         if resp.status_code == 200:
             data = resp.json()
@@ -449,10 +460,10 @@ def select_model_for_query(query: str) -> str:
     q = (query or "").lower()
 
     if any(token in q for token in CODING_SIGNALS):
-      return CODING_MODEL
+      return get_coding_model()
     if any(token in q for token in LIBRARIAN_SIGNALS):
-      return LIBRARIAN_MODEL
-    return ASSISTANT_MODEL
+      return get_librarian_model()
+    return get_assistant_model()
 
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
@@ -1027,7 +1038,7 @@ async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
     )
     try:
       resp = await call_ollama(
-          {"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False},
+          {"model": get_assistant_model(), "prompt": prompt, "stream": False},
           use_chat=False,
       )
       if resp.status_code != 200:
@@ -1223,7 +1234,7 @@ Request: "{query}"
 Return a simple JSON list of strings.
 Example: ["Turn on the office light", "Play some jazz music"]
 """
-        resp = await call_ollama({"model": ASSISTANT_MODEL, "prompt": prompt, "stream": False}, use_chat=False)
+        resp = await call_ollama({"model": get_assistant_model(), "prompt": prompt, "stream": False}, use_chat=False)
         text = resp.json().get("response", "").strip()
         if "[" in text and "]" in text:
             import json
@@ -1251,7 +1262,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
     try:
         # We use a non-streaming call for the shadow proposal
         payload = {
-            "model": ASSISTANT_MODEL,
+            "model": get_assistant_model(),
             "messages": [{"role": "user", "content": proposal_prompt}],
             "stream": False
         }
@@ -1286,7 +1297,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
     explicit_model = str(body.get("model") or "").strip()
-    selected_model = explicit_model or ASSISTANT_MODEL
+    selected_model = explicit_model or get_assistant_model()
 
     # 2. Extract Query
     query = body.get("query")
@@ -1305,7 +1316,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "ouroboros", "audit", "develop", "refactor"]
         if any(k in (query or "").lower() for k in coding_keywords):
             # Check if specialized coder model is available (hardcoded preference for qwen2.5-coder)
-            selected_model = CODING_MODEL
+            selected_model = get_coding_model()
             log.info(f"[ChatHandler] Specialized coding task detected. Routing to: {selected_model}")
 
     try:
@@ -2474,3 +2485,34 @@ async def proxy_admin_volumes(request: Request):
             timeout=120.0,
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
+# ---- Config Endpoints ----
+
+@app.get("/api/config/models")
+async def get_ollama_models():
+    """Proxy to Ollama to list available tags."""
+    OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"status": "SUCCESS", "models": [m["name"] for m in data.get("models", [])]}
+            return {"status": "ERROR", "message": f"Ollama returned {resp.status_code}"}
+    except Exception as e:
+        return {"status": "ERROR", "message": str(e)}
+
+@app.get("/api/config")
+async def get_gateway_config():
+    return {"status": "SUCCESS", "config": CONFIG}
+
+@app.post("/api/config")
+async def update_gateway_config(new_config: dict):
+    global CONFIG
+    if "assistant_model" in new_config:
+        CONFIG["assistant_model"] = new_config["assistant_model"]
+    if "coding_model" in new_config:
+        CONFIG["coding_model"] = new_config["coding_model"]
+    if "librarian_model" in new_config:
+        CONFIG["librarian_model"] = new_config["librarian_model"]
+    log.info(f"Updated Gateway Config: {CONFIG}")
+    return {"status": "SUCCESS", "config": CONFIG}

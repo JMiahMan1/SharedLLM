@@ -98,6 +98,14 @@ export interface DeviceAssignment {
 export interface GlobalSetting {
   key: string;
   value: string;
+  description?: string;
+}
+
+export interface GatewayConfig {
+  assistant_model: string;
+  coding_model: string;
+  librarian_model: string;
+}
   description?: string | null;
 }
 
@@ -297,6 +305,21 @@ export const api = {
       stream,
     });
     return resp.data;
+  },
+
+  async getGatewayConfig(): Promise<GatewayConfig> {
+    const resp = await apiClient.get('/api/config');
+    return resp.data.config;
+  },
+
+  async updateGatewayConfig(config: Partial<GatewayConfig>): Promise<GatewayConfig> {
+    const resp = await apiClient.post('/api/config', config);
+    return resp.data.config;
+  },
+
+  async getAvailableModels(): Promise<string[]> {
+    const resp = await apiClient.get('/api/config/models');
+    return resp.data.models;
   },
 
   async globalSearch(query: string): Promise<unknown> {
