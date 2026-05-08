@@ -61,6 +61,35 @@ def _make_ollama_response(message: str, model: str, intent: str = None, debug_co
     
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
+def extract_action_json(text: str) -> dict:
+    """Extracts the first JSON object found in the text, with MoE-safe fallback."""
+    if not text:
+        return {}
+    
+    # Pattern A: Standard Markdown JSON block
+    match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except:
+            pass
+
+    # Pattern B: Any block between curly braces
+    match = re.search(r"(\{.*?\})", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except:
+            # Pattern C: Deep search for anything looking like a JSON object if simple match fails
+            try:
+                cleaned = match.group(1)
+                cleaned = re.sub(r",\s*([\]}])", r"\1", cleaned)
+                return json.loads(cleaned)
+            except:
+                pass
+    
+    return {}
+
 def _make_openai_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
     from fastapi.responses import JSONResponse, StreamingResponse
