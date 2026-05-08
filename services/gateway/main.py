@@ -1445,7 +1445,11 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "Follow the standard OODA loop:\n"
             "1. READ: Use `WorkspaceFileReadRequest` to inspect existing code. (STOP and wait for result)\n"
             "2. PATCH: Use `WorkspaceFilePatchRequest` to modify code. (STOP and wait for result)\n"
-            "3. LINT/TEST: (Optional) Use `PytestRequest` or shell commands to verify syntax if needed. (STOP and wait for result)\n"
+            "3. LINT: Use `WorkspaceLintRequest` to check the patched file for errors. (STOP and wait for result)\n"
+            "   - .py files: runs black + flake8 automatically.\n"
+            "   - .js/.ts files: runs eslint automatically.\n"
+            "   - .yaml/.json files: runs yamllint / json.tool automatically.\n"
+            "   - If lint FAILS, use another PATCH to fix the errors, then lint again.\n"
             "4. COMMIT: Use `GitOperationRequest` (action: 'commit') to save changes.\n\n"
             "[GIT & BRANCH RULES]\n"
             "- Branch: You may commit to the current working branch (like `microservices`) or create a new branch. NEVER push directly to `main` or `development`.\n"
@@ -1828,6 +1832,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
                 "workspace_file_patch": (EXECUTION_SVC, "/execute/workspace_file_patch"),
                 "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
+                "workspace_file_lint": (EXECUTION_SVC, "/execute/workspace_lint"),
+                "workspacelintrequeset": (EXECUTION_SVC, "/execute/workspace_lint"),
+                "workspacelintequest": (EXECUTION_SVC, "/execute/workspace_lint"),
+                "lint": (EXECUTION_SVC, "/execute/workspace_lint"),
                 "storage_file_read": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storage_file_write": (EXECUTION_SVC, "/execute/storage_file_write"),
