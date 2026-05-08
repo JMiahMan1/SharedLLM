@@ -1816,6 +1816,16 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         action = "WorkspaceFileReadRequest"
                         log.info(f"[AgentLoop] Falling back to WorkspaceFileReadRequest for flat JSON (content was null)")
 
+            # Map common hallucinations to real schemas
+            action_map_aliases = {
+                "read_file": "WorkspaceFileReadRequest",
+                "write_file": "WorkspaceFileWriteRequest",
+                "patch_file": "WorkspaceFilePatchRequest",
+                "lint_file": "WorkspaceLintRequest"
+            }
+            if action in action_map_aliases:
+                action = action_map_aliases[action]
+
             # Map action to service endpoint
             action_map = {
                 "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
