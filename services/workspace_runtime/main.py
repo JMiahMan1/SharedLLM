@@ -1456,10 +1456,11 @@ def git_push(req: GitPushRequest, x_internal_secret: Optional[str] = Header(defa
         raise HTTPException(status_code=400, detail="Unable to determine branch to push")
     
     # SYSTEM SAFETY CHECK: Prohibit autonomous pushes to protected branches
-    if branch_name in ("main", "master", "development"):
+    forbidden_branches = identity.get("forbidden_branches", ["main", "master", "development"])
+    if branch_name in forbidden_branches:
         raise HTTPException(
             status_code=403, 
-            detail=f"Autonomous push to '{branch_name}' is physically blocked by the Workspace Runtime API. Please create a feature branch and open a Pull Request instead."
+            detail=f"Autonomous push to '{branch_name}' is physically blocked by integration settings. Please create a feature branch and open a Pull Request instead."
         )
     remote_url = _git_remote_url(workspace_path, remote_name)
     args = ["git", "push"]
