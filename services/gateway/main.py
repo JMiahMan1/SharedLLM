@@ -1625,8 +1625,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         
         # Strategy 6: Payload Normalization
         if tool_data and isinstance(tool_data, dict):
+            # Handle array format (e.g. OpenAI or custom tool array)
+            for array_key in ("tools", "tool_calls", "actions"):
+                if array_key in tool_data and isinstance(tool_data[array_key], list) and len(tool_data[array_key]) > 0:
+                    log.info(f"[AgentLoop] Normalizing tool schema: extracting first item from '{array_key}'")
+                    tool_data = tool_data[array_key][0]
+                    break
+
             for nest_key in ("arguments", "payload", "args", "json", "tool_call"):
-                if nest_key in tool_data and isinstance(tool_data[nest_key], dict):
+                if tool_data and isinstance(tool_data, dict) and nest_key in tool_data and isinstance(tool_data[nest_key], dict):
                     log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
                     nested_vals = tool_data.pop(nest_key)
                     tool_data.update(nested_vals)
@@ -1647,8 +1654,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "WorkspaceFileReadRequest", "WorkspaceFilePatchRequest", 
                 "WorkspaceFileWriteRequest", "WorkspaceSearchRequest", 
                 "WorkspaceLintRequest", "WorkspaceFileDeleteRequest",
-                "WorkspaceBootstrapRequest",
-                "ripgrep", "read_file", "patch_file", "grep", "search"
+                "WorkspaceBootstrapRequest", "WorkspaceShellRequest",
+                "ripgrep", "read_file", "patch_file", "grep", "search", "shell"
             ]
             action = tool_data.get("type") or tool_data.get("action") if tool_data else None
             if action and action not in ALLOWED_TOOLS:
