@@ -1058,12 +1058,12 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
     return best_eid if best_score > 0 else candidates[0]["entity_id"]
 
 
-async def call_ollama(payload: dict, use_chat: bool = True) -> httpx.Response:
+async def call_ollama(payload: dict, use_chat: bool = True, timeout: float = None) -> httpx.Response:
     endpoint = "/api/chat" if use_chat else "/api/generate"
     return await get_http_client().post(
       f"{OLLAMA_URL}{endpoint}",
       json=payload,
-      timeout=OLLAMA_TIMEOUT,
+      timeout=timeout if timeout is not None else OLLAMA_TIMEOUT,
     )
 
 
@@ -1303,7 +1303,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
             "messages": [{"role": "user", "content": proposal_prompt}],
             "stream": False
         }
-        resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=120.0)
+        resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
         if resp.status_code == 200:
             proposal = resp.json().get("message", {}).get("content", "")
             return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
@@ -1369,7 +1369,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             
             async with INFERENCE_LOCK:
                 log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
-                resp = await call_ollama(ollama_payload, use_chat=True)
+                resp = await call_ollama(ollama_payload, use_chat=True, timeout=300.0)
                 log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
                 
             heartbeat_stop.set()
