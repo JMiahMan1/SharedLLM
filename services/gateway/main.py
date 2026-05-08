@@ -1439,8 +1439,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch"]):
         final_query += (
-            "\n\n[SYSTEM OVERRIDE: You HAVE direct access to the local Git workspace files via `WorkspaceFileReadRequest` and `WorkspaceFileWriteRequest`. "
-            "Do NOT confuse the local workspace with Nextcloud storage. Use the Workspace tools for all coding tasks.]"
+            "\n\n[SYSTEM OVERRIDE: You HAVE direct access to the local Git workspace files via `WorkspaceFileReadRequest`, `WorkspaceFileWriteRequest`, and `WorkspaceFilePatchRequest`. "
+            "Do NOT confuse the local workspace with Nextcloud storage. "
+            "CRITICAL: You MUST use the markdown ```json block format for your tool calls. DO NOT USE XML TAGS LIKE <tool_...>. "
+            "If you use XML tags, the system will crash.]"
         )
         
     ollama_payload = {
