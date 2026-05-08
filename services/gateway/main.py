@@ -2916,7 +2916,8 @@ async def get_ollama_models():
             resp = await client.get(f"{OLLAMA_URL}/api/tags")
             if resp.status_code == 200:
                 data = resp.json()
-                return {"status": "SUCCESS", "models": [m["name"] for m in data.get("models", [])]}
+                models = sorted(list(set(m["name"] for m in data.get("models", []))))
+                return {"status": "SUCCESS", "models": models}
             return {"status": "ERROR", "message": f"Ollama returned {resp.status_code}"}
     except Exception as e:
         return {"status": "ERROR", "message": str(e)}

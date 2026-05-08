@@ -28,6 +28,12 @@
     handle /api/discovery* {
         reverse_proxy gateway:11435
     }
+    handle /api/communication* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/search* {
+        reverse_proxy gateway:11435
+    }
     handle /api/docs* {
         reverse_proxy gateway:11435
     }
@@ -47,11 +53,18 @@
         reverse_proxy execution:8003
     }
 
+    handle /discovery* {
+        reverse_proxy execution:8003
+    }
+
     # 3. Route Identity/Auth API traffic
     handle /api/auth* {
         reverse_proxy identity:8001
     }
     handle /api/users* {
+        reverse_proxy identity:8001
+    }
+    handle /api/devices* {
         reverse_proxy identity:8001
     }
     handle /api/resolve* {
