@@ -371,38 +371,48 @@ async def execute_index_capabilities():
 async def execute_announce(req: AnnouncementRequest):
     # Announcements are currently cross-domain (Volume + TTS)
     ctx = req.user_context
-    log.info(f"[announce] user={ctx.user} entity={req.entity_id}")
+    target_player = req.entity_id
+    if not target_player.startswith("media_player."):
+        target_player = f"media_player.{target_player}"
+
+    log.info(f"[announce] START user={ctx.user} target={target_player} msg='{req.message}' vol={req.volume}")
     
     # 1. Ensure the device is turned on (crucial for TVs)
-    if req.entity_id.startswith("media_player."):
-        log.info(f"[announce] Powering on {req.entity_id}")
-        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", req.entity_id, {})
-        # Give it a tiny bit of time to wake up if it was off
-        await asyncio.sleep(1.0)
+    log.info(f"[announce] Step 1: Powering on {target_player}")
+    pwr_res = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", target_player, {})
+    log.info(f"[announce] Power on result: {pwr_res}")
+    # Give it a tiny bit of time to wake up if it was off
+    await asyncio.sleep(1.5)
 
     # 2. Set volume
-    await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", req.entity_id, {"volume_level": req.volume})
+    log.info(f"[announce] Step 2: Setting volume to {req.volume}")
+    vol_res = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
+    log.info(f"[announce] Volume set result: {vol_res}")
     
-    # Try modern tts.speak first
-    result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "speak", req.entity_id, {
-        "message": req.message, 
-        "media_player_entity_id": req.entity_id,
-        "cache": True
-    })
+    # 3. TTS Announce
+    log.info(f"[announce] Step 3: Triggering TTS")
+    # Most common integrations: google_translate_say, cloud_say
+    # These services target the media player directly.
+    tts_services = ["google_translate_say", "cloud_say", "piper"]
     
-    if not result.get("ok"):
-        log.warning(f"[announce] tts.speak failed, trying fallback: {result.get('error')}")
-        # Fallback to common google_translate_say
-        # Many users have 'google_translate' or 'google_say'
-        # We'll try a few common ones or a generic tts call if possible
-        # For now, let's try the most common one: google_translate_say
-        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "google_translate_say", req.entity_id, {
+    result = {"ok": False, "error": "No TTS service succeeded"}
+    
+    for tts_srv in tts_services:
+        log.info(f"[announce] Trying tts.{tts_srv} on {target_player}...")
+        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", tts_srv, target_player, {
             "message": req.message
         })
+        if result.get("ok"):
+            log.info(f"[announce] SUCCESS using tts.{tts_srv}")
+            break
+        else:
+            log.warning(f"[announce] tts.{tts_srv} failed: {result.get('error')}")
 
     if result.get("ok"):
-        return _ok(f"Announcement sent to {req.entity_id}.", "announce")
-    return _fail(f"Announcement failed after fallback: {result.get('error')}", "announce", result)
+        return _ok(f"Announcement sent successfully to {target_player}.", "announce")
+    
+    log.error(f"[announce] ALL TTS attempts failed for {target_player}")
+    return _fail(f"Announcement failed: {result.get('error')}", "announce", result)
 
 @app.post("/execute/ha_service", response_model=ExecutionResult)
 async def execute_ha_service(req: HAServiceRequest):
