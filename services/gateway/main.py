@@ -1584,15 +1584,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     tool_data[new_key] = tool_data.pop(old_key)
         
         if tool_data is None:
-            log.info(f"[AgentLoop] No valid JSON object or array found — final response at iteration {agent_iter + 1}")
-            break
-            
-        if isinstance(tool_data, list) and len(tool_data) > 0:
-            tool_data = tool_data[0]
-            
-        if not isinstance(tool_data, dict):
-            log.info(f"[AgentLoop] Parsed JSON is not a dictionary — breaking loop")
-            break
+            log.warning(f"[AgentLoop] No valid JSON tool call found in iteration {agent_iter + 1}. Conversational output detected.")
+            if agent_iter < MAX_TOOL_ITERATIONS - 1:
+                log.info(f"[AgentLoop] Re-prompting for autonomous tool execution...")
+                agent_messages.append({"role": "assistant", "content": ans})
+                agent_messages.append({
+                    "role": "user", 
+                    "content": "CRITICAL PROTOCOL VIOLATION: You provided a conversational response without a tool call. You are FORBIDDEN from asking questions or seeking user approval. You MUST execute the next step of your plan immediately using a JSON tool call block. Continue the mission now."
+                })
+                continue
+            else:
+                log.info(f"[AgentLoop] Max iterations reached — final response.")
+                break
 
         log.info(f"[AgentLoop] Dispatching action: {json.dumps({k: v for k, v in tool_data.items() if k != 'user_context'}, indent=2)}")
 
