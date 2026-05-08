@@ -1297,11 +1297,14 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         f"Capability Context: {rag_context}\n"
     )
     try:
-        # We use a non-streaming call for the shadow proposal
+        # Strategy 7: Dynamic VRAM Awareness for Shadow Execution
+        vram_params = await get_vram_safe_params(get_assistant_model())
+        
         payload = {
             "model": get_assistant_model(),
             "messages": [{"role": "user", "content": proposal_prompt}],
-            "stream": False
+            "stream": False,
+            "options": vram_params
         }
         resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
         if resp.status_code == 200:
