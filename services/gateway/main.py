@@ -1874,10 +1874,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             except Exception as e:
                 log.error(f"[AgentLoop] Error parsing pseudo-tag: {e}")
         
-        # Strategy 6: Payload Normalization (Flatten 'arguments' or 'payload')
+        # Strategy 6: Payload Normalization (Flatten 'arguments', 'payload', 'args', or 'json')
         if tool_data and isinstance(tool_data, dict):
-            # If the model nested everything under 'arguments' or 'payload', hoist it
-            for nest_key in ("arguments", "payload"):
+            # If the model nested everything under common keys, hoist it
+            for nest_key in ("arguments", "payload", "args", "json"):
                 if nest_key in tool_data and isinstance(tool_data[nest_key], dict):
                     log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
                     nested_vals = tool_data.pop(nest_key)
