@@ -62,9 +62,12 @@ def _make_ollama_response(message: str, model: str, intent: str = None, debug_co
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 def extract_action_json(text: str) -> dict | None:
-    """Extracts the first JSON object found in the text, with MoE-safe fallback."""
+    """Extracts the first JSON object found in the text, with MoE-safe fallback and log-stripping."""
     if not text:
         return None
+    
+    # Strip common log garbage prefixes (e.g. Uvicorn INFO logs)
+    text = re.sub(r"^INFO:.*?\n", "", text, flags=re.MULTILINE)
     
     # Pattern A: Standard Markdown JSON block
     match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
@@ -75,15 +78,17 @@ def extract_action_json(text: str) -> dict | None:
             pass
 
     # Pattern B: Any block between curly braces
-    match = re.search(r"(\{.*?\})", text, re.DOTALL)
-    if match:
+    # We use a greedy rfind for the last brace to handle nested JSON
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidate = text[first_brace:last_brace+1]
         try:
-            return json.loads(match.group(1))
+            return json.loads(candidate)
         except:
             # Pattern C: Deep search for anything looking like a JSON object if simple match fails
             try:
-                cleaned = match.group(1)
-                cleaned = re.sub(r",\s*([\]}])", r"\1", cleaned)
+                cleaned = re.sub(r",\s*([\]}])", r"\1", candidate)
                 return json.loads(cleaned)
             except:
                 pass
@@ -1587,7 +1592,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         
         # Strategy 6: Payload Normalization
         if tool_data and isinstance(tool_data, dict):
-            for nest_key in ("arguments", "payload", "args", "json"):
+            for nest_key in ("arguments", "payload", "args", "json", "tool_call"):
                 if nest_key in tool_data and isinstance(tool_data[nest_key], dict):
                     log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
                     nested_vals = tool_data.pop(nest_key)
@@ -1602,6 +1607,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if "properties" in tool_data and "type" in tool_data:
                 # Detect schema hallucinations
                 log.warning(f"[AgentLoop] Detected schema hallucination — triggering protocol correction")
+                tool_data = None
+            
+            # SCHEMA_WHITELIST: Strictly enforce allowed workspace tools
+            ALLOWED_TOOLS = [
+                "WorkspaceFileReadRequest", "WorkspaceFilePatchRequest", 
+                "WorkspaceFileWriteRequest", "WorkspaceSearchRequest", 
+                "WorkspaceLintRequest", "WorkspaceFileDeleteRequest"
+            ]
+            action = tool_data.get("type") or tool_data.get("action") if tool_data else None
+            if action and action not in ALLOWED_TOOLS:
+                log.warning(f"[AgentLoop] Hallucinated tool detected: {action} — triggering protocol correction")
                 tool_data = None
         
         if not tool_data:
