@@ -1829,14 +1829,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                                     "payload": {"path": path, "chunks": chunks}
                                 }
                                 log.info(f"[AgentLoop] Parsed raw markdown diff into WorkspaceFilePatchRequest for {path}")
-                        else:
-                            # It's full code without diff markers
-                            if "def " in code_text or "import " in code_text or "class " in code_text:
+                            # Fallback for ANY code block if no strategy matched
+                            if len(code_text.strip()) > 10:
+                                # If it looks like a patch but missing diff markers, or just raw code
+                                action = "WorkspaceFilePatchRequest" if agent_iter > 0 else "WorkspaceFileWriteRequest"
                                 tool_data = {
-                                    "action": "WorkspaceFileWriteRequest",
+                                    "action": action,
                                     "payload": {"path": "auto", "content": code_text}
                                 }
-                                log.info(f"[AgentLoop] Parsed raw markdown code into WorkspaceFileWriteRequest")
+                                log.info(f"[AgentLoop] Parsed raw markdown block into {action}")
             except Exception as e:
                 log.error(f"[AgentLoop] Error parsing raw markdown block: {e}")
         
@@ -2636,11 +2637,16 @@ async def get_storage_stats(request: Request):
     
 @app.get("/api/storage/collection/{collection_name}")
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
-    try:
-        creds_data = await _resolve_identity_from_request(request)
-        user_id = creds_data.get("nextcloud_user") or creds_data.get("user", "default")
-    except:
+    # HA entities and system capabilities are global, ingested under 'default'
+    GLOBAL_COLLECTIONS = {"ha_entities", "system_capabilities", "system_learnings"}
+    if collection_name in GLOBAL_COLLECTIONS:
         user_id = "default"
+    else:
+        try:
+            creds_data = await _resolve_identity_from_request(request)
+            user_id = creds_data.get("nextcloud_user") or creds_data.get("user", "default")
+        except:
+            user_id = "default"
 
     resp = await get_http_client().get(
         f"{RAG_SVC}/rag/collection/{collection_name}?user_id={user_id}&limit={limit}",
