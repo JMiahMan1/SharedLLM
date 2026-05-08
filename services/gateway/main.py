@@ -1636,7 +1636,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 if tool_data and isinstance(tool_data, dict) and nest_key in tool_data and isinstance(tool_data[nest_key], dict):
                     log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
                     nested_vals = tool_data.pop(nest_key)
-                    tool_data.update(nested_vals)
+                    # Preserve top-level action/type if they exist
+                    for k, v in nested_vals.items():
+                        if k in ("action", "type") and k in tool_data:
+                            # If they differ, keep the outer one as the 'primary' action
+                            # but we can store the inner one in payload if needed.
+                            # For now, just don't overwrite the primary.
+                            continue
+                        tool_data[k] = v
             
             mapping = {"offset": "offset_lines", "limit": "limit_lines"}
             for old_key, new_key in mapping.items():
