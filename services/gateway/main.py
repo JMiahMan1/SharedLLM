@@ -1985,11 +1985,26 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         shadow_context = await perform_shadow_execution(query, creds, short_term, rag_context)
 
     system_instruction = select_system_instruction_for_query(query, selected_model)
+    
+    # Detection of autonomous agent engagement
+    is_autonomous = False
+    # Hardened intent logic: also trigger on 'Raven' or explicit 'perform' keywords
+    if "raven" in query.lower() or "perform" in query.lower() or "audit" in query.lower() or ":" in query[:15]:
+        is_autonomous = True
+        try:
+            from .prompts import RAVEN_AUTONOMOUS_PROTOCOL
+        except (ImportError, ValueError):
+            try:
+                from prompts import RAVEN_AUTONOMOUS_PROTOCOL
+            except ImportError:
+                from gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL
+        system_instruction = RAVEN_AUTONOMOUS_PROTOCOL
+
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
     
     protocols = await fetch_autonomous_protocols()
-    full_system = f"{system_instruction}\n\n{QWEN_GROUNDING_INSTRUCTION}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
+    full_system = f"{system_instruction}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
     
     final_query = query
     if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
@@ -2007,61 +2022,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "in a markdown code block. Never claim you cannot show logs.]"
         )
 
-    # Detection of autonomous agent engagement
-    is_autonomous = any(k in query.lower() for k in [
-        "raven:", "raven,", "<raven>", "raven mode", "ouroboros:", "jarvis:", 
-        "fix the", "patch the", "implement", "autonomous:", "audit the", 
-        "full system audit", "perform a git pull"
-    ])
-    
-    # Fallback: if 'raven' appears at the very beginning
-    if not is_autonomous and query.lower().strip().startswith("raven"):
-        is_autonomous = True
-    
-    log.info(f"[Intent] query='{query[:100]}...' is_autonomous={is_autonomous}")
-    
+    # 8. Final Message Construction & Shadow Dispatch
     if is_autonomous:
-        # Specialized coding keywords to ensure the system override is descriptive
-        final_query += (
-            "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
-            "MISSION LOCK: YOU ARE RAVEN. YOU ARE A REPAIR AGENT. YOU ARE FORBIDDEN FROM ASKING QUESTIONS.\n\n"
-            "You have access to Workspace tools to read and patch files.\n\n"
-            "CRITICAL LIMIT: Your context window is limited to 12KB.\n"
-            "CRITICAL: You must execute ONE step at a time! Output ONE tool call, wait for the system result, then output the next tool call.\n"
-            "CRITICAL: DO NOT TALK. DO NOT EXPLAIN. DO NOT ASK FOR CLARIFICATION. JUST OUTPUT JSON.\n\n"
-            "Follow the standard OODA loop:\n"
-            "1. READ: Use `WorkspaceFileReadRequest` to inspect existing code. (STOP and wait for result)\n"
-            "2. PATCH: Use `WorkspaceFilePatchRequest` to modify code. (STOP and wait for result)\n"
-            "3. LINT: Use `WorkspaceLintRequest` to check the patched file for errors. (STOP and wait for result)\n"
-            "   - .py files: runs black + flake8 automatically.\n"
-            "   - .js/.ts files: runs eslint automatically.\n"
-            "   - .yaml/.json files: runs yamllint / json.tool automatically.\n"
-            "   - If lint FAILS, use another PATCH to fix the errors, then lint again.\n"
-            "4. SYNC: Use `GitOperationRequest` (action: 'pull') to get the latest code. (STOP and wait for result)\n"
-            "5. COMMIT: Use `GitOperationRequest` (action: 'commit') to save changes.\n\n"
-            "[GIT & BRANCH RULES]\n"
-            "- Workspace: The root workspace is 'SharedLLM'. Always specify this in `workspace_id` if required.\n"
-            "- Branch: You may commit to the current working branch (like `microservices`) or create a new branch. NEVER push directly to `main` or `development`.\n"
-            "- Pull Requests: If you need to merge changes to `main` or `development`, you must create a Pull Request.\n"
-            "- Commit Messages: All autonomous commits MUST be prefixed with '[Jarvis Autonomous] '.\n\n"
-            "[TOOL CALLING RULES]\n"
-            "You MUST execute tools using a standard Markdown JSON block. Example:\n"
-            "```json\n"
-            "{\n"
-            "  \"type\": \"WorkspaceFilePatchRequest\",\n"
-            "  \"path\": \"services/execution/main.py\",\n"
-            "  \"chunks\": [{\"old_text\": \"...\", \"new_text\": \"...\"}]\n"
-            "}\n"
-            "```\n"
-            "Do NOT just talk about what you will do. Output the JSON tool call immediately."
-        )
-
-    vram_params = await get_vram_safe_params(selected_model)
-
-    # 6. Raven Autonomous Loop (Strategy 7 & 8 implementation)
-    if is_autonomous:
+        # Use coding model for autonomous tasks
+        coding_model = await get_coding_model()
+        selected_model = coding_model
         log.info("[ShadowExecution] Routing to autonomous AgentLoop...")
         return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user"), creds)
+
+    vram_params = await get_vram_safe_params(selected_model)
 
     ollama_payload = {
         "model": selected_model,
