@@ -113,12 +113,12 @@ except (ImportError, ValueError):
 
 # --- Ouroboros Worker ---
 try:
-    from .background_worker import worker as ouroboros_worker
+    from .background_worker import worker as raven_worker
 except ImportError:
     try:
-        from background_worker import ouroboros_worker
+        from background_worker import raven_worker
     except ImportError:
-        ouroboros_worker = None
+        raven_worker = None
 
 # --- Setup Logging ---
 log = logging.getLogger("gateway")
@@ -173,7 +173,7 @@ WORKSPACE_README_ACTION_HINTS = (
 )
 AUTONOMOUS_SIGNALS = (
   "look into the error", "analyze logs", "build the tool", "self repair", 
-  "fix the error", "auto-fix", "debug the system", "ouroboros", "dev loop",
+  "fix the error", "auto-fix", "debug the system", "raven", "dev loop",
   "check container logs", "rebuild service", "deploy fix", "repair", "execute fix",
   "fix it", "debug it", "fix the code", "apply the fix"
 )
@@ -228,12 +228,14 @@ def get_http_client() -> httpx.AsyncClient:
 async def lifespan(app: FastAPI):
     log.info("Gateway starting up...")
     engine.load()
-    if ouroboros_worker:
-        await ouroboros_worker.start()
+    if raven_worker:
+        await raven_worker.start()
+    
     yield
+
     log.info("Gateway shutting down...")
-    if ouroboros_worker:
-        await ouroboros_worker.stop()
+    if raven_worker:
+        await raven_worker.stop()
 
 app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
 
@@ -1313,7 +1315,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     # Dynamic Model Routing: Use specialized coder model for engineering tasks
     if not explicit_model:
-        coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "ouroboros", "audit", "develop", "refactor"]
+        coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "raven", "audit", "develop", "refactor"]
         if any(k in (query or "").lower() for k in coding_keywords):
             # Check if specialized coder model is available (hardcoded preference for qwen2.5-coder)
             selected_model = get_coding_model()
