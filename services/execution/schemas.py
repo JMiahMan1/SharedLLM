@@ -186,6 +186,17 @@ class WorkspaceFilePatchRequest(BaseModel):
     commit_after: bool = False
     commit_message: Optional[str] = None
 
+class WorkspaceSearchRequest(BaseModel):
+    """
+    Performs a codebase-wide search in the Git workspace using ripgrep or grep.
+    Use this to find function definitions, variable usages, or specific patterns.
+    """
+    user_context: UserContext
+    query: str = Field(..., description="The search pattern (regex supported)")
+    path: str = Field(".", description="Search directory relative to root")
+    include: Optional[str] = Field(None, description="Glob pattern to include (e.g. '*.py')")
+    exclude: Optional[str] = Field(None, description="Glob pattern to exclude (e.g. '**/tests/**')")
+
 class WorkspaceLintRequest(BaseModel):
     """
     Lints a file in the local Git workspace.
