@@ -1660,34 +1660,52 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream" if is_openai else "application/x-ndjson")
 
-    # Non-streaming
-    try:
-        resp = await call_ollama(ollama_payload, use_chat=True)
-        if resp.status_code != 200:
-            return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
-        data = resp.json()
-        ans = data.get("message", {}).get("content", "Error.")
-    except (httpx.TimeoutException, httpx.ConnectError):
-        ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
-        # Ensure we return a 200 OK with the degradation message as per hardening requirements
-        if is_openai:
-            return _make_openai_response(ans, selected_model, "degraded")
-        return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
-    
-    # 8. Tool Execution
-    # Intercept JSON blocks for execution as defined in prompts.py
-    log.info(f"[ChatHandler] Full response length: {len(ans)}")
-    if "```" in ans:
-        log.info(f"[ChatHandler] Block detected. Content preview: {ans[ans.find('```'):][:100]}...")
+    # Non-streaming — Agent Loop
+    # Supports multi-turn tool execution: call Ollama, execute tool, feed result back, repeat.
+    MAX_TOOL_ITERATIONS = 5
+    agent_messages = ollama_payload.get("messages", [])[:]  # shallow copy
+    exec_data = None
+    ans = ""
 
-    if "```json" in ans or ("```" in ans and "action" in ans and "payload" in ans):
+    for agent_iter in range(MAX_TOOL_ITERATIONS):
+        log.info(f"[AgentLoop] Iteration {agent_iter + 1}/{MAX_TOOL_ITERATIONS}")
+
+        try:
+            ollama_payload["messages"] = agent_messages
+            resp = await call_ollama(ollama_payload, use_chat=True)
+            if resp.status_code != 200:
+                return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
+            data = resp.json()
+            ans = data.get("message", {}).get("content", "Error.")
+        except (httpx.TimeoutException, httpx.ConnectError):
+            ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
+            if is_openai:
+                return _make_openai_response(ans, selected_model, "degraded")
+            return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
+
+        # 8. Tool Execution — Intercept JSON blocks for execution
+        log.info(f"[AgentLoop] Response length: {len(ans)}")
+        if "```" in ans:
+            log.info(f"[AgentLoop] Block detected. Content preview: {ans[ans.find('```'):][:100]}...")
+
+        # Check if the response contains a tool call
+        has_tool_block = "```json" in ans or ("```" in ans and ("action" in ans or "type" in ans or "tool" in ans))
+
+        if not has_tool_block:
+            log.info(f"[AgentLoop] No tool call detected — final response at iteration {agent_iter + 1}")
+            break
+
+        # Extract and execute the tool call
         try:
             tag = "```json" if "```json" in ans else "```"
             start = ans.find(tag) + len(tag)
             end = ans.find("```", start)
+            if end <= start:
+                log.warning(f"[AgentLoop] Malformed code block — no closing fence")
+                break
             tool_json = ans[start:end].strip()
             tool_data = json.loads(tool_json)
-            
+
             action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
             payload = tool_data.get("payload", {})
             # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
@@ -1698,18 +1716,19 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             payload["path"] = v
                         else:
                             payload[k] = v
-            
+
             if not action:
                 if "path" in payload:
                     if (payload.get("is_patch") or "chunks" in payload):
                         action = "WorkspaceFilePatchRequest"
-                        log.info(f"[ToolExecution] Falling back to WorkspaceFilePatchRequest for flat JSON")
+                        log.info(f"[AgentLoop] Falling back to WorkspaceFilePatchRequest for flat JSON")
                     elif payload.get("content") is not None:
                         action = "WorkspaceFileWriteRequest"
-                        log.info(f"[ToolExecution] Falling back to WorkspaceFileWriteRequest for flat JSON")
+                        log.info(f"[AgentLoop] Falling back to WorkspaceFileWriteRequest for flat JSON")
                     else:
                         action = "WorkspaceFileReadRequest"
-                        log.info(f"[ToolExecution] Falling back to WorkspaceFileReadRequest for flat JSON (content was null)")
+                        log.info(f"[AgentLoop] Falling back to WorkspaceFileReadRequest for flat JSON (content was null)")
+
             # Map action to service endpoint
             action_map = {
                 "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
@@ -1772,9 +1791,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 "patch": (EXECUTION_SVC, "/execute/workspace_file_patch"),
                 "gitpull": (EXECUTION_SVC, "/execute/git_pull"),
             }
-            
+
             lookup_action = action.lower().strip() if action else ""
-            
+
             if lookup_action in ("storageindexrequest", "storagelistrequest"):
                 action_map[lookup_action] = (STORAGE_SVC, "/index/full" if lookup_action == "storageindexrequest" else "/providers/list")
                 payload = {
@@ -1789,44 +1808,40 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     "path": (payload or {}).get("path", "/"),
                     "recursive": (payload or {}).get("recursive", True)
                 }
-            
+
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
-                
+
                 # ALWAYS overwrite user context with real resolved credentials
-                # Filter to only fields expected by Execution (user, ha_url, ha_token)
-                # to avoid 422 validation errors from extra fields in ResolvedCredentials
                 payload["user_context"] = {
                     "user": creds.user,
                     "is_admin": creds.is_admin,
                     "ha_url": creds.ha_url,
                     "ha_token": creds.ha_token
                 }
-                
-                log.info(f"[ToolExecution] Triggering {action} via {svc_base}{endpoint}")
+
+                log.info(f"[AgentLoop] Triggering {action} via {svc_base}{endpoint} (iter {agent_iter + 1})")
                 exec_resp = await get_http_client().post(
                     f"{svc_base}{endpoint}",
                     json=payload,
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=120.0
                 )
-                
+
+                exec_msg = ""
                 if exec_resp.status_code == 200:
                     exec_data = exec_resp.json()
-                    # If it's a standard ExecutionResult, use its message
-                    # Otherwise, use a default message and wrap the whole body as detail
                     if "status" in exec_data and "message" in exec_data:
                         exec_msg = exec_data.get("message", "Action completed.")
                     else:
                         exec_msg = "Action completed."
-                        # Wrap non-standard response into an ExecutionResult-like structure
                         exec_data = {
                             "status": exec_data.get("status", "SUCCESS"),
                             "message": exec_msg,
                             "service": lookup_action,
                             "detail": exec_data
                         }
-                    # PIPELINE HARDENING: Append detail (logs, code) for the agent to 'see'
+                    # Extract detail text for feeding back to the model
                     detail = exec_data.get("detail")
                     if detail:
                         if isinstance(detail, dict):
@@ -1835,8 +1850,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                             elif "logs" in detail:
                                 detail_txt = str(detail["logs"])
                             elif "lines" in detail:
-                                joined_lines = "\n".join(detail["lines"][:100])
-                                detail_txt = joined_lines
+                                detail_txt = "\n".join(detail["lines"][:100])
                             else:
                                 detail_txt = str(detail)
                         else:
@@ -1845,17 +1859,41 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 else:
                     try:
                         err_detail = exec_resp.json().get("detail", exec_resp.text)
-                    except:
+                    except Exception:
                         err_detail = exec_resp.text
                     exec_msg = f"Failed: {err_detail}"
-                
-                # Append execution result to answer and hide the raw JSON from user
-                clean_ans = ans[:ans.find("```json")].strip()
-                ans = f"{clean_ans}\n\n**System Update**: {exec_msg}"
-                log.info(f"[ToolExecution] Result: {exec_msg}")
+
+                log.info(f"[AgentLoop] Tool result (iter {agent_iter + 1}): {exec_msg[:200]}...")
+
+                # ── AGENT LOOP CONTINUATION ──
+                # Feed the tool result back to Ollama so it can decide the next step.
+                agent_messages.append({"role": "assistant", "content": ans})
+                agent_messages.append({
+                    "role": "user",
+                    "content": (
+                        f"[TOOL RESULT for {action}]: {exec_msg[:8000]}\n\n"
+                        "Continue with your plan. If you need another tool, output a JSON block. "
+                        "If you are done, respond with a final summary (no JSON block)."
+                    )
+                })
+                # Continue the loop — Ollama will be called again at the top
+                continue
+            else:
+                log.warning(f"[AgentLoop] Unknown action '{action}' (lookup: '{lookup_action}') — breaking loop")
+                break
+
+        except json.JSONDecodeError as e:
+            log.error(f"[AgentLoop] JSON parse error: {e}")
+            break
         except Exception as e:
-            log.error(f"Tool execution failed: {e}")
-            # Optionally keep the answer as is or append error
+            log.error(f"[AgentLoop] Tool execution failed: {e}")
+            break
+
+    # Clean up the final answer — strip raw JSON blocks from user-facing text
+    if "```json" in ans:
+        clean_ans = ans[:ans.find("```json")].strip()
+        if clean_ans:
+            ans = clean_ans
     
     if not is_background_task:
         await update_history(user_id, "user", query)
