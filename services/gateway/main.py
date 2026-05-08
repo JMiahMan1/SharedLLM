@@ -1987,9 +1987,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         )
 
     # Detection of autonomous agent engagement
-    is_autonomous = any(k in query.lower() for k in ["raven:", "<raven>", "raven mode", "ouroboros:", "jarvis:", "fix the", "patch the", "implement", "autonomous:"])
+    is_autonomous = any(k in query.lower() for k in [
+        "raven:", "raven,", "<raven>", "raven mode", "ouroboros:", "jarvis:", 
+        "fix the", "patch the", "implement", "autonomous:", "audit the", 
+        "full system audit", "perform a git pull"
+    ])
     
-    if is_autonomous:
+    # Fallback: if 'raven' appears at the very beginning
+    if not is_autonomous and query.lower().strip().startswith("raven"):
+        is_autonomous = True
         # Specialized coding keywords to ensure the system override is descriptive
         final_query += (
             "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
