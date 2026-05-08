@@ -51,7 +51,7 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
                 original_content = f.read()
         
         new_content = req.content
-        if req.is_patch:
+        if getattr(req, "is_patch", False):
             # Simple unified diff patch support could go here, 
             # but for now we'll assume content IS the new content or handle patch logic.
             # In SharedLLM, 'is_patch' usually means the LLM provided a diff.
