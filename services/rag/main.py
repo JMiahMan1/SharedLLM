@@ -221,8 +221,15 @@ async def list_collection_documents(collection_name: str, user_id: str = "defaul
         collection = chroma_client.get_or_create_collection(name=collection_name, embedding_function=embedding_fn)
         target_user = "default" if collection_name == "system_capabilities" else user_id
         
+        where_filter = {
+            "$or": [
+                {"user_id": target_user},
+                {"user_id": "default"}
+            ]
+        } if target_user != "default" else {"user_id": "default"}
+        
         results = collection.get(
-            where={"user_id": target_user},
+            where=where_filter,
             limit=limit,
             include=["documents", "metadatas"]
         )
