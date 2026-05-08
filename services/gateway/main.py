@@ -1897,25 +1897,29 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     
     # 6. Context Injection (RAG)
     rag_context = ""
-    try:
-        collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
-        for coll in collections:
-            client = get_http_client()
-            resp = await client.post(
-                f"{RAG_SVC}/rag/search",
-                json={"collection_name": coll, "query": query, "user_id": user_id, "k": 15},
-                headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"}
-            )
-            resp.raise_for_status()
-            res = resp.json()
-            hits = res.get("results", [])
-            if hits:
-                rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
-                log.info(f"[RAG] Collection '{coll}' returned {len(hits)} hits.")
-            else:
-                log.info(f"[RAG] Collection '{coll}' returned NO hits.")
-    except Exception as e:
-        log.error(f"RAG Retrieval error: {e}")
+    # MISSION LOCK: Disable RAG to prevent architectural hallucinations
+    if "MISSION LOCK" in query:
+        log.info("[RAG] MISSION LOCK detected — bypassing all collections to ensure focus.")
+    else:
+        try:
+            collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
+            for coll in collections:
+                client = get_http_client()
+                resp = await client.post(
+                    f"{RAG_SVC}/rag/search",
+                    json={"collection_name": coll, "query": query, "user_id": user_id, "k": 15},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"}
+                )
+                resp.raise_for_status()
+                res = resp.json()
+                hits = res.get("results", [])
+                if hits:
+                    rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
+                    log.info(f"[RAG] Collection '{coll}' returned {len(hits)} hits.")
+                else:
+                    log.info(f"[RAG] Collection '{coll}' returned NO hits.")
+        except Exception as e:
+            log.error(f"RAG Retrieval error: {e}")
 
     # 7. Slow Path Execution (LLM Pipeline)
     shadow_context = ""
