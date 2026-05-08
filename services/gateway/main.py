@@ -1996,6 +1996,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     # Fallback: if 'raven' appears at the very beginning
     if not is_autonomous and query.lower().strip().startswith("raven"):
         is_autonomous = True
+    
+    log.info(f"[Intent] query='{query[:100]}...' is_autonomous={is_autonomous}")
         # Specialized coding keywords to ensure the system override is descriptive
         final_query += (
             "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
