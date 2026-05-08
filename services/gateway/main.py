@@ -64,10 +64,10 @@ def _make_ollama_response(message: str, model: str, intent: str = None, debug_co
     
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
-def extract_action_json(text: str) -> dict:
+def extract_action_json(text: str) -> dict | None:
     """Extracts the first JSON object found in the text, with MoE-safe fallback."""
     if not text:
-        return {}
+        return None
     
     # Pattern A: Standard Markdown JSON block
     match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
@@ -91,7 +91,7 @@ def extract_action_json(text: str) -> dict:
             except:
                 pass
     
-    return {}
+    return None
 
 def _make_openai_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
@@ -1590,7 +1590,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
                     tool_data[new_key] = tool_data.pop(old_key)
         
-        if tool_data is None:
+        if not tool_data:
             log.warning(f"[AgentLoop] No valid JSON tool call found in iteration {agent_iter + 1}. Conversational output detected.")
             if agent_iter < MAX_TOOL_ITERATIONS - 1:
                 log.info(f"[AgentLoop] Re-prompting for autonomous tool execution...")
