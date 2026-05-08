@@ -182,8 +182,10 @@ async def get_vram_safe_params(model: str) -> dict:
                 # Threshold of 7GB is tailored for 8GB cards. 
                 # If we have a model > 7GB, we downshift to ensure room for the KV cache.
                 if len(models) > 1 or any(m.get("size", 0) > 7*1024*1024*1024 for m in models):
-                    log.warning("[Strategy 7] VRAM pressure detected (local). Downshifting to 4096.")
-                    params["num_ctx"] = 4096
+                    log.warning(f"[Strategy 7] VRAM pressure detected (local). Downshifting to 8192.")
+                    # For 7B-14B models on 8GB VRAM, we need significant headroom
+                    # but 4096 was too small for complex reasoning. 8192 is a better balance.
+                    params["num_ctx"] = 8192
                 # CASE B: Free Capacity (Zero models active)
                 elif len(models) == 0:
                     log.info(f"[Strategy 7] VRAM is clear. Up-shifting to {max_ctx}.")
