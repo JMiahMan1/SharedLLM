@@ -1409,7 +1409,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         except (httpx.TimeoutException, httpx.ConnectError):
             heartbeat_stop.set()
             await hb_task
-                            ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
+            ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
             log.warning(f"[AgentLoop] Ollama timeout/connect error on iter {agent_iter + 1}")
             return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
 
