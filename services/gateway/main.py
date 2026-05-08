@@ -20,6 +20,16 @@ except (ImportError, ValueError):
     except ImportError:
         from gateway.schemas import ChatRequest, ResolvedCredentials
 
+QWEN_GROUNDING_INSTRUCTION = """
+### QWEN 3.5 GROUNDING PROTOCOL (MANDATORY)
+1. **NO PHANTOM TOOLS/ENTITIES**: If a tool, library function, or Home Assistant entity is not explicitly provided in the current context, DO NOT assume its existence. 
+2. **NEUROSYMBOLIC GUARDRAIL**: You are strictly forbidden from claiming success (e.g., "I have updated the file") unless you have actually emitted a corresponding tool call JSON block in that same turn.
+3. **MISSING_CONTEXT PROTOCOL**: If you believe a specific tool or entity should exist but cannot find it, reply with 'MISSING_CONTEXT: [Name]' and explain why it is needed.
+4. **DOMAIN CONSTRAINTS**:
+   - Home Assistant: Only use services and entities listed in your Capability Context.
+   - Coding: Verify all imports and function names against the actual workspace files using `search` or `read`.
+"""
+
 def _make_ollama_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
     from fastapi.responses import JSONResponse, StreamingResponse
@@ -1834,7 +1844,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
     
-    full_system = f"{system_instruction}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
+    full_system = f"{system_instruction}\n\n{QWEN_GROUNDING_INSTRUCTION}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
     
     final_query = query
     if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
