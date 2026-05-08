@@ -59,12 +59,16 @@ interface IntegrationTileProps {
   icon: LucideIcon;
   color: string;
   configKeys: Record<string, string>;
+  /** Fields that are arrays of strings, rendered as chip inputs */
+  listKeys?: Record<string, string>;  // label -> field_key
   userData?: UserProfile | null;
 }
 
-const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, configKeys, userData }) => {
+const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, configKeys, listKeys, userData }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState<Record<string, string | boolean>>({});
+  const [listForm, setListForm] = useState<Record<string, string[]>>({});
+  const [listInputs, setListInputs] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<{ status: 'SUCCESS' | 'ERROR', message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const { role } = useAuth();
@@ -123,6 +127,14 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
       initialForm[key] = (userData as Record<string, string | boolean>)?.[key] || '';
     });
     setForm(initialForm);
+    // Initialise list fields
+    const initialListForm: Record<string, string[]> = {};
+    Object.values(listKeys || {}).forEach((key) => {
+      const raw = (userData as Record<string, unknown>)?.[key];
+      initialListForm[key] = Array.isArray(raw) ? raw as string[] : [];
+    });
+    setListForm(initialListForm);
+    setListInputs({});
     setIsOpen(true);
     setTestResult(null);
   };
@@ -189,6 +201,57 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             })}
           </div>
 
+          {/* ── List / Chip fields ─────────────────────────────────── */}
+          {listKeys && Object.entries(listKeys).map(([label, key]) => {
+            const chips: string[] = listForm[key] || [];
+            const addChip = (val: string) => {
+              const trimmed = val.trim().toLowerCase().replace(/^[,\s]+|[,\s]+$/g, '');
+              if (trimmed && !chips.includes(trimmed)) {
+                setListForm(lf => ({ ...lf, [key]: [...(lf[key] || []), trimmed] }));
+              }
+              setListInputs(li => ({ ...li, [key]: '' }));
+            };
+            return (
+              <div key={key} className="space-y-2">
+                <div className="flex items-center mb-2">
+                  <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
+                  <HelpTooltip docName="integrations.md" sectionTitle={name} label={label} />
+                </div>
+                {/* Chip display */}
+                <div className="flex flex-wrap gap-2 min-h-[32px] p-2 glass-input rounded-xl bg-black/20">
+                  {chips.map(chip => (
+                    <span key={chip} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-600/30 border border-purple-500/30 text-purple-300 text-[10px] font-bold">
+                      {chip}
+                      <button
+                        type="button"
+                        onClick={() => setListForm(lf => ({ ...lf, [key]: lf[key].filter(c => c !== chip) }))}
+                        className="text-purple-400 hover:text-red-400 transition-colors ml-0.5"
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                {/* Input to add new chip */}
+                <input
+                  type="text"
+                  value={listInputs[key] || ''}
+                  onChange={e => setListInputs(li => ({ ...li, [key]: e.target.value }))}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ',') {
+                      e.preventDefault();
+                      addChip(listInputs[key] || '');
+                    }
+                  }}
+                  onBlur={() => { if (listInputs[key]?.trim()) addChip(listInputs[key]); }}
+                  className="glass-input w-full text-sm py-2 bg-black/20 focus:bg-black/40"
+                  placeholder={`Type branch name and press Enter…`}
+                />
+                <p className="text-[9px] text-slate-600">Jarvis will never push directly to these branches. Press Enter or comma to add.</p>
+              </div>
+            );
+          })}
+
           <div className="p-4 glass-card border-white/5 bg-white/5 rounded-xl">
              <div className="flex items-center justify-between mb-4">
                 <div>
@@ -228,7 +291,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
               {isTesting ? 'Verifying...' : 'Test Sync'}
             </button>
             <button 
-              onClick={() => updateMutation.mutate(form as Partial<UserProfile>)}
+              onClick={() => updateMutation.mutate({ ...form, ...listForm } as Partial<UserProfile>)}
               disabled={updateMutation.isPending}
               className="glass-button flex-1 py-3 bg-purple-600/40 border-purple-500/30 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
@@ -486,6 +549,9 @@ const Identity = () => {
                 configKeys={{
                   "GitHub Username": "github_user",
                   "Personal Access Token": "github_token"
+                }}
+                listKeys={{
+                  "Protected Branches (no direct push)": "forbidden_branches"
                 }}
               />
               <IntegrationTile 
