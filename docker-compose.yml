@@ -28,6 +28,7 @@ services:
       - TZ=America/Phoenix
     volumes:
       - identity_db:/data
+      - ./services/identity/main.py:/app/main.py:ro
       - ./.env:/app/.env.legacy:ro
       - /etc/localtime:/etc/localtime:ro
 
@@ -48,6 +49,7 @@ services:
       - label=disable
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      - ./services/execution/main.py:/app/main.py:ro
       - ./services/tests:/app/tests
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/workspace/SharedLLM
@@ -136,6 +138,7 @@ services:
       - TZ=America/Phoenix
     volumes:
       - logging_data:/app/data
+      - ./services/logging/main.py:/app/main.py:ro
       - /etc/localtime:/etc/localtime:ro
 
   storage:
@@ -148,6 +151,7 @@ services:
       - TZ=America/Phoenix
     volumes:
       - ./:/workspace/SharedLLM:ro
+      - ./services/storage/indexer.py:/app/indexer.py:ro
       - /etc/localtime:/etc/localtime:ro
 
   workspace_runtime:
