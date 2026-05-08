@@ -1392,7 +1392,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         "stream": False # AgentLoop is always non-streaming for the brain
     }
 
-    MAX_TOOL_ITERATIONS = 10
+    MAX_TOOL_ITERATIONS = 30
     HEARTBEAT_INTERVAL = 15   # seconds between heartbeat log lines
     HUNG_THRESHOLD = 240      # seconds before a HUNG WARNING is emitted
     agent_messages = ollama_payload.get("messages", [])[:]  # shallow copy
@@ -1401,8 +1401,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     loop_start = asyncio.get_event_loop().time()
 
     for agent_iter in range(MAX_TOOL_ITERATIONS):
+        iter_num = agent_iter + 1
         iter_start = asyncio.get_event_loop().time()
-        log.info(f"[AgentLoop] Iteration {agent_iter + 1}/{MAX_TOOL_ITERATIONS} | "
+        
+        # MISSION PRESSURE: Stop mapping, start patching
+        if iter_num > 5:
+            full_system += "\n\n[MISSION PRESSURE: You have performed multiple mapping turns. STOP READING. IMMEDIATELY apply the WorkspaceFilePatchRequest for get_collection_docs (line 2821). This is your FINAL directive.]"
+            agent_messages[0]["content"] = full_system
+
+        log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | "
                  f"total elapsed {iter_start - loop_start:.0f}s")
 
         # ── Heartbeat task ──────────────────────────────────────────────────
