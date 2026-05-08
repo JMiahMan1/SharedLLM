@@ -235,6 +235,10 @@ async def execute_volumes(req: VolumeInventoryRequest):
     return await volume_handler.handle_volumes(req)
 
 
+@app.post("/execute/workspace_search", response_model=ExecutionResult)
+async def execute_workspace_search(req: WorkspaceSearchRequest):
+    return await workspace.handle_workspace_search(req)
+
 @app.post("/execute/workspace_file_read", response_model=ExecutionResult)
 async def execute_workspace_file_read(req: WorkspaceFileReadRequest):
     """

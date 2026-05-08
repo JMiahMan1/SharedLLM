@@ -3,7 +3,7 @@ import os
 import logging
 import difflib
 from typing import Dict, Any, Optional
-from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, ExecutionResult
+from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceSearchRequest, ExecutionResult
 
 log = logging.getLogger("execution.workspace")
 
@@ -54,13 +54,17 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
 
         # Chunked Reading (Windowing)
         start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
-        end = start + req.limit_lines
+        
+        # Hardware Protection: Enforce a hard cap of 500 lines for autonomous agents
+        safe_limit = min(req.limit_lines, 500)
+        end = start + safe_limit
+        
         chunk = lines[start:end]
         content = "".join(chunk)
         
         msg = f"Read {len(chunk)} lines from {req.path} (offset={req.offset_lines})"
         if end < len(lines):
-            msg += f" | TRUNCATED: file has {len(lines)} lines total."
+            msg += f" | TRUNCATED for context safety: file has {len(lines)} lines total."
             
         return _ok(msg, {"content": content, "path": req.path, "total_lines": len(lines), "start_line": start + 1})
     except Exception as e:
@@ -97,6 +101,50 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
     except Exception as e:
         log.error(f"Workspace write failed: {e}")
         return _fail(str(e))
+
+async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResult:
+    """Performs a ripgrep search in the workspace."""
+    import subprocess
+    try:
+        abs_search_path = resolve_safe_path(req.path)
+        
+        # Build rg command
+        cmd = ["rg", "--json", "-i", "--max-count", "100", req.query, abs_search_path]
+        if req.include:
+            cmd.extend(["-g", req.include])
+        if req.exclude:
+            cmd.extend(["-g", f"!{req.exclude}"])
+            
+        log.info(f"Running search: {' '.join(cmd)}")
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        # Ripgrep returns 1 if no matches found, which isn't a failure in our case
+        if proc.returncode not in (0, 1):
+            return _fail(f"Search failed: {proc.stderr}")
+            
+        matches = []
+        import json
+        for line in proc.stdout.splitlines():
+            try:
+                data = json.loads(line)
+                if data.get("type") == "match":
+                    match_data = data.get("data", {})
+                    matches.append({
+                        "path": os.path.relpath(match_data.get("path", {}).get("text", ""), WORKSPACE_ROOT),
+                        "line": match_data.get("line_number"),
+                        "text": match_data.get("lines", {}).get("text", "").strip()
+                    })
+            except:
+                continue
+                
+        if not matches:
+            return _ok(f"No matches found for '{req.query}' in {req.path}", {"matches": []})
+            
+        return _ok(f"Found {len(matches)} matches for '{req.query}'", {"matches": matches})
+    except Exception as e:
+        log.error(f"Workspace search failed: {e}")
+        return _fail(str(e))
+
 async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionResult:
     try:
         abs_path = resolve_safe_path(req.path)
