@@ -1437,13 +1437,29 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "in a markdown code block. Never claim you cannot show logs.]"
         )
 
-    if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch"]):
+    if any(k in query.lower() for k in ["code", "script", "file", "read", "write", "patch", "commit", "branch"]):
         final_query += (
-            "\n\n[SYSTEM OVERRIDE: You HAVE direct access to the local Git workspace files via `WorkspaceFileReadRequest`, `WorkspaceFileWriteRequest`, `WorkspaceFilePatchRequest`, and `GitOperationRequest`. "
-            "CRITICAL: When modifying existing files, you MUST use `WorkspaceFilePatchRequest` instead of rewriting the file. "
-            "Patch schema: {\"type\": \"WorkspaceFilePatchRequest\", \"path\": \"...\", \"chunks\": [{\"old_text\": \"exact old lines to replace\", \"new_text\": \"new lines\"}]}. "
-            "CRITICAL: You MUST use a standard markdown JSON block for your tool calls. DO NOT USE XML TAGS. "
-            "NEVER output raw python code blocks. ALWAYS wrap your code inside a JSON tool call.]"
+            "\n\n[SYSTEM OVERRIDE: AUTONOMOUS DEVELOPER PROTOCOL]\n"
+            "You are Jarvis, an autonomous developer. You have direct access to the local Git workspace. "
+            "You must follow the standard OODA loop for code modifications:\n"
+            "1. READ: Use `WorkspaceFileReadRequest` to inspect existing code.\n"
+            "2. PATCH: Use `WorkspaceFilePatchRequest` to modify code (avoid full rewrites for large files).\n"
+            "3. LINT/TEST: (Optional) Use `PytestRequest` or shell commands to verify syntax if needed.\n"
+            "4. COMMIT: Use `GitOperationRequest` (action: 'commit') to save changes.\n\n"
+            "[GIT & BRANCH RULES]\n"
+            "- Branch: You may commit to the current working branch (like `microservices`) or create a new branch. NEVER push directly to `main` or `development`.\n"
+            "- Pull Requests: If you need to merge changes to `main` or `development`, you must create a Pull Request.\n"
+            "- Commit Messages: All autonomous commits MUST be prefixed with '[Jarvis Autonomous] '.\n\n"
+            "[TOOL CALLING RULES]\n"
+            "You MUST execute tools using a standard Markdown JSON block. Example:\n"
+            "```json\n"
+            "{\n"
+            "  \"type\": \"WorkspaceFilePatchRequest\",\n"
+            "  \"path\": \"services/execution/main.py\",\n"
+            "  \"chunks\": [{\"old_text\": \"...\", \"new_text\": \"...\"}]\n"
+            "}\n"
+            "```\n"
+            "Do NOT just talk about what you will do. Output the JSON tool call immediately."
         )
         
     ollama_payload = {
