@@ -182,11 +182,15 @@ job_queue = InferenceJobQueue(REDIS_URL)
 
 # --- Ouroboros Worker ---
 try:
-    from .background_worker import worker as raven_worker
-except ImportError:
+    from background_worker import worker as raven_worker
+    log.info("Successfully imported Raven background worker.")
+except ImportError as e:
+    log.warning(f"Could not import background worker directly: {e}. Trying relative import...")
     try:
-        from background_worker import raven_worker
-    except ImportError:
+        from .background_worker import worker as raven_worker
+        log.info("Successfully imported Raven background worker via relative import.")
+    except ImportError as e2:
+        log.error(f"FATAL: Background worker import failed: {e2}")
         raven_worker = None
 
 # --- Setup Logging ---
