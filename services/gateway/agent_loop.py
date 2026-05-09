@@ -103,8 +103,10 @@ def get_http_client() -> httpx.AsyncClient:
 
 async def call_ollama(payload: dict, use_chat: bool = True, timeout: float = None) -> httpx.Response:
     endpoint = "/api/chat" if use_chat else "/api/generate"
+    url = f"{OLLAMA_URL}{endpoint}"
+    log.info(f"[AgentLoop] Calling Ollama: {url}")
     return await get_http_client().post(
-      f"{OLLAMA_URL}{endpoint}",
+      url,
       json=payload,
       timeout=timeout if timeout is not None else OLLAMA_TIMEOUT,
     )
