@@ -1665,8 +1665,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "gitoperationrequest", "dockerlogsrequest", "dockercomposerequest",
                 "ripgrep", "read_file", "patch_file", "grep", "search", "shell", "git", "logs", "compose"
             ]
-            # Tool Discriminator: Detect which tool is being called
-            action_key = tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_name") or tool_data.get("tool_choice") or tool_data.get("tool") if tool_data else None
+            # Tool Discriminator: Detect which tool is being called. 
+            # Prioritize 'tool_name' if it was set during hoisting to avoid clobbering by payload parameters.
+            action_key = tool_data.get("tool_name") or tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_choice") or tool_data.get("tool") if tool_data else None
             dispatch_action = None
             
             if action_key:
