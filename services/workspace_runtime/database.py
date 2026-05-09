@@ -1,5 +1,5 @@
 import os
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine
 from sqlalchemy import inspect, text
 try:
     from .models import Workspace
