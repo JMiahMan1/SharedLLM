@@ -222,27 +222,6 @@ async def fetch_autonomous_protocols() -> str:
     """Fetch the latest autonomous protocols from the Identity Service GlobalSettings."""
     return await fetch_global_setting("system_autonomous_protocols")
 
-            if resp.status_code == 200:
-                ps = resp.json()
-                models = ps.get("models", [])
-                
-                # CASE A: High Pressure (Multiple models or massive model active)
-                # Threshold of 7GB is tailored for 8GB cards. 
-                # If we have a model > 7GB, we downshift to ensure room for the KV cache.
-                if len(models) > 1 or any(m.get("size", 0) > 7*1024*1024*1024 for m in models):
-                    log.warning(f"[Strategy 7] VRAM pressure detected (local). Downshifting to 8192.")
-                    # For 7B-14B models on 8GB VRAM, we need significant headroom
-                    # but 4096 was too small for complex reasoning. 8192 is a better balance.
-                    params["num_ctx"] = 8192
-                # CASE B: Free Capacity (Zero models active)
-                elif len(models) == 0:
-                    log.info(f"[Strategy 7] VRAM is clear. Up-shifting to {max_ctx}.")
-                    params["num_ctx"] = max_ctx
-    except Exception as e:
-        # Fallback if ps endpoint is unavailable or blocked
-        log.warning(f"[Strategy 7] Could not poll VRAM state (ps unavailable): {e}")
-    
-    return params
 
 CODING_SIGNALS = (
   "python", "javascript", "typescript", "node", "react", "fastapi", "sql", "regex",
