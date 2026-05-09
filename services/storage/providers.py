@@ -1,15 +1,12 @@
+# services/storage/providers.py
 from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from typing import Any
 
 try:
     from .models import ProviderConfig, StorageEntry
-    from .nextcloud_client import NextCloudClient
 except ImportError:
     from models import ProviderConfig, StorageEntry
-    from nextcloud_client import NextCloudClient
-
 
 class StorageProvider(ABC):
     @abstractmethod
@@ -26,38 +23,21 @@ class StorageProvider(ABC):
     ) -> dict[str, Any]:
         raise NotImplementedError
 
-
-class NextcloudStorageProvider(StorageProvider):
-    def __init__(self, settings: dict):
-        self.client = NextCloudClient(
-            settings["url"],
-            settings["username"],
-            settings["password"],
-        )
-
-    def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
-        return self.client.list_entries(path=path, recursive=recursive)
-
-    def get_content(self, path: str) -> str | None:
-        return self.client.get_file_content(path)
-
-    def write_content(
-        self,
-        path: str,
-        content: str | bytes,
-        create_parents: bool = True,
-        verify: bool = True,
-        is_binary: bool = False,
-    ) -> dict[str, Any]:
-        return self.client.write_file_content(
-            path, content, create_parents=create_parents, verify=verify, is_binary=is_binary
-        )
-
-    def upload_directory(self, remote_path: str, local_path: str) -> dict[str, Any]:
-        return self.client.upload_directory(remote_path, local_path)
-
-
 def build_provider(config: ProviderConfig) -> StorageProvider:
+    """
+    Factory function to build storage providers.
+    Moving specifics to plugins ensures backend agnosticism.
+    """
     if config.kind == "nextcloud":
+        try:
+            from .providers_impl.nextcloud import NextcloudStorageProvider
+        except ImportError:
+            from providers_impl.nextcloud import NextcloudStorageProvider
         return NextcloudStorageProvider(config.settings)
+    
+    # Example for future local provider:
+    # if config.kind == "local":
+    #     from .providers_impl.local import LocalStorageProvider
+    #     return LocalStorageProvider(config.settings)
+        
     raise ValueError(f"Unsupported storage provider: {config.kind}")

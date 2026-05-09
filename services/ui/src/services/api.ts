@@ -376,6 +376,11 @@ export const api = {
     return resp.data;
   },
 
+  async pullWorkspace(id: string, branch?: string): Promise<{ status: string; message: string; branch: string }> {
+    const resp = await apiClient.post('/api/workspaces/git/pull', { workspace_id: id, branch });
+    return resp.data;
+  },
+
   async getAPIKeys(): Promise<APIKey[]> {
     const resp = await apiClient.get('/api/users/me/keys');
     return resp.data;

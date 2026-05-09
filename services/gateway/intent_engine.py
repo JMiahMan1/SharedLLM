@@ -58,6 +58,8 @@ class IntentEngine:
         phrases = []
         labels = []
         for intent, examples in data.items():
+            if intent == "fallbacks":
+                continue # Skip acknowledgment phrases
             for ex in examples:
                 phrases.append(ex.lower())
                 labels.append(intent)
@@ -94,6 +96,10 @@ class IntentEngine:
             return "turn_on", 1.0
         if any(k in q for k in ["turn off", "power off", "switch off"]):
             return "turn_off", 1.0
+        if any(k in q for k in ["index ", "reindex ", "scan my library"]):
+            return "index_storage", 1.0
+        if any(k in q for k in ["sync home assistant", "refresh devices"]):
+            return "sync_ha", 1.0
         # 2. Semantic Routing (if active)
         # Fallback Check: Engine crashed or has no embeddings
         if not self.is_active or not self.model or len(self.intent_embeddings) == 0 or np is None:
@@ -127,4 +133,13 @@ class IntentEngine:
         Determines if the semantic match is strong enough to bypass LLM classification.
         """
         return confidence >= self.FAST_PATH_CONFIDENCE
+
+    def is_fast_path(self, intent: str, confidence: float) -> bool:
+        """
+        Checks if an intent is eligible for direct execution.
+        """
+        if intent == "unknown":
+            return False
+        return self.should_bypass_llm(confidence)
+
 engine = IntentEngine()

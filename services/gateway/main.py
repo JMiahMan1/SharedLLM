@@ -4,6 +4,7 @@ import logging
 import json
 import asyncio
 import httpx
+import random
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from typing import Optional, Any, Dict, List
@@ -60,6 +61,14 @@ def _make_ollama_response(message: str, model: str, intent: str = None, debug_co
         yield json.dumps({"model": model, "done": True}) + "\n"
     
     return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+def _make_ollama_chunk(content: str, model: str, done: bool = False):
+    return {
+        "model": model,
+        "created_at": datetime.now().isoformat() + "Z",
+        "message": {"role": "assistant", "content": content},
+        "done": done
+    }
 
 def extract_action_json(text: str) -> dict | None:
     """Extracts the first JSON object found in the text, with MoE-safe fallback and log-stripping."""
@@ -137,6 +146,16 @@ def _make_openai_response(message: str, model: str, intent: str = None, debug_co
     
     return StreamingResponse(gen(), media_type="text/event-stream")
 
+def _make_openai_chunk(content: str, model: str, finish_reason: str = None):
+    import time
+    return {
+        "id": f"chatcmpl-{int(time.time())}",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"delta": {"content": content} if content else {}, "index": 0, "finish_reason": finish_reason}]
+    }
+
 # --- Imports from internal modules ---
 try:
     from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, DeploymentRequest, SystemLearningRequest, WorkspaceBootstrapRequest
@@ -148,6 +167,13 @@ except (ImportError, ValueError):
       from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
       from services.gateway.intent_engine import engine
       from services.gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
+try:
+    from .messaging import InferenceJobQueue, JobStatus
+except (ImportError, ValueError):
+    from messaging import InferenceJobQueue, JobStatus
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+job_queue = InferenceJobQueue(REDIS_URL)
       from services.gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     except ImportError:
       from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
@@ -340,7 +366,8 @@ async def lifespan(app: FastAPI):
     engine.load()
     # Initialize the client explicitly on startup
     get_http_client()
-    log.info("Gateway initialized with standardized 45s timeouts")
+    await job_queue.connect()
+    log.info("Gateway initialized with FIFO Inference Queue")
     if raven_worker:
         await raven_worker.start()
     
@@ -1944,457 +1971,198 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     log.info(f"Chat request from {user_id} query='{query}'")
 
     # 3. Semantic Routing (Fast Path Detection)
-    is_background_task = "### Task:" in query or "Generate 1-3 broad tags" in query or "Suggest 3-5 relevant follow-up questions" in query
+    intent, confidence = engine.classify(query)
+    is_fast_path = engine.is_fast_path(intent, confidence)
     
-    if is_background_task:
-        intent, confidence = "none", 0.0
-        is_fast_path = False
-        log.info("[FastPath] Skipped for automated background task")
-    else:
-        intent, confidence = engine.classify(query)
-        is_fast_path = engine.should_bypass_llm(confidence)
-    
-    # 4. Capability Check (Pre-flight)
-    required_fields = INTENT_CAPABILITY_MAP.get(intent, [])
-    missing_fields = [f for f in required_fields if not getattr(creds, f)]
-    if missing_fields:
-        log.warning(f"[CapabilityEnforcement] User {user_id} lacks {missing_fields} for intent {intent}")
-        persona_prompt = f"The user asked '{query}' but lacks {missing_fields}. Explain that they must visit the Identity page."
-        resp = await call_ollama({"model": selected_model, "prompt": persona_prompt, "stream": False}, use_chat=False)
-        msg = resp.json().get("response", "Please set up your credentials in Identity.")
-        if is_openai:
-            return _make_openai_response(msg, selected_model, "redirection")
-        return _make_ollama_response(msg, selected_model, "redirection")
-
     if is_fast_path:
         log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence}")
-        # Fast-path is now restricted to non-parameterized system status or simple toggle triggers
-        # Device control with parameters (like set_brightness or play_media) MUST go through the LLM for extraction
+        # Execute immediate tool for simple intents
         endpoint_map = {
-            "ha_status": "/health", # Placeholder for status check
-            "storage_status": "/health",
+            "turn_on": "/execute/light",
+            "turn_off": "/execute/light",
+            "play_media": "/execute/media/play",
+            "pause_media": "/execute/media/play",
+            "index_storage": "/index/full",
+            "sync_ha": "/health",
         }
         endpoint = endpoint_map.get(intent)
         if endpoint:
             exec_payload = {
                 "user_context": creds.model_dump(),
-                "entity_id": "auto", # Smart resolution would happen in the execution service
-                "action": "turn_on" if intent in ("turn_on", "set_brightness") else ("turn_off" if intent == "turn_off" else "play")
+                "action": "turn_on" if intent == "turn_on" else ("turn_off" if intent == "turn_off" else "play"),
+                "entity_id": "auto"
             }
-            exec_res = await execute_command(endpoint, exec_payload)
-            ans = exec_res.get("message", "Action completed.")
+            # Add specialized payload for storage/ha
+            if intent == "index_storage":
+                exec_payload = {
+                    "provider": {"kind": "nextcloud", "settings": {"url": creds.nextcloud_url, "username": creds.nextcloud_user, "password": creds.nextcloud_pass}},
+                    "path": "/", "recursive": True
+                }
+                svc_base = STORAGE_SVC
+            else:
+                svc_base = EXECUTION_SVC
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                ans = exec_resp.json().get("message", "Action completed.")
+            
             await update_history(user_id, "user", query)
             await update_history(user_id, "assistant", ans)
-            if is_openai:
-                return _make_openai_response(ans, selected_model, intent)
+            if is_openai: return _make_openai_response(ans, selected_model, intent)
             return _make_ollama_response(ans, selected_model, intent)
 
-    # 5. Retrieve Tiered Memory
-    short_term = await get_history(user_id)
-    long_term = await get_long_term_memory(user_id, query)
-    
-    # 6. Context Injection (RAG)
-    rag_context = ""
-    # MISSION LOCK: Disable RAG to prevent architectural hallucinations
-    if "MISSION LOCK" in query:
-        log.info("[RAG] MISSION LOCK detected — bypassing all collections to ensure focus.")
-    else:
-        try:
-            collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
-            for coll in collections:
-                client = get_http_client()
-                resp = await client.post(
-                    f"{RAG_SVC}/rag/search",
-                    json={"collection_name": coll, "query": query, "user_id": user_id, "k": 15},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"}
-                )
-                resp.raise_for_status()
-                res = resp.json()
-                hits = res.get("results", [])
-                if hits:
-                    rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
-                    log.info(f"[RAG] Collection '{coll}' returned {len(hits)} hits.")
-                else:
-                    log.info(f"[RAG] Collection '{coll}' returned NO hits.")
-        except Exception as e:
-            log.error(f"RAG Retrieval error: {e}")
-
-    # 7. Slow Path Execution (LLM Pipeline)
-    shadow_context = ""
-    complex_signals = ["complex", "bug", "refactor", "design", "how to", "fix", "error", "traceback", "implement", "logic"]
-    if any(k in query.lower() for k in complex_signals):
-        shadow_context = await perform_shadow_execution(query, creds, short_term, rag_context)
-
-    system_instruction = select_system_instruction_for_query(query, selected_model)
-    
-    # Detection of autonomous agent engagement
-    is_autonomous = False
-    # Hardened intent logic: also trigger on 'Raven' or explicit 'perform' keywords
-    autonomy_signals = ["raven", "perform", "audit", "index", "reindex", "scan", "repair", "fix", "check", "synchronize", "sync"]
-    if any(k in query.lower() for k in autonomy_signals) or ":" in query[:15]:
-        log.info("[ShadowExecution] AUTONOMOUS MISSION DETECTED via keyword/protocol signal")
-        is_autonomous = True
-        try:
-            from .prompts import RAVEN_AUTONOMOUS_PROTOCOL
-        except (ImportError, ValueError):
-            try:
-                from prompts import RAVEN_AUTONOMOUS_PROTOCOL
-            except ImportError:
-                from gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL
-        system_instruction = RAVEN_AUTONOMOUS_PROTOCOL
-
-    admin_tag = " (ADMIN)" if creds.is_admin else ""
-    user_info = f"Current User: {user_id}{admin_tag}"
-    
-    protocols = await fetch_autonomous_protocols()
-    full_system = f"{system_instruction}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
-    
-    final_query = query
-    if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
-        full_system += (
-            "\n\n[SYSTEM OVERRIDE: CRITICAL DIRECTIVE: You have full permission to access the storage system. "
-            "You ARE fully capable of executing this storage action. "
-            "DO NOT apologize or say you lack access. DO NOT provide a tutorial. "
-            "You MUST immediately execute the appropriate tool: `StorageListRequest` to find resources, "
-            "or `StorageIndexRequest` to index them. Output the correct JSON block now.]"
-        )
-    
-    if any(k in query.lower() for k in ["log", "logs", "docker", "output", "error"]):
-        final_query += (
-            "\n\n[SYSTEM OVERRIDE: You ARE authorized and REQUIRED to print diagnostic log snippets to the user. "
-            "If you fetch logs via `DockerLogsRequest`, you MUST parse the output and display relevant snippets "
-            "in a markdown code block. Never claim you cannot show logs.]"
-        )
-
-    # 8. Final Message Construction & Shadow Dispatch
-    if is_autonomous:
-        # Use coding model for autonomous tasks
-        coding_model = await get_coding_model()
-        selected_model = coding_model
-        log.info("[ShadowExecution] Routing to autonomous AgentLoop...")
-        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user"), creds)
-
-    vram_params = await get_vram_safe_params(selected_model)
-
-    ollama_payload = {
+    # 4. Slow Path Execution (FIFO Queue Redirect)
+    # Pack full context for the worker
+    job_payload = {
         "model": selected_model,
-        "messages": [
-            {"role": "system", "content": full_system}
-        ] + short_term + [{"role": "user", "content": final_query}],
-        "options": vram_params,
-        "stream": should_stream
+        "query": query,
+        "creds": creds.model_dump(),
+        "client": body.client,
+        "source": body.source,
+        "device_id": body.device_id,
+        "rag_user": body.rag_user
     }
+    
+    job_id = await job_queue.enqueue_job(user_id, job_payload)
+    
+    # 5. Modality-Specific Response Logic (Phase 2 Integration)
+    # Standard clients (OpenAI/Ollama/OpenWebUI) require synchronous or standard streaming.
+    # We bridge the Async Queue to their expectation here.
+    
+    is_standard_client = is_openai or body.get("standard_client", False)
+    # If using /api/chat (Ollama format) and not explicitly asking for async, assume standard
+    if "/api/chat" in str(request.url) and not body.get("async_job", False) and body.get("client") != "voice":
+        is_standard_client = True
 
-    if should_stream:
-        async def stream_generator():
-            full_ans = ""
-            suppressing = False
-            async with INFERENCE_LOCK:
-                log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model}")
-                async with httpx.AsyncClient(timeout=None) as client:
-                    async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=ollama_payload) as resp:
-                        async for line in resp.aiter_lines():
-                            if not line: continue
-                            try:
-                                chunk = json.loads(line)
-                                content = chunk.get("message", {}).get("content", "")
-                                if content:
-                                    full_ans += content
-                                    # Detection of ANY code block OR raw background JSON to start suppression
-                                    if not suppressing and ("```json" in full_ans or (full_ans.strip().startswith("{") and len(full_ans.strip()) > 10)):
-                                        suppressing = True
-                                    if not suppressing:
-                                        if is_openai:
-                                            yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
-                                        else:
-                                            yield line + "\n"
-                                if chunk.get("done"): break
-                            except: pass
-                log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
-            
-            # 8. Handle tool execution at the end of the stream
-            log.info(f"[StreamGenerator] Full response length: {len(full_ans)}")
-            log.info(f"[StreamGenerator] RAW RESPONSE: {full_ans}")
-            if "```" in full_ans:
-                log.info(f"[StreamGenerator] Block detected. Content preview: {full_ans[full_ans.find('```'):][:100]}...")
-                
-            # Detect tool block (either ```json or raw ``` if it looks like JSON)
-            if "```json" in full_ans or ("```" in full_ans and "action" in full_ans and "payload" in full_ans):
-                try:
-                    tag = "```json" if "```json" in full_ans else "```"
-                    start = full_ans.find(tag) + len(tag)
-                    end = full_ans.find("```", start)
-                    tool_json = full_ans[start:end].strip()
-                    tool_data = json.loads(tool_json)
-                    # Handle model wrapping tool call in an array
-                    if isinstance(tool_data, list) and len(tool_data) > 0:
-                        tool_data = tool_data[0]
+    if is_standard_client:
+        if should_stream:
+            async def standard_stream_gen():
+                last_pos = -1
+                while True:
+                    job = await job_queue.get_job_status(job_id)
+                    if not job: break
                     
-                    action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
-                    payload = tool_data.get("payload", {})
-                    # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
-                    if isinstance(tool_data, dict):
-                        for k, v in tool_data.items():
-                            if k not in ("action", "payload", "tool", "name", "type") and k not in payload:
-                                if "path" in k.lower():
-                                    payload["path"] = v
-                                else:
-                                    payload[k] = v
-                    
-                    if not action:
-                        if "path" in payload:
-                            if (payload.get("is_patch") or "chunks" in payload):
-                                action = "WorkspaceFilePatchRequest"
-                                log.info(f"[StreamToolExecution] Falling back to WorkspaceFilePatchRequest for flat JSON")
-                            elif payload.get("content") is not None:
-                                action = "WorkspaceFileWriteRequest"
-                                log.info(f"[StreamToolExecution] Falling back to WorkspaceFileWriteRequest for flat JSON")
-                            else:
-                                action = "WorkspaceFileReadRequest"
-                                log.info(f"[StreamToolExecution] Falling back to WorkspaceFileReadRequest for flat JSON (content was null)")
-                    action_map = {
-                        "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
-                        "light_control": (EXECUTION_SVC, "/execute/light"),
-                        "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
-                        "media_play": (EXECUTION_SVC, "/execute/media/play"),
-                        "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
-                        "media_transport": (EXECUTION_SVC, "/execute/media/transport"),
-                        "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
-                        "tv_cast": (EXECUTION_SVC, "/execute/tv_cast"),
-                        "climaterequest": (EXECUTION_SVC, "/execute/climate"),
-                        "securityrequest": (EXECUTION_SVC, "/execute/security"),
-                        "announcementrequest": (EXECUTION_SVC, "/execute/announce"),
-                        "haservicerequest": (EXECUTION_SVC, "/execute/ha_service"),
-                        "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
-                        "noterequest": (EXECUTION_SVC, "/execute/note"),
-                        "timerrequest": (EXECUTION_SVC, "/execute/timer"),
-                        "talkrequest": (EXECUTION_SVC, "/execute/talk"),
-                        "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
-                        "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
-                        "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
-                        "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
-                        "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
-                        "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
-                        "volumeinventoryrequest": (EXECUTION_SVC, "/execute/volumes"),
-                        "workspacefileaction": (WORKSPACE_RUNTIME_SVC, "/files/write"),
-                        "workspacegitaction": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
-                        "workspacesyncaction": (WORKSPACE_RUNTIME_SVC, "/workflow/write-sync-commit"),
-                        "filereadrequest": (WORKSPACE_RUNTIME_SVC, "/files/read"),
-                        "filelistrequest": (WORKSPACE_RUNTIME_SVC, "/files/list"),
-                        "filewriterequest": (WORKSPACE_RUNTIME_SVC, "/files/write"),
-                        "pytestrequest": (WORKSPACE_RUNTIME_SVC, "/tests/pytest"),
-                        "diffrequest": (WORKSPACE_RUNTIME_SVC, "/git/diff"),
-                        "gitaddrequest": (WORKSPACE_RUNTIME_SVC, "/git/add"),
-                        "gitcommitrequest": (WORKSPACE_RUNTIME_SVC, "/git/commit"),
-                        "gitstatusrequest": (WORKSPACE_RUNTIME_SVC, "/git/status"),
-                        "gitdiffrequest": (WORKSPACE_RUNTIME_SVC, "/git/diff"),
-                        "gitbranchcreaterequest": (WORKSPACE_RUNTIME_SVC, "/git/branch/create"),
-                        "gitpushrequest": (WORKSPACE_RUNTIME_SVC, "/git/push"),
-                        "gitfetchrequest": (WORKSPACE_RUNTIME_SVC, "/git/fetch"),
-                        "gitpullrequest": (WORKSPACE_RUNTIME_SVC, "/git/pull"),
-                        "gitpull": (WORKSPACE_RUNTIME_SVC, "/git/pull"),
-                        "gitrebaserequest": (WORKSPACE_RUNTIME_SVC, "/git/rebase"),
-                        "storagestatusrequest": (STORAGE_SVC, "/status"),
-                        "storagelistrequest": (STORAGE_SVC, "/providers/list"),
-                        "storageindexrequest": (STORAGE_SVC, "/index/full"),
-                        "workspace_file_read": (EXECUTION_SVC, "/execute/workspace_file_read"),
-                        "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
-                        "read": (EXECUTION_SVC, "/execute/workspace_file_read"),
-                        "workspace_file_write": (EXECUTION_SVC, "/execute/workspace_file_write"),
-                        "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
-                        "write": (EXECUTION_SVC, "/execute/workspace_file_write"),
-                        "storage_file_read": (EXECUTION_SVC, "/execute/storage_file_read"),
-                        "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
-                        "storage_file_write": (EXECUTION_SVC, "/execute/storage_file_write"),
-                        "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
-                        "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
-                    }
-                    
-                    # Normalize action name for lookup
-                    lookup_action = action.lower().strip() if action else ""
-                    
-                    if lookup_action in ("storageindexrequest", "storagelistrequest"):
-                        action_map[lookup_action] = (STORAGE_SVC, "/index/full" if lookup_action == "storageindexrequest" else "/providers/list")
-                        payload = {
-                            "provider": {
-                                "kind": "nextcloud",
-                                "settings": {
-                                    "url": creds.nextcloud_url,
-                                    "username": creds.nextcloud_user,
-                                    "password": creds.nextcloud_pass
-                                }
-                            },
-                            "path": (payload or {}).get("path", "/"),
-                            "recursive": (payload or {}).get("recursive", True)
-                        }
-                    
-                    if lookup_action in action_map:
-                        svc_base, endpoint = action_map[lookup_action]
-                        
-                        # ALWAYS overwrite user context with real resolved credentials
-                        # Filtered for compatibility with Execution schemas
-                        payload["user_context"] = {
-                            "user": creds.user,
-                            "is_admin": creds.is_admin,
-                            "ha_url": creds.ha_url,
-                            "ha_token": creds.ha_token
-                        }
-                        
-                        log.info(f"[StreamToolExecution] Triggering {action} with payload keys: {list(payload.keys())}")
-                        log.debug(f"[StreamToolExecution] Full Payload: {payload}")
-                        exec_resp = await get_http_client().post(
-                            f"{svc_base}{endpoint}",
-                            json=payload,
-                            headers={"X-Internal-Secret": INTERNAL_SECRET},
-                            timeout=120.0
-                        )
-                        
-                        if exec_resp.status_code == 200:
-                            exec_data = exec_resp.json()
-                            exec_msg = exec_data.get("message", "Action completed.")
-                            # PIPELINE HARDENING: Append detail (logs, code) for the agent to 'see'
-                            detail = exec_data.get("detail")
-                            if detail:
-                                if isinstance(detail, dict):
-                                    if "content" in detail:
-                                        detail_txt = str(detail["content"])
-                                    elif "logs" in detail:
-                                        detail_txt = str(detail["logs"])
-                                    elif "lines" in detail:
-                                        detail_txt = "\n".join(detail["lines"][:100])
-                                    else:
-                                        detail_txt = str(detail)
-                                else:
-                                    detail_txt = str(detail)
-                                exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
-                        else:
-                            try:
-                                err_detail = exec_resp.json().get("detail", exec_resp.text)
-                            except:
-                                err_detail = exec_resp.text
-                            exec_msg = f"Failed: {err_detail}"
-                        
-                        update_text = f"\n\n**System Update**: {exec_msg}"
-                        full_ans = full_ans[:full_ans.find("```json")].strip() + update_text
-                        
+                    # Pop and yield chunks
+                    chunks = await job_queue.get_chunks(job_id)
+                    for chunk in chunks:
                         if is_openai:
-                            yield f"data: {json.dumps({'choices': [{'delta': {'content': update_text}}]})}\n\n"
+                            yield f"data: {json.dumps(_make_openai_chunk(chunk, selected_model))}\n\n"
                         else:
-                            # Ollama format chunk
-                            final_chunk = {"message": {"role": "assistant", "content": update_text}, "done": False}
-                            yield json.dumps(final_chunk) + "\n"
-                except Exception as e:
-                    log.error(f"Streaming tool execution failed: {e}")
-
-            if not is_background_task:
-                await update_history(user_id, "user", query)
-                await update_history(user_id, "assistant", full_ans)
-            else:
-                log.info(f"[Background] Skipping history update for task: {query[:50]}...")
-                
-            if not is_openai:
-                yield json.dumps({"done": True}) + "\n"
-
-        return StreamingResponse(stream_generator(), media_type="text/event-stream" if is_openai else "application/x-ndjson")
-
-    # Non-streaming — Standard Response
-    async with INFERENCE_LOCK:
-        log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model}")
-        resp = await call_ollama(ollama_payload, use_chat=True)
-        log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
-
-    if resp.status_code != 200:
-        return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
-    
-    data = resp.json()
-    ans = data.get("message", {}).get("content", "Error.")
-    
-    # TOOL EXECUTION (Non-autonomous/Single-turn)
-    # Detect tool block (either ```json or raw ``` if it looks like JSON)
-    if "```json" in ans or ("```" in ans and "action" in ans and "payload" in ans):
-        try:
-            tag = "```json" if "```json" in ans else "```"
-            start = ans.find(tag) + len(tag)
-            end = ans.find("```", start)
-            tool_json = ans[start:end].strip()
-            tool_data = json.loads(tool_json)
-            # Handle model wrapping tool call in an array
-            if isinstance(tool_data, list) and len(tool_data) > 0:
-                tool_data = tool_data[0]
-            
-            action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
-            payload = tool_data.get("payload", {})
-            # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
-            if isinstance(tool_data, dict):
-                for k, v in tool_data.items():
-                    if k not in ("action", "payload", "tool", "name", "type") and k not in payload:
-                        if "path" in k.lower():
-                            payload["path"] = v
+                            yield json.dumps(_make_ollama_chunk(chunk, selected_model)) + "\n"
+                    
+                    if job["status"] == JobStatus.COMPLETED:
+                        if is_openai:
+                            yield f"data: {json.dumps(_make_openai_chunk('', selected_model, 'stop'))}\n\n"
+                            yield "data: [DONE]\n\n"
                         else:
-                            payload[k] = v
+                            yield json.dumps(_make_ollama_chunk("", selected_model, True)) + "\n"
+                        break
+                    
+                    if job["status"] == JobStatus.FAILED:
+                        err = job.get("error", "Unknown error")
+                        if is_openai: yield f"data: {json.dumps(_make_openai_chunk(f'[ERROR]: {err}', selected_model, 'stop'))}\n\n"
+                        else: yield json.dumps(_make_ollama_chunk(f"[ERROR]: {err}", selected_model, True)) + "\n"
+                        break
+                    
+                    # Optional: Yield queue position if it changes
+                    pos = await job_queue.get_queue_position(job_id)
+                    if pos != last_pos and pos > 0:
+                        # We send this as a subtle prefix or hidden content if possible, 
+                        # but for standard clients, it's safer to just wait.
+                        last_pos = pos
+                        
+                    await asyncio.sleep(0.1)
             
-            # (Reuse existing logic for action mapping - for brevity, I'll just handle the ones in the test)
-            # In a real fix, I would refactor the action mapping to a shared function.
-            # For now, I'll use the mapping logic from the streaming path if possible, or just copy it.
+            return StreamingResponse(
+                standard_stream_gen(), 
+                media_type="text/event-stream" if is_openai else "application/x-ndjson"
+            )
+        else:
+            # Blocking path
+            while True:
+                job = await job_queue.get_job_status(job_id)
+                if not job: break
+                if job["status"] == JobStatus.COMPLETED:
+                    ans = job["result"]
+                    if is_openai: return _make_openai_response(ans, selected_model)
+                    return _make_ollama_response(ans, selected_model)
+                if job["status"] == JobStatus.FAILED:
+                    raise HTTPException(status_code=500, detail=job.get("error", "Job failed"))
+                await asyncio.sleep(0.2)
+
+    # JARVIS-SPECIFIC CLIENTS (202 Accepted + SSE Polling)
+    # This keeps the UI responsive even during long inference.
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "QUEUED",
+            "job_id": job_id,
+            "message": "Inference task queued. Raven is currently processing or waiting for compute resources.",
+            "position": await job_queue.get_queue_position(job_id)
+        }
+    )
+
+@app.get("/api/chat/stream/{job_id}")
+async def stream_chat_job(job_id: str):
+    """
+    SSE endpoint for real-time job completion updates.
+    The UI subscribes to this to receive the final Markdown once Raven finishes.
+    """
+    async def event_generator():
+        last_status = None
+        while True:
+            job = await job_queue.get_job_status(job_id)
+            if not job:
+                yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
+                break
             
-            if action and action.lower() == "storageindexrequest":
-                # Storage logic
-                log.info("[ToolExecution] Executing storageindexrequest...")
-                payload = {
-                    "provider": {
-                        "kind": "nextcloud",
-                        "settings": {
-                            "url": creds.nextcloud_url,
-                            "username": creds.nextcloud_user,
-                            "password": creds.nextcloud_pass
-                        }
-                    },
-                    "path": payload.get("path", "/"),
-                    "recursive": True
-                }
-                client_http = get_http_client()
-                exec_resp = await client_http.post(
-                    f"{STORAGE_SVC}/index/full",
-                    json=payload,
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if exec_resp.status_code == 200:
-                    exec_data = exec_resp.json()
-                    exec_msg = exec_data.get("message", "Success")
-                else:
-                    exec_msg = f"Failed: {exec_resp.text}"
+            status = job["status"]
+            if status != last_status:
+                yield f"data: {json.dumps({'status': status.upper(), 'job_id': job_id, 'position': await job_queue.get_queue_position(job_id)})}\n\n"
+                last_status = status
+            
+            if status == JobStatus.COMPLETED:
+                result = job["result"]
+                yield f"data: {json.dumps({'status': 'COMPLETED', 'result': result})}\n\n"
+                break
+            
+            if status == JobStatus.FAILED:
+                yield f"data: {json.dumps({'status': 'FAILED', 'error': job.get('error')})}\n\n"
+                break
                 
-                update_text = f"\n\n**System Update**: {exec_msg}"
-                ans = ans[:ans.find("```")].strip() + update_text
-        except Exception as e:
-            log.error(f"Tool execution failed: {e}")
+            await asyncio.sleep(1.0) # Poll Redis every second for status changes
 
-    # Update History
-    if not is_openai:
-        await update_history(user_id, "user", query)
-        await update_history(user_id, "assistant", ans)
-    else:
-        log.info(f"[Background] Skipping history update for task: {query[:50]}...")
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.get("/api/chat/job/{job_id}")
+async def get_chat_job_status(job_id: str):
+    """Checks the status of an inference job."""
+    job = await job_queue.get_job_status(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
     
-    if background_tasks:
-        background_tasks.add_task(extract_and_store_user_facts, user_id, short_term + [{"role": "user", "content": query}])
-
-    resp_data = {
-        "execution_result": exec_data,
-        "intent": intent,
-        "confidence": confidence if 'confidence' in locals() else 1.0
+    if job["status"] == JobStatus.COMPLETED:
+        # Return the final result
+        result = job["result"]
+        # Wrap in expected response format
+        if job["payload"].get("is_openai"):
+             return _make_openai_response(result, job["payload"]["model"], "completed")
+        return _make_ollama_response(result, job["payload"]["model"], "completed")
+    
+    if job["status"] == JobStatus.FAILED:
+        return JSONResponse({
+            "status": "FAILED",
+            "error": job.get("error", "Unknown error during inference"),
+            "job_id": job_id
+        }, status_code=500)
+    
+    return {
+        "status": job["status"].upper(),
+        "job_id": job_id,
+        "position": await job_queue.get_queue_position(job_id),
+        "message": "Raven is still thinking..." if job["status"] == JobStatus.PROCESSING else "Queued in FIFO buffer."
     }
     
-    if is_openai:
-        return _make_openai_response(ans, selected_model, intent, extra_fields=resp_data)
-    
-    base_resp = _make_ollama_response(ans, selected_model, intent)
-    # Merge additional data into the Ollama response body
-    if isinstance(base_resp, JSONResponse):
-        final_content = json.loads(base_resp.body.decode())
-        final_content.update(resp_data)
-        return JSONResponse(status_code=base_resp.status_code, content=final_content)
-    return base_resp
 @app.post("/api/auth/login")
 async def proxy_login(request: Request):
     body = await request.json()

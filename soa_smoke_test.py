@@ -86,6 +86,24 @@ def test_workspace_list():
         log(f"FAIL: Workspace List ({e})")
     return False
 
+def test_git_pull():
+    try:
+        # Pull SharedLLM workspace (self)
+        payload = {"workspace_id": "sharedllm"}
+        resp = requests.post(
+            f"{WORKSPACE_RUNTIME_URL}/git/pull",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=15
+        )
+        if resp.status_code == 200:
+            log(f"PASS: Git Pull (Branch: {resp.json().get('branch')})")
+            return True
+        log(f"FAIL: Git Pull (HTTP {resp.status_code}: {resp.text})")
+    except Exception as e:
+        log(f"FAIL: Git Pull ({e})")
+    return False
+
 def run_all():
     log("=== INITIALIZING SHAREDLLM SOA SMOKE TEST ===")
     results = []
@@ -102,6 +120,7 @@ def run_all():
     results.append(test_rag_capability_search())
     results.append(test_execution_ha_link())
     results.append(test_workspace_list())
+    results.append(test_git_pull())
     
     total = len(results)
     passed = sum(1 for r in results if r)

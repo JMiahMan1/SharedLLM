@@ -19,6 +19,14 @@ async def handle_climate(req: ClimateRequest) -> ExecutionResult:
     ctx = req.user_context
     log.info(f"[climate] user={ctx.user} entity={req.entity_id} temp={req.temperature}")
 
+    # 1. AUTHORIZATION CHECK
+    if not ha_client.authorize_action(ctx.model_dump(), "climate", "set_temperature"):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Access Denied: You are not authorized to set temperature on {req.entity_id}. Admin privileges required.",
+            service="climate"
+        )
+
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         "climate", "set_temperature",

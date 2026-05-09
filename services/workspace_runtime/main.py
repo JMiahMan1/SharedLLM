@@ -1546,7 +1546,7 @@ def git_fetch(req: GitFetchRequest, x_internal_secret: Optional[str] = Header(de
 
 
 @app.post("/git/pull")
-def git_pull(req: GitPullRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -1570,8 +1570,24 @@ def git_pull(req: GitPullRequest, x_internal_secret: Optional[str] = Header(defa
         identity=identity,
         remote_url=remote_url,
     )
+    if result["returncode"] == 0:
+        # Trigger automatic backup if enabled
+        with Session(engine) as session:
+            match = session.get(Workspace, workspace["id"])
+            if match and match.auto_backup_enabled and match.nextcloud_path:
+                background_tasks.add_task(
+                    _trigger_nextcloud_sync,
+                    match.id,
+                    match.owner_user or "default",
+                    str(workspace_path),
+                    match.nextcloud_path
+                )
+
     if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git pull failed")
+        raise HTTPException(
+            status_code=400,
+            detail=result["stderr"].strip() or result["stdout"].strip() or "git pull failed"
+        )
 
     return {
         "status": "SUCCESS",
@@ -1579,6 +1595,7 @@ def git_pull(req: GitPullRequest, x_internal_secret: Optional[str] = Header(defa
         "command": args,
         "stdout": result["stdout"],
         "stderr": result["stderr"],
+        "branch": branch_name
     }
 
 

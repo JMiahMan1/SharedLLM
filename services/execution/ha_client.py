@@ -10,6 +10,28 @@ log = logging.getLogger("execution.ha_client")
 import re
 _TIMEOUT = httpx.Timeout(45.0, connect=5.0)
 
+def authorize_action(user_context: dict, domain: str, action: str) -> bool:
+    """
+    Validates if a user is authorized to perform a specific action.
+    Strictly enforces the 'Admin-Only' rule for sensitive environmental changes.
+    """
+    is_admin = user_context.get("is_admin", False)
+    
+    # SENSITIVE ACTIONS (Admins Only)
+    sensitive_actions = {
+        "lock": ["unlock", "open"],
+        "cover": ["open"],
+        "alarm_control_panel": ["alarm_disarm"],
+        "climate": ["set_temperature"], # Some homes consider this sensitive
+    }
+    
+    if domain in sensitive_actions:
+        if action in sensitive_actions[domain] and not is_admin:
+            log.warning(f"[Security] BLOCK: Non-admin user '{user_context.get('user')}' attempted '{action}' on '{domain}'")
+            return False
+            
+    return True
+
 def sanitize_entity_id(domain: str, llm_target: str) -> str:
     """
     Ensures the entity_id is well-formed for Home Assistant.

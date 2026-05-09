@@ -145,5 +145,12 @@
         "build a new capability for the system",
         "upgrade your own handlers",
         "autonomous feature addition"
+    ],
+    "fallbacks": [
+        "One moment, I'm looking into that for you.",
+        "Working on it. Just a second.",
+        "I'm processing that request now.",
+        "Give me a moment to check that.",
+        "I'm on it."
     ]
 }
