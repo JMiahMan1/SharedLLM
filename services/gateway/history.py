@@ -13,6 +13,11 @@ log = logging.getLogger("gateway.history")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+try:
+    from .messaging import INFERENCE_LOCK
+except (ImportError, ValueError):
+    from messaging import INFERENCE_LOCK
+
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 
 def _get_history_key(user: str) -> str:
