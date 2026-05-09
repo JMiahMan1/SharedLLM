@@ -16,3 +16,6 @@ temp/
 temp_output/
 *.log*
 .codex
+services/storage/index_checkpoint.json
+services/workspace_runtime/config/
+data/
