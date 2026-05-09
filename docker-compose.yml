@@ -53,6 +53,7 @@ services:
       - ./services/tests:/app/tests
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/workspace/SharedLLM
+      - /home/jeremiah/.ssh:/root/.ssh:ro
 
   rag:
     build: ./services/rag
