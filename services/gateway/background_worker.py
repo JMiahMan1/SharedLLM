@@ -83,15 +83,7 @@ class RavenWorker:
         payload = job["payload"]
         
         try:
-            # 1. Prepare LLM Call
-            ollama_payload = {
-                "model": payload["model"],
-                "messages": [
-                    {"role": "system", "content": payload["system"]},
-                    {"role": "user", "content": payload["query"]}
-                ],
-                "stream": False
-            }
+            # 1. Inference Orchestration
 
             # 2. Singleton Inference with Full Orchestration and Streaming support
             async with INFERENCE_LOCK:
