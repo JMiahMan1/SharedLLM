@@ -2016,10 +2016,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         "model": selected_model,
         "query": query,
         "creds": creds.model_dump(),
-        "client": body.client,
-        "source": body.source,
-        "device_id": body.device_id,
-        "rag_user": body.rag_user
+        "client": body.get("client"),
+        "source": body.get("source"),
+        "device_id": body.get("device_id"),
+        "rag_user": body.get("rag_user")
     }
     
     job_id = await job_queue.enqueue_job(user_id, job_payload)
@@ -2616,8 +2616,8 @@ async def list_storage_files(request: Request, body: StorageListRequest):
                 "password": creds["nextcloud_pass"]
             }
         },
-        "path": body.path,
-        "recursive": body.recursive
+        "path": body.get("path"),
+        "recursive": body.get("recursive")
     }
     
     resp = await get_http_client().post(
@@ -2642,8 +2642,8 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
                 "password": creds["nextcloud_pass"]
             }
         },
-        "path": body.path,
-        "recursive": body.recursive
+        "path": body.get("path"),
+        "recursive": body.get("recursive")
     }
     
     resp = await get_http_client().post(
