@@ -102,33 +102,53 @@ const OverviewPane = () => {
 };
 
 const TestsPane = () => {
-  const runTestMutation = useMutation<SmokeTestResult>({
+  const runSmokeMutation = useMutation<SmokeTestResult>({
     mutationFn: () => api.runSmokeTest(),
     onSuccess: () => toast.success('Smoke test completed'),
     onError: () => toast.error('Smoke test failed'),
   });
 
+  const runUnitMutation = useMutation<SmokeTestResult>({
+    mutationFn: () => api.runUnitTests(),
+    onSuccess: () => toast.success('Unit tests completed'),
+    onError: () => toast.error('Unit tests failed'),
+  });
+
+  const activeMutation = runSmokeMutation.isPending ? runSmokeMutation : runUnitMutation.isPending ? runUnitMutation : null;
+  const lastResult = runSmokeMutation.data || runUnitMutation.data;
+
   return (
     <section className="glass-panel p-6">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-xl font-bold text-white">Smoke Verification</h3>
-          <p className="text-sm text-slate-400">Runs the repo smoke test through workspace runtime.</p>
+          <h3 className="text-xl font-bold text-white">Verification Engine</h3>
+          <p className="text-sm text-slate-400">Execute system-wide functional and logic verification suites.</p>
         </div>
-        <button
-          onClick={() => runTestMutation.mutate()}
-          className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
-        >
-          {runTestMutation.isPending ? <RefreshCcw size={14} className="animate-spin" /> : <Play size={14} />}
-          Run Smoke Test
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => runUnitMutation.mutate()}
+            disabled={!!activeMutation}
+            className="glass-button flex items-center gap-2 px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+          >
+            {runUnitMutation.isPending ? <RefreshCcw size={14} className="animate-spin" /> : <Terminal size={14} />}
+            Run Unit Tests
+          </button>
+          <button
+            onClick={() => runSmokeMutation.mutate()}
+            disabled={!!activeMutation}
+            className="glass-button flex items-center gap-2 px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+          >
+            {runSmokeMutation.isPending ? <RefreshCcw size={14} className="animate-spin" /> : <Play size={14} />}
+            Run Smoke Test
+          </button>
+        </div>
       </div>
 
-      {runTestMutation.data && (
+      {lastResult && (
         <div className="mb-6 rounded-2xl border border-white/5 bg-white/5 p-4">
           <p className="text-sm text-white">
-            Result: <span className={runTestMutation.data.passed ? 'text-emerald-300' : 'text-red-300'}>
-              {runTestMutation.data.passed ? 'PASS' : 'FAIL'}
+            Last Run Result: <span className={lastResult.passed ? 'text-emerald-300' : 'text-red-300'}>
+              {lastResult.passed ? 'PASS' : 'FAIL'}
             </span>
           </p>
         </div>
@@ -139,8 +159,8 @@ const TestsPane = () => {
           <Terminal size={14} />
           Raw Output
         </div>
-        <pre className="whitespace-pre-wrap text-sm text-slate-300">
-          {runTestMutation.data?.results || 'Run the smoke test to see live output here.'}
+        <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-slate-300 max-h-[500px] overflow-y-auto custom-scrollbar">
+          {lastResult?.results || 'Select a test suite to begin verification.'}
         </pre>
       </div>
     </section>

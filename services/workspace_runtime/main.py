@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
@@ -243,18 +244,22 @@ def _seed_db_from_json():
             log.error("Failed to seed DB: %s", exc)
 
 
-@app.on_event("startup")
-async def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
     init_db()
     
     # Handle dubious ownership in mounted volumes
     try:
         import subprocess
+        subprocess.run(["git", "--version"], capture_output=True, check=True) # Basic check
         subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], check=True)
         log.info("Added '*' to git safe.directory")
     except Exception as e:
         log.warning(f"Failed to set git safe.directory: {e}")
+    
     _seed_db_from_json()
+    
     with Session(engine) as session:
         pending = session.exec(select(Workspace).where(Workspace.webhook_token.is_not(None))).all()
         migrated = 0
@@ -267,6 +272,15 @@ async def on_startup():
         if migrated:
             session.commit()
             log.info("Migrated %d workspace webhook secrets to encrypted storage", migrated)
+    
+    log.info("Workspace Runtime service ready.")
+    
+    yield
+
+    # Shutdown logic
+    log.info("Workspace Runtime service shutting down.")
+
+app = FastAPI(title="Jarvis Workspace Runtime", version="1.0.0", lifespan=lifespan)
 
 
 def _workspace_access_policy(entry: dict[str, Any]) -> str:
@@ -1478,6 +1492,19 @@ def run_smoke_test(x_internal_secret: Optional[str] = Header(default=None)):
     # Run soa_smoke_test.py from the root of the repo (which is /workspace in the container)
     workspace_path = get_workspace_root()
     result = _run_command(workspace_path, ["python3", "soa_smoke_test.py"], timeout_seconds=60)
+    return {
+        "status": "SUCCESS",
+        "passed": result["returncode"] == 0,
+        "results": result["stdout"] + result["stderr"]
+    }
+
+
+@app.post("/api/admin/tests/unit")
+def run_unit_tests(x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    # Run the CI unit test script from the root
+    workspace_path = get_workspace_root()
+    result = _run_command(workspace_path, ["bash", "scripts/run_ci_unit_tests.sh"], timeout_seconds=120)
     return {
         "status": "SUCCESS",
         "passed": result["returncode"] == 0,

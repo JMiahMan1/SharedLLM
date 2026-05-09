@@ -8,7 +8,7 @@ first startup or call via the /api/admin/seed endpoint.
 """
 import os
 import logging
-from sqlmodel import Session, select
+from sqlmodel import Session, select, text
 from dotenv import load_dotenv
 
 try:
@@ -123,9 +123,13 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             return 0
     else:
         log.info("[seed] Forced re-seed: Clearing existing users/assignments.")
-        from sqlalchemy import text
-        session.execute(text("DELETE FROM deviceassignment"))
-        session.execute(text("DELETE FROM user"))
+        # Clear using SQLModel to avoid table name mismatches
+        from models import User, DeviceAssignment, APIKey, GlobalSetting
+        for table in ["deviceassignment", "user", "apikey", "globalsetting"]:
+            try:
+                session.exec(text(f"DELETE FROM {table}"))
+            except Exception:
+                pass 
         session.commit()
 
     env_users = _parse_env_users()
