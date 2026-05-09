@@ -4,14 +4,32 @@ import os
 import time
 
 # Configuration from environment or defaults
-SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
+SERVER_IP = os.getenv("SERVER_IP", "localhost")
 GATEWAY_URL = f"http://{SERVER_IP}:8080"
 WORKSPACE_RUNTIME_URL = f"http://{SERVER_IP}:8007"
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
+def wait_for_service(url, timeout=30):
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            with httpx.Client() as client:
+                resp = client.get(url.replace("/workspaces", "/")) # Generic health check
+                if resp.status_code < 500:
+                    return True
+        except Exception:
+            pass
+        time.sleep(2)
+    return False
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_services():
+    if not wait_for_service(WORKSPACE_RUNTIME_URL):
+        pytest.fail(f"Service {WORKSPACE_RUNTIME_URL} not available")
+
 @pytest.fixture
 def api_client():
-    return httpx.Client(headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=30.0)
+    return httpx.Client(headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=60.0)
 
 def test_workspace_lifecycle(api_client):
     """
