@@ -55,8 +55,8 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
         # Chunked Reading (Windowing)
         start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
         
-        # Hardware Protection: Enforce a hard cap of 500 lines for autonomous agents
-        safe_limit = min(req.limit_lines, 500)
+        # Hardware Protection: Enforce a hard cap of 2000 lines for autonomous agents
+        safe_limit = min(req.limit_lines, 2000)
         end = start + safe_limit
         
         chunk = lines[start:end]
