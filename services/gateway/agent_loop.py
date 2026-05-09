@@ -207,7 +207,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "grep": "WorkspaceSearchRequest",
                 "search": "WorkspaceSearchRequest",
                 "shell": "WorkspaceShellRequest",
-                "run": "WorkspaceShellRequest"
+                "run": "WorkspaceShellRequest",
+                "gitstatus": "GitOperationRequest",
+                "gitdiff": "GitOperationRequest",
+                "gitlog": "GitOperationRequest",
+                "gitpull": "GitOperationRequest"
             }
             if action in action_map_aliases:
                 action = action_map_aliases[action]
@@ -271,4 +275,4 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.error(f"[AgentLoop] Tool execution failed: {e}")
             exec_data = {"status": "ERROR", "message": str(e)}
 
-    return JSONResponse({"status": "SUCCESS", "message": ans})
+    return ans
