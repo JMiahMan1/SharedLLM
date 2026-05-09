@@ -174,7 +174,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             heartbeat_stop.set()
             await hb_task
             if resp.status_code != 200:
-                return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
+                return "ERROR: Brain offline (502)."
             data = resp.json()
             ans = data.get("message", {}).get("content", "Error.")
             log.info(f"[AgentLoop] Ollama responded in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms \u2014 iter {agent_iter + 1}")
@@ -182,7 +182,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             heartbeat_stop.set()
             await hb_task
             log.warning(f"[AgentLoop] Ollama error on iter {agent_iter + 1}: {e}")
-            return JSONResponse({"status": "SUCCESS", "message": "Jarvis is currently operating in low-latency mode.", "degraded": True})
+            return "SUCCESS: Jarvis is currently operating in low-latency mode (Degraded)."
 
         tool_data = extract_action_json(ans)
         
