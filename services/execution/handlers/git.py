@@ -28,6 +28,11 @@ log = logging.getLogger("execution.git")
 # The SharedLLM workspace is bind-mounted here from the host.
 WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "/workspace/SharedLLM")
 
+# Fix: Mark workspace as safe to avoid 'dubious ownership' errors in Docker
+# We do this once at module load
+os.system(f"git config --global --add safe.directory {WORKSPACE_ROOT}")
+log.info(f"Marked {WORKSPACE_ROOT} as safe.directory")
+
 
 async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT) -> dict:
     """
