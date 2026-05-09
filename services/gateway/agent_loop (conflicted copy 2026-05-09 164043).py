@@ -29,7 +29,7 @@ ALLOWED_TOOLS = {
     "tvcastrequest", "climaterequest", "securityrequest", 
     "announcementrequest", "haservicerequest", "calendarrequest", 
     "noterequest", "timerrequest", "talkrequest", 
-    "websearchrequest", "webreadrequest", "dockerlogsrequest", "dockercomposerequest",
+    "websearchrequest", "webreadrequest", "dockerlogsrequest", 
     "gitoperationrequest", "deploymentrequest", "capabilityindexrequest", 
     "volumeinventoryrequest", "workspacefilereadrequest", 
     "workspacefilewriterequest", "workspacefilepatchrequest", 
@@ -115,7 +115,7 @@ async def call_ollama(payload: dict, use_chat: bool = True, timeout: float = Non
       timeout=timeout if timeout is not None else OLLAMA_TIMEOUT,
     )
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials) -> Any:
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, chunk_callback: callable = None) -> Any:
     ollama_payload = {
         "model": selected_model,
         "messages": [
@@ -131,6 +131,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     exec_data = None
     ans = ""
     loop_start = asyncio.get_event_loop().time()
+
+    async def _emit(text: str):
+        if chunk_callback:
+            await chunk_callback(text)
 
     for agent_iter in range(MAX_TOOL_ITERATIONS):
         iter_num = agent_iter + 1
@@ -173,15 +177,23 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             heartbeat_stop.set()
             await hb_task
             if resp.status_code != 200:
-                return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
+                err_msg = f"Brain offline (Ollama {resp.status_code})."
+                await _emit(f"\n[ERROR] {err_msg}\n")
+                return JSONResponse({"status": "ERROR", "message": err_msg}, status_code=502)
             data = resp.json()
             ans = data.get("message", {}).get("content", "Error.")
             log.info(f"[AgentLoop] Ollama responded in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms \u2014 iter {agent_iter + 1}")
+            
+            # Stream the raw response to the user
+            await _emit(ans + "\n")
+            
         except Exception as e:
             heartbeat_stop.set()
             await hb_task
             log.warning(f"[AgentLoop] Ollama error on iter {agent_iter + 1}: {e}")
-            return JSONResponse({"status": "SUCCESS", "message": "Jarvis is currently operating in low-latency mode.", "degraded": True})
+            err_msg = f"Autonomous loop exception: {e}"
+            await _emit(f"\n[CRITICAL ERROR] {err_msg}\n")
+            raise  # Let the orchestrator handle it
 
         tool_data = extract_action_json(ans)
         
@@ -228,7 +240,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
                 "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
                 "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
-                "dockercomposerequest": (EXECUTION_SVC, "/execute/docker"),
                 "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
                 "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
                 "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
@@ -263,12 +274,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                     exec_data = resp.json()
                     log.info(f"[AgentLoop] Tool response: {resp.status_code}")
+                    
+                    # Stream tool execution status
+                    await _emit(f"\n[TOOL {action}] Status: {resp.status_code}\n")
             else:
                 log.warning(f"[AgentLoop] Unknown action: {action}")
                 exec_data = {"status": "ERROR", "message": f"Unknown action: {action}"}
+                await _emit(f"\n[ERROR] Unknown action: {action}\n")
 
         except Exception as e:
             log.error(f"[AgentLoop] Tool execution failed: {e}")
             exec_data = {"status": "ERROR", "message": str(e)}
+            await _emit(f"\n[ERROR] Tool {action} failed: {e}\n")
 
-    return JSONResponse({"status": "SUCCESS", "message": ans})
+    return ans

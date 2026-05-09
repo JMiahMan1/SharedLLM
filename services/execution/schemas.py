@@ -7,7 +7,8 @@ from typing import Optional, Literal, Any, Dict, List
 from pydantic import BaseModel, Field
 
 
-# ─── Base ───────────────────────────────────────────────────────────────────────
+class BaseRequest(BaseModel):
+    model_config = {"extra": "ignore"}
 
 class UserContext(BaseModel):
     """Resolved user credentials forwarded by the Gateway."""
@@ -29,7 +30,7 @@ class ExecutionResult(BaseModel):
 
 # ─── Media / Music ──────────────────────────────────────────────────────────────
 
-class MediaPlayRequest(BaseModel):
+class MediaPlayRequest(BaseRequest):
     user_context: UserContext
     entity_id: str = Field(..., description="HA media_player entity ID")
     media_content_id: Optional[str] = None
@@ -39,7 +40,7 @@ class MediaPlayRequest(BaseModel):
     enqueue: Optional[Literal["add", "next", "replace"]] = "replace"
 
 
-class MediaTransportRequest(BaseModel):
+class MediaTransportRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
     command: Literal["pause", "resume", "stop", "next", "previous", "volume_up", "volume_down"]
@@ -48,7 +49,7 @@ class MediaTransportRequest(BaseModel):
 
 # ─── Lights ─────────────────────────────────────────────────────────────────────
 
-class LightControlRequest(BaseModel):
+class LightControlRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
     action: Literal["turn_on", "turn_off", "toggle"]
@@ -59,19 +60,19 @@ class LightControlRequest(BaseModel):
 
 # ─── Generic HA Service Call ────────────────────────────────────────────────────
 
-class HAServiceRequest(BaseModel):
+class HAServiceRequest(BaseRequest):
     user_context: UserContext
     domain: str          # e.g. "light", "switch", "media_player"
     service: str         # e.g. "turn_on", "play_media"
     entity_id: str
     service_data: Optional[Dict[str, Any]] = None
 
-class ClimateRequest(BaseModel):
+class ClimateRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
     temperature: float
 
-class SecurityRequest(BaseModel):
+class SecurityRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
     action: Literal["lock", "unlock", "open", "close", "status"]
@@ -79,7 +80,7 @@ class SecurityRequest(BaseModel):
 
 # ─── Announcements ──────────────────────────────────────────────────────────────
 
-class AnnouncementRequest(BaseModel):
+class AnnouncementRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
     message: str
@@ -88,7 +89,7 @@ class AnnouncementRequest(BaseModel):
 
 # ─── TV / SmartPowerSync ────────────────────────────────────────────────────────
 
-class TVCastRequest(BaseModel):
+class TVCastRequest(BaseRequest):
     """
     Encapsulates the 'SmartPowerSync' pattern:
     power on the TV, wait for readiness, then cast.
@@ -102,7 +103,7 @@ class TVCastRequest(BaseModel):
 
 # ─── Personal Data (Calendar / Notes) ──────────────────────────────────────────
 
-class CalendarRequest(BaseModel):
+class CalendarRequest(BaseRequest):
     user_context: UserContext
     action: Literal["list", "read", "add", "delete", "update"]
     query: Optional[str] = None
@@ -111,7 +112,7 @@ class CalendarRequest(BaseModel):
     calendar_name: Optional[str] = None
 
 
-class NoteRequest(BaseModel):
+class NoteRequest(BaseRequest):
     user_context: UserContext
     action: Literal["create", "append", "read", "delete", "check_off"]
     title: str
@@ -122,7 +123,7 @@ class NoteRequest(BaseModel):
 
 # ─── Timers / Alarms ────────────────────────────────────────────────────────────
 
-class TimerRequest(BaseModel):
+class TimerRequest(BaseRequest):
     user_context: UserContext
     action: Literal["add", "list", "delete", "pause", "resume"]
     type: Literal["timer", "alarm"] = "timer"
@@ -134,7 +135,7 @@ class TimerRequest(BaseModel):
     target_device: Optional[str] = None
 
 
-class TalkRequest(BaseModel):
+class TalkRequest(BaseRequest):
     user_context: UserContext
     action: Literal["list", "open", "messages", "send", "send_voice"]
     token: Optional[str] = None
@@ -149,7 +150,7 @@ class TalkRequest(BaseModel):
 
 # ─── File Operations (Workspace vs Storage) ───────────────────────────────────
 
-class WorkspaceFileReadRequest(BaseModel):
+class WorkspaceFileReadRequest(BaseRequest):
     """
     Reads a file from the local Git workspace (/workspace/SharedLLM).
     Use this for reading CODE, SCRIPTS, and CONFIG.
@@ -160,7 +161,7 @@ class WorkspaceFileReadRequest(BaseModel):
     limit_lines: int = Field(1000, ge=1, le=5000, description="Max lines to read")
     summary_only: bool = Field(False, description="If true, returns only class/function signatures and docstrings (semantic map)")
 
-class WorkspaceFileWriteRequest(BaseModel):
+class WorkspaceFileWriteRequest(BaseRequest):
     """
     Writes or overwrites a file in the local Git workspace.
     Requires the FULL file content in the 'content' field.
@@ -175,7 +176,7 @@ class ReplacementChunk(BaseModel):
     old_text: str = Field(..., description="The exact text to be replaced")
     new_text: str = Field(..., description="The replacement text")
 
-class WorkspaceFilePatchRequest(BaseModel):
+class WorkspaceFilePatchRequest(BaseRequest):
     """
     Surgically patches a file in the local Git workspace.
     Use this for small fixes to avoid providing the full file content.
@@ -186,7 +187,7 @@ class WorkspaceFilePatchRequest(BaseModel):
     commit_after: bool = False
     commit_message: Optional[str] = None
 
-class WorkspaceShellRequest(BaseModel):
+class WorkspaceShellRequest(BaseRequest):
     """
     Executes a shell command in the workspace root.
     Use this for advanced operations not covered by other tools.
@@ -196,7 +197,7 @@ class WorkspaceShellRequest(BaseModel):
     cwd: Optional[str] = Field(".", description="Working directory relative to root")
     timeout: int = Field(60, ge=1, le=300, description="Command timeout in seconds")
 
-class WorkspaceSearchRequest(BaseModel):
+class WorkspaceSearchRequest(BaseRequest):
     """
     Performs a codebase-wide search in the Git workspace using ripgrep or grep.
     Use this to find function definitions, variable usages, or specific patterns.
@@ -207,7 +208,7 @@ class WorkspaceSearchRequest(BaseModel):
     include: Optional[str] = Field(None, description="Glob pattern to include (e.g. '*.py')")
     exclude: Optional[str] = Field(None, description="Glob pattern to exclude (e.g. '**/tests/**')")
 
-class WorkspaceLintRequest(BaseModel):
+class WorkspaceLintRequest(BaseRequest):
     """
     Lints a file in the local Git workspace.
     Automatically detects the linter based on file extension:
@@ -222,7 +223,7 @@ class WorkspaceLintRequest(BaseModel):
     linter: Optional[str] = Field(None, description="Force a specific linter (black, flake8, eslint, yamllint)")
     fix: bool = Field(False, description="If true, apply auto-fixes where possible (e.g. black --write)")
 
-class StorageFileReadRequest(BaseModel):
+class StorageFileReadRequest(BaseRequest):
     """
     Reads a file from Nextcloud storage (Documents/Notes).
     Do NOT use this for code. Use WorkspaceFileReadRequest instead.
@@ -230,7 +231,7 @@ class StorageFileReadRequest(BaseModel):
     user_context: UserContext
     path: str = Field(..., description="Path within Nextcloud (e.g. '/Documents/memo.txt')")
 
-class StorageFileWriteRequest(BaseModel):
+class StorageFileWriteRequest(BaseRequest):
     """
     Writes a file to Nextcloud storage.
     """
@@ -238,7 +239,7 @@ class StorageFileWriteRequest(BaseModel):
     path: str = Field(..., description="Path within Nextcloud")
     content: str
 
-class DiscoverySyncRequest(BaseModel):
+class DiscoverySyncRequest(BaseRequest):
     """
     Triggers a synchronization of Home Assistant entities into the RAG database for discovery.
     """
@@ -246,7 +247,7 @@ class DiscoverySyncRequest(BaseModel):
 
 # ─── Workspace / Code Orchestration ──────────────────────────────────────────
 
-class WorkspaceFileAction(BaseModel):
+class WorkspaceFileAction(BaseRequest):
     """Orchestrates file writes and patches within a Git-backed workspace."""
     user_context: UserContext
     workspace_name: str
@@ -256,7 +257,7 @@ class WorkspaceFileAction(BaseModel):
     commit_after: bool = False
     commit_message: Optional[str] = None
 
-class WorkspaceGitAction(BaseModel):
+class WorkspaceGitAction(BaseRequest):
     """Performs Git lifecycle operations (pull, commit, branch, status)."""
     user_context: UserContext
     workspace_name: str
@@ -264,7 +265,7 @@ class WorkspaceGitAction(BaseModel):
     branch_name: Optional[str] = None
     commit_message: Optional[str] = None
 
-class WorkspaceSyncAction(BaseModel):
+class WorkspaceSyncAction(BaseRequest):
     """Synchronizes workspace files with Nextcloud or other storage providers."""
     user_context: UserContext
     workspace_name: str
@@ -273,12 +274,12 @@ class WorkspaceSyncAction(BaseModel):
 
 # ─── Browser / Web Agent ────────────────────────────────────────────────────────
 
-class WebSearchRequest(BaseModel):
+class WebSearchRequest(BaseRequest):
     """Performs a web search via search.sumemail.com."""
     user_context: UserContext
     query: str
 
-class WebReadRequest(BaseModel):
+class WebReadRequest(BaseRequest):
     """Fetches a URL and returns the content as markdown."""
     user_context: UserContext
     url: str
@@ -286,7 +287,7 @@ class WebReadRequest(BaseModel):
 
 # ─── Ouroboros Autonomous Loop ───────────────────────────────────────────────
 
-class DockerLogsRequest(BaseModel):
+class DockerLogsRequest(BaseRequest):
     """
     Fetches recent log output from one or more Docker containers.
     If 'services' is provided, it fetches logs for each (prepending 'sharedllm_' if needed).
@@ -298,7 +299,7 @@ class DockerLogsRequest(BaseModel):
     grep_filter: Optional[str] = Field(None, description="Filter to lines containing this keyword")
 
 
-class GitOperationRequest(BaseModel):
+class GitOperationRequest(BaseRequest):
     """
     Performs a Git lifecycle operation on the SharedLLM workspace.
     push requires is_admin=True in user_context.
@@ -311,7 +312,7 @@ class GitOperationRequest(BaseModel):
     log_count: Optional[int] = Field(10, ge=1, le=50, description="Number of commits for 'log'")
 
 
-class DeploymentRequest(BaseModel):
+class DeploymentRequest(BaseRequest):
     """
     Controls a SharedLLM Docker container via the host socket.
     Supports: restart, status, logs, list.
@@ -322,7 +323,18 @@ class DeploymentRequest(BaseModel):
     tail: int = Field(100, ge=1, le=1000, description="Lines to fetch for 'logs' action")
 
 
-class VolumeInventoryRequest(BaseModel):
+class DockerComposeRequest(BaseRequest):
+    """
+    Controls SharedLLM Docker containers via docker-compose (emulated via SDK).
+    Supports: up, down, restart, logs.
+    """
+    user_context: UserContext
+    action: Literal["up", "down", "restart", "logs"]
+    services: Optional[List[str]] = Field(None, description="List of services to act upon (e.g. ['gateway', 'rag'])")
+    containers: Optional[List[str]] = Field(None, description="Alias for services")
+
+
+class VolumeInventoryRequest(BaseRequest):
     """
     Returns tracked Docker volume inventory and usage.
     Admin only.
@@ -330,14 +342,14 @@ class VolumeInventoryRequest(BaseModel):
     user_context: UserContext
 
 
-class CapabilityIndexRequest(BaseModel):
+class CapabilityIndexRequest(BaseRequest):
     """
     Triggers the JIT Capability Discovery indexing script.
     Refreshes the RAG system's knowledge of available tools.
     """
     user_context: UserContext
 
-class SystemLearningRequest(BaseModel):
+class SystemLearningRequest(BaseRequest):
     """
     Persists a successful solution or architectural insight to the System Learnings RAG.
     This helps the agent 'remember' how to solve similar problems in the future.

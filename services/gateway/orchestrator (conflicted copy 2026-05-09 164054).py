@@ -47,7 +47,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
             from .agent_loop import AgentLoop
         except (ImportError, ValueError):
             from agent_loop import AgentLoop
-        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds)
+        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, chunk_callback=chunk_callback)
     else:
         ans = await _single_turn_inference(query, model, rag_context, short_term, chunk_callback)
         
