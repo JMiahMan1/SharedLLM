@@ -42,11 +42,15 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT) -> dict:
     cmd = ["git"] + args
     log.info(f"[Git] Running: {' '.join(shlex.quote(a) for a in cmd)} in {cwd}")
     try:
+        env = os.environ.copy()
+        env["GIT_SSH_COMMAND"] = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+        
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
         return {
