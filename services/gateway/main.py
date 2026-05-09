@@ -1637,13 +1637,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 if tool_data and isinstance(tool_data, dict) and nest_key in tool_data and isinstance(tool_data[nest_key], dict):
                     log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
                     nested_vals = tool_data.pop(nest_key)
-                    # Preserve top-level action/type if they exist
+                    # Preserve top-level action/type if they exist, but inner payload fields take precedence
+                    # for parameters like 'action' in GitOperationRequest.
                     for k, v in nested_vals.items():
                         if k in ("action", "type") and k in tool_data:
-                            # If they differ, keep the outer one as the 'primary' action
-                            # but we can store the inner one in payload if needed.
-                            # For now, just don't overwrite the primary.
-                            continue
+                            # Move the outer discriminator to 'tool_name' to avoid clobbering
+                            tool_data["tool_name"] = tool_data.get(k)
                         tool_data[k] = v
             
             mapping = {"offset": "offset_lines", "limit": "limit_lines"}
@@ -1666,23 +1665,25 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "gitoperationrequest", "dockerlogsrequest", "dockercomposerequest",
                 "ripgrep", "read_file", "patch_file", "grep", "search", "shell", "git", "logs", "compose"
             ]
-            action = tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_name") or tool_data.get("tool_choice") or tool_data.get("tool") if tool_data else None
+            # Tool Discriminator: Detect which tool is being called
+            action_key = tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_name") or tool_data.get("tool_choice") or tool_data.get("tool") if tool_data else None
+            dispatch_action = None
             
-            if action:
+            if action_key:
                 # Normalization: lower, strip underscores/hyphens, handle 'request' suffix
-                norm_action = action.lower().replace("_", "").replace("-", "").strip()
+                norm_action = str(action_key).lower().replace("_", "").replace("-", "").strip()
                 if not norm_action.endswith("request") and (norm_action + "request") in ALLOWED_TOOLS:
                     norm_action = norm_action + "request"
                 
                 if norm_action in ALLOWED_TOOLS:
-                    # Update tool_data with the normalized action name
-                    if "action" in tool_data: tool_data["action"] = norm_action
-                    if "type" in tool_data: tool_data["type"] = norm_action
-                    action = norm_action
+                    dispatch_action = norm_action
 
-            if action and action.lower().strip() not in ALLOWED_TOOLS:
-                log.warning(f"[AgentLoop] Hallucinated tool detected: {action} — triggering protocol correction")
+            if not dispatch_action:
+                log.warning(f"[AgentLoop] Hallucinated tool detected: {action_key} — triggering protocol correction")
                 tool_data = None
+            else:
+                # We have a valid dispatch action. Use it but don't clobber the payload's 'action' if it belongs to the tool schema.
+                action = dispatch_action
         
         if not tool_data:
             log.warning(f"[AgentLoop] No valid JSON tool call found in iteration {agent_iter + 1}. Conversational output detected.")
