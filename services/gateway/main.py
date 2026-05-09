@@ -1719,10 +1719,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 tool_data.get("type") or 
                 tool_data.get("tool_choice")
             )
-            payload = tool_data.get("payload", {})
+            # If hoisting occurred, tool_data itself contains the payload fields.
+            # Otherwise, we use the 'payload' sub-dictionary if it exists.
+            orig_payload = tool_data.get("payload")
+            if isinstance(orig_payload, dict) and orig_payload:
+                payload = orig_payload
+            else:
+                # Use everything in tool_data as the payload, excluding internal discriminators
+                payload = {k: v for k, v in tool_data.items() if k not in ("payload", "tool_name", "tool_choice")}
+            
             if isinstance(tool_data, dict):
                 for k, v in tool_data.items():
-                    if k not in ("action", "payload", "tool", "name", "type") and k not in payload:
+                    if k not in ("action", "payload", "tool", "name", "type", "tool_name") and k not in payload:
                         if "path" in k.lower():
                             payload["path"] = v
                         else:
