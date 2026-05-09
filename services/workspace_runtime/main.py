@@ -622,8 +622,10 @@ def _validate_branch_name(branch_name: str) -> str:
 
 
 def _git_remote_url(workspace_path: Path, remote_name: str) -> str:
+    log.info(f"Resolving git remote URL for '{remote_name}' in {workspace_path}")
     result = _run_command(workspace_path, ["git", "config", "--get", f"remote.{remote_name}.url"])
     if result["returncode"] != 0:
+        log.warning(f"Git remote lookup failed for '{remote_name}': {result['stderr']}")
         raise HTTPException(status_code=400, detail=f"Git remote '{remote_name}' is not configured")
     remote_url = result["stdout"].strip()
     if not remote_url:
