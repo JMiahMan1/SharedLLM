@@ -1626,6 +1626,7 @@ def git_rebase(req: GitRebaseRequest, x_internal_secret: Optional[str] = Header(
 @app.post("/api/webhook/git-pull/{workspace_id}")
 async def git_pull_webhook(
     workspace_id: str,
+    background_tasks: BackgroundTasks,
     x_webhook_secret: Optional[str] = Header(None, alias="X-Webhook-Secret"),
     token: Optional[str] = None
 ):
