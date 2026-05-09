@@ -251,6 +251,54 @@ class NextCloudClient:
             log.error(f"Failed to download {remote_path}: {e}")
             return False
 
+    def upload_directory(self, remote_path: str, local_path: str) -> Dict[str, Any]:
+        """Recursively upload a local directory to a remote Nextcloud path."""
+        import os
+        from pathlib import Path
+        
+        local_root = Path(local_path).resolve()
+        if not local_root.is_dir():
+            raise ValueError(f"Local path {local_path} is not a directory or does not exist.")
+            
+        remote_root = "/" + str(remote_path).strip("/")
+        log.info(f"Uploading directory {local_root} to {remote_root}")
+        
+        uploaded_files = 0
+        total_bytes = 0
+        
+        for root, dirs, files in os.walk(local_root):
+            # Skip noise directories
+            dirs[:] = [d for d in dirs if d not in {
+                "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
+                ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox"
+            }]
+            
+            rel_path = Path(root).relative_to(local_root)
+            remote_dir = str(PurePosixPath(remote_root) / rel_path)
+            
+            # Ensure the directory exists on Nextcloud
+            self.ensure_directory(remote_dir)
+            
+            for file in files:
+                local_file = Path(root) / file
+                remote_file = str(PurePosixPath(remote_dir) / file)
+                
+                try:
+                    with open(local_file, "rb") as f:
+                        content = f.read()
+                        self.write_file_content(remote_file, content, create_parents=False, is_binary=True)
+                        uploaded_files += 1
+                        total_bytes += len(content)
+                except Exception as e:
+                    log.error(f"Failed to upload {local_file} to {remote_file}: {e}")
+                    
+        return {
+            "status": "SUCCESS",
+            "remote_root": remote_root,
+            "uploaded_files": uploaded_files,
+            "total_bytes": total_bytes
+        }
+
     def close(self):
         self.client.close()
 
