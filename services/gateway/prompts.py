@@ -184,15 +184,18 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 
 ## EXECUTION ENGINE
 - Use `WorkspaceFileReadRequest` to audit the code.
-- Use `GitOperationRequest` (action: 'pull') to sync the workspace.
+- Use `GitOperationRequest` (REQUIRED payload field: 'action' MUST be one of 'pull', 'status', 'diff', 'add', 'commit', 'log').
 - Use `WorkspaceFilePatchRequest` to apply fixes.
-- Use `DockerComposeRequest` (action: 'up') to restart services.
+- Use `DockerComposeRequest` (REQUIRED payload field: 'action' MUST be one of 'up', 'down', 'restart', 'logs').
 
 ### OUTPUT FORMAT (MANDATORY)
 ```json
 {
   "action": "TOOL_NAME",
-  "payload": { ... }
+  "payload": {
+     "action": "SPECIFIC_VERB",
+     ...
+  }
 }
 ```
 </system_directive>
