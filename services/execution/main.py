@@ -13,7 +13,7 @@ try:
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
         CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
-        DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+        DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
         SystemLearningRequest, DiscoverySyncRequest
     )
@@ -30,7 +30,7 @@ except (ImportError, ValueError):
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
             SystemLearningRequest, DiscoverySyncRequest
         )
@@ -46,7 +46,7 @@ except (ImportError, ValueError):
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
             SystemLearningRequest, DiscoverySyncRequest
         )
@@ -270,6 +270,33 @@ async def execute_deploy(req: DeploymentRequest):
     Part of the Ouroboros ACT/OBSERVE phase.
     """
     return await deployment_handler.handle_deployment(req)
+
+
+@app.post("/execute/docker")
+async def execute_docker(req: DockerComposeRequest):
+    """
+    Multi-service Docker control (restart, up, down, logs).
+    """
+    # Reuse deployment_handler but loop over services
+    results = []
+    services = req.services or req.containers or []
+    if not services:
+        return _fail("No services or containers specified", "docker")
+    
+    for svc in services:
+        # Mocking DeploymentRequest for each service
+        from schemas import DeploymentRequest
+        # Ensure prefix
+        container_name = svc if svc.startswith("sharedllm_") else f"sharedllm_{svc}"
+        mock_req = DeploymentRequest(
+            user_context=req.user_context,
+            action=req.action if req.action != "up" else "restart", # 'up' becomes 'restart' for existing
+            container_name=container_name
+        )
+        res = await deployment_handler.handle_deployment(mock_req)
+        results.append(res)
+    
+    return _ok(f"Docker action '{req.action}' applied to {len(services)} services.", {"results": results})
 
 
 @app.post("/execute/volumes")

@@ -51,22 +51,14 @@ async def delegate_to_raven():
     
     async with httpx.AsyncClient(timeout=600.0) as client:
         try:
-            async with client.stream("POST", f"{GATEWAY_URL}/api/chat", json=payload, headers=headers) as resp:
-                print(f"Status: {resp.status_code}")
-                if resp.status_code != 200:
-                    print(f"Error: {await resp.aread()}")
-                    return
-                
-                async for line in resp.aiter_lines():
-                    if not line: continue
-                    if line.startswith("data: "):
-                        try:
-                            chunk = json.loads(line[6:])
-                            content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                            if content:
-                                print(content, end="", flush=True)
-                        except:
-                            pass
+            resp = await client.post(f"{GATEWAY_URL}/api/chat", json=payload, headers=headers)
+            print(f"Status: {resp.status_code}")
+            if resp.status_code == 200:
+                data = resp.json()
+                print("\nRAVEN AUDIT RESPONSE:\n")
+                print(data.get("choices", [{}])[0].get("message", {}).get("content", "No response content."))
+            else:
+                print(f"Error: {resp.text}")
         except Exception as e:
             print(f"\nDelegation failed: {e}")
 
