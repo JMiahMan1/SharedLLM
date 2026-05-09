@@ -49,6 +49,7 @@ class NextCloudClient:
             
         quoted_path = quote(relative_path.lstrip("/"), safe="/")
         url = f"{self.base_url}{self.base_path}/{quoted_path}"
+        log.info(f"[Nextcloud] Full URL construction: host={self.host}, base={self.base_path}, relative={relative_path} -> {url}")
         # Ensure trailing slash if the original remote_path had it and it's not already there
         if remote_path.endswith("/") and not url.endswith("/"):
             url += "/"
