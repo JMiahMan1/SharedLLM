@@ -19,6 +19,8 @@ services:
     build: ./services/identity
     container_name: sharedllm_identity
     restart: unless-stopped
+    ports:
+      - 8001:8001
     env_file:
       - .env
     environment:
@@ -146,6 +148,8 @@ services:
     build: ./services/storage
     container_name: sharedllm_storage
     restart: unless-stopped
+    ports:
+      - 8005:8005
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - RAG_SVC_URL=http://rag:8004
@@ -159,6 +163,8 @@ services:
     build: ./services/workspace_runtime
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
+    ports:
+      - 8007:8007
     environment:
       - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
