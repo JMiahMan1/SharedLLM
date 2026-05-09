@@ -288,13 +288,14 @@ class WebReadRequest(BaseModel):
 
 class DockerLogsRequest(BaseModel):
     """
-    Fetches recent log output from a Docker container.
-    The container_name must start with 'sharedllm_' (enforced in handler).
+    Fetches recent log output from one or more Docker containers.
+    If 'services' is provided, it fetches logs for each (prepending 'sharedllm_' if needed).
     """
     user_context: UserContext
-    container_name: str = Field(..., description="Exact Docker container name, e.g. 'sharedllm_gateway'")
+    container_name: Optional[str] = Field(None, description="Exact Docker container name")
+    services: Optional[List[str]] = Field(None, description="List of services to fetch logs for (e.g. ['gateway', 'rag'])")
     tail_lines: int = Field(200, ge=1, le=2000, description="Number of log lines to retrieve")
-    grep_filter: Optional[str] = Field(None, description="Filter to lines containing this keyword, e.g. 'ERROR' or 'WARN'")
+    grep_filter: Optional[str] = Field(None, description="Filter to lines containing this keyword")
 
 
 class GitOperationRequest(BaseModel):
