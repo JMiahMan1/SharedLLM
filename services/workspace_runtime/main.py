@@ -10,18 +10,18 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request, Depends, BackgroundTasks
+from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 try:
     from .models import Workspace
-    from .database import engine, init_db, get_session
+    from .database import engine, init_db
     from .crypto import encrypt, decrypt
 except (ImportError, ValueError):
     from models import Workspace
-    from database import engine, init_db, get_session
+    from database import engine, init_db
     from crypto import encrypt, decrypt
 
 
@@ -1172,49 +1172,6 @@ def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret
     }
 
 
-@app.post("/workspaces/create")
-def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    with Session(engine) as session:
-        existing = session.get(Workspace, ws.id)
-        if existing:
-            raise HTTPException(status_code=409, detail=f"Workspace with id '{ws.id}' already exists")
-        _store_workspace_secret_fields(ws)
-        session.add(ws)
-        session.commit()
-        session.refresh(ws)
-        return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
-
-
-@app.put("/workspaces/{workspace_id}")
-def update_workspace(workspace_id: str, updates: dict, x_internal_secret: Optional[str] = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    with Session(engine) as session:
-        ws = session.get(Workspace, workspace_id)
-        if not ws:
-            raise HTTPException(status_code=404, detail="Workspace not found")
-        
-        for key, value in updates.items():
-            if hasattr(ws, key):
-                setattr(ws, key, value)
-        _store_workspace_secret_fields(ws, updates)
-        
-        session.add(ws)
-        session.commit()
-        session.refresh(ws)
-        return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
-
-
-@app.delete("/workspaces/{workspace_id}")
-def delete_workspace(workspace_id: str, x_internal_secret: Optional[str] = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    with Session(engine) as session:
-        ws = session.get(Workspace, workspace_id)
-        if not ws:
-            raise HTTPException(status_code=404, detail="Workspace not found")
-        session.delete(ws)
-        session.commit()
-        return {"status": "SUCCESS", "message": f"Workspace '{workspace_id}' deleted"}
 
 
 @app.post("/workflow/write-sync-commit")
