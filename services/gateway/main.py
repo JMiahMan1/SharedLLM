@@ -1711,11 +1711,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         try:
             action = (
+                dispatch_action or
+                tool_data.get("tool_name") or 
                 tool_data.get("action") or 
                 tool_data.get("tool") or 
                 tool_data.get("name") or 
                 tool_data.get("type") or 
-                tool_data.get("tool_name") or 
                 tool_data.get("tool_choice")
             )
             payload = tool_data.get("payload", {})
