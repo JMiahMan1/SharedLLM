@@ -103,7 +103,9 @@ class RavenWorker:
             await self.job_queue.complete_job(job_id, ans)
             
         except Exception as e:
-            log.error(f"Failed to process job {job_id}: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            log.error(f"Failed to process job {job_id}: {e}\n{tb}")
             await self.job_queue.fail_job(job_id, str(e))
 
     async def _trigger_tts_callback(self, payload: Dict[str, Any], message: str):
