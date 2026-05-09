@@ -77,17 +77,21 @@ async def get_vram_safe_params(model: str) -> dict:
         return {"num_ctx": max_ctx}
 
     params = {"num_ctx": target_ctx}
+    log.info(f"[AgentLoop] Checking VRAM state at {OLLAMA_URL}/api/ps")
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(f"{OLLAMA_URL}/api/ps")
+            log.info(f"[AgentLoop] VRAM check status: {resp.status_code}")
             if resp.status_code == 200:
                 data = resp.json()
                 models = data.get("models", [])
                 if len(models) > 1:
                     params["num_ctx"] = 4096
                     log.info(f"[Strategy 7] VRAM PRESSURE DETECTED ({len(models)} models active). Scaling context to 4096.")
-    except Exception:
-        pass
+            else:
+                log.warning(f"[AgentLoop] VRAM check failed: {resp.status_code}")
+    except Exception as e:
+        log.warning(f"[AgentLoop] VRAM check exception: {e}")
     return params
 
 _global_http_client: Optional[httpx.AsyncClient] = None
