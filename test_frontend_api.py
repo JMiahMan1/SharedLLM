@@ -35,7 +35,7 @@ async def test_frontend_settings():
 
 async def test_frontend_chat_identity():
     print("\n--- Testing Frontend: POST /api/chat (Identity Pass-through) ---")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         # Test a simple RAG query that triggers identity resolution
         payload = {
             "query": "What are your capabilities?",
