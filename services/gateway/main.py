@@ -1666,7 +1666,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "gitoperationrequest", "dockerlogsrequest", "dockercomposerequest",
                 "ripgrep", "read_file", "patch_file", "grep", "search", "shell", "git", "logs", "compose"
             ]
-            action = tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_name") or tool_data.get("tool_choice") if tool_data else None
+            action = tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_name") or tool_data.get("tool_choice") or tool_data.get("tool") if tool_data else None
+            
+            if action:
+                # Normalization: lower, strip underscores/hyphens, handle 'request' suffix
+                norm_action = action.lower().replace("_", "").replace("-", "").strip()
+                if not norm_action.endswith("request") and (norm_action + "request") in ALLOWED_TOOLS:
+                    norm_action = norm_action + "request"
+                
+                if norm_action in ALLOWED_TOOLS:
+                    # Update tool_data with the normalized action name
+                    if "action" in tool_data: tool_data["action"] = norm_action
+                    if "type" in tool_data: tool_data["type"] = norm_action
+                    action = norm_action
+
             if action and action.lower().strip() not in ALLOWED_TOOLS:
                 log.warning(f"[AgentLoop] Hallucinated tool detected: {action} — triggering protocol correction")
                 tool_data = None
