@@ -34,77 +34,61 @@ def _get_docker_client():
 
 async def handle_docker_logs(req) -> dict:
     """
-    Fetch and optionally filter logs from a Docker container.
-
-    req fields (from DockerLogsRequest):
-        container_name: str  — exact container name (must start with sharedllm_)
-        tail_lines: int      — number of lines to fetch (default 200)
-        grep_filter: str     — "ERROR", "WARN", "INFO", or None (all)
+    Fetch and optionally filter logs from one or more Docker containers.
     """
-    container_name: str = req.container_name
     tail: int = getattr(req, "tail_lines", 200)
     filter_level: Optional[str] = getattr(req, "grep_filter", None)
+    
+    container_names = []
+    if req.container_name:
+        container_names.append(req.container_name)
+    if req.services:
+        for s in req.services:
+            if not s.startswith(CONTAINER_ALLOWLIST_PREFIX):
+                container_names.append(f"{CONTAINER_ALLOWLIST_PREFIX}{s}")
+            else:
+                container_names.append(s)
 
-    # --- Security: enforce allowlist ---
-    if not container_name.startswith(CONTAINER_ALLOWLIST_PREFIX):
-        return {
-            "status": "FAILURE",
-            "message": f"Container '{container_name}' is not in the allowed prefix list ('{CONTAINER_ALLOWLIST_PREFIX}').",
-            "service": "docker_logs",
-        }
+    if not container_names:
+        return {"status": "FAILURE", "message": "No container_name or services provided.", "service": "docker_logs"}
 
     try:
         client = _get_docker_client()
     except RuntimeError as e:
         return {"status": "FAILURE", "message": str(e), "service": "docker_logs"}
 
-    try:
-        container = client.containers.get(container_name)
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "message": f"Container '{container_name}' not found: {e}",
-            "service": "docker_logs",
-        }
+    results = {}
+    for name in container_names:
+        # --- Security: enforce allowlist ---
+        if not name.startswith(CONTAINER_ALLOWLIST_PREFIX):
+            results[name] = {"status": "FAILURE", "message": "Access denied."}
+            continue
 
-    try:
-        raw_logs: bytes = container.logs(
-            tail=tail,
-            stdout=True,
-            stderr=True,
-            timestamps=True,
-        )
-        lines = raw_logs.decode("utf-8", errors="replace").splitlines()
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "message": f"Failed to fetch logs: {e}",
-            "service": "docker_logs",
-        }
-
-    # --- Optional level filter ---
-    if filter_level:
         try:
-            pattern = re.compile(filter_level, re.IGNORECASE)
-            lines = [l for l in lines if pattern.search(l)]
-        except Exception:
-            lines = [l for l in lines if filter_level.lower() in l.lower()]
-
-    log.info(
-        f"[DockerLogs] {container_name}: fetched {len(lines)} lines "
-        f"(filter={filter_level or 'none'}, tail={tail})"
-    )
+            container = client.containers.get(name)
+            raw_logs: bytes = container.logs(tail=tail, stdout=True, stderr=True, timestamps=True)
+            lines = raw_logs.decode("utf-8", errors="replace").splitlines()
+            
+            if filter_level:
+                try:
+                    pattern = re.compile(filter_level, re.IGNORECASE)
+                    lines = [l for l in lines if pattern.search(l)]
+                except Exception:
+                    lines = [l for l in lines if filter_level.lower() in l.lower()]
+            
+            results[name] = {
+                "status": "SUCCESS",
+                "line_count": len(lines),
+                "lines": lines
+            }
+        except Exception as e:
+            results[name] = {"status": "FAILURE", "message": str(e)}
 
     return {
-        "status": "SUCCESS",
-        "message": f"Fetched {len(lines)} log lines from '{container_name}'.",
+        "status": "SUCCESS" if any(r["status"] == "SUCCESS" for r in results.values()) else "FAILURE",
+        "message": f"Processed logs for {len(results)} containers.",
         "service": "docker_logs",
-        "detail": {
-            "container": container_name,
-            "line_count": len(lines),
-            "filter_level": filter_level,
-            "lines": lines,
-        },
+        "detail": results
     }
 
 
