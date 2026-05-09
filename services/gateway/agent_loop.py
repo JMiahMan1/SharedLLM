@@ -29,14 +29,15 @@ ALLOWED_TOOLS = {
     "tvcastrequest", "climaterequest", "securityrequest", 
     "announcementrequest", "haservicerequest", "calendarrequest", 
     "noterequest", "timerrequest", "talkrequest", 
-    "websearchrequest", "webreadrequest", "dockerlogsrequest", "dockercomposerequest",
+    "websearchrequest", "webreadrequest", "dockerlogsrequest", 
     "gitoperationrequest", "deploymentrequest", "capabilityindexrequest", 
     "volumeinventoryrequest", "workspacefilereadrequest", 
     "workspacefilewriterequest", "workspacefilepatchrequest", 
     "workspacelintrequest", "workspacesearchrequest", 
     "workspaceshellrequest", "storagefilereadrequest", 
     "storagefilewriterequest", "workspacebootstraprequest", 
-    "systemlearningrequest", "discoverysyncrequest", "storageindexrequest"
+    "systemlearningrequest", "discoverysyncrequest", "storageindexrequest",
+    "dockercomposerequest" # <-- ADDED THIS
 }
 
 def extract_action_json(text: str) -> dict | None:
@@ -255,12 +256,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
-                payload["user_context"] = {
-                    "user": creds.user,
-                    "is_admin": creds.is_admin,
-                    "ha_url": creds.ha_url,
-                    "ha_token": creds.ha_token
-                }
+                
+                # Only inject user_context if it is NOT a workspace/dev tool
+                if not lookup_action.startswith("workspace") and "git" not in lookup_action:
+                    payload["user_context"] = {
+                        "user": creds.user,
+                        "is_admin": creds.is_admin,
+                        "ha_url": creds.ha_url,
+                        "ha_token": creds.ha_token
+                    }
 
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(payload)}")
