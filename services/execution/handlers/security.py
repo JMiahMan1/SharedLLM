@@ -43,6 +43,14 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
     }
     service = ha_service_map.get(req.action, req.action)
 
+    # 1. AUTHORIZATION CHECK
+    if not ha_client.authorize_action(ctx.model_dump(), domain, service):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Access Denied: You are not authorized to perform '{req.action}' on {full_entity_id}. Admin privileges required.",
+            service="security"
+        )
+
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         domain, service,

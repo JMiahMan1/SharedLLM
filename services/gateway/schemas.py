@@ -10,6 +10,8 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     stream: bool = False
     api_key: Optional[str] = None
+    client: Optional[str] = "chat" # chat, voice, home_assistant
+    source: Optional[str] = None
 
 class ChatResponse(BaseModel):
     status: Literal["SUCCESS", "FAILURE"]

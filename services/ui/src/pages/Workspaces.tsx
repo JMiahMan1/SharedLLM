@@ -70,6 +70,15 @@ const Workspaces = () => {
     onError: (err: Error) => toast.error(err.message || 'Failed to delete workspace'),
   });
 
+  const pullMutation = useMutation({
+    mutationFn: (id: string) => api.pullWorkspace(id),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+      toast.success(`Successfully pulled latest changes on ${data.branch}`);
+    },
+    onError: (err: Error) => toast.error(err.message || 'Git pull failed'),
+  });
+
   const openEdit = (ws: Workspace) => {
     setEditingWs(ws);
     setForm(ws);
@@ -115,13 +124,31 @@ const Workspaces = () => {
           <h2 className="text-3xl font-bold tracking-tight text-white">Workspaces</h2>
           <p className="mt-1 text-slate-400">Manage repository locations and automated sync triggers.</p>
         </div>
-        <button 
-          onClick={openCreate}
-          className="glass-button px-6 py-2.5 bg-indigo-600/20 border-indigo-500/30 text-indigo-300 font-bold flex items-center gap-2"
-        >
-          <Plus size={18} />
-          Add Repository
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => {
+              toast.promise(
+                Promise.all(workspaces.map(ws => api.pullWorkspace(ws.id))),
+                {
+                  loading: 'Synchronizing all repositories...',
+                  success: 'All workspaces up to date',
+                  error: 'One or more pulls failed'
+                }
+              ).then(() => queryClient.invalidateQueries({ queryKey: ['workspaces'] }));
+            }}
+            className="glass-button px-6 py-2.5 bg-slate-800/40 border-slate-700/50 text-slate-300 font-bold flex items-center gap-2"
+          >
+            <GitPullRequest size={18} />
+            Sync All
+          </button>
+          <button 
+            onClick={openCreate}
+            className="glass-button px-6 py-2.5 bg-indigo-600/20 border-indigo-500/30 text-indigo-300 font-bold flex items-center gap-2"
+          >
+            <Plus size={18} />
+            Add Repository
+          </button>
+        </div>
       </header>
 
       <div className="grid gap-6">
@@ -192,7 +219,16 @@ const Workspaces = () => {
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Git Status</p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Git Status</p>
+                        <button 
+                          onClick={() => pullMutation.mutate(ws.id)}
+                          disabled={pullMutation.isPending}
+                          className="text-[10px] font-black uppercase tracking-widest text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                        >
+                          {pullMutation.isPending ? 'Pulling...' : 'Pull Now'}
+                        </button>
+                      </div>
                       <div className="flex items-center gap-2 text-sm text-slate-300">
                         <GitPullRequest size={14} className="text-slate-600" />
                         <span>{ws.git_remote}/{ws.default_branch}</span>
@@ -356,6 +392,24 @@ const Workspaces = () => {
                   className={`w-12 h-6 rounded-full transition-colors relative ${form.auto_pull_enabled ? 'bg-indigo-500' : 'bg-slate-800'}`}
                 >
                   <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${form.auto_pull_enabled ? 'left-7' : 'left-1'}`} />
+                </button>
+             </div>
+
+             <div className="flex items-center justify-between">
+                <div>
+                   <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Save size={16} className="text-indigo-400" />
+                      Nextcloud Backup
+                   </h4>
+                   <p className="text-xs text-slate-500">Mirror local changes to Nextcloud provider.</p>
+                </div>
+                <button 
+                  type="button"
+                  aria-label="Toggle nextcloud backup"
+                  onClick={() => setForm({ ...form, auto_backup_enabled: !form.auto_backup_enabled })}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${form.auto_backup_enabled ? 'bg-indigo-500' : 'bg-slate-800'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${form.auto_backup_enabled ? 'left-7' : 'left-1'}`} />
                 </button>
              </div>
 

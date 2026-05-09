@@ -27,6 +27,14 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
     
     log.info(f"[light] user={ctx.user} (admin={ctx.is_admin}) entity={full_entity_id} action={req.action} (original={req.entity_id})")
 
+    # 1. AUTHORIZATION CHECK
+    if not ha_client.authorize_action(ctx.model_dump(), domain, req.action):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Access Denied: You are not authorized to perform '{req.action}' on {full_entity_id}. Admin privileges required.",
+            service="light_control"
+        )
+
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         domain, req.action,
