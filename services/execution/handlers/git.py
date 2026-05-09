@@ -43,7 +43,8 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT) -> dict:
     log.info(f"[Git] Running: {' '.join(shlex.quote(a) for a in cmd)} in {cwd}")
     try:
         env = os.environ.copy()
-        env["GIT_SSH_COMMAND"] = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+        # Fix: Ignore bad permissions on config file by using -F /dev/null
+        env["GIT_SSH_COMMAND"] = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -F /dev/null"
         
         proc = await asyncio.create_subprocess_exec(
             *cmd,
