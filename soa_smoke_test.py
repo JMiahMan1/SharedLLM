@@ -91,6 +91,7 @@ def run_all():
     results = []
     
     # 1. Pings
+    results.append(test_service_ping("Gateway", GATEWAY_URL))
     results.append(test_service_ping("Identity", IDENTITY_URL))
     results.append(test_service_ping("Execution", EXECUTION_URL))
     results.append(test_service_ping("RAG", RAG_URL))

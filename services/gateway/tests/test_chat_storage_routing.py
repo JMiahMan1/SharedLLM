@@ -36,19 +36,35 @@ def test_chat_storage_routing(auth_headers):
     )
 
     # Mock Ollama generation - simulate a generated JSON tool block from LLM
-    llm_response = {
-        "model": "qwen3:8b",
-        "created_at": "2026-05-06T00:00:00Z",
-        "message": {
-            "role": "assistant",
-            "content": "Sure, I will index your storage.\n```json\n{\"action\": \"storageindexrequest\", \"payload\": {\"path\": \"/myfolder\"}}\n```"
+    # We use a side effect to return a tool call the first time and a conversational response the second time
+    # to avoid infinite loops in the AgentLoop.
+    responses = [
+        {
+            "model": "qwen3:8b",
+            "message": {
+                "role": "assistant",
+                "content": "Sure, I will index your storage.\n```json\n{\"action\": \"storageindexrequest\", \"payload\": {\"path\": \"/myfolder\"}}\n```"
+            },
+            "done": True
         },
-        "done": True
-    }
+        {
+            "model": "qwen3:8b",
+            "message": {
+                "role": "assistant",
+                "content": "I have started the indexing process for you. (System Update: Indexing started)"
+            },
+            "done": True
+        }
+    ]
     
-    llm_route = respx.post("http://127.0.0.1:11434/api/chat").mock(
-        return_value=httpx.Response(200, json=llm_response)
-    )
+    response_iter = iter(responses)
+    def ollama_side_effect(request):
+        try:
+            return httpx.Response(200, json=next(response_iter))
+        except StopIteration:
+            return httpx.Response(200, json=responses[-1])
+
+    llm_route = respx.post("http://127.0.0.1:11434/api/chat").mock(side_effect=ollama_side_effect)
 
     # Mock Storage Index call
     storage_route = respx.post(f"{STORAGE_SVC}/index/full").mock(

@@ -158,7 +158,8 @@ async def list_provider_entries(req: IndexScanRequest):
         # Map indexed status to entries
         result_entries = []
         for e in entries:
-            e_dict = e.dict()
+            # Use model_dump if available (Pydantic V2), otherwise fallback to dict()
+            e_dict = e.model_dump() if hasattr(e, "model_dump") else e.dict()
             e_dict["indexed"] = e_dict["path"] in indexed_paths
             result_entries.append(e_dict)
 

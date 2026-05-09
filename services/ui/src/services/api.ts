@@ -512,6 +512,11 @@ export const api = {
     return resp.data;
   },
 
+  async runUnitTests(): Promise<SmokeTestResult> {
+    const resp = await apiClient.post('/api/admin/tests/unit');
+    return resp.data;
+  },
+
   async getStorageFiles(path: string): Promise<StorageEntry[]> {
     const resp = await apiClient.post('/api/storage/list', { path, recursive: false });
     return resp.data.entries || [];
