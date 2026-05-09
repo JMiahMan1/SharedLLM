@@ -55,8 +55,8 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
         # Chunked Reading (Windowing)
         start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
         
-        # Hardware Protection: Enforce a hard cap of 500 lines for autonomous agents
-        safe_limit = min(req.limit_lines, 500)
+        # Hardware Protection: Enforce a hard cap of 2000 lines for autonomous agents
+        safe_limit = min(req.limit_lines, 2000)
         end = start + safe_limit
         
         chunk = lines[start:end]
@@ -195,11 +195,37 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
         failed_chunks = []
         
         for chunk in req.chunks:
+            # Try exact match first
             if chunk.old_text in content:
-                content = content.replace(chunk.old_text, chunk.new_text, 1) # Only replace first occurrence
+                content = content.replace(chunk.old_text, chunk.new_text, 1)
                 applied_count += 1
             else:
-                failed_chunks.append(chunk.old_text)
+                # Fuzzy matching fallback using difflib
+                import difflib
+                lines = content.splitlines(keepends=True)
+                old_lines = chunk.old_text.splitlines(keepends=True)
+                
+                # Find best matching block
+                matcher = difflib.SequenceMatcher(None, old_lines, lines)
+                best_match = None
+                highest_ratio = 0.0
+                
+                # We look for a block of the same length roughly
+                for i in range(len(lines) - len(old_lines) + 1):
+                    candidate = lines[i:i+len(old_lines)]
+                    ratio = difflib.SequenceMatcher(None, old_lines, candidate).ratio()
+                    if ratio > highest_ratio:
+                        highest_ratio = ratio
+                        best_match = (i, i+len(old_lines))
+                
+                if highest_ratio > 0.85: # Threshold for "close enough"
+                    start, end = best_match
+                    log.info(f"Fuzzy patch match found with ratio {highest_ratio:.2f} at lines {start}-{end}")
+                    new_lines = lines[:start] + chunk.new_text.splitlines(keepends=True) + lines[end:]
+                    content = "".join(new_lines)
+                    applied_count += 1
+                else:
+                    failed_chunks.append(chunk.old_text)
         
         if applied_count == 0:
             return _fail(f"Patch failed: No chunks matched the target file {req.path}")
