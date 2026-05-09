@@ -180,6 +180,10 @@ except (ImportError, ValueError):
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 job_queue = InferenceJobQueue(REDIS_URL)
 
+# --- Setup Logging ---
+log = logging.getLogger("gateway")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+
 # --- Ouroboros Worker ---
 try:
     from background_worker import worker as raven_worker
@@ -192,10 +196,6 @@ except ImportError as e:
     except ImportError as e2:
         log.error(f"FATAL: Background worker import failed: {e2}")
         raven_worker = None
-
-# --- Setup Logging ---
-log = logging.getLogger("gateway")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
 # --- Configuration ---
 IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
