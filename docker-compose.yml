@@ -49,7 +49,7 @@ services:
       - label=disable
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ./services/execution/main.py:/app/main.py:ro
+      - ./services/execution:/app
       - ./services/tests:/app/tests
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/workspace/SharedLLM
