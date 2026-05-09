@@ -12,10 +12,10 @@ from sqlmodel import Session, select, text
 from dotenv import load_dotenv
 
 try:
-    from .models import User, GlobalSetting
+    from .models import User, GlobalSetting, DeviceAssignment, APIKey
     from .crypto import encrypt
 except ImportError:
-    from models import User, GlobalSetting
+    from models import User, GlobalSetting, DeviceAssignment, APIKey
     from crypto import encrypt
 
 from passlib.context import CryptContext
@@ -124,7 +124,6 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     else:
         log.info("[seed] Forced re-seed: Clearing existing users/assignments.")
         # Clear using SQLModel to avoid table name mismatches
-        from models import User, DeviceAssignment, APIKey, GlobalSetting
         for table in ["deviceassignment", "user", "apikey", "globalsetting"]:
             try:
                 session.exec(text(f"DELETE FROM {table}"))
