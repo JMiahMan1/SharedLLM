@@ -55,8 +55,8 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
         # Chunked Reading (Windowing)
         start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
         
-        # Hardware Protection: Enforce a hard cap of 2000 lines for autonomous agents
-        safe_limit = min(req.limit_lines, 2000)
+        # Hardware Protection removed to allow full file reads for autonomous agents
+        safe_limit = req.limit_lines if req.limit_lines and req.limit_lines > 0 else len(lines)
         end = start + safe_limit
         
         chunk = lines[start:end]
@@ -195,12 +195,16 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
         failed_chunks = []
         
         for chunk in req.chunks:
-            # Try exact match first
-            if chunk.old_text in content:
-                content = content.replace(chunk.old_text, chunk.new_text, 1)
+            # Normalize line endings and trailing whitespace to prevent brittle patch failures
+            old_normalized = "\n".join([line.rstrip() for line in chunk.old_text.splitlines()])
+            content_normalized = "\n".join([line.rstrip() for line in content.splitlines()])
+            
+            if old_normalized in content_normalized:
+                # Standard replace
+                content = content.replace(chunk.old_text, chunk.new_text, 1) 
                 applied_count += 1
             else:
-                # Fuzzy matching fallback using difflib
+                # Fuzzy matching fallback using difflib (kept from previous iteration for extra robustness)
                 import difflib
                 lines = content.splitlines(keepends=True)
                 old_lines = chunk.old_text.splitlines(keepends=True)

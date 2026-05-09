@@ -41,7 +41,7 @@ async def delegate_to_raven():
     
     payload = {
         "query": MISSION,
-        "stream": False, 
+        "stream": False,  # Gateway agent loop does not support streaming
         "rag_user": "default"
     }
     
@@ -53,12 +53,16 @@ async def delegate_to_raven():
         try:
             resp = await client.post(f"{GATEWAY_URL}/api/chat", json=payload, headers=headers)
             print(f"Status: {resp.status_code}")
-            if resp.status_code == 200:
-                data = resp.json()
-                print("\nRAVEN AUDIT RESPONSE:\n")
-                print(data.get("choices", [{}])[0].get("message", {}).get("content", "No response content."))
-            else:
+            
+            if resp.status_code != 200:
                 print(f"Error: {resp.text}")
+                return
+                
+            data = resp.json()
+            message = data.get("message", "")
+            print("\n=== RAVEN AUDIT COMPLETE ===\n")
+            print(message)
+            
         except Exception as e:
             print(f"\nDelegation failed: {e}")
 
