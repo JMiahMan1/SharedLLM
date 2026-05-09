@@ -1658,11 +1658,13 @@ async def git_pull_webhook(
                 log.warning(f"Webhook pull attempted for workspace {workspace_id} but auto_pull_enabled is False")
                 raise HTTPException(status_code=403, detail="Webhook pulling is disabled for this workspace")
 
+            log.info(f"Webhook git pull: resolving path for {match.local_path} with root {get_workspace_root()}")
             resolved_path = resolve_safe_path(get_workspace_root(), str(match.local_path))
             workspace_path = Path(resolved_path)
             
             remote_name = (match.git_remote or "origin").strip()
             default_branch = (match.default_branch or "main").strip()
+            log.info(f"Webhook git pull: resolved workspace_path={workspace_path}, remote_name={remote_name}")
             remote_url = _git_remote_url(workspace_path, remote_name)
         
         log.info(f"Webhook triggered git pull for workspace {workspace_id} on {remote_name}/{default_branch}")
