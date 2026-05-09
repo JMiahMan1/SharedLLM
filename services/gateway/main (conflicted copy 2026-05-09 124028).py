@@ -15,20 +15,11 @@ from datetime import datetime
 from pathlib import Path
 try:
     from .schemas import ChatRequest, ResolvedCredentials
-    from .agent_loop import AgentLoop, extract_action_json, call_ollama, get_vram_safe_params
-    from .config import (
-        OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
-        STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
-        INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
-    )
 except (ImportError, ValueError):
-    from schemas import ChatRequest, ResolvedCredentials
-    from agent_loop import AgentLoop, extract_action_json, call_ollama, get_vram_safe_params
-    from config import (
-        OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
-        STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
-        INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
-    )
+    try:
+        from schemas import ChatRequest, ResolvedCredentials
+    except ImportError:
+        from gateway.schemas import ChatRequest, ResolvedCredentials
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -79,6 +70,39 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False):
         "done": done
     }
 
+def extract_action_json(text: str) -> dict | None:
+    """Extracts the first JSON object found in the text, with MoE-safe fallback and log-stripping."""
+    if not text:
+        return None
+    
+    # Strip common log garbage prefixes (e.g. Uvicorn INFO logs)
+    text = re.sub(r"^INFO:.*?\n", "", text, flags=re.MULTILINE)
+    
+    # Pattern A: Standard Markdown JSON block
+    match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except:
+            pass
+
+    # Pattern B: Any block between curly braces
+    # We use a greedy rfind for the last brace to handle nested JSON
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidate = text[first_brace:last_brace+1]
+        try:
+            return json.loads(candidate)
+        except:
+            # Pattern C: Deep search for anything looking like a JSON object if simple match fails
+            try:
+                cleaned = re.sub(r",\s*([\]}])", r"\1", candidate)
+                return json.loads(cleaned)
+            except:
+                pass
+    
+    return None
 
 def _make_openai_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
@@ -222,6 +246,28 @@ async def fetch_autonomous_protocols() -> str:
     """Fetch the latest autonomous protocols from the Identity Service GlobalSettings."""
     return await fetch_global_setting("system_autonomous_protocols")
 
+async def get_vram_safe_params(model: str) -> dict:
+    """
+    Strategy 7: Dynamic VRAM Awareness & Elastic Scaling.
+    Checks Ollama's current load and adjusts context parameters.
+    Scales UP if VRAM is free, scales DOWN if under pressure.
+    Bypasses throttling if running against external APIs (OpenRouter/OpenAI).
+    """
+    # Environment-aware ceiling
+    max_ctx = int(os.getenv("MAX_CONTEXT_WINDOW", "32768"))
+    target_ctx = int(os.getenv("DEFAULT_CONTEXT_WINDOW", "12288"))
+    
+    # EXTERNAL API BYPASS: If using a cloud provider, assume unlimited/large context
+    external_indicators = ("openrouter.ai", "openai.com", "anthropic.com", "groq.com")
+    if any(ind in OLLAMA_URL.lower() for ind in external_indicators):
+        log.info(f"[Strategy 7] External API detected ({OLLAMA_URL}). Unlocking full context: {max_ctx}")
+        return {"num_ctx": max_ctx}
+
+    params = {"num_ctx": target_ctx}
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            # Note: /api/ps only works for local Ollama instances
+            resp = await client.get(f"{OLLAMA_URL}/api/ps")
             if resp.status_code == 200:
                 ps = resp.json()
                 models = ps.get("models", [])
@@ -1113,6 +1159,13 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
     return best_eid if best_score > 0 else candidates[0]["entity_id"]
 
 
+async def call_ollama(payload: dict, use_chat: bool = True, timeout: float = None) -> httpx.Response:
+    endpoint = "/api/chat" if use_chat else "/api/generate"
+    return await get_http_client().post(
+      f"{OLLAMA_URL}{endpoint}",
+      json=payload,
+      timeout=timeout if timeout is not None else OLLAMA_TIMEOUT,
+    )
 
 
 async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
@@ -1374,6 +1427,490 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         log.warning(f"[ShadowExecution] Failed: {type(e).__name__}: {e}")
     return ""
 
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials) -> Any:
+    """
+    Raven Autonomous Loop (Strategy 7 & 8 implementation).
+    Supports multi-turn tool execution: call Ollama, execute tool, feed result back, repeat.
+    """
+    # Initialize the base payload for the loop
+    ollama_payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": full_system}
+        ] + short_term + [{"role": "user", "content": query}],
+        "stream": False # AgentLoop is always non-streaming for the brain
+    }
+
+    MAX_TOOL_ITERATIONS = 30
+    HEARTBEAT_INTERVAL = 15   # seconds between heartbeat log lines
+    HUNG_THRESHOLD = 240      # seconds before a HUNG WARNING is emitted
+    agent_messages = ollama_payload.get("messages", [])[:]  # shallow copy
+    exec_data = None
+    ans = ""
+    loop_start = asyncio.get_event_loop().time()
+
+    for agent_iter in range(MAX_TOOL_ITERATIONS):
+        iter_num = agent_iter + 1
+        iter_start = asyncio.get_event_loop().time()
+        
+        # MISSION PRESSURE: Stop mapping, start patching
+        if iter_num > 5:
+            pressure_msg = "\n\n[MISSION PRESSURE: You have performed multiple mapping turns. STOP READING. IMMEDIATELY apply the WorkspaceFilePatchRequest for get_collection_docs (line 2821). This is your FINAL directive.]"
+            full_system += pressure_msg
+            agent_messages[0]["content"] = full_system
+            log.warning(f"[AgentLoop] MISSION PRESSURE INJECTED into Iteration {iter_num}")
+
+        log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | "
+                 f"total elapsed {iter_start - loop_start:.0f}s")
+        log.info(f"[AgentLoop] System prompt preview: {full_system[:300]}...")
+
+        # ── Heartbeat task ──────────────────────────────────────────────────
+        heartbeat_stop = asyncio.Event()
+
+        async def _heartbeat(iter_n: int, t0: float) -> None:
+            elapsed = 0.0
+            while not heartbeat_stop.is_set():
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                if heartbeat_stop.is_set():
+                    break
+                elapsed = asyncio.get_event_loop().time() - t0
+                if elapsed > HUNG_THRESHOLD:
+                    log.warning(
+                        f"[AgentLoop] ⚠ HUNG WARNING — iter {iter_n} has been waiting "
+                        f"{elapsed:.0f}s for Ollama response (threshold={HUNG_THRESHOLD}s)"
+                    )
+                else:
+                    log.info(
+                        f"[AgentLoop] ♥ heartbeat — iter {iter_n} | "
+                        f"waiting for Ollama {elapsed:.0f}s | stage=inference"
+                    )
+
+        hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
+
+        try:
+            # Strategy 7 & 8: Dynamic VRAM Awareness & Singleton Queue
+            vram_params = await get_vram_safe_params(selected_model)
+            ollama_payload["options"] = vram_params
+
+            # ISOLATED CONTEXT: Only send the mission, protocol, and the LAST tool result to prevent history drift
+            ollama_payload["messages"] = [
+                {"role": "system", "content": full_system},
+                {"role": "user", "content": f"MISSION LOCK: {query}"}
+            ]
+            if exec_data:
+                ollama_payload["messages"].append({
+                    "role": "user", 
+                    "content": f"LAST TOOL RESULT (Execution Status: SUCCESS):\n{json.dumps(exec_data) if isinstance(exec_data, dict) else str(exec_data)}"
+                })
+            ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
+            
+            async with INFERENCE_LOCK:
+                log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
+                resp = await call_ollama(ollama_payload, use_chat=True, timeout=300.0)
+                log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
+                
+            heartbeat_stop.set()
+            await hb_task
+            
+            if resp.status_code != 200:
+                return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
+            data = resp.json()
+            ans = data.get("message", {}).get("content", "Error.")
+            ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
+            log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
+        except (httpx.TimeoutException, httpx.ConnectError):
+            heartbeat_stop.set()
+            await hb_task
+            ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
+            log.warning(f"[AgentLoop] Ollama timeout/connect error on iter {agent_iter + 1}")
+            return JSONResponse({"status": "SUCCESS", "message": ans, "degraded": True})
+
+        # 8. Tool Execution — Intercept JSON blocks for execution
+        resp_content = ans
+        log.info(f"[AgentLoop] Response length: {len(resp_content)}")
+        log.info(f"[AgentLoop] Raw response: {resp_content}")
+        
+        # 4. Extract Tool Call
+        tool_data = extract_action_json(resp_content)
+        
+        tag = "```json" if "```json" in ans else "```"
+        start = ans.find(tag)
+        if start != -1:
+            start += len(tag)
+            end = ans.find("```", start)
+            if end > start:
+                try:
+                    tool_data = json.loads(ans[start:end].strip())
+                except Exception:
+                    pass
+
+        # Strategy 2: First { to last }
+        if tool_data is None:
+            first_brace = ans.find("{")
+            last_brace = ans.rfind("}")
+            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                try:
+                    tool_data = json.loads(ans[first_brace:last_brace+1])
+                except Exception:
+                    pass
+
+        # Strategy 3: First [ to last ] (for array-wrapped)
+        if tool_data is None:
+            first_bracket = ans.find("[")
+            last_bracket = ans.rfind("]")
+            if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+                try:
+                    tool_data = json.loads(ans[first_bracket:last_bracket+1])
+                except Exception:
+                    pass
+
+        # Strategy 4: Fallback for raw markdown code blocks (Diffs or Full Code)
+        if tool_data is None and "```" in ans:
+            try:
+                parts = ans.split("```")
+                if len(parts) >= 3:
+                    block_content = parts[1]
+                    first_nl = block_content.find('\n')
+                    if first_nl != -1:
+                        code_text = block_content[first_nl+1:]
+                        # Simple detection for unified diff
+                        if "--- " in code_text and "+++ " in code_text and "@@ " in code_text:
+                            # It's a diff
+                            path = "auto"
+                            chunks = []
+                            current_old = []
+                            current_new = []
+                            in_hunk = False
+                            for line in code_text.splitlines():
+                                if line.startswith("+++ b/") or line.startswith("+++ "):
+                                    path = line.split("+++ ")[-1].replace("b/", "", 1).strip()
+                                elif line.startswith("@@"):
+                                    if in_hunk and (current_old or current_new):
+                                        chunks.append({
+                                            "old_text": "\n".join(current_old) + "\n" if current_old else "",
+                                            "new_text": "\n".join(current_new) + "\n" if current_new else ""
+                                        })
+                                        current_old, current_new = [], []
+                                    in_hunk = True
+                                elif in_hunk:
+                                    if line.startswith("-"):
+                                        current_old.append(line[1:])
+                                    elif line.startswith("+"):
+                                        current_new.append(line[1:])
+                                    elif line.startswith(" "):
+                                        current_old.append(line[1:])
+                                        current_new.append(line[1:])
+                            if in_hunk and (current_old or current_new):
+                                chunks.append({
+                                    "old_text": "\n".join(current_old) + "\n" if current_old else "",
+                                    "new_text": "\n".join(current_new) + "\n" if current_new else ""
+                                })
+                            
+                            if chunks:
+                                tool_data = {
+                                    "action": "WorkspaceFilePatchRequest",
+                                    "payload": {"path": path, "chunks": chunks}
+                                }
+                                log.info(f"[AgentLoop] Parsed raw markdown diff into WorkspaceFilePatchRequest for {path}")
+                        # Fallback for ANY code block if no strategy matched
+                        elif len(code_text.strip()) > 10:
+                            # If it's a full block, use Write (which supports 'content')
+                            action = "WorkspaceFileWriteRequest"
+                            tool_data = {
+                                "action": action,
+                                "payload": {"path": path if path != "auto" else "auto", "content": code_text}
+                            }
+                            log.info(f"[AgentLoop] Parsed raw markdown block into {action}")
+            except Exception as e:
+                log.error(f"[AgentLoop] Error parsing raw markdown block: {e}")
+
+        # Strategy 5: Fallback for XML-like tags (e.g. <commit>, <tool>, <action>)
+        if tool_data is None and "<" in ans and ">" in ans:
+            try:
+                start = ans.find("<")
+                end = ans.find(">", start)
+                if start != -1 and end != -1:
+                    tag_content = ans[start+1:end]
+                    if "action=" in tag_content or "path=" in tag_content:
+                        attrs = {}
+                        import re
+                        for match in re.finditer(r'(\w+)=["\']([^"\']+)["\']', tag_content):
+                            attrs[match.group(1)] = match.group(2)
+                        
+                        action_val = attrs.get("action") or attrs.get("type")
+                        path_val = attrs.get("path")
+                        
+                        if action_val:
+                            action_map_shorthand = {"read": "WorkspaceFileReadRequest", "patch": "WorkspaceFilePatchRequest"}
+                            tool_data = {
+                                "action": action_map_shorthand.get(action_val, action_val),
+                                "payload": {"path": path_val}
+                            }
+                            log.info(f"[AgentLoop] Parsed pseudo-tag <{tag_content}> into {tool_data['action']}")
+            except Exception as e:
+                log.error(f"[AgentLoop] Error parsing pseudo-tag: {e}")
+        
+        # Strategy 6: Payload Normalization
+        if tool_data and isinstance(tool_data, dict):
+            # Handle array format (e.g. OpenAI or custom tool array)
+            for array_key in ("tools", "tool_calls", "actions"):
+                if array_key in tool_data and isinstance(tool_data[array_key], list) and len(tool_data[array_key]) > 0:
+                    log.info(f"[AgentLoop] Normalizing tool schema: extracting first item from '{array_key}'")
+                    tool_data = tool_data[array_key][0]
+                    break
+
+            for nest_key in ("arguments", "payload", "args", "json", "tool_call"):
+                if tool_data and isinstance(tool_data, dict) and nest_key in tool_data and isinstance(tool_data[nest_key], dict):
+                    log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
+                    nested_vals = tool_data.pop(nest_key)
+                    # Preserve top-level action/type if they exist, but inner payload fields take precedence
+                    # for parameters like 'action' in GitOperationRequest.
+                    for k, v in nested_vals.items():
+                        if k in ("action", "type") and k in tool_data:
+                            # Move the outer discriminator to 'tool_name' to avoid clobbering
+                            tool_data["tool_name"] = tool_data.get(k)
+                        tool_data[k] = v
+            
+            mapping = {"offset": "offset_lines", "limit": "limit_lines"}
+            for old_key, new_key in mapping.items():
+                if old_key in tool_data and new_key not in tool_data:
+                    log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
+                    tool_data[new_key] = tool_data.pop(old_key)
+            
+            if "properties" in tool_data and "type" in tool_data:
+                # Detect schema hallucinations
+                log.warning(f"[AgentLoop] Detected schema hallucination — triggering protocol correction")
+                tool_data = None
+            
+            # SCHEMA_WHITELIST: Strictly enforce allowed workspace tools
+            ALLOWED_TOOLS = [
+                "workspacefilereadrequest", "workspacefilepatchrequest", 
+                "workspacefilewriterequest", "workspacesearchrequest", 
+                "workspacelintrequest", "workspacefiledeleterequest",
+                "workspacebootstraprequest", "workspaceshellrequest",
+                "gitoperationrequest", "dockerlogsrequest", "dockercomposerequest",
+                "storageindexrequest", "storagefilereadrequest", "storagefilewriterequest",
+                "ripgrep", "read_file", "patch_file", "grep", "search", "shell", "git", "logs", "compose", "index"
+            ]
+            # Tool Discriminator: Detect which tool is being called. 
+            # Prioritize 'tool_name' if it was set during hoisting to avoid clobbering by payload parameters.
+            action_key = tool_data.get("tool_name") or tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_choice") or tool_data.get("tool") if tool_data else None
+            dispatch_action = None
+            
+            if action_key:
+                # Normalization: lower, strip underscores/hyphens, handle 'request' suffix
+                norm_action = str(action_key).lower().replace("_", "").replace("-", "").strip()
+                if not norm_action.endswith("request") and (norm_action + "request") in ALLOWED_TOOLS:
+                    norm_action = norm_action + "request"
+                
+                if norm_action in ALLOWED_TOOLS:
+                    dispatch_action = norm_action
+
+            if not dispatch_action:
+                log.warning(f"[AgentLoop] Hallucinated tool detected: {action_key} — triggering protocol correction")
+                tool_data = None
+            else:
+                # We have a valid dispatch action. Use it but don't clobber the payload's 'action' if it belongs to the tool schema.
+                action = dispatch_action
+        
+        if not tool_data:
+            log.warning(f"[AgentLoop] No valid JSON tool call found in iteration {agent_iter + 1}. Conversational output detected.")
+            # If we've already performed at least one action, a conversational response is acceptable as a final status.
+            if agent_iter > 0:
+                log.info(f"[AgentLoop] Mission likely accomplished. Terminating loop.")
+                break
+                
+            if agent_iter < MAX_TOOL_ITERATIONS - 1:
+                log.info(f"[AgentLoop] Re-prompting for autonomous tool execution...")
+                agent_messages.append({"role": "assistant", "content": ans})
+                QWEN_GROUNDING_INSTRUCTION = """
+# MISSION LOCK: Raven Autonomous Repair Protocol
+1. **FOCUS**: YOU ARE RAVEN. Your ONLY mission is to resolve the BUG or TASK.
+2. **ZERO CONVERSATION**: You MUST NOT ask questions or provide status updates.
+3. **TOOL MANDATE**: Every response MUST contain a valid JSON tool call. Output ONLY JSON.
+4. **NO DISTRACTIONS**: Do not acknowledge instructions. Just execute.
+"""
+                agent_messages.append({
+                    "role": "user", 
+                    "content": f"{QWEN_GROUNDING_INSTRUCTION}\n\nCRITICAL PROTOCOL VIOLATION: You provided a conversational response without a tool call. You are FORBIDDEN from asking questions or seeking user approval. You MUST execute the next step of your plan immediately using a JSON tool call block. Continue the mission now."
+                })
+                continue
+            else:
+                log.info(f"[AgentLoop] Max iterations reached — final response.")
+                break
+
+        log.info(f"[AgentLoop] Dispatching action: {json.dumps({k: v for k, v in tool_data.items() if k != 'user_context'}, indent=2)}")
+
+        try:
+            action = (
+                dispatch_action or
+                tool_data.get("tool_name") or 
+                tool_data.get("action") or 
+                tool_data.get("tool") or 
+                tool_data.get("name") or 
+                tool_data.get("type") or 
+                tool_data.get("tool_choice")
+            )
+            # If hoisting occurred, tool_data itself contains the payload fields.
+            # Otherwise, we use the 'payload' sub-dictionary if it exists.
+            orig_payload = tool_data.get("payload")
+            if isinstance(orig_payload, dict) and orig_payload:
+                payload = orig_payload
+            else:
+                # Use everything in tool_data as the payload, excluding internal discriminators
+                payload = {k: v for k, v in tool_data.items() if k not in ("payload", "tool_name", "tool_choice")}
+            
+            if isinstance(tool_data, dict):
+                for k, v in tool_data.items():
+                    if k not in ("action", "payload", "tool", "name", "type", "tool_name") and k not in payload:
+                        if "path" in k.lower():
+                            payload["path"] = v
+                        else:
+                            payload[k] = v
+
+            if not action:
+                if "path" in payload:
+                    if (payload.get("is_patch") or "chunks" in payload):
+                        action = "WorkspaceFilePatchRequest"
+                    elif payload.get("content") is not None:
+                        action = "WorkspaceFileWriteRequest"
+                    else:
+                        action = "WorkspaceFileReadRequest"
+
+            action_map_aliases = {
+                "read_file": "WorkspaceFileReadRequest",
+                "write_file": "WorkspaceFileWriteRequest",
+                "patch_file": "WorkspaceFilePatchRequest",
+                "lint_file": "WorkspaceLintRequest",
+                "lint": "WorkspaceLintRequest",
+                "ripgrep": "WorkspaceSearchRequest",
+                "grep": "WorkspaceSearchRequest",
+                "search": "WorkspaceSearchRequest",
+                "fd": "WorkspaceSearchRequest",
+                "shell": "WorkspaceShellRequest",
+                "terminal": "WorkspaceShellRequest",
+                "command": "WorkspaceShellRequest",
+                "exec": "WorkspaceShellRequest",
+                "run": "WorkspaceShellRequest"
+            }
+            if action in action_map_aliases:
+                action = action_map_aliases[action]
+
+            action_map = {
+                "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
+                "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
+                "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
+                "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
+                "climaterequest": (EXECUTION_SVC, "/execute/climate"),
+                "securityrequest": (EXECUTION_SVC, "/execute/security"),
+                "announcementrequest": (EXECUTION_SVC, "/execute/announce"),
+                "haservicerequest": (EXECUTION_SVC, "/execute/ha_service"),
+                "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
+                "noterequest": (EXECUTION_SVC, "/execute/note"),
+                "timerrequest": (EXECUTION_SVC, "/execute/timer"),
+                "talkrequest": (EXECUTION_SVC, "/execute/talk"),
+                "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
+                "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
+                "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
+                "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
+                "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
+                "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
+                "volumeinventoryrequest": (EXECUTION_SVC, "/execute/volumes"),
+                "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
+                "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
+                "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
+                "workspacelintrequest": (EXECUTION_SVC, "/execute/workspace_lint"),
+                "workspacesearchrequest": (EXECUTION_SVC, "/execute/workspace_search"),
+                "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
+                "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
+                "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
+                "workspacebootstraprequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/bootstrap"),
+                "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
+                "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
+                "storageindexrequest": (STORAGE_SVC, "/index/full"),
+            }
+
+            lookup_action = action.lower().strip() if action else ""
+
+            if lookup_action in action_map:
+                svc_base, endpoint = action_map[lookup_action]
+                payload["user_context"] = {
+                    "user": creds.user,
+                    "is_admin": creds.is_admin,
+                    "ha_url": creds.ha_url,
+                    "ha_token": creds.ha_token
+                }
+
+                if action.lower() == "storageindexrequest":
+                    # Specialized payload for storage indexing
+                    payload = {
+                        "provider": {
+                            "kind": "nextcloud",
+                            "settings": {
+                                "url": creds.nextcloud_url,
+                                "username": creds.nextcloud_user,
+                                "password": creds.nextcloud_pass
+                            }
+                        },
+                        "path": payload.get("path", "/"),
+                        "recursive": True
+                    }
+
+                log.info(f"[AgentLoop] Triggering {action} via {svc_base}{endpoint} (iter {agent_iter + 1})")
+                exec_resp = await get_http_client().post(
+                    f"{svc_base}{endpoint}",
+                    json=payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=120.0
+                )
+
+                exec_msg = ""
+                if exec_resp.status_code == 200:
+                    exec_data = exec_resp.json()
+                    exec_msg = exec_data.get("message", "Action completed.")
+                    detail = exec_data.get("detail")
+                    if detail:
+                        if isinstance(detail, dict):
+                            if "content" in detail:
+                                detail_txt = str(detail["content"])
+                            elif "logs" in detail:
+                                detail_txt = str(detail["logs"])
+                            else:
+                                detail_txt = str(detail)
+                        else:
+                            detail_txt = str(detail)
+                        exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
+                else:
+                    try:
+                        err_detail = exec_resp.json().get("detail", exec_resp.text)
+                    except:
+                        err_detail = exec_resp.text
+                    exec_msg = f"Failed: {err_detail}"
+
+                log.info(f"[AgentLoop] Tool result (iter {agent_iter + 1}): {exec_msg[:200]}...")
+                agent_messages.append({"role": "assistant", "content": ans})
+                agent_messages.append({
+                    "role": "user",
+                    "content": f"[TOOL RESULT for {action}]: {exec_msg[:8000]}\n\nContinue with your plan."
+                })
+                continue
+            else:
+                log.warning(f"[AgentLoop] Unknown action '{action}' — breaking loop")
+                break
+
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            log.error(f"[AgentLoop] Tool execution failed: {e}\n{tb}")
+            agent_messages.append({"role": "assistant", "content": ans})
+            agent_messages.append({
+                "role": "user",
+                "content": f"[FATAL ERROR IN TOOL EXECUTION]: {e}\n\nTraceback:\n{tb}\n\nPlease analyze this failure, adjust your approach or parameters, and continue the mission."
+            })
+            continue
+
+    return _make_ollama_response(ans, selected_model, "autonomous_mission")
+
 
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
@@ -1478,7 +2015,6 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             if is_openai: return _make_openai_response(ans, selected_model, intent)
             return _make_ollama_response(ans, selected_model, intent)
 
-    # 4. Slow Path Execution (FIFO Queue Redirect)
     # Pack full context for the worker
     default_sys = LIBRARIAN_SYSTEM_INSTRUCTION if "librarian" in selected_model else CODE_HELPER_SYSTEM_INSTRUCTION
     job_payload = {
