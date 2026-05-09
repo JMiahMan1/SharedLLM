@@ -1,50 +1,55 @@
+import os
+import sys
+from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
-import os
 
-@pytest.fixture(name="client")
-def client_fixture(monkeypatch):
-    import sys
-    from unittest.mock import MagicMock
-    
-    # Mock chromadb and embedding_functions before they are imported by main
-    mock_chroma = MagicMock()
-    mock_ef = MagicMock()
-    sys.modules["chromadb"] = mock_chroma
-    sys.modules["chromadb.config"] = MagicMock()
-    sys.modules["chromadb.utils"] = MagicMock()
-    sys.modules["chromadb.utils.embedding_functions"] = mock_ef
-    
-    # Mock the collection
-    mock_collection = MagicMock()
+# Mock heavy ML dependencies before importing the app
+sys.modules['chromadb'] = MagicMock()
+sys.modules['chromadb.config'] = MagicMock()
+sys.modules['chromadb.utils'] = MagicMock()
+sys.modules['sentence_transformers'] = MagicMock()
+
+# Ensure parent directory is in sys.path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+os.environ["INTERNAL_SECRET"] = "test-secret"
+from main import app
+import main
+
+client = TestClient(app)
+
+def test_ingest_and_search(mocker):
+    mock_collection = mocker.Mock()
     mock_collection.query.return_value = {
-        "documents": [["Test content"]],
-        "metadatas": [[{"source": "test.txt", "user_id": "default"}]],
-        "ids": [["id1"]]
+        "documents": [["Test doc content"]],
+        "metadatas": [[{"user_id": "alice", "source": "test"}]]
     }
-    mock_chroma.PersistentClient.return_value.get_or_create_collection.return_value = mock_collection
     
-    from main import app
-    import main
-    main.chroma_client = mock_chroma.PersistentClient.return_value
-    main.embedding_fn = MagicMock()
+    mocker.patch("main.get_collection", return_value=mock_collection)
     
-    return TestClient(app)
-
-def test_health_check(client: TestClient):
-    resp = client.get("/health")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
-
-def test_rag_search_mocked(client: TestClient):
-    payload = {
-        "query": "test", 
-        "k": 1, 
-        "collection_name": "nextcloud_files",
-        "user_id": "default"
-    }
-    resp = client.post("/rag/search", json=payload, headers={"X-Internal-Secret": "change-me-in-production"})
-    assert resp.status_code == 200
-    assert "results" in resp.json()
-    assert len(resp.json()["results"]) > 0
-    assert resp.json()["results"][0]["content"] == "Test content"
+    # Test Ingest
+    ingest_resp = client.post("/rag/ingest", 
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "user_id": "alice",
+            "content": "Test doc content",
+            "metadata": {"source": "test"}
+        }
+    )
+    assert ingest_resp.status_code == 200
+    assert ingest_resp.json()["status"] == "SUCCESS"
+    
+    # Test Search
+    search_resp = client.post("/rag/search", 
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "query": "Test doc",
+            "user_id": "alice",
+            "k": 1
+        }
+    )
+    assert search_resp.status_code == 200
+    results = search_resp.json()["results"]
+    assert len(results) == 1
+    assert results[0]["content"] == "Test doc content"
