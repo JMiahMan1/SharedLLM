@@ -41,10 +41,13 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     is_autonomous = any(k in query.lower() for k in autonomy_signals)
     
     # 4. Final Inference / AgentLoop
+    full_system = job_payload.get("system", "")
     if is_autonomous:
-        from services.gateway.main import AgentLoop # We might need to move AgentLoop too
-        # For Phase 1, we'll just do a single-turn inference if AgentLoop is not easily moved
-        ans = await _single_turn_inference(query, model, rag_context, short_term, chunk_callback)
+        try:
+            from .agent_loop import AgentLoop
+        except (ImportError, ValueError):
+            from agent_loop import AgentLoop
+        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds)
     else:
         ans = await _single_turn_inference(query, model, rag_context, short_term, chunk_callback)
         
