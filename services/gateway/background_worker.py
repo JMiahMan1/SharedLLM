@@ -92,7 +92,7 @@ class RavenWorker:
                 async def chunk_callback(chunk: str):
                     await self.job_queue.push_chunk(job_id, chunk)
                 
-                ans = await process_full_orchestration(job, chunk_callback=chunk_callback)
+                ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
                 log.info(f"Inference Lock RELEASED for job {job_id}")
 
             # 3. Tool Extraction & Execution (Future Phases will expand this)

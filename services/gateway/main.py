@@ -2016,9 +2016,11 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     # 4. Slow Path Execution (FIFO Queue Redirect)
     # Pack full context for the worker
+    default_sys = LIBRARIAN_SYSTEM_INSTRUCTION if "librarian" in selected_model else CODE_HELPER_SYSTEM_INSTRUCTION
     job_payload = {
         "model": selected_model,
         "query": query,
+        "system": body.get("system") or default_sys,
         "creds": creds.model_dump(),
         "client": body.get("client"),
         "source": body.get("source"),
