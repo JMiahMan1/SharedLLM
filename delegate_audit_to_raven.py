@@ -41,7 +41,7 @@ async def delegate_to_raven():
     
     payload = {
         "query": MISSION,
-        "stream": True, # We want to see Raven's progress
+        "stream": False, 
         "rag_user": "default"
     }
     
