@@ -10,7 +10,7 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request, Depends
+from fastapi import FastAPI, Header, HTTPException, Request, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
@@ -1658,25 +1658,41 @@ async def git_pull_webhook(
                 log.warning(f"Webhook pull attempted for workspace {workspace_id} but auto_pull_enabled is False")
                 raise HTTPException(status_code=403, detail="Webhook pulling is disabled for this workspace")
 
-            log.info(f"Webhook git pull: resolving path for {match.local_path} with root {get_workspace_root()}")
             resolved_path = resolve_safe_path(get_workspace_root(), str(match.local_path))
             workspace_path = Path(resolved_path)
+            workspace_path.mkdir(parents=True, exist_ok=True)
             
             remote_name = (match.git_remote or "origin").strip()
             default_branch = (match.default_branch or "main").strip()
+            
+            # Check if it's a git repo
+            if not (workspace_path / ".git").is_dir():
+                log.info(f"Workspace {workspace_id} path {workspace_path} exists but is not a git repo. Attempting clone...")
+                repo_url = match.repo_url
+                if not repo_url:
+                     raise HTTPException(status_code=400, detail="Cannot clone workspace: repo_url is missing")
+                
+                # Use the HTTPS redirector for the clone too if needed
+                clone_url = _git_webhook_pull_remote(repo_url, remote_name)
+                args = ["git", "clone", "-b", default_branch, clone_url, "."]
+                result = _run_command(workspace_path, args)
+                if result["returncode"] != 0:
+                    raise HTTPException(status_code=500, detail=f"Initial clone failed: {result['stderr']}")
+                
+                return {"status": "SUCCESS", "message": f"Successfully cloned and initialized {workspace_id}", "branch": default_branch}
+
             log.info(f"Webhook git pull: resolved workspace_path={workspace_path}, remote_name={remote_name}")
             remote_url = _git_remote_url(workspace_path, remote_name)
         
         log.info(f"Webhook triggered git pull for workspace {workspace_id} on {remote_name}/{default_branch}")
         
-        # Note: We don't have identity context here, so this only works if:
-        # 1. The remote is public
-        # 2. Or the server has SSH keys configured globally
-        # 3. Or we use the credentials of a system user
-        
         args = ["git", "pull", _git_webhook_pull_remote(remote_url, remote_name), default_branch]
         result = _run_command(workspace_path, args)
         
+        if result["returncode"] == 0 and match.auto_backup_enabled and match.nextcloud_path:
+            log.info(f"Triggering automatic Nextcloud backup for {workspace_id} to {match.nextcloud_path}")
+            background_tasks.add_task(_trigger_nextcloud_sync, workspace_id, match.owner_user or "default", str(workspace_path), match.nextcloud_path)
+
         if result["returncode"] != 0:
             log.error(f"Git pull failed: {result['stderr']}")
             return {
@@ -1695,3 +1711,58 @@ async def git_pull_webhook(
     except Exception as e:
         log.error(f"Webhook error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path: str, remote_path: str):
+    """
+    Background task to mirror a local workspace directory to Nextcloud.
+    Resolves credentials via Identity service and calls Storage mirror endpoint.
+    """
+    log.info(f"Starting Nextcloud sync for {workspace_id} (owner: {owner_user})")
+    try:
+        # 1. Resolve credentials from Identity
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC_URL}/api/resolve",
+                json={"rag_user": owner_user},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code != 200:
+                log.error(f"Failed to resolve identity for {owner_user}: {resp.text}")
+                return
+            
+            creds = resp.json()
+            nc_url = creds.get("nextcloud_url")
+            nc_user = creds.get("nextcloud_user")
+            nc_pass = creds.get("nextcloud_pass")
+            
+            if not all([nc_url, nc_user, nc_pass]):
+                log.warning(f"Nextcloud credentials missing for {owner_user}. Skipping sync.")
+                return
+
+            # 2. Trigger mirror via Storage Service
+            mirror_req = {
+                "provider": {
+                    "kind": "nextcloud",
+                    "settings": {
+                        "url": nc_url,
+                        "username": nc_user,
+                        "password": nc_pass
+                    }
+                },
+                "remote_path": remote_path,
+                "local_path": local_path
+            }
+            
+            resp = await client.post(
+                f"{STORAGE_SVC_URL}/providers/mirror",
+                json=mirror_req,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                log.info(f"Successfully triggered Nextcloud mirror for {workspace_id}")
+            else:
+                log.error(f"Failed to trigger Nextcloud mirror: {resp.text}")
+
+    except Exception as e:
+        log.error(f"Error in _trigger_nextcloud_sync: {e}")
