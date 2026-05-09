@@ -162,24 +162,23 @@ try:
     from .intent_engine import engine
     from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
     from .prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
-except (ImportError, ValueError):
-    try:
-      from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
-      from services.gateway.intent_engine import engine
-      from services.gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-try:
     from .messaging import InferenceJobQueue, JobStatus
 except (ImportError, ValueError):
-    from messaging import InferenceJobQueue, JobStatus
+    try:
+        from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
+        from services.gateway.intent_engine import engine
+        from services.gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
+        from services.gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+        from services.gateway.messaging import InferenceJobQueue, JobStatus
+    except ImportError:
+        from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
+        from intent_engine import engine
+        from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
+        from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+        from messaging import InferenceJobQueue, JobStatus
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 job_queue = InferenceJobQueue(REDIS_URL)
-      from services.gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
-    except ImportError:
-      from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
-      from intent_engine import engine
-      from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-      from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 
 # --- Ouroboros Worker ---
 try:
