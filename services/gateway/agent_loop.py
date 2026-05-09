@@ -167,10 +167,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 })
             ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
             
-            async with INFERENCE_LOCK:
-                log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
-                resp = await call_ollama(ollama_payload, use_chat=True, timeout=300.0)
-                log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
+            log.info(f"[Strategy 8] Executing inference for {selected_model} (Iter {agent_iter + 1})")
+            resp = await call_ollama(ollama_payload, use_chat=True, timeout=300.0)
                 
             heartbeat_stop.set()
             await hb_task
