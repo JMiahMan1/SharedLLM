@@ -152,7 +152,7 @@ services:
       - TZ=America/Phoenix
     volumes:
       - ./:/workspace/SharedLLM:ro
-      - ./services/storage/indexer.py:/app/indexer.py:ro
+      - ./services/storage:/app
       - /etc/localtime:/etc/localtime:ro
 
   workspace_runtime:
