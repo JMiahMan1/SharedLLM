@@ -1248,12 +1248,16 @@ async def fetch_ha_entities(creds: dict) -> list:
             entities = data.get("entities", []) if isinstance(data, dict) else []
             if entities:
                 user_id = creds.get("user", "default")
+                # Update IntentEngine cache for fuzzy matching
+                engine.update_entity_cache(entities)
+                
                 # 1. Sync to RAG for discovery
                 asyncio.create_task(get_http_client().post(
                     f"{RAG_SVC}/rag/sync/ha",
                     json={"entities": entities, "user_id": user_id},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 ))
+
                 # 2. Auto-assign to user in Identity for RBAC bypass/mapping
                 async def auto_assign():
                     try:
@@ -1457,18 +1461,20 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     is_fast_path = engine.is_fast_path(intent, confidence)
     
     if is_fast_path:
-        # Safety: Only use FastPath for turn_on/turn_off if the query is very simple (2 words max)
-        # This prevents "Turn off the piano lamp" from being executed with entity_id="auto"
-        query_words = (query or "").split()
-        if intent in ["turn_on", "turn_off"] and len(query_words) > 2:
-            log.info(f"[FastPath] BYPASSED for {intent}: Query too complex for auto-execution ('{query}')")
+        # Attempt entity extraction/resolution for control intents
+        resolved_entity = engine.extract_entity(query, intent)
+        
+        # If the intent requires an entity (light, media) but we couldn't resolve one,
+        # fallback to the slow-path (LLM) to avoid 'light.auto' errors.
+        if intent in ["turn_on", "turn_off", "play_media"] and not resolved_entity:
+            log.info(f"[FastPath] BYPASSED for {intent}: Could not resolve entity from '{query}'")
             is_fast_path = False
         else:
-            log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence}")
+            log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence} entity='{resolved_entity}'")
+
 
     if is_fast_path:
         # Execute immediate tool for simple intents
-
         endpoint_map = {
             "turn_on": "/execute/light",
             "turn_off": "/execute/light",
@@ -1482,8 +1488,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             exec_payload = {
                 "user_context": creds.model_dump(),
                 "action": "turn_on" if intent == "turn_on" else ("turn_off" if intent == "turn_off" else "play"),
-                "entity_id": "auto"
+                "entity_id": resolved_entity or "auto"
             }
+
             # Add specialized payload for storage/ha
             if intent == "index_storage":
                 exec_payload = {
