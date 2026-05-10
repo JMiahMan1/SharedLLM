@@ -167,12 +167,21 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         safe_cwd = req.cwd if hasattr(req, 'cwd') and req.cwd else "."
         abs_cwd = resolve_safe_path(safe_cwd)
         
-        log.info(f"Executing shell command: {req.command} in {abs_cwd}")
+        # Determine the final command string
+        final_cmd = ""
+        if req.commands:
+            final_cmd = " && ".join(req.commands)
+        elif req.command:
+            final_cmd = req.command
+        else:
+            return _fail("Neither 'command' nor 'commands' provided")
+
+        log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
         # Enforce a max timeout of 300s
         safe_timeout = min(req.timeout, 300)
         
         proc = subprocess.run(
-            req.command,
+            final_cmd,
             shell=True,
             cwd=abs_cwd,
             capture_output=True,
