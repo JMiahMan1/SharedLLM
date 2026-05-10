@@ -51,7 +51,7 @@ async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
 
 async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
     """
-    Handles the full Raven orchestration pipeline:
+    Handles the full Jarvis orchestration pipeline:
     Decompose -> Memory -> RAG -> Inference -> Tools -> Update.
     """
     query = job_payload["query"]
@@ -68,6 +68,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     rag_context = await _fetch_rag_context(query, user_id)
     
     # 3. Autonomous Detection (Raven/Coding/Repair ONLY)
+    # Raven runs in Workspaces and handles long-running or coding tasks.
     # Home Automation should NOT be treated as autonomous (no long-running loops)
     autonomy_signals = ["raven", "audit", "repair", "fix", "deploy", "bootstrap", "coding", "develop"]
     is_autonomous = any(k in query.lower() for k in autonomy_signals)
@@ -79,9 +80,10 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
             from .agent_loop import AgentLoop
         except (ImportError, ValueError):
             from agent_loop import AgentLoop
+        # Raven handles autonomous loops
         ans = await AgentLoop(query, model, full_system, short_term, user_id, creds)
     else:
-        # Standard Slow Path (Single turn tool call allowed)
+        # Librarian handles standard single-turn inference
         ans = await _single_turn_inference(query, model, rag_context, short_term, creds, chunk_callback)
         
     return ans
@@ -109,13 +111,13 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
     settings = await get_llm_settings()
     provider = await get_provider(settings)
 
-    system = f"You are the SharedLLM Assistant. Context:\n{rag_context}\n\nIf the user wants to control a device, output a JSON block like: ```json\n{{\"action\": \"LightControlRequest\", \"payload\": {{\"entity_id\": \"light.xyz\", \"action\": \"turn_on\"}}}}\n```"
+    system = f"You are the SharedLLM Assistant. Context:\n{rag_context}\n\nIf the user wants to control a device or perform a task, output a JSON block like: ```json\n{{\"action\": \"LightControlRequest\", \"payload\": {{\"entity_id\": \"light.xyz\", \"action\": \"turn_on\"}}}}\n```. If you execute a tool, do NOT include any other text in your response."
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
     ans = await provider.generate(model, messages, chunk_callback=chunk_callback)
 
-    # Tool Extraction (Simplified check for standard LLM tool use)
+    # Tool Extraction
     try:
         from .agent_loop import extract_action_json
     except (ImportError, ValueError):
@@ -123,23 +125,50 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
 
     tool_data = extract_action_json(ans)
     if tool_data:
-        log.info(f"[_single_turn_inference] Tool call detected: {tool_data.get('action')}")
-        # Execute tool call (reuse AgentLoop logic if possible, or simple dispatch)
-        # For now, let's just return a placeholder or do a simple dispatch for HA
-        action = tool_data.get("action", "").lower()
-        if "light" in action or "media" in action:
-             # Simple dispatch
-             try:
-                 endpoint = "/execute/light" if "light" in action else "/execute/media/play"
-                 payload = tool_data.get("payload", {})
-                 payload["user_context"] = creds.model_dump()
-                 async with httpx.AsyncClient(timeout=30.0) as client:
-                     resp = await client.post(f"{EXECUTION_SVC}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                     if resp.status_code == 200:
-                         return resp.json().get("message", "Action completed.")
-             except Exception as e:
-                 log.error(f"Single-turn tool execution failed: {e}")
-                 return f"I tried to execute the command but encountered an error: {e}"
+        action = tool_data.get("action", "").lower().strip()
+        log.info(f"[_single_turn_inference] Tool call detected: {action}")
+        
+        # Comprehensive Tool Map (sync with agent_loop.py)
+        action_map = {
+            "lightcontrolrequest": "/execute/light",
+            "mediaplayrequest": "/execute/media/play",
+            "mediatransportrequest": "/execute/media/transport",
+            "tvcastrequest": "/execute/tv_cast",
+            "climaterequest": "/execute/climate",
+            "securityrequest": "/execute/security",
+            "announcementrequest": "/execute/announce",
+            "haservicerequest": "/execute/ha_service",
+            "calendarrequest": "/execute/calendar",
+            "noterequest": "/execute/note",
+            "timerrequest": "/execute/timer",
+            "talkrequest": "/execute/talk",
+            "websearchrequest": "/execute/web_search",
+            "webreadrequest": "/execute/web_read",
+            "discoverysyncrequest": "/execute/discovery_sync",
+            "storageindexrequest": "/index/full",
+        }
+
+        if action in action_map:
+            endpoint = action_map[action]
+            svc_base = STORAGE_SVC if "storage" in action or "index" in action else EXECUTION_SVC
+            
+            try:
+                payload = tool_data.get("payload", tool_data)
+                payload["user_context"] = creds.model_dump()
+                
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                    if resp.status_code == 200:
+                        return resp.json().get("message", "Action completed successfully.")
+                    else:
+                        return f"Tool execution failed ({resp.status_code}): {resp.text}"
+            except Exception as e:
+                log.error(f"Single-turn tool execution error: {e}")
+                return f"I encountered an error while executing the tool: {e}"
+        else:
+            log.warning(f"[_single_turn_inference] Unsupported tool for single-turn: {action}")
+            return f"I found a tool call for '{action}', but it is not supported in the standard path. Please ask Raven to perform this task."
 
     return ans
+
 

@@ -1,8 +1,8 @@
 # services/gateway/background_worker.py
 """
-Raven Background Worker — The "heartbeat" and "brain" of the autonomous system.
+Jarvis Background Worker — The "heartbeat" and "brain" of the autonomous Raven agent.
 1. Health Monitoring: Periodically scrapes logs and triggers self-repair.
-2. Singleton Inference: Processes the FIFO job queue for LLM tasks.
+2. Singleton Inference: Processes the FIFO job queue for Tier 2 (Librarian) and Tier 3 (Raven) tasks.
 """
 import asyncio
 import logging
