@@ -1466,7 +1466,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         else:
             log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence}")
 
+    if is_fast_path:
         # Execute immediate tool for simple intents
+
         endpoint_map = {
             "turn_on": "/execute/light",
             "turn_off": "/execute/light",
