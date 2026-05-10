@@ -61,18 +61,18 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     
     log.info(f"[Orchestrator] Starting orchestration for query: {query[:50]}...")
     
-    # 1. Retrieve Memory (Simplified for Phase 1 - should use helpers)
-    # In a real impl, we'd call the history service or redis directly
+    # 1. Retrieve Memory
     short_term = [] # Placeholder
     
     # 2. Context Injection (RAG)
     rag_context = await _fetch_rag_context(query, user_id)
     
-    # 3. Autonomous Detection
-    autonomy_signals = ["raven", "perform", "audit", "index", "reindex", "scan", "repair", "fix", "check", "synchronize", "sync"]
+    # 3. Autonomous Detection (Raven/Coding/Repair ONLY)
+    # Home Automation should NOT be treated as autonomous (no long-running loops)
+    autonomy_signals = ["raven", "audit", "repair", "fix", "deploy", "bootstrap", "coding", "develop"]
     is_autonomous = any(k in query.lower() for k in autonomy_signals)
     
-    # 4. Final Inference / AgentLoop
+    # 4. Final Inference
     full_system = job_payload.get("system", "")
     if is_autonomous:
         try:
@@ -81,7 +81,8 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
             from agent_loop import AgentLoop
         ans = await AgentLoop(query, model, full_system, short_term, user_id, creds)
     else:
-        ans = await _single_turn_inference(query, model, rag_context, short_term, chunk_callback)
+        # Standard Slow Path (Single turn tool call allowed)
+        ans = await _single_turn_inference(query, model, rag_context, short_term, creds, chunk_callback)
         
     return ans
 
@@ -104,12 +105,41 @@ async def _fetch_rag_context(query: str, user_id: str) -> str:
         log.error(f"RAG search failed: {e}")
     return rag_context
 
-async def _single_turn_inference(query: str, model: str, rag_context: str, history: List[Dict[str, str]], chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
+async def _single_turn_inference(query: str, model: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
     settings = await get_llm_settings()
     provider = await get_provider(settings)
 
-    system = f"You are Raven, an autonomous AI OS. Context:\n{rag_context}"
+    system = f"You are the SharedLLM Assistant. Context:\n{rag_context}\n\nIf the user wants to control a device, output a JSON block like: ```json\n{{\"action\": \"LightControlRequest\", \"payload\": {{\"entity_id\": \"light.xyz\", \"action\": \"turn_on\"}}}}\n```"
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
 
-    log.info(f"[_single_turn_inference] Using provider {type(provider).__name__} for model {model}")
-    return await provider.generate(model, messages, chunk_callback=chunk_callback)
+    log.info(f"[_single_turn_inference] Executing for model {model}")
+    ans = await provider.generate(model, messages, chunk_callback=chunk_callback)
+
+    # Tool Extraction (Simplified check for standard LLM tool use)
+    try:
+        from .agent_loop import extract_action_json
+    except (ImportError, ValueError):
+        from agent_loop import extract_action_json
+
+    tool_data = extract_action_json(ans)
+    if tool_data:
+        log.info(f"[_single_turn_inference] Tool call detected: {tool_data.get('action')}")
+        # Execute tool call (reuse AgentLoop logic if possible, or simple dispatch)
+        # For now, let's just return a placeholder or do a simple dispatch for HA
+        action = tool_data.get("action", "").lower()
+        if "light" in action or "media" in action:
+             # Simple dispatch
+             try:
+                 endpoint = "/execute/light" if "light" in action else "/execute/media/play"
+                 payload = tool_data.get("payload", {})
+                 payload["user_context"] = creds.model_dump()
+                 async with httpx.AsyncClient(timeout=30.0) as client:
+                     resp = await client.post(f"{EXECUTION_SVC}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                     if resp.status_code == 200:
+                         return resp.json().get("message", "Action completed.")
+             except Exception as e:
+                 log.error(f"Single-turn tool execution failed: {e}")
+                 return f"I tried to execute the command but encountered an error: {e}"
+
+    return ans
+
