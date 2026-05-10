@@ -27,6 +27,7 @@ import type {
 } from '../services/api';
 import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
+import LLMSettings from '../components/settings/LLMSettings';
 
 type UserFormState = {
   username: string;
@@ -516,46 +517,9 @@ const Admin = () => {
         </section>
 
         <section className="space-y-8 min-w-0 overflow-hidden">
-          <div className="glass-panel p-6">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h3 className="flex items-center gap-3 text-xl font-bold text-white">
-                  <Cpu size={20} className="text-purple-300" />
-                  Model Configuration
-                </h3>
-                <p className="mt-1 text-sm text-slate-400">Select active models for different system roles.</p>
-              </div>
-              <HelpTooltip docName="architecture.md" sectionTitle="Dynamic Model Routing" label="Models" />
-            </div>
-
-            <div className="space-y-6">
-              {[
-                { label: 'Assistant Model', key: 'assistant_model' as const, desc: 'Primary conversational model for general queries.' },
-                { label: 'Coding Model', key: 'coding_model' as const, desc: 'Specialized model for software engineering and bug fixing.' },
-                { label: 'Librarian Model', key: 'librarian_model' as const, desc: 'Model for research, summarization, and file discovery.' }
-              ].map((m) => (
-                <div key={m.key} className="glass-card p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-widest text-slate-500">{m.label}</p>
-                      <p className="text-[10px] text-slate-600 mt-0.5">{m.desc}</p>
-                    </div>
-                  </div>
-                  <select
-                    value={modelConfig?.[m.key] || ''}
-                    onChange={(e) => updateConfigMutation.mutate({ [m.key]: e.target.value })}
-                    disabled={updateConfigMutation.isPending}
-                    className="glass-input w-full bg-black/30"
-                  >
-                    <option value="" disabled>Select a model</option>
-                    {availableModels.map((model) => (
-                      <option key={model} value={model}>{model}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </div>
+      <section className="glass-panel p-8 border-purple-500/20">
+        <LLMSettings />
+      </section>
 
           <div className="glass-panel p-6">
             <div className="mb-6 flex items-center justify-between">
