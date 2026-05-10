@@ -118,6 +118,12 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
         log.info(f"Running search: {' '.join(cmd)}")
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
+        # Fallback to grep if rg not found
+        if proc.returncode == 127:
+            log.info("ripgrep (rg) not found, falling back to grep")
+            cmd = ["grep", "-rnI", "-e", req.query, abs_search_path]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
         # Ripgrep returns 1 if no matches found, which isn't a failure in our case
         if proc.returncode not in (0, 1):
             return _fail(f"Search failed: {proc.stderr}")
@@ -126,6 +132,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
         import json
         for line in proc.stdout.splitlines():
             try:
+                # Try parsing as JSON (rg output), otherwise treat as raw grep line
                 data = json.loads(line)
                 if data.get("type") == "match":
                     match_data = data.get("data", {})
@@ -135,7 +142,14 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                         "text": match_data.get("lines", {}).get("text", "").strip()
                     })
             except:
-                continue
+                # Basic grep fallback parsing
+                parts = line.split(":", 2)
+                if len(parts) >= 3:
+                    matches.append({
+                        "path": os.path.relpath(parts[0], WORKSPACE_ROOT),
+                        "line": parts[1],
+                        "text": parts[2].strip()
+                    })
                 
         if not matches:
             return _ok(f"No matches found for '{req.query}' in {req.path}", {"matches": []})
@@ -150,7 +164,8 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
     import subprocess
     try:
         # Resolve safe CWD
-        abs_cwd = resolve_safe_path(req.cwd)
+        safe_cwd = req.cwd if hasattr(req, 'cwd') and req.cwd else "."
+        abs_cwd = resolve_safe_path(safe_cwd)
         
         log.info(f"Executing shell command: {req.command} in {abs_cwd}")
         # Enforce a max timeout of 300s
