@@ -295,6 +295,9 @@ def _workspace_access_policy(entry: dict[str, Any]) -> str:
 
 
 def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
+    if ref.user_context:
+        return ref.user_context
+    
     payload = {}
     if ref.rag_user:
         payload["rag_user"] = ref.rag_user
