@@ -55,8 +55,8 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
         # Chunked Reading (Windowing)
         start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
         
-        # Hardware Protection removed to allow full file reads for autonomous agents
-        safe_limit = req.limit_lines if req.limit_lines and req.limit_lines > 0 else len(lines)
+        # Hardware Protection for 8GB VRAM constraints
+        safe_limit = min(req.limit_lines if req.limit_lines and req.limit_lines > 0 else 300, 300)
         end = start + safe_limit
         
         chunk = lines[start:end]
@@ -195,41 +195,37 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
         failed_chunks = []
         
         for chunk in req.chunks:
-            # Normalize line endings and trailing whitespace to prevent brittle patch failures
-            old_normalized = "\n".join([line.rstrip() for line in chunk.old_text.splitlines()])
-            content_normalized = "\n".join([line.rstrip() for line in content.splitlines()])
+            lines = content.splitlines(keepends=True)
+            old_lines = chunk.old_text.splitlines(keepends=True)
             
-            if old_normalized in content_normalized:
-                # Standard replace
-                content = content.replace(chunk.old_text, chunk.new_text, 1) 
+            # Normalize for matching
+            old_norm = [l.strip() for l in old_lines if l.strip()]
+            
+            best_match = None
+            highest_ratio = 0.0
+            
+            # Scan file for best matching block of code
+            for i in range(len(lines) - len(old_norm) + 1):
+                candidate = [l.strip() for l in lines[i:i+len(old_lines)] if l.strip()]
+                ratio = difflib.SequenceMatcher(None, old_norm, candidate[:len(old_norm)]).ratio()
+                
+                if ratio > highest_ratio:
+                    highest_ratio = ratio
+                    best_match = (i, i + len(old_lines))
+
+            if highest_ratio > 0.85 and best_match: 
+                start, end = best_match
+                log.info(f"Fuzzy patch match found with ratio {highest_ratio:.2f} at lines {start}-{end}")
+                # Reconstruct file with new chunk swapped in
+                new_lines = lines[:start] + chunk.new_text.splitlines(keepends=True)
+                if not new_lines[-1].endswith("\n"):
+                    new_lines[-1] += "\n"
+                new_lines += lines[end:]
+                
+                content = "".join(new_lines)
                 applied_count += 1
             else:
-                # Fuzzy matching fallback using difflib (kept from previous iteration for extra robustness)
-                import difflib
-                lines = content.splitlines(keepends=True)
-                old_lines = chunk.old_text.splitlines(keepends=True)
-                
-                # Find best matching block
-                matcher = difflib.SequenceMatcher(None, old_lines, lines)
-                best_match = None
-                highest_ratio = 0.0
-                
-                # We look for a block of the same length roughly
-                for i in range(len(lines) - len(old_lines) + 1):
-                    candidate = lines[i:i+len(old_lines)]
-                    ratio = difflib.SequenceMatcher(None, old_lines, candidate).ratio()
-                    if ratio > highest_ratio:
-                        highest_ratio = ratio
-                        best_match = (i, i+len(old_lines))
-                
-                if highest_ratio > 0.85: # Threshold for "close enough"
-                    start, end = best_match
-                    log.info(f"Fuzzy patch match found with ratio {highest_ratio:.2f} at lines {start}-{end}")
-                    new_lines = lines[:start] + chunk.new_text.splitlines(keepends=True) + lines[end:]
-                    content = "".join(new_lines)
-                    applied_count += 1
-                else:
-                    failed_chunks.append(chunk.old_text)
+                failed_chunks.append(chunk.old_text)
         
         if applied_count == 0:
             return _fail(f"Patch failed: No chunks matched the target file {req.path}")

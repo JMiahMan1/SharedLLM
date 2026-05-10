@@ -132,6 +132,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     exec_data = None
     ans = ""
     loop_start = asyncio.get_event_loop().time()
+    
+    # --- VRAM-SAFE SCRATCHPAD ---
+    action_log = []
 
     for agent_iter in range(MAX_TOOL_ITERATIONS):
         iter_num = agent_iter + 1
@@ -159,12 +162,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ollama_payload["options"] = vram_params
             ollama_payload["messages"] = [
                 {"role": "system", "content": full_system},
-                {"role": "user", "content": f"MISSION LOCK: {query}"}
+                {"role": "user", "content": f"MISSION LOCK: {query}\n\nPAST ACTIONS SUMMARY:\n" + "\n".join(action_log)}
             ]
             if exec_data:
+                # Truncate detail to save VRAM if it is massive
+                safe_exec_data = exec_data.copy() if isinstance(exec_data, dict) else {"result": str(exec_data)}
+                if "detail" in safe_exec_data and isinstance(safe_exec_data["detail"], dict) and "content" in safe_exec_data["detail"]:
+                    if len(safe_exec_data["detail"]["content"]) > 1500:
+                        safe_exec_data["detail"]["content"] = safe_exec_data["detail"]["content"][:1500] + "\n...[TRUNCATED FOR VRAM]..."
+                        
                 ollama_payload["messages"].append({
                     "role": "user", 
-                    "content": f"LAST TOOL RESULT (Execution Status: SUCCESS):\n{json.dumps(exec_data) if isinstance(exec_data, dict) else str(exec_data)}"
+                    "content": f"LAST TOOL RESULT (Execution Status: SUCCESS):\n{json.dumps(safe_exec_data)}"
                 })
             ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
             
@@ -263,19 +272,22 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
                 
-                # Only inject user_context if it is NOT a workspace/dev tool
-                if not lookup_action.startswith("workspace") and "git" not in lookup_action:
-                    payload["user_context"] = {
-                        "user": creds.user,
-                        "is_admin": creds.is_admin,
-                        "ha_url": creds.ha_url,
-                        "ha_token": creds.ha_token
-                    }
+                # ALWAYS inject user_context. Pydantic schemas require it for validation.
+                payload["user_context"] = {
+                    "user": creds.user,
+                    "is_admin": creds.is_admin,
+                    "ha_url": creds.ha_url,
+                    "ha_token": creds.ha_token
+                }
 
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(payload)}")
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                     exec_data = resp.json()
+                    
+                    # --- ADD TO SCRATCHPAD ---
+                    short_msg = exec_data.get("message", "Success")
+                    action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
                     log.info(f"[AgentLoop] Tool response: {resp.status_code}")
             else:
                 log.warning(f"[AgentLoop] Unknown action: {action}")
