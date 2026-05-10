@@ -23,6 +23,9 @@ services:
       - 8001:8001
     env_file:
       - .env
+    extra_hosts:
+      - "ollama-server:192.168.2.114"
+      - "ai-server:192.168.2.205"
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
@@ -34,12 +37,11 @@ services:
       - ./.env:/app/.env.legacy:ro
       - /etc/localtime:/etc/localtime:ro
 
-  execution:
-    build: ./services/execution
-    container_name: sharedllm_execution
-    restart: unless-stopped
     env_file:
       - .env
+    extra_hosts:
+      - "ollama-server:192.168.2.114"
+      - "ai-server:192.168.2.205"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - REDIS_URL=redis://redis:6379/0
@@ -107,6 +109,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    extra_hosts:
+      - "ollama-server:192.168.2.114"
+      - "ai-server:192.168.2.205"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - IDENTITY_SVC_URL=http://identity:8001
