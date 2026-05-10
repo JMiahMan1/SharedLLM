@@ -80,7 +80,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "workspace_runtime_root", "value": "/workspace", "description": "Root folder where workspaces and files will be saved"},
     
     # --- LLM CONFIGURATION (UI MANAGED) ---
-    {"key": "llm_local_url", "value": "http://127.0.0.1:11434", "description": "Base URL for local inference (e.g., Ollama)"},
+    {"key": "llm_local_url", "value": "http://ollama-server:11434", "description": "Base URL for local inference (e.g., Ollama)"},
     {"key": "llm_local_max_ctx", "value": "4096", "description": "Maximum token context allowed for local 8GB VRAM constraint"},
     {"key": "llm_cloud_api_key", "value": "", "description": "API Key for cloud fallback (OpenRouter, OpenAI, etc.)"},
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
