@@ -14,6 +14,7 @@ try:
     )
     from .schemas import ResolvedCredentials
     from .messaging import INFERENCE_LOCK
+    from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
@@ -21,6 +22,7 @@ except (ImportError, ValueError):
     )
     from schemas import ResolvedCredentials
     from messaging import INFERENCE_LOCK
+    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 
 log = logging.getLogger("gateway.agent_loop")
 
@@ -94,7 +96,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         "top_p": 0.9,
         "repeat_penalty": 1.1
     }
-    
+
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{local_url.rstrip('/')}/api/ps")
@@ -106,64 +108,27 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
                     log.info(f"[AgentLoop] VRAM PRESSURE. Scaling context down to {safe_ctx}.")
     except Exception:
         pass
-        
+
     return params
 
-async def execute_inference(payload: dict, timeout: float = None) -> dict:
-    """Circuit breaker: Tries dynamic Local URL, falls back to dynamic Cloud URL."""
-    
-    settings = await get_dynamic_llm_settings()
-    
-    local_url = settings.get("llm_local_url", OLLAMA_URL)
-    cloud_key = settings.get("llm_cloud_api_key", "")
-    cloud_url = settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions")
-    cloud_model = settings.get("llm_cloud_fallback_model", "google/gemini-2.5-flash-8b")
-    
-    # 1. Try Local Execution
-    try:
-        log.info(f"[AgentLoop] Local inference via {local_url}...")
-        resp = await get_http_client().post(
-            f"{local_url.rstrip('/')}/api/chat",
-            json=payload,
-            timeout=timeout if timeout is not None else OLLAMA_TIMEOUT,
+
+async def get_provider(settings: dict) -> BaseLLMProvider:
+    """Instantiates the correct provider based on settings."""
+    active_provider = settings.get("active_llm_provider", "ollama")
+    if active_provider == "openrouter":
+        return OpenRouterProvider(
+            api_key=settings.get("llm_cloud_api_key", ""),
+            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions")
         )
-        if resp.status_code == 200:
-            return resp.json()
-        log.warning(f"[AgentLoop] Local returned {resp.status_code}. Tripping circuit breaker.")
-    except Exception as e:
-        log.warning(f"[AgentLoop] Local inference failed ({type(e).__name__}). Tripping circuit breaker.")
-
-    # 2. Failover to Cloud (OpenRouter / OpenAI format)
-    if not cloud_key:
-        raise Exception("Local inference failed and no cloud fallback key is configured in the Identity settings.")
-
-    log.info(f"[AgentLoop] Executing cloud fallback using: {cloud_model}")
-    
-    headers = {
-        "Authorization": f"Bearer {cloud_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/jmiahman1/sharedllm", 
-    }
-    
-    # Translate Ollama payload to OpenAI schema format
-    or_payload = {
-        "model": cloud_model,
-        "messages": payload.get("messages", []),
-        "temperature": payload.get("options", {}).get("temperature", 0.7)
-    }
-
-    resp = await get_http_client().post(
-        cloud_url, 
-        json=or_payload, 
-        headers=headers, 
-        timeout=timeout if timeout is not None else 60.0
-    )
-    
-    if resp.status_code == 200:
-        data = resp.json()
-        return {"message": data.get("choices", [{}])[0].get("message", {})}
     else:
-        raise Exception(f"Cloud fallback failed with status {resp.status_code}: {resp.text}")
+        return OllamaProvider(
+            base_url=settings.get("llm_local_url", OLLAMA_URL)
+        )
+
+async def execute_inference(provider: BaseLLMProvider, model: str, messages: list, options: dict) -> dict:
+    """Delegates inference to the specified provider."""
+    content = await provider.generate(model, messages, options=options)
+    return {"message": {"role": "assistant", "content": content}}
 
 _global_http_client: Optional[httpx.AsyncClient] = None
 
@@ -178,6 +143,26 @@ def get_http_client() -> httpx.AsyncClient:
 
 
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials) -> Any:
+    # 1. Fetch dynamic settings and resolve active provider/model
+    settings = await get_dynamic_llm_settings()
+    provider = await get_provider(settings)
+    active_provider_name = settings.get("active_llm_provider", "ollama")
+
+    # 2. Resolve Role-Based Model (Coder/Assistant) if selected_model is generic or "auto"
+    if selected_model in ["auto", "assistant", "coder"]:
+        if active_provider_name == "openrouter":
+            if "coder" in selected_model or "fix" in query.lower() or "repair" in query.lower():
+                selected_model = settings.get("cloud_coding_model", "anthropic/claude-3.5-sonnet")
+            else:
+                selected_model = settings.get("cloud_assistant_model", "google/gemini-2.0-flash-001")
+        else:
+            if "coder" in selected_model or "fix" in query.lower() or "repair" in query.lower():
+                selected_model = settings.get("ollama_coding_model", "qwen2.5-coder:7b")
+            else:
+                selected_model = settings.get("ollama_assistant_model", "qwen3.5:9b")
+
+    log.info(f"[AgentLoop] Active Provider: {active_provider_name} | Model: {selected_model}")
+
     ollama_payload = {
         "model": selected_model,
         "messages": [
@@ -245,8 +230,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ollama_payload["options"] = await get_vram_safe_params(selected_model, dynamic_settings)
             
             log.info(f"[Strategy 8] Executing inference for {selected_model} (Iter {agent_iter + 1})")
-            data = await execute_inference(ollama_payload, timeout=300.0)
-                
+            data = await execute_inference(
+                provider,
+                selected_model,
+                ollama_payload["messages"],
+                ollama_payload.get("options", {})
+            )
+
             heartbeat_stop.set()
             await hb_task
             ans = data.get("message", {}).get("content", "Error.")

@@ -80,16 +80,27 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "workspace_runtime_root", "value": "/workspace", "description": "Root folder where workspaces and files will be saved"},
     
     # --- LLM CONFIGURATION (UI MANAGED) ---
+    {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, openrouter, openai)"},
     {"key": "llm_local_url", "value": "http://ollama-server:11434", "description": "Base URL for local inference (e.g., Ollama)"},
     {"key": "llm_local_max_ctx", "value": "4096", "description": "Maximum token context allowed for local 8GB VRAM constraint"},
     {"key": "llm_cloud_api_key", "value": "", "description": "API Key for cloud fallback (OpenRouter, OpenAI, etc.)"},
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
-    {"key": "llm_cloud_fallback_model", "value": "google/gemini-2.5-flash-8b", "description": "Cloud model to use if local inference fails"},
     
-    # --- MODEL SELECTIONS ---
-    {"key": "assistant_model", "value": "auto", "description": "Primary conversational model for general queries (Resolved to qwen3.5:9b)."},
-    {"key": "librarian_model", "value": "auto", "description": "Model used for background fact extraction (Resolved to qwen3.5:9b)."},
-    {"key": "coding_model", "value": "auto", "description": "Model used for autonomous workspace repairs (Resolved to qwen3.5:9b)."},
+    # --- OLLAMA MODELS ---
+    {"key": "ollama_assistant_model", "value": "qwen3.5:9b", "description": "Ollama assistant model"},
+    {"key": "ollama_coding_model", "value": "qwen2.5-coder:7b", "description": "Ollama coding model"},
+    {"key": "ollama_librarian_model", "value": "qwen3.5:9b", "description": "Ollama librarian model"},
+
+    # --- CLOUD MODELS ---
+    {"key": "cloud_assistant_model", "value": "google/gemini-2.0-flash-001", "description": "Cloud assistant model (OpenRouter/OpenAI)"},
+    {"key": "cloud_coding_model", "value": "anthropic/claude-3.5-sonnet", "description": "Cloud coding model (OpenRouter/OpenAI)"},
+    {"key": "cloud_librarian_model", "value": "google/gemini-2.0-flash-001", "description": "Cloud librarian model (OpenRouter/OpenAI)"},
+    
+    # --- DEPRECATED (FOR BACKWARD COMPATIBILITY) ---
+    {"key": "assistant_model", "value": "auto", "description": "DEPRECATED: Use provider-specific models."},
+    {"key": "librarian_model", "value": "auto", "description": "DEPRECATED: Use provider-specific models."},
+    {"key": "coding_model", "value": "auto", "description": "DEPRECATED: Use provider-specific models."},
+    {"key": "llm_cloud_fallback_model", "value": "google/gemini-2.5-flash-8b", "description": "DEPRECATED: Use cloud_assistant_model."},
     
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
     {

@@ -7,15 +7,47 @@ import json
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 try:
     from .schemas import ResolvedCredentials
+    from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from schemas import ResolvedCredentials
+    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 
 log = logging.getLogger("gateway.orchestrator")
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
 RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
+IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+
+async def get_llm_settings() -> Dict[str, str]:
+    """Fetches LLM configuration from the Identity service."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/settings",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                return {item["key"]: item["value"] for item in resp.json()}
+    except Exception as e:
+        log.error(f"Failed to fetch dynamic LLM settings: {e}")
+    return {}
+
+
+async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
+    """Instantiates the correct provider based on settings."""
+    active_provider = settings.get("active_llm_provider", "ollama")
+    if active_provider == "openrouter":
+        return OpenRouterProvider(
+            api_key=settings.get("llm_cloud_api_key", ""),
+            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions")
+        )
+    else:
+        return OllamaProvider(
+            base_url=settings.get("llm_local_url", OLLAMA_URL)
+        )
 
 async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
     """
@@ -73,34 +105,11 @@ async def _fetch_rag_context(query: str, user_id: str) -> str:
     return rag_context
 
 async def _single_turn_inference(query: str, model: str, rag_context: str, history: List[Dict[str, str]], chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
+    settings = await get_llm_settings()
+    provider = await get_provider(settings)
+
     system = f"You are Raven, an autonomous AI OS. Context:\n{rag_context}"
-    payload = {
-        "model": model,
-        "messages": [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}],
-        "stream": True if chunk_callback else False
-    }
-    
-    full_content = ""
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        if not chunk_callback:
-            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
-            resp.raise_for_status()
-            return resp.json().get("message", {}).get("content", "Error.")
-        
-        # Streaming path
-        async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line: continue
-                try:
-                    chunk_json = json.loads(line)
-                    content = chunk_json.get("message", {}).get("content", "")
-                    if content:
-                        full_content += content
-                        await chunk_callback(content)
-                    if chunk_json.get("done"):
-                        break
-                except Exception as e:
-                    log.error(f"Error parsing streaming chunk: {e}")
-    
-    return full_content
+    messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
+
+    log.info(f"[_single_turn_inference] Using provider {type(provider).__name__} for model {model}")
+    return await provider.generate(model, messages, chunk_callback=chunk_callback)

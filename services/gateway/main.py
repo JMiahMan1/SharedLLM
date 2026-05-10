@@ -21,6 +21,7 @@ try:
         STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
         INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
     )
+    from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from schemas import ChatRequest, ResolvedCredentials
     from agent_loop import AgentLoop, extract_action_json, execute_inference, get_vram_safe_params
@@ -29,6 +30,7 @@ except (ImportError, ValueError):
         STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
         INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
     )
+    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -210,14 +212,58 @@ async def fetch_global_setting(key: str, default: str = "") -> str:
         log.warning(f"Failed to fetch global setting '{key}': {e}")
     return default
 
+
+async def get_llm_settings() -> Dict[str, str]:
+    """Fetches full LLM settings from Identity Service."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/settings",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                return {item["key"]: item["value"] for item in resp.json()}
+    except Exception as e:
+        log.error(f"Failed to fetch dynamic LLM settings: {e}")
+    return {}
+
+
+async def get_provider(settings: dict) -> BaseLLMProvider:
+    """Instantiates the correct provider based on settings."""
+    active_provider = settings.get("active_llm_provider", "ollama")
+    if active_provider == "openrouter":
+        return OpenRouterProvider(
+            api_key=settings.get("llm_cloud_api_key", ""),
+            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions")
+        )
+    else:
+        return OllamaProvider(
+            base_url=settings.get("llm_local_url", OLLAMA_URL)
+        )
+
+
 async def get_assistant_model():
-    return await fetch_global_setting("assistant_model", CONFIG["assistant_model"])
+    settings = await get_llm_settings()
+    active = settings.get("active_llm_provider", "ollama")
+    if active == "openrouter":
+        return settings.get("cloud_assistant_model", "google/gemini-2.0-flash-001")
+    return settings.get("ollama_assistant_model", "qwen3.5:9b")
+
 
 async def get_coding_model():
-    return await fetch_global_setting("coding_model", CONFIG["coding_model"])
+    settings = await get_llm_settings()
+    active = settings.get("active_llm_provider", "ollama")
+    if active == "openrouter":
+        return settings.get("cloud_coding_model", "anthropic/claude-3.5-sonnet")
+    return settings.get("ollama_coding_model", "qwen2.5-coder:7b")
+
 
 async def get_librarian_model():
-    return await fetch_global_setting("librarian_model", CONFIG["librarian_model"])
+    settings = await get_llm_settings()
+    active = settings.get("active_llm_provider", "ollama")
+    if active == "openrouter":
+        return settings.get("cloud_librarian_model", "google/gemini-2.0-flash-001")
+    return settings.get("ollama_librarian_model", "qwen3.5:9b")
 
 async def fetch_autonomous_protocols() -> str:
     """Fetch the latest autonomous protocols from the Identity Service GlobalSettings."""
@@ -513,15 +559,15 @@ async def contextualize_query(query: str, history: list) -> str:
 
     prompt = f"Given history:\n{hist_str}\nRewrite follow-up to standalone command.\nFollow-up: {query}\nCommand:"
     try:
+        settings = await get_llm_settings()
+        provider = await get_provider(settings)
         assistant = await get_assistant_model()
-        payload = {"model": assistant, "prompt": prompt, "stream": False, "options": {"temperature": 0.0}}
-        resp = await get_http_client().post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=5.0)
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, dict):
-                rewritten = str(data.get("response", query)).strip().strip('"')
-                log.info(f"[Context] '{query}' -> '{rewritten}'")
-                return rewritten
+        messages = [{"role": "user", "content": prompt}]
+        rewritten = await provider.generate(assistant, messages, options={"temperature": 0.0})
+        if rewritten:
+            rewritten = rewritten.strip().strip('"')
+            log.info(f"[Context] '{query}' -> '{rewritten}'")
+            return rewritten
     except Exception as e:
         log.warning(f"Contextualization failed: {e}")
     return query
