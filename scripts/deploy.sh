@@ -97,7 +97,7 @@ log "Re-ingesting Home Assistant devices via Gateway..."
 # Execute the POST request INSIDE the gateway container
 $COMPOSE exec -T gateway curl -s -X POST "http://localhost:11435/api/discovery/sync" \
      -H "Content-Type: application/json" \
-     -d '{"user": "admin"}' \
+     -d '{"rag_user": "default"}' \
      | tee -a "$LOG_FILE"
 
 log "========================================="
