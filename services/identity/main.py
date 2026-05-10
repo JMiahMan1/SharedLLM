@@ -836,14 +836,33 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
 # ─── Admin ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/settings", response_model=list[GlobalSettingRead])
-def get_settings(session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
-    return session.exec(select(GlobalSetting)).all()
+def get_settings(
+    session: Session = Depends(get_session), 
+    x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
+    auth: bool = Depends(require_admin_or_internal)
+):
+    settings = session.exec(select(GlobalSetting)).all()
+    # Mask sensitive keys for non-internal (UI) requests
+    if x_internal_secret != INTERNAL_SECRET:
+        for s in settings:
+            if s.key == "llm_cloud_api_key" and s.value:
+                s.value = "sk-***"
+    return settings
 
 @app.get("/api/settings/{key}", response_model=GlobalSettingRead)
-def get_setting(key: str, session: Session = Depends(get_session)):
+def get_setting(
+    key: str, 
+    session: Session = Depends(get_session),
+    x_internal_secret: str = Header(None, alias="X-Internal-Secret")
+):
     setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
     if not setting:
         raise HTTPException(status_code=404, detail="Setting not found")
+    
+    # Mask sensitive keys for non-internal (UI) requests
+    if x_internal_secret != INTERNAL_SECRET and key == "llm_cloud_api_key" and setting.value:
+        setting.value = "sk-***"
+        
     return setting
 
 @app.patch("/api/settings/{key}", response_model=GlobalSettingRead)
