@@ -42,6 +42,7 @@ class ResolvedCredentials(BaseModel):
     ha_url: Optional[str] = None
     ha_token: Optional[str] = None
     openai_key: Optional[str] = None
+    api_key: Optional[str] = None
     is_admin: bool = False
 
     @field_validator(

@@ -334,6 +334,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     return ResolvedCredentials(
         user=user.username,
         is_admin=user.is_admin,
+        api_key=decrypt(user.api_key_enc) if user.api_key_enc else req.api_key,
         nextcloud_url=user.nextcloud_url,
         nextcloud_user=user.nextcloud_user,
         nextcloud_pass=decrypt(user.nextcloud_pass_enc) if user.nextcloud_pass_enc else None,

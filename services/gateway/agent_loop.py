@@ -250,7 +250,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             heartbeat_stop.set()
             await hb_task
             ans = data.get("message", {}).get("content", "Error.")
-            log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms \u2014 iter {agent_iter + 1}")
+            log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms — iter {agent_iter + 1}")
+            log.info(f"[AgentLoop] Response content: {ans[:200]}...")
         except Exception as e:
             heartbeat_stop.set()
             await hb_task
@@ -341,8 +342,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 payload["user_context"] = {
                     "user": creds.user,
                     "is_admin": creds.is_admin,
+                    "api_key": creds.api_key,
                     "ha_url": creds.ha_url,
-                    "ha_token": creds.ha_token
+                    "ha_token": creds.ha_token,
+                    "nextcloud_url": creds.nextcloud_url,
+                    "nextcloud_user": creds.nextcloud_user,
+                    "nextcloud_pass": creds.nextcloud_pass,
                 }
 
                 async with httpx.AsyncClient(timeout=120.0) as client:
