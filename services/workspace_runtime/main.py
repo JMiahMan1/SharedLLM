@@ -76,7 +76,7 @@ class WorkspaceRef(BaseModel):
     rag_user: Optional[str] = None
     voice_id: Optional[str] = None
     device_id: Optional[str] = None
-    user_context: Optional[Dict[str, Any]] = None
+    user_context: Optional[dict[str, Any]] = None
 
     class Config:
         extra = "ignore"
