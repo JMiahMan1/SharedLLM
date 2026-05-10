@@ -168,13 +168,15 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         session.add(user)
         count += 1
 
-    session.commit()
-
     # ── Seed Global Settings ──────────────────────────────────────────────────
     for ds in DEFAULT_GLOBAL_SETTINGS:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == ds["key"])).first()
         if not existing:
             session.add(GlobalSetting(**ds))
+        elif force:
+            existing.value = ds["value"]
+            existing.description = ds.get("description")
+            session.add(existing)
 
     session.commit()
     log.info(f"[seed] Seeded {count} user(s) and default settings.")
