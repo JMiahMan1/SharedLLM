@@ -9,14 +9,14 @@ from fastapi.responses import JSONResponse
 
 try:
     from .config import (
-        OLLAMA_URL, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
+        OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
         STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT
     )
     from .schemas import ResolvedCredentials
     from .messaging import INFERENCE_LOCK
 except (ImportError, ValueError):
     from config import (
-        OLLAMA_URL, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
+        OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
         STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT
     )
     from schemas import ResolvedCredentials
