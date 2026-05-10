@@ -70,14 +70,9 @@ def extract_action_json(text: str) -> dict | None:
     return None
 
 async def get_vram_safe_params(model: str) -> dict:
-    max_ctx = int(os.getenv("MAX_CONTEXT_WINDOW", "32768"))
-    target_ctx = int(os.getenv("DEFAULT_CONTEXT_WINDOW", "12288"))
+    # Hard-cap at 4096 for 8GB VRAM safety
+    target_ctx = 4096
     
-    external_indicators = ("openrouter.ai", "openai.com", "anthropic.com", "groq.com")
-    if any(ind in OLLAMA_URL.lower() for ind in external_indicators):
-        return {"num_ctx": max_ctx}
-
-    params = {"num_ctx": target_ctx}
     log.info(f"[AgentLoop] Checking VRAM state at {OLLAMA_URL}/api/ps")
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -87,13 +82,19 @@ async def get_vram_safe_params(model: str) -> dict:
                 data = resp.json()
                 models = data.get("models", [])
                 if len(models) > 1:
-                    params["num_ctx"] = 4096
-                    log.info(f"[Strategy 7] VRAM PRESSURE DETECTED ({len(models)} models active). Scaling context to 4096.")
+                    target_ctx = 2048
+                    log.info(f"[Strategy 7] VRAM PRESSURE DETECTED ({len(models)} models active). Scaling context to 2048.")
             else:
                 log.warning(f"[AgentLoop] VRAM check failed: {resp.status_code}")
     except Exception as e:
         log.warning(f"[AgentLoop] VRAM check exception: {e}")
-    return params
+    
+    return {
+        "num_ctx": target_ctx,
+        "temperature": 0.1,
+        "top_p": 0.9,
+        "repeat_penalty": 1.1
+    }
 
 _global_http_client: Optional[httpx.AsyncClient] = None
 
@@ -165,11 +166,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 {"role": "user", "content": f"MISSION LOCK: {query}\n\nPAST ACTIONS SUMMARY:\n" + "\n".join(action_log)}
             ]
             if exec_data:
-                # Truncate detail to save VRAM if it is massive
+                # Truncate detail, stdout, and stderr to save VRAM if they are massive
                 safe_exec_data = exec_data.copy() if isinstance(exec_data, dict) else {"result": str(exec_data)}
-                if "detail" in safe_exec_data and isinstance(safe_exec_data["detail"], dict) and "content" in safe_exec_data["detail"]:
-                    if len(safe_exec_data["detail"]["content"]) > 1500:
-                        safe_exec_data["detail"]["content"] = safe_exec_data["detail"]["content"][:1500] + "\n...[TRUNCATED FOR VRAM]..."
+                if "detail" in safe_exec_data and isinstance(safe_exec_data["detail"], dict):
+                    for key in ["content", "stdout", "stderr"]:
+                        if key in safe_exec_data["detail"] and safe_exec_data["detail"][key] and len(str(safe_exec_data["detail"][key])) > 1500:
+                            safe_exec_data["detail"][key] = str(safe_exec_data["detail"][key])[:1500] + "\n...[TRUNCATED FOR 8GB VRAM]..."
                         
                 ollama_payload["messages"].append({
                     "role": "user", 
