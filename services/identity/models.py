@@ -87,9 +87,9 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "llm_cloud_fallback_model", "value": "google/gemini-2.5-flash-8b", "description": "Cloud model to use if local inference fails"},
     
     # --- MODEL SELECTIONS ---
-    {"key": "assistant_model", "value": "auto", "description": "Primary conversational model for general queries (Resolved to qwen3.5:8b)."},
-    {"key": "librarian_model", "value": "auto", "description": "Model used for background fact extraction (Resolved to qwen3.5:8b)."},
-    {"key": "coding_model", "value": "auto", "description": "Model used for autonomous workspace repairs (Resolved to qwen3.5:8b)."},
+    {"key": "assistant_model", "value": "auto", "description": "Primary conversational model for general queries (Resolved to qwen3.5:9b)."},
+    {"key": "librarian_model", "value": "auto", "description": "Model used for background fact extraction (Resolved to qwen3.5:9b)."},
+    {"key": "coding_model", "value": "auto", "description": "Model used for autonomous workspace repairs (Resolved to qwen3.5:9b)."},
     
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
     {
