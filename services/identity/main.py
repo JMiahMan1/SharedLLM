@@ -833,7 +833,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
 # ─── Admin ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/settings", response_model=list[GlobalSettingRead])
-def get_settings(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+def get_settings(session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
     return session.exec(select(GlobalSetting)).all()
 
 @app.get("/api/settings/{key}", response_model=GlobalSettingRead)
