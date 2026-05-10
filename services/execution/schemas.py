@@ -193,7 +193,8 @@ class WorkspaceShellRequest(BaseRequest):
     Use this for advanced operations not covered by other tools.
     """
     user_context: UserContext
-    command: str = Field(..., description="The shell command to execute")
+    command: Optional[str] = Field(None, description="The shell command to execute")
+    commands: Optional[List[str]] = Field(None, description="A list of shell commands to execute (joined with &&)")
     cwd: Optional[str] = Field(".", description="Working directory relative to root")
     timeout: int = Field(60, ge=1, le=300, description="Command timeout in seconds")
 
