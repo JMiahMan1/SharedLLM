@@ -34,6 +34,8 @@ services:
     volumes:
       - identity_db:/data
       - ./services/identity/main.py:/app/main.py:ro
+      - ./services/identity/models.py:/app/models.py:ro
+      - ./services/identity/seed.py:/app/seed.py:ro
       - ./.env:/app/.env.legacy:ro
       - /etc/localtime:/etc/localtime:ro
 
