@@ -37,6 +37,10 @@ services:
       - ./.env:/app/.env.legacy:ro
       - /etc/localtime:/etc/localtime:ro
 
+  execution:
+    build: ./services/execution
+    container_name: sharedllm_execution
+    restart: unless-stopped
     env_file:
       - .env
     extra_hosts:
@@ -78,14 +82,12 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./services/rag/main.py:/app/main.py
       - ./services/rag/schemas.py:/app/schemas.py
-    # ADDED: Healthcheck so the sync script knows when to run
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ADDED: Auto-syncs your tools to RAG on startup, then exits gracefully
   capabilities-sync:
     build: ./services/rag
     container_name: sharedllm_capabilities_sync
