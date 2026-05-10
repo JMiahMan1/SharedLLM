@@ -24,6 +24,7 @@ class ResolvedCredentials(BaseModel):
     """
     user: str
     is_admin: bool = False
+    api_key: Optional[str] = None         # decrypted at resolution time for tool usage
     nextcloud_url: Optional[str] = None
     nextcloud_user: Optional[str] = None
     nextcloud_pass: Optional[str] = None   # decrypted at resolution time

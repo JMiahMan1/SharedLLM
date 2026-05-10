@@ -19,6 +19,7 @@ class UserContext(BaseModel):
     nextcloud_url: Optional[str] = None
     nextcloud_user: Optional[str] = None
     nextcloud_pass: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 class ExecutionResult(BaseModel):
@@ -284,6 +285,7 @@ class WebReadRequest(BaseRequest):
     """Fetches a URL and returns the content as markdown."""
     user_context: UserContext
     url: str
+    use_current_user_auth: bool = False
 
 
 # ─── Ouroboros Autonomous Loop ───────────────────────────────────────────────

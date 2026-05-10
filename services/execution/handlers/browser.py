@@ -89,6 +89,18 @@ async def handle_web_read(req: WebReadRequest) -> ExecutionResult:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
             
+            if req.use_current_user_auth and req.user_context.api_key:
+                from urllib.parse import urlparse
+                domain = urlparse(req.url).netloc
+                if domain:
+                    log.info(f"[browser/read] Injecting jarvis_api_key for {domain}")
+                    await page.context.add_cookies([{
+                        'name': 'jarvis_api_key',
+                        'value': req.user_context.api_key,
+                        'domain': domain.split(':')[0],
+                        'path': '/'
+                    }])
+
             # Standard timeout and wait condition
             await page.goto(req.url, wait_until="domcontentloaded", timeout=30000)
             
