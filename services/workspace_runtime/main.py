@@ -1664,7 +1664,7 @@ async def git_pull_webhook(
                 log.warning(f"Webhook pull attempted for workspace {workspace_id} but auto_pull_enabled is False")
                 raise HTTPException(status_code=403, detail="Webhook pulling is disabled for this workspace")
 
-            resolved_path = resolve_safe_path(get_workspace_root(), str(match.local_path))
+            resolved_path = resolve_safe_path(get_workspace_root(), str(match.local_path), must_exist=False)
             workspace_path = Path(resolved_path)
             workspace_path.mkdir(parents=True, exist_ok=True)
             
