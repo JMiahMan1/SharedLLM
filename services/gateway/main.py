@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 try:
     from .schemas import ChatRequest, ResolvedCredentials
-    from .agent_loop import AgentLoop, extract_action_json, call_ollama, get_vram_safe_params
+    from .agent_loop import AgentLoop, extract_action_json, execute_inference, get_vram_safe_params
     from .config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
         STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
@@ -23,7 +23,7 @@ try:
     )
 except (ImportError, ValueError):
     from schemas import ChatRequest, ResolvedCredentials
-    from agent_loop import AgentLoop, extract_action_json, call_ollama, get_vram_safe_params
+    from agent_loop import AgentLoop, extract_action_json, execute_inference, get_vram_safe_params
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
         STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
@@ -874,11 +874,7 @@ async def generate_workspace_readme_via_coding_model(
       ],
       "stream": False,
     }
-    resp = await call_ollama(payload, use_chat=True)
-    if resp.status_code != 200:
-      raise HTTPException(status_code=502, detail="Coding model did not return a README response")
-
-    data = resp.json()
+    data = await execute_inference(payload)
     generated = ""
     if isinstance(data, dict):
       msg_obj = data.get("message")
@@ -971,12 +967,9 @@ async def orchestrate_code_change(
       "format": "json"
     }
     
-    resp = await call_ollama(payload, use_chat=True)
-    if resp.status_code != 200:
-      raise HTTPException(status_code=502, detail="Coding model failed to generate a plan")
-      
+    data = await execute_inference(payload)
     try:
-        plan = resp.json().get("message", {}).get("content") or resp.json().get("response")
+        plan = data.get("message", {}).get("content") or data.get("response")
         plan_data = json.loads(plan)
     except Exception as e:
         log.error(f"Failed to parse coding plan: {e}\nRaw: {plan}")
@@ -1101,13 +1094,9 @@ async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
       f"Failure: {failure}"
     )
     try:
-      resp = await call_ollama(
-          {"model": await get_assistant_model(), "prompt": prompt, "stream": False},
-          use_chat=False,
+      data = await execute_inference(
+          {"model": await get_assistant_model(), "messages": [{"role": "user", "content": prompt}], "stream": False}
       )
-      if resp.status_code != 200:
-          return None
-      data = resp.json()
       if not isinstance(data, dict):
           return None
       raw = str(data.get("response", "")).strip()
@@ -1302,8 +1291,8 @@ Request: "{query}"
 Return a simple JSON list of strings.
 Example: ["Turn on the office light", "Play some jazz music"]
 """
-        resp = await call_ollama({"model": await get_assistant_model(), "prompt": prompt, "stream": False}, use_chat=False)
-        text = resp.json().get("response", "").strip()
+        data = await execute_inference({"model": await get_assistant_model(), "messages": [{"role": "user", "content": prompt}], "stream": False})
+        text = data.get("message", {}).get("content", "").strip()
         if "[" in text and "]" in text:
             import json
             try:
