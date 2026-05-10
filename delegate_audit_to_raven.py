@@ -1,12 +1,13 @@
 import httpx
 import asyncio
 import json
+import sys
 
 SERVER_IP = "192.168.2.205"
 GATEWAY_URL = f"http://{SERVER_IP}:8080"
 API_KEY = "c7133d7546cee7bbd04dcf48cb7efc2bf3a080d7a1032ac3"
 
-MISSION = """
+DEFAULT_MISSION = """
 RAVEN, I need you to perform a full system audit on the SharedLLM production environment.
 
 1. **Log Audit**: Use `DockerLogsRequest` to check for recent errors in all microservices:
@@ -36,11 +37,11 @@ RAVEN, I need you to perform a full system audit on the SharedLLM production env
 This is a CRITICAL mission. Proceed immediately.
 """
 
-async def delegate_to_raven():
-    print("Delegating system audit to Raven...")
+async def delegate_to_raven(mission_text: str):
+    print(f"Delegating system mission to Raven...")
     
     payload = {
-        "query": MISSION,
+        "query": mission_text,
         "stream": False,  # Gateway agent loop does not support streaming
         "rag_user": "default"
     }
@@ -60,11 +61,15 @@ async def delegate_to_raven():
                 
             data = resp.json()
             message = data.get("message", "")
-            print("\n=== RAVEN AUDIT COMPLETE ===\n")
+            print("\n=== RAVEN MISSION COMPLETE ===\n")
             print(message)
             
         except Exception as e:
             print(f"\nDelegation failed: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(delegate_to_raven())
+    mission = DEFAULT_MISSION
+    if len(sys.argv) > 1:
+        mission = sys.argv[1]
+    
+    asyncio.run(delegate_to_raven(mission))

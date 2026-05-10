@@ -12,7 +12,7 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 OLLAMA_TIMEOUT = 180.0
 
 CONFIG = {
-    "assistant_model": "qwen3.5:9b",
-    "librarian_model": "qwen3.5:9b",
-    "coding_model": "qwen2.5-coder:7b",
+    "assistant_model": "qwen3.5:8b",
+    "librarian_model": "qwen3.5:8b",
+    "coding_model": "qwen3.5:8b",
 }
