@@ -667,7 +667,7 @@ def _git_webhook_pull_remote(remote_url: str, remote_name: str) -> str:
         if path:
             return f"https://{parsed.hostname}/{path}"
 
-    return remote_name
+    return value
 
 
 def _workspace_provider_binding(workspace: dict[str, Any], identity: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
