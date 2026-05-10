@@ -12,10 +12,10 @@ from sqlmodel import Session, select, text
 from dotenv import load_dotenv
 
 try:
-    from .models import User, GlobalSetting, DeviceAssignment, APIKey
+    from .models import User, GlobalSetting, DeviceAssignment, APIKey, DEFAULT_GLOBAL_SETTINGS
     from .crypto import encrypt
 except ImportError:
-    from models import User, GlobalSetting, DeviceAssignment, APIKey
+    from models import User, GlobalSetting, DeviceAssignment, APIKey, DEFAULT_GLOBAL_SETTINGS
     from crypto import encrypt
 
 from passlib.context import CryptContext
@@ -171,13 +171,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     session.commit()
 
     # ── Seed Global Settings ──────────────────────────────────────────────────
-    default_settings = [
-        {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
-        {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
-        {"key": "rag_sync_interval", "value": "3600", "description": "Frequency in seconds for RAG background re-indexing"}
-    ]
-
-    for ds in default_settings:
+    for ds in DEFAULT_GLOBAL_SETTINGS:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == ds["key"])).first()
         if not existing:
             session.add(GlobalSetting(**ds))
