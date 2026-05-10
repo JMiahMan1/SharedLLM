@@ -186,6 +186,7 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 - `WorkspaceFileReadRequest`: Read SMALL segments of code using offset_lines.
 - `WorkspaceFilePatchRequest`: Apply fixes.
 - `WorkspaceShellRequest`: Run unit tests (pytest) to verify.
+- `WebReadRequest`: Audit UI states and authenticated pages.
 
 ### OUTPUT FORMAT (MANDATORY)
 ```json
