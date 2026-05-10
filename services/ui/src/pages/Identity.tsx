@@ -18,7 +18,8 @@ import {
   Globe,
   LockKeyhole,
   Smartphone,
-  User
+  User,
+  Zap
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -538,7 +539,19 @@ const Identity = () => {
                 userData={fullUser}
                 configKeys={{
                   "Server URL": "audiobookshelf_url",
-                  "API Key": "audiobookshelf_token"
+                  "Username": "audiobookshelf_user",
+                  "Password": "audiobookshelf_pass"
+                }}
+              />
+              <IntegrationTile 
+                name="Private Git" 
+                icon={Server} 
+                color="rose" 
+                userData={fullUser}
+                configKeys={{
+                  "Git Endpoint": "git_url",
+                  "Auth Username": "git_user",
+                  "Auth Password": "git_token"
                 }}
               />
               <IntegrationTile 
@@ -565,6 +578,18 @@ const Identity = () => {
                   "Access Token": "gitlab_token"
                 }}
               />
+              {!fullUser?.is_system_default && (
+                <IntegrationTile 
+                  name="OpenRouter" 
+                  icon={Zap} 
+                  color="purple" 
+                  userData={fullUser}
+                  configKeys={{
+                    "Cloud Base URL": "openrouter_url",
+                    "Cloud API Key": "openrouter_token"
+                  }}
+                />
+              )}
             </div>
           </section>
 
