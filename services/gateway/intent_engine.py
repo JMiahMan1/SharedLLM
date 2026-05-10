@@ -88,18 +88,20 @@ class IntentEngine:
         
         # 1. Hardcoded Keyword Fallbacks (Safety/Test logic)
         # These ensure core functionality works even if the semantic model is offline.
-        if any(k in q for k in ["play ", "start playing", "resume music"]):
+        # We only use these for VERY simple queries to avoid hijacking complex ones that need entity extraction.
+        if q in ["play", "play music", "start playing", "resume music"]:
             return "play_media", 1.0
-        if any(k in q for k in ["pause", "stop the music", "stop playing"]):
+        if q in ["pause", "pause music", "stop the music", "stop playing"]:
             return "pause_media", 1.0
-        if any(k in q for k in ["turn on", "power on", "switch on"]):
+        if q in ["turn on", "power on", "switch on"]:
             return "turn_on", 1.0
-        if any(k in q for k in ["turn off", "power off", "switch off"]):
+        if q in ["turn off", "power off", "switch off"]:
             return "turn_off", 1.0
-        if any(k in q for k in ["index ", "reindex ", "scan my library"]):
+        if q in ["index", "reindex", "scan my library"]:
             return "index_storage", 1.0
-        if any(k in q for k in ["sync home assistant", "refresh devices"]):
+        if q in ["sync home assistant", "refresh devices"]:
             return "sync_ha", 1.0
+
         # 2. Semantic Routing (if active)
         # Fallback Check: Engine crashed or has no embeddings
         if not self.is_active or not self.model or len(self.intent_embeddings) == 0 or np is None:

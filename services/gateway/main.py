@@ -1457,7 +1457,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     is_fast_path = engine.is_fast_path(intent, confidence)
     
     if is_fast_path:
-        log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence}")
+        # Safety: Only use FastPath for turn_on/turn_off if the query is very simple (2 words max)
+        # This prevents "Turn off the piano lamp" from being executed with entity_id="auto"
+        query_words = (query or "").split()
+        if intent in ["turn_on", "turn_off"] and len(query_words) > 2:
+            log.info(f"[FastPath] BYPASSED for {intent}: Query too complex for auto-execution ('{query}')")
+            is_fast_path = False
+        else:
+            log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence}")
+
         # Execute immediate tool for simple intents
         endpoint_map = {
             "turn_on": "/execute/light",
