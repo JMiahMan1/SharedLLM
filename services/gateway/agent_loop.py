@@ -219,7 +219,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
 
         try:
-            vram_params = await get_vram_safe_params(selected_model)
+            dynamic_settings = await get_dynamic_llm_settings()
+            vram_params = await get_vram_safe_params(selected_model, dynamic_settings)
             ollama_payload["options"] = vram_params
             ollama_payload["messages"] = [
                 {"role": "system", "content": full_system},
