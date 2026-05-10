@@ -129,9 +129,11 @@ async def _ensure_default_settings(session: Session) -> None:
         # Dynamic Resolution for models
         if setting.get("value") == "auto":
             if setting["key"] == "coding_model":
-                setting["value"] = resolve_best_model("coder", "qwen2.5-coder:7b")
+                setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:8b")
             elif setting["key"] == "librarian_model":
-                setting["value"] = resolve_best_model("3.5", "qwen3.5:9b")
+                setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:8b")
+            elif setting["key"] == "assistant_model":
+                setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:8b")
 
         session.add(GlobalSetting(**setting))
         inserted = True

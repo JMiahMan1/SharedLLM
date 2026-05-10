@@ -186,9 +186,9 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120.0"))
 # ---- Dynamic Model Config ----
 CONFIG = {
-    "assistant_model": os.getenv("ASSISTANT_MODEL", os.getenv("DEFAULT_MODEL", "qwen3.5:9b")),
-    "coding_model": os.getenv("CODING_MODEL", "qwen2.5-coder:7b"),
-    "librarian_model": os.getenv("LIBRARIAN_MODEL", "qwen2.5-coder:7b")
+    "assistant_model": "qwen3.5:8b",
+    "coding_model": "qwen3.5:8b",
+    "librarian_model": "qwen3.5:8b"
 }
 
 # Global Inference Lock (Strategy 8: Singleton Queue)
