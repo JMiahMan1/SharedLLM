@@ -71,7 +71,8 @@ def test_workspace_lifecycle(api_client):
     list_req = {
         "workspace_id": workspace_id,
         "relative_path": ".",
-        "max_entries": 10
+        "max_entries": 10,
+        "user_context": {"user": "default", "is_admin": True}
     }
     resp = api_client.post(f"{WORKSPACE_RUNTIME_URL}/files/list", json=list_req)
     assert resp.status_code == 200, f"Failed to list files: {resp.text}"
