@@ -69,32 +69,101 @@ def extract_action_json(text: str) -> dict | None:
     
     return None
 
-async def get_vram_safe_params(model: str) -> dict:
-    # Hard-cap at 4096 for 8GB VRAM safety
-    target_ctx = 4096
-    
-    log.info(f"[AgentLoop] Checking VRAM state at {OLLAMA_URL}/api/ps")
+async def get_dynamic_llm_settings() -> dict:
+    """Fetches elastic LLM routing configuration directly from the Identity DB."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{OLLAMA_URL}/api/ps")
-            log.info(f"[AgentLoop] VRAM check status: {resp.status_code}")
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/settings", 
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
             if resp.status_code == 200:
-                data = resp.json()
-                models = data.get("models", [])
-                if len(models) > 1:
-                    target_ctx = 2048
-                    log.info(f"[Strategy 7] VRAM PRESSURE DETECTED ({len(models)} models active). Scaling context to 2048.")
-            else:
-                log.warning(f"[AgentLoop] VRAM check failed: {resp.status_code}")
+                # Convert list of {key: x, value: y} into a flat dictionary
+                return {item["key"]: item["value"] for item in resp.json()}
     except Exception as e:
-        log.warning(f"[AgentLoop] VRAM check exception: {e}")
-    
-    return {
-        "num_ctx": target_ctx,
+        log.error(f"[AgentLoop] Failed to fetch dynamic LLM settings: {e}")
+    return {}
+
+async def get_vram_safe_params(model: str, settings: dict) -> dict:
+    """Dynamically checks VRAM pressure using DB constraints."""
+    local_url = settings.get("llm_local_url", OLLAMA_URL)
+    max_ctx = int(settings.get("llm_local_max_ctx", "4096"))
+    params = {
+        "num_ctx": max_ctx,
         "temperature": 0.1,
         "top_p": 0.9,
         "repeat_penalty": 1.1
     }
+    
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{local_url.rstrip('/')}/api/ps")
+            if resp.status_code == 200:
+                models = resp.json().get("models", [])
+                if len(models) > 1:
+                    safe_ctx = max(2048, max_ctx // 2)
+                    params["num_ctx"] = safe_ctx
+                    log.info(f"[AgentLoop] VRAM PRESSURE. Scaling context down to {safe_ctx}.")
+    except Exception:
+        pass
+        
+    return params
+
+async def execute_inference(payload: dict, timeout: float = None) -> dict:
+    """Circuit breaker: Tries dynamic Local URL, falls back to dynamic Cloud URL."""
+    
+    settings = await get_dynamic_llm_settings()
+    
+    local_url = settings.get("llm_local_url", OLLAMA_URL)
+    cloud_key = settings.get("llm_cloud_api_key", "")
+    cloud_url = settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions")
+    cloud_model = settings.get("llm_cloud_fallback_model", "google/gemini-2.5-flash-8b")
+    
+    # 1. Try Local Execution
+    try:
+        log.info(f"[AgentLoop] Local inference via {local_url}...")
+        resp = await get_http_client().post(
+            f"{local_url.rstrip('/')}/api/chat",
+            json=payload,
+            timeout=timeout if timeout is not None else OLLAMA_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        log.warning(f"[AgentLoop] Local returned {resp.status_code}. Tripping circuit breaker.")
+    except Exception as e:
+        log.warning(f"[AgentLoop] Local inference failed ({type(e).__name__}). Tripping circuit breaker.")
+
+    # 2. Failover to Cloud (OpenRouter / OpenAI format)
+    if not cloud_key:
+        raise Exception("Local inference failed and no cloud fallback key is configured in the Identity settings.")
+
+    log.info(f"[AgentLoop] Executing cloud fallback using: {cloud_model}")
+    
+    headers = {
+        "Authorization": f"Bearer {cloud_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/jmiahman1/sharedllm", 
+    }
+    
+    # Translate Ollama payload to OpenAI schema format
+    or_payload = {
+        "model": cloud_model,
+        "messages": payload.get("messages", []),
+        "temperature": payload.get("options", {}).get("temperature", 0.7)
+    }
+
+    resp = await get_http_client().post(
+        cloud_url, 
+        json=or_payload, 
+        headers=headers, 
+        timeout=timeout if timeout is not None else 60.0
+    )
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        return {"message": data.get("choices", [{}])[0].get("message", {})}
+    else:
+        raise Exception(f"Cloud fallback failed with status {resp.status_code}: {resp.text}")
 
 _global_http_client: Optional[httpx.AsyncClient] = None
 
@@ -107,15 +176,6 @@ def get_http_client() -> httpx.AsyncClient:
         )
     return _global_http_client
 
-async def call_ollama(payload: dict, use_chat: bool = True, timeout: float = None) -> httpx.Response:
-    endpoint = "/api/chat" if use_chat else "/api/generate"
-    url = f"{OLLAMA_URL}{endpoint}"
-    log.info(f"[AgentLoop] Calling Ollama: {url}")
-    return await get_http_client().post(
-      url,
-      json=payload,
-      timeout=timeout if timeout is not None else OLLAMA_TIMEOUT,
-    )
 
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials) -> Any:
     ollama_payload = {
@@ -179,16 +239,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 })
             ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
             
+            # Fetch dynamic settings for VRAM-safe params
+            dynamic_settings = await get_dynamic_llm_settings()
+            ollama_payload["options"] = await get_vram_safe_params(selected_model, dynamic_settings)
+            
             log.info(f"[Strategy 8] Executing inference for {selected_model} (Iter {agent_iter + 1})")
-            resp = await call_ollama(ollama_payload, use_chat=True, timeout=300.0)
+            data = await execute_inference(ollama_payload, timeout=300.0)
                 
             heartbeat_stop.set()
             await hb_task
-            if resp.status_code != 200:
-                return "ERROR: Brain offline (502)."
-            data = resp.json()
             ans = data.get("message", {}).get("content", "Error.")
-            log.info(f"[AgentLoop] Ollama responded in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms \u2014 iter {agent_iter + 1}")
+            log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms \u2014 iter {agent_iter + 1}")
         except Exception as e:
             heartbeat_stop.set()
             await hb_task
