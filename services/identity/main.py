@@ -849,6 +849,26 @@ def get_settings(
                 s.value = "sk-***"
     return settings
 
+@app.post("/api/settings")
+def update_settings_bulk(
+    body: Dict[str, str], 
+    session: Session = Depends(get_session), 
+    auth: bool = Depends(require_admin_or_internal)
+):
+    """
+    Securely accept raw keys and commit them to the database without logging the raw payload.
+    """
+    for key, value in body.items():
+        setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not setting:
+            setting = GlobalSetting(key=key, value=value)
+        else:
+            setting.value = value
+        session.add(setting)
+    
+    session.commit()
+    return {"status": "SUCCESS"}
+
 @app.get("/api/settings/{key}", response_model=GlobalSettingRead)
 def get_setting(
     key: str, 

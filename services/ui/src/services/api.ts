@@ -351,6 +351,11 @@ export const api = {
     return resp.data;
   },
 
+  async updateSettingsBulk(settings: Record<string, string>): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/settings', settings);
+    return resp.data;
+  },
+
   async testConnection(service: string, config: Record<string, unknown>): Promise<{ status: 'SUCCESS' | 'ERROR'; message?: string }> {
     const resp = await apiClient.post('/api/auth/test-connection', { service, config });
     return resp.data;
