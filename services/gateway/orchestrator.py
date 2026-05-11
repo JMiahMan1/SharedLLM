@@ -131,6 +131,10 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
     
     options = {"grammar": TOOL_GRAMMAR, "temperature": 0.0}
 
+    # --- RETRY LOGIC FOR MODEL SWITCHING ---
+    MAX_INFERENCE_RETRIES = 3
+    ans = ""
+
     for retry_count in range(MAX_INFERENCE_RETRIES):
         try:
             ans = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
