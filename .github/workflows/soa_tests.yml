@@ -46,7 +46,7 @@ jobs:
         CODING_MODEL: qwen2.5-coder:7b
       run: |
         pytest \
-          services/tests/test_identity_resolution.py \
+          services/tests/test_identity.py \
           services/tests/test_gateway_model_selection.py \
           services/tests/test_gateway_media_target.py \
           services/tests/test_intent_engine.py \
