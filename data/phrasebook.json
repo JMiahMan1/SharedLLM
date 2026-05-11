@@ -1,156 +1,91 @@
 {
-    "turn_on": [
-        "turn on the lights",
-        "power on",
-        "switch on",
-        "turn on the lamp",
-        "activate the lights",
-        "lights on",
-        "turn on piano lamp"
-    ],
-    "turn_off": [
-        "turn off the lights",
-        "power off",
-        "switch off",
-        "turn off the lamp",
-        "deactivate the lights",
-        "lights off",
-        "turn off piano lamp"
-    ],
-    "set_brightness": [
-        "set brightness to 50%",
-        "dim the lights to 20%",
-        "make the lamp brighter",
-        "set the piano lamp to 75%",
-        "adjust brightness to 100",
-        "set the light to 10 percent",
-        "brightness 80%"
-    ],
-    "set_temperature": [
-        "set the thermostat to 72 degrees",
-        "make it 70 in here",
-        "adjust temperature to 68",
-        "turn up the heat",
-        "cool it down to 75",
-        "set climate to 71"
-    ],
-    "lock_security": [
-        "lock the front door",
-        "secure the house",
-        "lock the back door",
-        "is the door locked",
-        "lock up"
-    ],
-    "unlock_security": [
-        "unlock the front door",
-        "open the door",
-        "let me in",
-        "unlock the back door"
-    ],
-    "check_security_status": [
-        "is the garage door open?",
-        "check the front door",
-        "is the house secure?",
-        "check the gate",
-        "is the back door locked?",
-        "status of the garage"
-    ],
-    "open_cover": [
-        "open the garage door",
-        "open the blinds",
-        "raise the shades",
-        "open the gate"
-    ],
-    "close_cover": [
-        "close the garage door",
-        "close the blinds",
-        "lower the shades",
-        "close the gate"
-    ],
-    "play_media": [
-        "play music",
-        "start playing",
-        "resume music",
-        "play some jazz",
-        "start the radio",
-        "play the speaker",
-        "play music on Office TV"
-    ],
-    "pause_media": [
-        "pause music",
-        "stop playing",
-        "pause the speaker",
-        "stop the music"
-    ],
-    "toggle": [
-        "toggle the lights",
-        "flip the switch",
-        "toggle the lamp"
-    ],
-    "announce": [
-        "announce dinner is ready",
-        "broadcast a message",
-        "tell everyone it is time to go",
-        "make an announcement"
-    ],
-    "index_storage": [
-        "index my library",
-        "reindex my files",
-        "scan my nextcloud",
-        "update my knowledge base",
-        "index my documents",
-        "scan my library"
-    ],
-    "sync_ha": [
-        "reingest my devices",
-        "sync home assistant",
-        "refresh my devices",
-        "update my home assistant knowledge",
-        "re-scan for new devices",
-        "sync my home"
-    ],
-    "ha_status": [
-        "check home assistant status",
-        "what new devices were added?",
-        "any new devices found?",
-        "home assistant sync status",
-        "tell me about new devices",
-        "give me a status update on my home"
-    ],
-    "storage_status": [
-        "what files are indexed?",
-        "check indexing status",
-        "how many files have been indexed so far?",
-        "list some indexed files",
-        "show my indexed documents",
-        "what do you know about my files?",
-        "What’s the current status of our storage backend?",
-        "storage status",
-        "indexing report"
-    ],
-    "self_repair": [
-        "look into the error I just got",
-        "fix the bug in the execution service",
-        "analyze the logs and repair the gateway",
-        "self repair the system",
-        "debug the recent crash",
-        "find the root cause of the failure and fix it",
-        "autonomous repair mode"
-    ],
-    "dev_loop": [
-        "add a new tool to control the sprinklers",
-        "implement a new handler for weather reports",
-        "evolve the codebase to support solar panels",
-        "start the autonomous developer loop",
-        "build a new capability for the system",
-        "upgrade your own handlers",
-        "autonomous feature addition"
-    ],
-    "fallbacks": [
-        "One moment, I'm looking into that for you.",
-        "Working on it. Just a second.",
-        "I'm processing that request now.",
-        "Give me a moment to check that.",
-        "I'm on it."
-    ]
+  "turn_on": [
+    "turn on the kitchen light",
+    "switch on the living room fan",
+    "turn the heater on in the office",
+    "open the front gate",
+    "turn on the coffee maker",
+    "brighten the dining room lights",
+    "turn on the humidifier",
+    "activate the party lights",
+    "turn on the lights"
+  ],
+  "turn_off": [
+    "switch off the living room fan",
+    "turn off the lights in the basement",
+    "switch off the desk lamp",
+    "stop the air conditioner",
+    "turn off everything",
+    "lights off",
+    "turn off the heater"
+  ],
+  "play_media": [
+    "play some jazz in the kitchen",
+    "start playing Brandon Lake",
+    "play my chill playlist",
+    "play a fireplace video on the bedroom tv",
+    "watch news on the hallway screen",
+    "listen to radio paradise",
+    "play classical music in the study",
+    "shuffle my favorites",
+    "play music"
+  ],
+  "media_transport": [
+    "resume the music",
+    "pause the video on the living room tv",
+    "stop the music in the office",
+    "skip this song",
+    "next track please",
+    "rewind 30 seconds",
+    "fast forward to the end",
+    "pause",
+    "stop",
+    "resume"
+  ],
+  "workspace_coding": [
+    "fix the bug in services/identity/main.py",
+    "implement a new endpoint for user roles",
+    "update the readme with deployment instructions",
+    "change the timeout in the ha_client",
+    "create a python script to parse logs",
+    "what does this function do?",
+    "patch the vulnerability in the gateway",
+    "generate a test suite for the rag service",
+    "refactor the ui components",
+    "add a new field to the user model",
+    "run the unit tests for the identity service",
+    "check the status of the git repo",
+    "commit these changes with a message",
+    "push to the main branch"
+  ],
+  "storage_search": [
+    "find the budget report in nextcloud",
+    "search for pdf files about architecture",
+    "read the contents of notes.txt",
+    "what files are in the AI_Uploads folder?",
+    "find the design brief from last week",
+    "is there a file named invoice.pdf?",
+    "search my library for jazz music",
+    "find documents mentioning the 2026 upgrade",
+    "list the files in the root directory",
+    "search for images of the kitchen",
+    "list my nextcloud files",
+    "scan my nextcloud for new documents",
+    "what files do I have in storage?",
+    "list the contents of the AI folder"
+  ],
+  "index_storage": [
+    "index my storage library",
+    "reindex all my nextcloud files",
+    "start a full storage scan",
+    "re-scan my library for changes",
+    "reindex nextcloud"
+  ],
+  "ha_status": [
+    "is the porch light on?",
+    "is the back door locked?",
+    "check the status of the home assistant connection",
+    "are the lights on?",
+    "status of the heater"
+  ]
 }
