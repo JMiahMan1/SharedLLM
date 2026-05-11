@@ -68,7 +68,18 @@
     "search my library for jazz music",
     "find documents mentioning the 2026 upgrade",
     "list the files in the root directory",
-    "search for images of the kitchen"
+    "search for images of the kitchen",
+    "list my nextcloud files",
+    "scan my nextcloud for new documents",
+    "what files do I have in storage?",
+    "list the contents of the AI folder"
+  ],
+  "index_storage": [
+    "index my storage library",
+    "reindex all my nextcloud files",
+    "start a full storage scan",
+    "re-scan my library for changes",
+    "reindex nextcloud"
   ],
   "ha_status": [
     "is the porch light on?",
