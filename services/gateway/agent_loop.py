@@ -470,7 +470,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 }
 
                 async with httpx.AsyncClient(timeout=120.0) as client:
-                    log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(payload)}")
+                    # Redact sensitive info for logging
+                    log_payload = payload.copy()
+                    if "user_context" in log_payload:
+                        log_payload["user_context"] = "[REDACTED]"
+                        
+                    log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                     log.info(f"[AgentLoop] Tool response: {resp.status_code}")
                     
