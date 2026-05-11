@@ -104,7 +104,7 @@ ALLOWED_TOOLS = {
     "workspacefilewriterequest", "workspacefilepatchrequest", 
     "workspacelintrequest", "workspacesearchrequest", 
     "workspaceshellrequest", "storagefilereadrequest", 
-    "storagefilewriterequest", "workspacebootstraprequest", 
+    "storagefilewriterequest", "storagelistrequest", "workspacebootstraprequest", 
     "systemlearningrequest", "discoverysyncrequest", "storageindexrequest",
     "dockercomposerequest",
     # Aliases and Hallucination-prefixed tools

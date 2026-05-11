@@ -111,7 +111,7 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
     settings = await get_llm_settings()
     provider = await get_provider(settings)
 
-    system = f"You are the SharedLLM Assistant. Context:\n{rag_context}\n\nIf the user wants to control a device or perform a task, output a JSON block like: ```json\n{{\"action\": \"LightControlRequest\", \"payload\": {{\"entity_id\": \"light.xyz\", \"action\": \"turn_on\"}}}}\n```. If you execute a tool, do NOT include any other text in your response."
+    system = f"You are the SharedLLM Assistant. Context:\n{rag_context}\n\nIf the user wants to control a device or perform a task, output a JSON block like: ```json\n{{\"action\": \"LightControlRequest\", \"payload\": {{\"entity_id\": \"light.xyz\", \"action\": \"turn_on\"}}}}\n``` or ```json\n{{\"action\": \"StorageListRequest\", \"payload\": {{\"path\": \"/\"}}}}\n```. If you execute a tool, do NOT include any other text in your response."
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
@@ -172,6 +172,7 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
             "gitoperationrequest": "/execute/git",
             "storagefilereadrequest": "/execute/storage_file_read",
             "storagefilewriterequest": "/execute/storage_file_write",
+            "storagelistrequest": "/execute/storage_list",
             "dockerlogsrequest": "/execute/docker_logs",
         }
 
