@@ -468,13 +468,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "nextcloud_user": creds.nextcloud_user,
                     "nextcloud_pass": creds.nextcloud_pass,
                     "github_token": creds.github_token,
+                    "gitlab_token": creds.gitlab_token,
+                    "git_token": creds.git_token,
                 }
 
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     # Redact sensitive values for logging
                     log_payload = json.loads(json.dumps(payload)) # Deep copy
                     if "user_context" in log_payload:
-                        sensitive_keys = ["ha_token", "nextcloud_pass", "github_token", "api_key", "openai_key"]
+                        sensitive_keys = ["ha_token", "nextcloud_pass", "github_token", "gitlab_token", "git_token", "api_key", "openai_key"]
                         for sk in sensitive_keys:
                             if sk in log_payload["user_context"] and log_payload["user_context"][sk]:
                                 log_payload["user_context"][sk] = "[REDACTED]"

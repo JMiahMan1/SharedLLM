@@ -148,14 +148,8 @@ async def handle_git(req) -> dict:
             return _fail("commit", r)
         return _ok("commit", {"commit_message": commit_message, **r})
 
-    elif action == "pull":
-        r = await _run_git(["pull", "origin", branch])
-        if r["returncode"] != 0:
-            return _fail("pull", r)
-        return _ok("pull", {"branch": branch, **r})
-
-    elif action == "push":
-        if not is_admin:
+    elif action == "push" or action == "pull":
+        if action == "push" and not is_admin:
             return {
                 "status": "FAILURE",
                 "message": "Push requires admin privileges.",
@@ -165,20 +159,29 @@ async def handle_git(req) -> dict:
         
         # Resolve remote URL for token injection
         remote_url = await _get_remote_url("origin")
-        github_token = getattr(user_context, "github_token", None)
         
-        if github_token and "github.com" in remote_url:
-            # Inject token for HTTPS auth: https://<token>@github.com/...
+        # Determine the appropriate token for this host
+        token = None
+        if "github.com" in remote_url:
+            token = getattr(user_context, "github_token", None)
+        elif "gitlab" in remote_url:
+            token = getattr(user_context, "gitlab_token", None)
+        
+        # Fallback to generic git_token
+        token = token or getattr(user_context, "git_token", None)
+        
+        if token and remote_url.startswith("https://"):
+            # Inject token for HTTPS auth: https://<token>@host/...
             from urllib.parse import urlparse
             parsed = urlparse(remote_url)
-            auth_url = f"https://{github_token}@{parsed.hostname}{parsed.path}"
-            r = await _run_git(["push", auth_url, branch])
+            auth_url = f"https://{token}@{parsed.hostname}{parsed.path}"
+            r = await _run_git([action, auth_url, branch])
         else:
-            r = await _run_git(["push", "origin", branch])
+            r = await _run_git([action, "origin", branch])
             
         if r["returncode"] != 0:
-            return _fail("push", r)
-        return _ok("push", {"branch": branch, **r})
+            return _fail(action, r)
+        return _ok(action, {"branch": branch, **r})
 
     elif action == "log":
         r = await _run_git(["log", f"--oneline", f"-{log_count}"])
