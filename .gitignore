@@ -18,4 +18,5 @@ temp_output/
 .codex
 services/storage/index_checkpoint.json
 services/workspace_runtime/config/
-data/
+/data/
+!services/gateway/data/
