@@ -38,7 +38,7 @@ describe('Communication page', () => {
   it('sends announcements and executes note actions', async () => {
     renderWithProviders(<Communication />);
 
-    fireEvent.change(await screen.findByRole('combobox'), {
+    fireEvent.change(await screen.findByLabelText('Announcement target device'), {
       target: { value: 'media_player.office_speaker' },
     });
     fireEvent.change(screen.getByPlaceholderText('Enter the announcement message'), {
