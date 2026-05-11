@@ -1428,6 +1428,8 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks: BackgroundTasks = None):
+    print("DEBUG: Chat handler entered!")
+    log.info("DEBUG: Chat handler entered (Logger)!")
     exec_data = None
     client = get_http_client()
     # 1. Resolve Identity
