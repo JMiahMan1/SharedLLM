@@ -158,55 +158,27 @@ async def handle_git(req) -> dict:
         if not is_admin:
             return {
                 "status": "FAILURE",
-                "message": "Push requires admin privileges. Please authenticate as an admin user.",
+                "message": "Push requires admin privileges.",
                 "service": "git",
                 "detail": {"error": "insufficient_permissions"},
             }
-        r = await _run_git(["push", "origin", branch])
-        if r["returncode"] != 0:
-            return _fail("push", r)
-        return _ok("push", {"branch": branch, **r})
-
-    elif action == "sync":
-        # The Super-Tool: add, commit, and push in one go
-        if not commit_message:
-            return _fail("sync", {"error": "commit_message/message is required for 'sync' action."})
         
-        # 1. Add all
-        await _run_git(["add", "."])
-        
-        # 2. Commit
-        env_override = {
-            "GIT_AUTHOR_NAME": getattr(user_context, "user", "Raven"),
-            "GIT_AUTHOR_EMAIL": f"{getattr(user_context, 'user', 'raven')}@sumemail.com",
-            "GIT_COMMITTER_NAME": getattr(user_context, "user", "Raven"),
-            "GIT_COMMITTER_EMAIL": f"{getattr(user_context, 'user', 'raven')}@sumemail.com",
-        }
-        if not any(commit_message.startswith(p) for p in ("feat:", "fix:", "chore:", "docs:")):
-            commit_message = f"feat: {commit_message}"
-            
-        cr = await _run_git(["commit", "-m", commit_message], env_override=env_override)
-        if cr["returncode"] != 0 and "nothing to commit" not in cr["stdout"]:
-            return _fail("sync:commit", cr)
-            
-        # 3. Push (with token injection if available)
-        # Construct the push URL with token for auth
+        # Resolve remote URL for token injection
         remote_url = await _get_remote_url("origin")
         github_token = getattr(user_context, "github_token", None)
         
         if github_token and "github.com" in remote_url:
-            # Inject token: https://token@github.com/...
+            # Inject token for HTTPS auth: https://<token>@github.com/...
             from urllib.parse import urlparse
             parsed = urlparse(remote_url)
             auth_url = f"https://{github_token}@{parsed.hostname}{parsed.path}"
-            pr = await _run_git(["push", auth_url, branch])
+            r = await _run_git(["push", auth_url, branch])
         else:
-            pr = await _run_git(["push", "origin", branch])
+            r = await _run_git(["push", "origin", branch])
             
-        if pr["returncode"] != 0:
-            return _fail("sync:push", pr)
-            
-        return _ok("sync", {"commit": cr["stdout"], "push": pr["stdout"]})
+        if r["returncode"] != 0:
+            return _fail("push", r)
+        return _ok("push", {"branch": branch, **r})
 
     elif action == "log":
         r = await _run_git(["log", f"--oneline", f"-{log_count}"])
