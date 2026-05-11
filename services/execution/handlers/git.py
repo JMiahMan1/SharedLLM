@@ -111,6 +111,11 @@ async def _get_current_branch() -> str:
     return r["stdout"].strip() or "main"
 
 
+def _is_autonomous_actor(user_context: Any) -> bool:
+    user_name = str(getattr(user_context, "user", "") or "").strip().lower()
+    return user_name.startswith("raven")
+
+
 async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     """
     Dispatch git operations based on req.action.
@@ -140,6 +145,26 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     log_count: int = int(getattr(req, "log_count", 10) or 10)
     user_context = getattr(req, "user_context", None)
     is_admin: bool = getattr(user_context, "is_admin", False) if user_context else False
+    is_autonomous = _is_autonomous_actor(user_context)
+
+    if action in {"reset", "clean"}:
+        return {
+            "status": "FAILURE",
+            "message": f"git {action} is blocked for safety.",
+            "service": "git",
+            "detail": {"error": "unsafe_git_action_blocked"},
+        }
+
+    if is_autonomous and action in {"add", "commit", "push", "pull", "fetch", "branch", "checkout"}:
+        return {
+            "status": "FAILURE",
+            "message": (
+                f"Autonomous git {action} is blocked. "
+                "Use the workspace runtime review workflow for self-edit operations."
+            ),
+            "service": "git",
+            "detail": {"error": "autonomous_git_workflow_required"},
+        }
 
     if action == "status":
         r = await _run_git(["status", "--porcelain", "--branch"])
@@ -185,13 +210,6 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         if r["returncode"] != 0:
             return _fail("checkout", r)
         return _ok("checkout", r)
-
-    elif action == "clean":
-        # Force remove untracked files
-        r = await _run_git(["clean", "-fd"])
-        if r["returncode"] != 0:
-            return _fail("clean", r)
-        return _ok("clean", r)
 
     elif action == "show":
         # Show commit details
@@ -291,13 +309,6 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         if r["returncode"] != 0:
             return _fail("fetch", r)
         return _ok("fetch", r)
-
-    elif action == "reset":
-        # Hard reset to origin branch for recovery
-        r = await _run_git(["reset", "--hard", f"origin/{branch}"])
-        if r["returncode"] != 0:
-            return _fail("reset", r)
-        return _ok("reset", r)
 
     elif action == "log":
         r = await _run_git(["log", f"--oneline", f"-{log_count}"])
