@@ -115,7 +115,24 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
-    ans = await provider.generate(model, messages, chunk_callback=chunk_callback)
+    
+    # --- RETRY LOGIC FOR MODEL SWITCHING ---
+    MAX_INFERENCE_RETRIES = 3
+    ans = ""
+    
+    for retry_count in range(MAX_INFERENCE_RETRIES):
+        try:
+            ans = await provider.generate(model, messages, chunk_callback=chunk_callback)
+            break # Success!
+        except Exception as e:
+            log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
+            if retry_count < MAX_INFERENCE_RETRIES - 1:
+                wait_time = 5 * (retry_count + 1)
+                log.info(f"[_single_turn_inference] Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            else:
+                log.error(f"[_single_turn_inference] FATAL: All inference retries failed: {e}")
+                return f"I encountered an error while trying to generate a response (All retries failed): {e}"
 
     # Tool Extraction
     try:
