@@ -185,7 +185,13 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 - `WorkspaceSearchRequest`: { "query": "...", "path": "." }
 - `WorkspaceFileReadRequest`: { "path": "...", "offset_lines": 0, "limit_lines": 100 }
 - `WorkspaceFilePatchRequest`: { "path": "...", "chunks": [{"old_text": "...", "new_text": "..."}] }
-- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "message": "...", "path": ".", "branch": "microservices" } (NOTE: Use "clean" to nuke untracked files and "reset" for failed merges.)
+- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "message": "...", "path": ".", "branch": "microservices" }
+
+#### **GIT TACTICAL GUIDE:**
+1. **Self-Healing**: If a `push` fails due to being "behind remote", immediately `fetch` then `reset --hard` to `origin/branch` to synchronize.
+2. **Cleanup**: If tool errors suggest untracked files are blocking operations, use `clean` to prune the workspace.
+3. **Verification**: Always use `diff` (or `diff --cached`) before a `commit` to ensure no sensitive or unintended changes are being landed.
+4. **Context**: Use `log` and `show` to audit the repository history before making structural changes.
 - `WorkspaceShellRequest`: { "command": "pytest ..." }
 - `WebReadRequest`: { "url": "..." }
 
