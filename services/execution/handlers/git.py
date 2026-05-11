@@ -34,7 +34,7 @@ os.system(f"git config --global --add safe.directory {WORKSPACE_ROOT}")
 log.info(f"Marked {WORKSPACE_ROOT} as safe.directory")
 
 
-async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT) -> dict:
+async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dict = None) -> dict:
     """
     Run a git command as a subprocess and return stdout/stderr/returncode.
     args — list of git sub-command + arguments (NOT including 'git' itself).
@@ -45,6 +45,8 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT) -> dict:
         env = os.environ.copy()
         # Fix: Ignore bad permissions on config file by using -F /dev/null
         env["GIT_SSH_COMMAND"] = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -F /dev/null"
+        if env_override:
+            env.update(env_override)
         
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -127,7 +129,16 @@ async def handle_git(req) -> dict:
             "feat:", "fix:", "chore:", "docs:", "refactor:", "test:", "perf:", "ci:"
         )):
             commit_message = f"fix: {commit_message}"
-        r = await _run_git(["commit", "-m", commit_message])
+            
+        # Ensure we have an author identity for the commit
+        env_override = {
+            "GIT_AUTHOR_NAME": getattr(user_context, "user", "Raven"),
+            "GIT_AUTHOR_EMAIL": f"{getattr(user_context, 'user', 'raven')}@sumemail.com",
+            "GIT_COMMITTER_NAME": getattr(user_context, "user", "Raven"),
+            "GIT_COMMITTER_EMAIL": f"{getattr(user_context, 'user', 'raven')}@sumemail.com",
+        }
+        
+        r = await _run_git(["commit", "-m", commit_message], env_override=env_override)
         if r["returncode"] != 0:
             return _fail("commit", r)
         return _ok("commit", {"commit_message": commit_message, **r})
