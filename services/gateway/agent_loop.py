@@ -467,13 +467,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "nextcloud_url": creds.nextcloud_url,
                     "nextcloud_user": creds.nextcloud_user,
                     "nextcloud_pass": creds.nextcloud_pass,
+                    "github_token": creds.github_token,
                 }
 
                 async with httpx.AsyncClient(timeout=120.0) as client:
-                    # Redact sensitive info for logging
-                    log_payload = payload.copy()
+                    # Redact sensitive values for logging
+                    log_payload = json.loads(json.dumps(payload)) # Deep copy
                     if "user_context" in log_payload:
-                        log_payload["user_context"] = "[REDACTED]"
+                        sensitive_keys = ["ha_token", "nextcloud_pass", "github_token", "api_key", "openai_key"]
+                        for sk in sensitive_keys:
+                            if sk in log_payload["user_context"] and log_payload["user_context"][sk]:
+                                log_payload["user_context"][sk] = "[REDACTED]"
                         
                     log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
@@ -482,7 +486,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     if resp.status_code == 422:
                         try:
                             error_detail = resp.json().get("detail", "Validation failed")
-                            msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'commit_message') instead of 'command' or 'args'."
+                            msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'message') instead of 'command' or 'commit_message'."
                         except:
                             msg = f"SCHEMA ERROR (422): {resp.text}. Check your field names."
                         exec_data = {"status": "ERROR", "message": msg}
