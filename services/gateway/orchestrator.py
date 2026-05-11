@@ -70,7 +70,9 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     # 3. Autonomous Detection (Raven/Coding/Repair ONLY)
     # Raven runs in Workspaces and handles long-running or coding tasks.
     # Home Automation should NOT be treated as autonomous (no long-running loops)
-    autonomy_signals = ["raven", "audit", "repair", "fix", "deploy", "bootstrap", "coding", "develop"]
+    autonomy_signals = ["raven", "audit", "repair", "fix", "deploy", "bootstrap", "coding", "develop",
+                        "push", "commit", "git", "patch", "workflow", "ci ", "pipeline",
+                        "nextcloud", "storage", "upload", "download", "my files"]
     is_autonomous = any(k in query.lower() for k in autonomy_signals)
     
     # 4. Final Inference
@@ -163,6 +165,16 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
             "webreadrequest": "/execute/web_read",
             "discoverysyncrequest": "/execute/discovery_sync",
             "storageindexrequest": "/index/full",
+            # Workspace / Git tools (Nextcloud + code)
+            "workspacefilereadrequest": "/execute/workspace_file_read",
+            "workspacefilewriterequest": "/execute/workspace_file_write",
+            "workspacefilepatchrequest": "/execute/workspace_file_patch",
+            "workspacesearchrequest": "/execute/workspace_search",
+            "workspaceshellrequest": "/execute/workspace_shell",
+            "gitoperationrequest": "/execute/git",
+            "storagefilereadrequest": "/execute/storage_file_read",
+            "storagefilewriterequest": "/execute/storage_file_write",
+            "dockerlogsrequest": "/execute/docker_logs",
         }
 
         if action in action_map:
