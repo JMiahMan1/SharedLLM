@@ -10,6 +10,11 @@ from pydantic import BaseModel, Field, model_validator
 class BaseRequest(BaseModel):
     model_config = {"extra": "ignore"}
 
+    @model_validator(mode='before')
+    @classmethod
+    def handle_common_aliases(cls, data: Any) -> Any:
+        """Automatically map common hallucinations to schema-correct fields."""
+        if isinstance(data, dict):
             # Map 'command' to 'action' (Common Git hallucination)
             if "command" in data and "action" not in data:
                 data["action"] = data["command"]
