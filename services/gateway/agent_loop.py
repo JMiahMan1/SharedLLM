@@ -204,9 +204,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
 
         try:
-            dynamic_settings = await get_dynamic_llm_settings()
-            vram_params = await get_vram_safe_params(selected_model, dynamic_settings)
-            ollama_payload["options"] = vram_params
             ollama_payload["messages"] = [
                 {"role": "system", "content": full_system},
                 {"role": "user", "content": f"MISSION LOCK: {query}\n\nPAST ACTIONS SUMMARY:\n" + "\n".join(action_log)}
@@ -224,28 +221,45 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "content": f"LAST TOOL RESULT (Execution Status: SUCCESS):\n{json.dumps(safe_exec_data)}"
                 })
             ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
+
+            # --- RETRY LOGIC FOR MODEL SWITCHING ---
+            MAX_INFERENCE_RETRIES = 3
+            inference_success = False
             
-            # Fetch dynamic settings for VRAM-safe params
-            dynamic_settings = await get_dynamic_llm_settings()
-            ollama_payload["options"] = await get_vram_safe_params(selected_model, dynamic_settings)
-            
-            log.info(f"[Strategy 8] Executing inference for {selected_model} (Iter {agent_iter + 1})")
-            data = await execute_inference(
-                provider,
-                selected_model,
-                ollama_payload["messages"],
-                ollama_payload.get("options", {})
-            )
+            for retry_count in range(MAX_INFERENCE_RETRIES):
+                try:
+                    dynamic_settings = await get_dynamic_llm_settings()
+                    vram_params = await get_vram_safe_params(selected_model, dynamic_settings)
+                    ollama_payload["options"] = vram_params
+                    
+                    log.info(f"[AgentLoop] Executing inference (Attempt {retry_count + 1}/{MAX_INFERENCE_RETRIES}) for {selected_model}")
+                    data = await execute_inference(
+                        provider,
+                        selected_model,
+                        ollama_payload["messages"],
+                        ollama_payload.get("options", {})
+                    )
+                    
+                    ans = data.get("message", {}).get("content", "Error.")
+                    inference_success = True
+                    break # Success!
+                except Exception as e:
+                    log.warning(f"[AgentLoop] Inference attempt {retry_count + 1} failed: {e}")
+                    if retry_count < MAX_INFERENCE_RETRIES - 1:
+                        wait_time = 5 * (retry_count + 1)
+                        log.info(f"[AgentLoop] Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise e # Re-raise on final failure
 
             heartbeat_stop.set()
             await hb_task
-            ans = data.get("message", {}).get("content", "Error.")
             log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms — iter {agent_iter + 1}")
             log.info(f"[AgentLoop] Response content: {ans[:200]}...")
         except Exception as e:
             heartbeat_stop.set()
             await hb_task
-            log.warning(f"[AgentLoop] Ollama error on iter {agent_iter + 1}: {e}")
+            log.error(f"[AgentLoop] FATAL: All inference retries failed on iter {agent_iter + 1}: {e}")
             return "SUCCESS: Jarvis is currently operating in low-latency mode (Degraded)."
 
         tool_data = extract_action_json(ans)
