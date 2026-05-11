@@ -53,6 +53,7 @@ class OllamaProvider(BaseLLMProvider):
                 
                 # Harden: Strip keep-alive spaces and handle potential multi-line/streamed JSON
                 raw_text = resp.text.strip()
+                log.info(f"[OllamaProvider-RAW-BLOCK] {raw_text[:500]}") # Log first 500 chars
                 if not raw_text:
                     return ""
                 
