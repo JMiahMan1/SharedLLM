@@ -15,9 +15,12 @@ class BaseRequest(BaseModel):
     def handle_common_aliases(cls, data: Any) -> Any:
         """Automatically map common hallucinations to schema-correct fields."""
         if isinstance(data, dict):
-            # Map 'command' to 'action' (Common Git hallucination)
-            if "command" in data and "action" not in data:
-                data["action"] = data["command"]
+            # Map 'command' or 'operation' to 'action' (Common Git hallucination)
+            if "action" not in data:
+                if "command" in data:
+                    data["action"] = data["command"]
+                elif "operation" in data:
+                    data["action"] = data["operation"]
             
             # Map 'git_status' to 'status', etc.
             if "action" in data and isinstance(data["action"], str) and data["action"].startswith("git_"):
