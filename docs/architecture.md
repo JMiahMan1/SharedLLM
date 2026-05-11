@@ -165,6 +165,39 @@ Alarms are stored in Redis and monitored by a background thread started in
 `main.py`. When an alarm triggers, it dispatches a high-priority notification
 and plays an optional audio beep via the user's primary media player.
 
+### Model Routing Strategy
+
+To optimize performance and cost, the Gateway dynamically selects the most appropriate LLM for each query based on semantic signals and mission intent:
+
+1. **Coding & Autonomous (Raven)**:
+   - **Signal**: Queries containing technical keywords (python, git, docker) or the keyword "raven".
+   - **Routing**: Automatically directed to the **Coding Model** (e.g., `qwen2.5-coder:7b`).
+   - **Purpose**: High-precision tool usage, script generation, and multi-step autonomous repair.
+
+2. **Knowledge & Discovery (Librarian)**:
+   - **Signal**: Queries regarding document summaries, file searches, or storage inventory.
+   - **Routing**: Directed to the **Librarian Model** (e.g., `qwen3.5:9b`).
+   - **Purpose**: Broad context understanding and efficient retrieval from RAG sources.
+
+3. **Audible Preparation & TTS (Raven Narrator)**:
+   - **Signal**: Queries containing TTS keywords (audiobook, ssml, prosody, read aloud).
+   - **Routing**: Directed to the **Librarian Model** (e.g., `qwen3.5:9b` or `gemini-1.5-flash`).
+   - **Purpose**: Stripping non-audible artifacts (page numbers, headers), expanding abbreviations, and injecting SSML prosody tags for natural narration.
+   - **Example**: "RAVEN, prepare the ebook at /storage/books/dune.epub for TTS. Clean OCR errors and add 500ms paragraph breaks."
+
+4. **General Assistant**:
+   - **Signal**: Default fallback for conversational queries, smart home control, and general assistance.
+   - **Routing**: Directed to the **Assistant Model** (e.g., `qwen3.5:9b`).
+   - **Purpose**: Low-latency interaction and persona-driven household management.
+
+#### Recommended Models for TTS Preparation
+
+| Task Type | Recommended Model | Rationale |
+| :--- | :--- | :--- |
+| **High-Volume Cleaning** | `qwen3.5:9b` / `Llama-3-8b` | Excellent at stripping headers/footers and expanding abbreviations with low latency. |
+| **Structural/OCR Fixes** | `gemini-1.5-flash` | Large context window and structural awareness make it best for fixing messy PDFs/Ebooks. |
+| **Dialogue & Prosody** | `claude-3.5-sonnet` | Superior nuance for identifying speaker changes and injecting natural SSML breaks. |
+
 ### State Management Strategy (Hybrid)
 
 To balance search performance with data freshness, the system uses a **Hybrid
