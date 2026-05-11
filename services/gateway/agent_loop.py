@@ -393,7 +393,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info(f"[AgentLoop] Dispatching action: {action_name}")
 
         try:
-            action = tool_data.get("action")
+            # Normalize action name for better matching
+            action = str(tool_data.get("action") or tool_data.get("operation") or "").lower()
             payload = tool_data.get("payload", tool_data)
             
             action_map_aliases = {
@@ -426,9 +427,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspace_file_write": "WorkspaceFileWriteRequest",
                 "workspace_file_patch": "WorkspaceFilePatchRequest"
             }
-            
-            # Normalize action name to lower-case for better matching
-            action = action.lower()
             
             if action in action_map_aliases:
                 action = action_map_aliases[action]
