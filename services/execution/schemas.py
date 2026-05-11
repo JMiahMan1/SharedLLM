@@ -21,6 +21,8 @@ class BaseRequest(BaseModel):
                     data["action"] = data["command"]
                 elif "operation" in data:
                     data["action"] = data["operation"]
+                elif "message" in data:
+                    data["action"] = data["message"]
             
             # Map 'git_status' to 'status', etc.
             if "action" in data and isinstance(data["action"], str) and data["action"].startswith("git_"):
