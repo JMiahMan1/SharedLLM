@@ -146,26 +146,27 @@ class IntentEngine:
         Returns (intent_name, confidence_score).
         """
         q = query.lower().strip()
+        print(f"[IntentEngine-PRINT] Classifying query: '{q}'")
         log.info(f"[IntentEngine] Classifying query: '{q}'")
         
         # 1. Hardcoded Keyword Fallbacks (Safety/Test logic)
         if q in ["play", "play music", "start playing", "resume music"]:
-            log.info(f"[IntentEngine] Keyword match: play_media")
+            print(f"[IntentEngine-PRINT] Keyword match: play_media")
             return "play_media", 1.0
         if q in ["pause", "pause music", "stop the music", "stop playing"]:
-            log.info(f"[IntentEngine] Keyword match: pause_media")
+            print(f"[IntentEngine-PRINT] Keyword match: pause_media")
             return "pause_media", 1.0
         if q in ["turn on", "power on", "switch on"]:
-            log.info(f"[IntentEngine] Keyword match: turn_on")
+            print(f"[IntentEngine-PRINT] Keyword match: turn_on")
             return "turn_on", 1.0
         if q in ["turn off", "power off", "switch off"]:
-            log.info(f"[IntentEngine] Keyword match: turn_off")
+            print(f"[IntentEngine-PRINT] Keyword match: turn_off")
             return "turn_off", 1.0
         if q in ["index", "reindex", "scan my library"]:
-            log.info(f"[IntentEngine] Keyword match: index_storage")
+            print(f"[IntentEngine-PRINT] Keyword match: index_storage")
             return "index_storage", 1.0
         if q in ["sync home assistant", "refresh devices"]:
-            log.info(f"[IntentEngine] Keyword match: sync_ha")
+            print(f"[IntentEngine-PRINT] Keyword match: sync_ha")
             return "sync_ha", 1.0
 
         # 2. Semantic Routing (if active)
