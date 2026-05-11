@@ -189,9 +189,13 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 
 #### **GIT TACTICAL GUIDE:**
 1. **Self-Healing**: If a `push` fails due to being "behind remote", immediately `fetch` then `reset --hard` to `origin/branch` to synchronize.
-2. **Cleanup**: If tool errors suggest untracked files are blocking operations, use `clean` to prune the workspace.
-3. **Verification**: Always use `diff` (or `diff --cached`) before a `commit` to ensure no sensitive or unintended changes are being landed.
-4. **Context**: Use `log` and `show` to audit the repository history before making structural changes.
+2. **Cleanup**: If status shows many untracked files after a failed mission, use 'clean' to reset.
+3. **Commit Quality**: ALWAYS provide a descriptive, professional commit message in the 'commit_message' field.
+   - Format: '<type>: <short summary>' (e.g., 'feat: added automation scripts')
+   - Description: Briefly explain WHAT changed and WHY.
+   - Example: 'feat: mission accomplished - created and verified flag file'
+4. **Verification**: Always use `diff` (or `diff --cached`) before a `commit` to ensure no sensitive or unintended changes are being landed.
+5. **Context**: Use `log` and `show` to audit the repository history before making structural changes.
 - `WorkspaceShellRequest`: { "command": "pytest ..." }
 - `WebReadRequest`: { "url": "..." }
 
