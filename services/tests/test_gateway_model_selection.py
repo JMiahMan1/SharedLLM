@@ -233,6 +233,68 @@ async def test_workspace_pytest_proxy_uses_gateway_route(monkeypatch):
     assert captured["headers"]["X-Internal-Secret"] == "test-secret"
 
 
+@pytest.mark.asyncio
+async def test_orchestrate_code_change_uses_review_branch_workflow_payload(monkeypatch):
+    captured = {}
+
+    async def fake_execute_inference(payload):
+        return {
+            "message": {
+                "content": json.dumps(
+                    {
+                        "relative_path": "tests/test_sample.py",
+                        "content": "def test_sample():\n    assert True\n",
+                        "reasoning": "Create a minimal targeted test file.",
+                        "test_cmd": "pytest tests/test_sample.py -q",
+                    }
+                )
+            }
+        }
+
+    async def fake_workspace_runtime_request(method, path, *, json_payload=None, params=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["json"] = json_payload
+        return {
+            "commit": {"commit": "abc123"},
+            "provider_sync": {"status": "SUCCESS"},
+            "review": {
+                "head": "raven/alice/test-sample-123",
+                "base": "main",
+                "summary": {
+                    "pytest": {"passed": True, "targets": ["tests/test_sample.py"]},
+                },
+            },
+        }
+
+    monkeypatch.setattr(gateway_main, "resolve_chat_workspace", AsyncMock(return_value={"id": "alice-demo"}))
+    monkeypatch.setattr(gateway_main, "build_workspace_readme_context", AsyncMock(return_value="workspace context"))
+    monkeypatch.setattr(gateway_main, "execute_inference", fake_execute_inference)
+    monkeypatch.setattr(gateway_main, "workspace_runtime_request", fake_workspace_runtime_request)
+
+    response = await gateway_main.orchestrate_code_change(
+        body={},
+        user_id="alice",
+        refined_query="Add a targeted pytest for the sample module",
+        selected_model="qwen2.5-coder:7b",
+        should_stream=False,
+        is_openai=False,
+    )
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/workflow/write-sync-commit"
+    assert captured["json"]["workspace_id"] == "alice-demo"
+    assert captured["json"]["relative_path"] == "tests/test_sample.py"
+    assert captured["json"]["lint_paths"] == ["tests/test_sample.py"]
+    assert captured["json"]["pytest_targets"] == ["tests/test_sample.py"]
+    assert captured["json"]["auto_create_review_branch"] is True
+    assert captured["json"]["review_branch_prefix"] == "raven"
+    assert captured["json"]["push"] is True
+
+    payload = json.loads(response.body)
+    assert payload["message"]["content"].find("Review Branch") != -1
+
+
 @pytest.mark.local_only
 def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     captured = {}

@@ -1062,9 +1062,9 @@ async def orchestrate_code_change(
       "1. Identify the 'relative_path' for the file.\n"
       "2. Provide the full 'content' for the file.\n"
       "3. Write a detailed 'reasoning' (2-3 sentences) explaining the change and its structure.\n"
-      "4. **Verification Command**: If the user asks for linting, testing, or running, you MUST provide a 'test_cmd'.\n"
-      "   - Examples: 'shellcheck path/to/file.sh', 'flake8 path/to/file.py', 'go vet path/to/file.go', 'node path/to/file.js'.\n"
-      "   - To run the script and check output: 'bash path/to/file.sh', 'python3 path/to/file.py', etc.\n\n"
+      "4. **Verification Command**: If tests are needed, provide a 'test_cmd' that uses pytest and targets the smallest relevant scope.\n"
+      "   - Example: 'pytest tests/test_feature.py -q'.\n"
+      "   - Linting is handled automatically by the workspace runtime, so do not emit flake8 or eslint commands here.\n\n"
       "### Return ONLY JSON:\n"
       "{\n"
       "  \"relative_path\": \"string\",\n"
@@ -1102,6 +1102,26 @@ async def orchestrate_code_change(
     if not rel_path or content is None:
         raise HTTPException(status_code=400, detail="Coding plan missing relative_path or content")
 
+    def _pytest_targets_from_command(command: str | None) -> list[str]:
+        if not command:
+            return []
+        parts = str(command).strip().split()
+        if not parts:
+            return []
+        normalized = parts[0].lower()
+        if normalized not in {"pytest", "python", "python3"}:
+            return []
+        if normalized in {"python", "python3"}:
+            if len(parts) < 3 or parts[1] != "-m" or parts[2] != "pytest":
+                return []
+            parts = parts[3:]
+        else:
+            parts = parts[1:]
+        targets = [part for part in parts if part and not part.startswith("-")]
+        return targets
+
+    pytest_targets = _pytest_targets_from_command(test_cmd)
+
     # Call the workflow endpoint
     workflow_payload = {
         "workspace_id": workspace_id,
@@ -1109,13 +1129,19 @@ async def orchestrate_code_change(
         "relative_path": rel_path,
         "content": content,
         "commit_message": f"feat: {refined_query[:50]}",
-        "run_tests": True if test_cmd else False,
-        "test_command": test_cmd,
+        "lint_paths": [rel_path],
+        "pytest_targets": pytest_targets,
+        "auto_create_review_branch": True,
+        "review_branch_prefix": "raven",
+        "push": bool(pytest_targets),
         "sync_to_provider": True,
-        "create_parents": True
+        "create_parents": True,
     }
     
     result = await workspace_runtime_request("POST", "/workflow/write-sync-commit", json_payload=workflow_payload)
+    review = result.get("review") or {}
+    review_summary = review.get("summary") or {}
+    pytest_summary = review_summary.get("pytest") or {}
     
     summary = (
         f"### Code Orchestration Success\n\n"
@@ -1123,13 +1149,15 @@ async def orchestrate_code_change(
         f"**Action**: Autonomous creation and verification.\n\n"
         f"**Developer Reasoning & Description**:\n{reasoning}\n\n"
         f"**Workflow Result**:\n"
-        f"- **Commit**: `{result.get('commit_sha', 'N/A')}`\n"
-        f"- **Sync**: {result.get('sync_status', 'N/A')}\n"
-        f"- **Verification**: {result.get('test_status', 'N/A')}\n"
+        f"- **Commit**: `{result.get('commit', {}).get('commit', 'N/A')}`\n"
+        f"- **Review Branch**: `{review.get('head', 'N/A')}`\n"
+        f"- **Base Branch**: `{review.get('base', 'N/A')}`\n"
+        f"- **Sync**: {'SUCCESS' if result.get('provider_sync') else 'SKIPPED'}\n"
+        f"- **Verification**: {'PASS' if pytest_summary.get('passed') else 'Lint only / no pytest'}\n"
     )
     
-    if result.get("test_stdout"):
-        summary += f"\n**Verification Output**:\n```\n{result.get('test_stdout')}\n```\n"
+    if pytest_summary:
+        summary += f"\n**Pytest Targets**: `{', '.join(pytest_summary.get('targets', [])) or 'none'}`\n"
     
     if is_openai:
       return _make_openai_response(summary, selected_model, stream=should_stream)

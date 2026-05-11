@@ -5,6 +5,8 @@ import re
 import subprocess
 import hashlib
 import tempfile
+import fnmatch
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -56,6 +58,14 @@ def get_workspace_root() -> Path:
 WORKSPACE_ROOT = get_workspace_root() # Initial value
 DEFAULT_PYTEST_TIMEOUT_SECONDS = int(os.getenv("WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "90"))
 DEFAULT_FILE_READ_LIMIT = int(os.getenv("WORKSPACE_RUNTIME_FILE_READ_LIMIT", "20000"))
+DEFAULT_PROTECTED_BRANCH_PATTERNS = [
+    pattern.strip()
+    for pattern in os.getenv(
+        "WORKSPACE_RUNTIME_PROTECTED_BRANCHES",
+        "main,master,development,dev,release/*",
+    ).split(",")
+    if pattern.strip()
+]
 
 app = FastAPI(title="SharedLLM Workspace Runtime")
 
@@ -176,6 +186,9 @@ class WorkflowWriteSyncCommitRequest(WorkspaceRef):
     create_parents: bool = False
     sync_to_provider: bool = True
     verify_provider_write: bool = True
+    auto_create_review_branch: bool = True
+    review_branch_prefix: str = "raven"
+    lint_paths: list[str] = Field(default_factory=list)
     pytest_targets: list[str] = Field(default_factory=list)
     pytest_timeout_seconds: int = Field(default=DEFAULT_PYTEST_TIMEOUT_SECONDS, ge=1, le=900)
     push: bool = False
@@ -594,6 +607,49 @@ def _run_command(
     }
 
 
+def _run_lint_for_file(workspace_path: Path, relative_path: str) -> dict[str, Any]:
+    target = resolve_safe_path(workspace_path, relative_path)
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail=f"Path is not a file: {relative_path}")
+
+    ext = target.suffix.lower()
+    results: list[dict[str, Any]] = []
+    passed = True
+
+    def _lint(cmd: list[str]) -> tuple[int, str]:
+        result = _run_command(workspace_path, cmd, timeout_seconds=30)
+        output = result["stdout"].strip() or result["stderr"].strip()
+        return result["returncode"], output
+
+    if ext == ".py":
+        rc, output = _lint(["black", "--check", "--diff", str(target)])
+        results.append({"tool": "black", "returncode": rc, "output": output})
+        passed = passed and rc == 0
+        rc, output = _lint(["flake8", "--max-line-length=120", str(target)])
+        results.append({"tool": "flake8", "returncode": rc, "output": output})
+        passed = passed and rc == 0
+    elif ext in {".js", ".ts", ".jsx", ".tsx", ".mjs"}:
+        rc, output = _lint(["eslint", str(target)])
+        results.append({"tool": "eslint", "returncode": rc, "output": output})
+        passed = passed and rc == 0
+    elif ext == ".json":
+        rc, output = _lint(["python3", "-m", "json.tool", str(target)])
+        results.append({"tool": "json.tool", "returncode": rc, "output": output})
+        passed = passed and rc == 0
+    elif ext in {".yaml", ".yml"}:
+        rc, output = _lint(["yamllint", "-d", "relaxed", str(target)])
+        results.append({"tool": "yamllint", "returncode": rc, "output": output})
+        passed = passed and rc == 0
+    else:
+        results.append({"tool": "none", "returncode": 0, "output": f"No linter configured for {ext or '[no extension]'}"})
+
+    return {
+        "path": relative_path,
+        "passed": passed,
+        "results": results,
+    }
+
+
 def _sanitize_targets(targets: list[str]) -> list[str]:
     cleaned = []
     for value in targets:
@@ -640,6 +696,146 @@ def _validate_branch_name(branch_name: str) -> str:
     if result.returncode != 0:
         raise HTTPException(status_code=400, detail=f"Invalid branch name: {branch}")
     return branch
+
+
+def _protected_branch_patterns(identity: dict[str, Any]) -> list[str]:
+    raw_patterns = identity.get("forbidden_branches", DEFAULT_PROTECTED_BRANCH_PATTERNS)
+    if isinstance(raw_patterns, str):
+        patterns = [part.strip() for part in raw_patterns.split(",") if part.strip()]
+    elif isinstance(raw_patterns, list):
+        patterns = [str(part).strip() for part in raw_patterns if str(part).strip()]
+    else:
+        patterns = []
+    return patterns or DEFAULT_PROTECTED_BRANCH_PATTERNS
+
+
+def _is_protected_branch(branch_name: str, identity: dict[str, Any]) -> bool:
+    branch = str(branch_name or "").strip()
+    if not branch:
+        return False
+    return any(fnmatch.fnmatch(branch, pattern) for pattern in _protected_branch_patterns(identity))
+
+
+def _current_branch_name(workspace_path: Path) -> str:
+    result = _run_command(workspace_path, ["git", "branch", "--show-current"])
+    return result["stdout"].strip()
+
+
+def _slugify_branch_component(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(value or "").strip().lower()).strip("-./")
+    return cleaned or "change"
+
+
+def _create_review_branch(
+    workspace_path: Path,
+    identity: dict[str, Any],
+    workspace: dict[str, Any],
+    relative_path: str,
+    prefix: str,
+) -> str:
+    base_branch = str(workspace.get("default_branch") or "main").strip() or "main"
+    base_ref = _validate_branch_name(base_branch)
+    prefix_clean = _slugify_branch_component(prefix)
+    user_fragment = _slugify_branch_component(identity.get("user") or "raven")
+    file_fragment = _slugify_branch_component(Path(relative_path).stem or "change")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    branch_name = _validate_branch_name(f"{prefix_clean}/{user_fragment}/{file_fragment}-{timestamp}")
+
+    checkout_base = _run_command(workspace_path, ["git", "checkout", base_ref])
+    if checkout_base["returncode"] != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=checkout_base["stderr"].strip() or checkout_base["stdout"].strip() or f"Unable to checkout base branch {base_ref}",
+        )
+
+    create_branch = _run_command(workspace_path, ["git", "checkout", "-b", branch_name, base_ref])
+    if create_branch["returncode"] != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=create_branch["stderr"].strip() or create_branch["stdout"].strip() or "Unable to create review branch",
+        )
+    return branch_name
+
+
+def _build_review_metadata(
+    workspace: dict[str, Any],
+    relative_path: str,
+    commit_message: str,
+    branch_name: str,
+    commit_result: dict[str, Any],
+    lint_results: list[dict[str, Any]],
+    pytest_result: Optional[dict[str, Any]],
+    push_result: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    base_branch = str(workspace.get("default_branch") or "main").strip() or "main"
+    changed_files = [relative_path] + [
+        item.get("path")
+        for item in lint_results
+        if item.get("path") and item.get("path") != relative_path
+    ]
+    unique_changed_files = list(dict.fromkeys(changed_files))
+    lint_summary = [
+        {
+            "path": item.get("path"),
+            "passed": bool(item.get("passed")),
+            "tools": [result.get("tool") for result in item.get("results", [])],
+        }
+        for item in lint_results
+    ]
+    pytest_summary = None
+    if pytest_result:
+        pytest_summary = {
+            "passed": bool(pytest_result.get("passed")),
+            "targets": pytest_result.get("command", [])[3:],
+        }
+
+    summary_lines = [
+        f"- Workspace: {workspace.get('id')}",
+        f"- Branch: {branch_name}",
+        f"- Commit: {commit_result.get('commit') or 'pending'}",
+        f"- Changed files: {', '.join(unique_changed_files)}",
+        "- Verification:",
+    ]
+    for item in lint_summary:
+        tools = ", ".join(item["tools"]) or "none"
+        summary_lines.append(
+            f"  - Lint {item['path']}: {'PASS' if item['passed'] else 'FAIL'} via {tools}"
+        )
+    if pytest_summary:
+        targets = ", ".join(pytest_summary["targets"]) or "(full suite)"
+        summary_lines.append(
+            f"  - Pytest: {'PASS' if pytest_summary['passed'] else 'FAIL'} on {targets}"
+        )
+    else:
+        summary_lines.append("  - Pytest: not run")
+    summary_lines.extend(
+        [
+            "",
+            "## Reviewer Checklist",
+            "- Confirm the branch targets the correct protected base branch.",
+            "- Review the diff for unintended side effects.",
+            "- Confirm lint and test coverage are adequate for the touched files.",
+        ]
+    )
+
+    return {
+        "title": commit_message.strip() or (commit_result.get("commit") or "Raven change set"),
+        "head": branch_name,
+        "base": base_branch,
+        "draft": False,
+        "summary": {
+            "workspace_id": workspace.get("id"),
+            "branch": branch_name,
+            "base_branch": base_branch,
+            "commit": commit_result.get("commit"),
+            "changed_files": unique_changed_files,
+            "lint": lint_summary,
+            "pytest": pytest_summary,
+            "pushed": bool(push_result),
+            "remote": push_result.get("remote") if push_result else None,
+        },
+        "body": "\n".join(summary_lines),
+    }
 
 
 def _git_remote_url(workspace_path: Path, remote_name: str) -> str:
@@ -1198,6 +1394,40 @@ def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret
 @app.post("/workflow/write-sync-commit")
 def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "write")
+    workspace_path = Path(workspace["resolved_path"])
+    identity = workspace.get("resolved_identity") or {}
+    requested_branch = _validate_branch_name(req.branch) if req.branch else ""
+    branch_name = requested_branch or _current_branch_name(workspace_path)
+
+    if not requested_branch and req.auto_create_review_branch and (
+        not branch_name or _is_protected_branch(branch_name, identity)
+    ):
+        branch_name = _create_review_branch(
+            workspace_path=workspace_path,
+            identity=identity,
+            workspace=workspace,
+            relative_path=req.relative_path,
+            prefix=req.review_branch_prefix,
+        )
+
+    if req.push:
+        if not branch_name:
+            raise HTTPException(status_code=400, detail="Unable to determine branch to push")
+        if _is_protected_branch(branch_name, identity):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Autonomous push to protected branch '{branch_name}' is blocked. "
+                    "Create or switch to a review branch and open a Pull Request."
+                ),
+            )
+        if not req.pytest_targets:
+            raise HTTPException(
+                status_code=400,
+                detail="pytest_targets are required before autonomous push so Raven can prove the branch is review-ready.",
+            )
 
     write_result = write_file(
         FileWriteRequest(
@@ -1214,21 +1444,16 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
         x_internal_secret,
     )
 
-    provider_sync_result = None
-    if req.sync_to_provider:
-        provider_sync_result = provider_sync_file(
-            ProviderSyncFileRequest(
-                workspace_id=req.workspace_id,
-                local_path=req.local_path,
-                rag_user=req.rag_user,
-                voice_id=req.voice_id,
-                device_id=req.device_id,
-                relative_path=req.relative_path,
-                create_parents=req.create_parents,
-                verify=req.verify_provider_write,
-            ),
-            x_internal_secret,
-        )
+    lint_targets = _sanitize_targets(req.lint_paths or [req.relative_path])
+    lint_results = []
+    for lint_target in lint_targets:
+        lint_result = _run_lint_for_file(workspace_path, lint_target)
+        lint_results.append(lint_result)
+        if not lint_result["passed"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Lint failed for workflow request on {lint_target}",
+            )
 
     pytest_result = None
     if req.pytest_targets:
@@ -1282,14 +1507,43 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
             x_internal_secret,
         )
 
+    provider_sync_result = None
+    if req.sync_to_provider:
+        provider_sync_result = provider_sync_file(
+            ProviderSyncFileRequest(
+                workspace_id=req.workspace_id,
+                local_path=req.local_path,
+                rag_user=req.rag_user,
+                voice_id=req.voice_id,
+                device_id=req.device_id,
+                relative_path=req.relative_path,
+                create_parents=req.create_parents,
+                verify=req.verify_provider_write,
+            ),
+            x_internal_secret,
+        )
+
+    review = _build_review_metadata(
+        workspace=workspace,
+        relative_path=req.relative_path,
+        commit_message=req.commit_message,
+        branch_name=branch_name or _current_branch_name(workspace_path),
+        commit_result=commit_result,
+        lint_results=lint_results,
+        pytest_result=pytest_result,
+        push_result=push_result,
+    )
+
     return {
         "status": "SUCCESS",
         "relative_path": req.relative_path,
         "write": write_result,
-        "provider_sync": provider_sync_result,
+        "lint": lint_results,
         "pytest": pytest_result,
         "commit": commit_result,
         "push": push_result,
+        "provider_sync": provider_sync_result,
+        "review": review,
     }
 
 
@@ -1430,17 +1684,17 @@ def git_push(req: GitPushRequest, x_internal_secret: Optional[str] = Header(defa
     workspace_path = Path(workspace["resolved_path"])
     identity = workspace.get("resolved_identity") or {}
     remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
-    current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
-    branch_name = (req.branch or current_branch["stdout"].strip()).strip()
+    branch_name = (req.branch or _current_branch_name(workspace_path)).strip()
     if not branch_name:
         raise HTTPException(status_code=400, detail="Unable to determine branch to push")
-    
-    # SYSTEM SAFETY CHECK: Prohibit autonomous pushes to protected branches
-    forbidden_branches = identity.get("forbidden_branches", ["main", "master", "development"])
-    if branch_name in forbidden_branches:
+
+    if _is_protected_branch(branch_name, identity):
         raise HTTPException(
-            status_code=403, 
-            detail=f"Autonomous push to '{branch_name}' is physically blocked by integration settings. Please create a feature branch and open a Pull Request instead."
+            status_code=403,
+            detail=(
+                f"Autonomous push to protected branch '{branch_name}' is blocked by policy. "
+                "Push to a review branch and open a Pull Request instead."
+            ),
         )
     remote_url = _git_remote_url(workspace_path, remote_name)
     args = ["git", "push"]

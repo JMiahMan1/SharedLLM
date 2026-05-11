@@ -135,6 +135,37 @@ is to operate on mounted workspaces as a whole, including:
 - The service is intended for internal use and requires `X-Internal-Secret`
   for non-health endpoints.
 
+## Workspace Self-Edit Workflow
+
+Raven can push autonomously, but only to non-protected review branches.
+
+- protected branches such as `main`, `master`, `development`, `dev`, and
+  `release/*` are blocked for autonomous push in the runtime layer
+- Raven should work on a branch such as `raven/<task-id>` and open a PR
+- if a workflow begins on a protected branch, the runtime can automatically
+  create a `raven/<user>/<file>-<timestamp>` review branch from the configured
+  `default_branch`
+- `push=true` requires verification to complete first, including lint and
+  targeted `pytest`
+
+Current workflow order for `POST /workflow/write-sync-commit`:
+
+1. resolve workspace and branch policy
+2. write the file
+3. lint the changed file or requested `lint_paths`
+4. run targeted `pytest`
+5. commit the change
+6. push only if the branch is non-protected
+7. sync to the provider after verification succeeds
+
+Workflow responses now include a `review` payload with PR-ready metadata:
+
+- review title
+- head and base branch
+- changed files
+- lint and pytest summaries
+- reviewer checklist text for Raven or a human reviewer
+
 ## Current Scope
 
 Implemented:
