@@ -338,7 +338,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             heartbeat_stop.set()
             await hb_task
             log.error(f"[AgentLoop] FATAL: All inference retries failed on iter {agent_iter + 1}: {e}")
-            return "SUCCESS: Jarvis is currently operating in low-latency mode (Degraded)."
+            return f"SYSTEM ERROR: Inference failed after multiple retries. Detail: {e}. Please check the LLM provider status."
 
         tool_data = extract_action_json(ans)
         
