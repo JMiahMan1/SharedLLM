@@ -83,6 +83,8 @@ class OllamaProvider(BaseLLMProvider):
                     if not line:
                         continue
                     try:
+                        # DEBUG: Log the raw line to see what the proxy is actually sending
+                        log.info(f"[OllamaProvider-RAW] {line}")
                         chunk_json = json.loads(line)
                         content = chunk_json.get("message", {}).get("content") or ""
                         if content:
