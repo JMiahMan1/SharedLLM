@@ -14,7 +14,7 @@ try:
     )
     from .schemas import ResolvedCredentials
     from .messaging import INFERENCE_LOCK
-    from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+    from .llm_providers import BaseLLMProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
@@ -22,7 +22,78 @@ except (ImportError, ValueError):
     )
     from schemas import ResolvedCredentials
     from messaging import INFERENCE_LOCK
-    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+    from llm_providers import BaseLLMProvider, OpenRouterProvider
+
+# --- HARDENED OLLAMA PROVIDER OVERRIDE ---
+class OllamaProvider(BaseLLMProvider):
+    def __init__(self, base_url: str, timeout: float = 180.0):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    async def generate(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        options: Optional[Dict[str, Any]] = None,
+        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
+    ) -> str:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True if chunk_callback else False,
+            "options": options or {}
+        }
+
+        full_content = ""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
+            if not chunk_callback:
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                resp.raise_for_status()
+                
+                # Harden: Strip keep-alive spaces and handle potential multi-line/streamed JSON
+                raw_text = resp.text.strip()
+                if not raw_text:
+                    return ""
+                
+                # If the response contains multiple JSON objects (NDJSON), take the last one or merge
+                if "\n" in raw_text:
+                    lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
+                    content = ""
+                    for line in lines:
+                        try:
+                            data = json.loads(line)
+                            content += data.get("message", {}).get("content", "")
+                            if data.get("done"):
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                    return content
+                
+                try:
+                    return json.loads(raw_text).get("message", {}).get("content", "")
+                except json.JSONDecodeError as e:
+                    log.error(f"[OllamaProvider-Hardened] Failed to parse JSON: {raw_text[:100]}... Error: {e}")
+                    return ""
+
+            # Streaming
+            async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk_json = json.loads(line)
+                        content = chunk_json.get("message", {}).get("content", "")
+                        if content:
+                            full_content += content
+                            await chunk_callback(content)
+                        if chunk_json.get("done"):
+                            break
+                    except Exception:
+                        # Silently skip keep-alives or malformed chunks
+                        continue
+        return full_content
 
 log = logging.getLogger("gateway.agent_loop")
 
@@ -101,14 +172,21 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{local_url.rstrip('/')}/api/ps")
             if resp.status_code == 200:
-                models = resp.json().get("models", [])
-                if len(models) > 1:
-                    safe_ctx = max(2048, max_ctx // 2)
-                    params["num_ctx"] = safe_ctx
-                    log.info(f"[AgentLoop] VRAM PRESSURE. Scaling context down to {safe_ctx}.")
+                raw_text = resp.text.strip()
+                if not raw_text:
+                    return params
+                
+                try:
+                    data = json.loads(raw_text)
+                    models = data.get("models", [])
+                    if len(models) > 1:
+                        safe_ctx = max(2048, max_ctx // 2)
+                        params["num_ctx"] = safe_ctx
+                        log.info(f"[AgentLoop] VRAM PRESSURE. Scaling context down to {safe_ctx}.")
+                except json.JSONDecodeError:
+                    log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}")
     except Exception:
         pass
-
     return params
 
 
