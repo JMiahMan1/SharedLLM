@@ -14,7 +14,7 @@ try:
     )
     from .schemas import ResolvedCredentials
     from .messaging import INFERENCE_LOCK
-    from .llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
+    from .llm_providers import BaseLLMProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
@@ -22,9 +22,74 @@ except (ImportError, ValueError):
     )
     from schemas import ResolvedCredentials
     from messaging import INFERENCE_LOCK
-    from llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
+    from llm_providers import BaseLLMProvider, OpenRouterProvider
 
-# Redundant OllamaProvider removed. Using central one from llm_providers.py.
+# --- HARDENED OLLAMA PROVIDER ---
+class OllamaProvider(BaseLLMProvider):
+    def __init__(self, base_url: str, timeout: float = 180.0):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    async def generate(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        options: Optional[Dict[str, Any]] = None,
+        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
+    ) -> str:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,  # Hardened: Always stream
+            "options": options or {}
+        }
+
+        full_content = ""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
+            if not chunk_callback:
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                resp.raise_for_status()
+                raw_text = resp.text.strip()
+                if not raw_text: return ""
+                
+                if "\n" in raw_text:
+                    lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
+                    content = ""
+                    for line in lines:
+                        try:
+                            data = json.loads(line)
+                            if "error" in data: content += f" [PROVIDER ERROR: {data['error']}] "
+                            content += data.get("message", {}).get("content") or ""
+                            if data.get("done"): break
+                        except json.JSONDecodeError: continue
+                    return content
+                
+                try:
+                    data = json.loads(raw_text)
+                    if "error" in data: return f" [PROVIDER ERROR: {data['error']}] "
+                    return data.get("message", {}).get("content") or ""
+                except json.JSONDecodeError as e:
+                    log.error(f"[OllamaProvider-Hardened] Failed to parse JSON: {raw_text[:100]}... Error: {e}")
+                    return ""
+
+            # Streaming path (used by AgentLoop)
+            async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    clean_line = line.strip()
+                    if not clean_line: continue
+                    try:
+                        chunk_json = json.loads(clean_line)
+                        if "error" in chunk_json: full_content += f" [PROVIDER ERROR: {chunk_json['error']}] "
+                        content = chunk_json.get("message", {}).get("content") or ""
+                        if content:
+                            full_content += content
+                            await chunk_callback(content)
+                        if chunk_json.get("done"): break
+                    except Exception as e:
+                        log.error(f"Error parsing streaming chunk: {e} | Raw line: {line!r}")
+        return full_content
 
 log = logging.getLogger("gateway.agent_loop")
 
