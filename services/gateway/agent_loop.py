@@ -121,7 +121,11 @@ ALLOWED_TOOLS = {
     "workspaceshellrequest", "storagefilereadrequest", 
     "storagefilewriterequest", "workspacebootstraprequest", 
     "systemlearningrequest", "discoverysyncrequest", "storageindexrequest",
-    "dockercomposerequest" # <-- ADDED THIS
+    "dockercomposerequest",
+    # Aliases and Hallucination-prefixed tools
+    "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
+    "workspace_file_read", "workspace_file_write", "workspace_file_patch",
+    "status", "diff", "add", "commit", "push", "pull", "log"
 }
 
 def extract_action_json(text: str) -> dict | None:
@@ -429,7 +433,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             }
             
             if action in action_map_aliases:
-                action = action_map_aliases[action]
+                action = action_map_aliases[action].lower()
 
             action_map = {
                 "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
