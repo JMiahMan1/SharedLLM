@@ -37,7 +37,7 @@ class OllamaProvider(BaseLLMProvider):
         payload = {
             "model": model,
             "messages": messages,
-            "stream": True,  # Hardened: Always stream to survive proxy-side parsing bugs
+            "stream": chunk_callback is not None,  # Only stream when caller expects chunks
             "options": options or {}
         }
 
