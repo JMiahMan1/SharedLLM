@@ -36,6 +36,8 @@ class IntentClassificationResponse(BaseModel):
 class ResolvedCredentials(BaseModel):
     user: str
     github_token: Optional[str] = None
+    gitlab_token: Optional[str] = None
+    git_token: Optional[str] = None
     nextcloud_url: Optional[str] = None
     nextcloud_user: Optional[str] = None
     nextcloud_pass: Optional[str] = None
