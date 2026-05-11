@@ -185,7 +185,7 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 - `WorkspaceSearchRequest`: { "query": "...", "path": "." }
 - `WorkspaceFileReadRequest`: { "path": "...", "offset_lines": 0, "limit_lines": 100 }
 - `WorkspaceFilePatchRequest`: { "path": "...", "chunks": [{"old_text": "...", "new_text": "..."}] }
-- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset", "message": "...", "path": ".", "branch": "microservices" } (NOTE: Use "reset" to recover from failed merges or out-of-sync states.)
+- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "message": "...", "path": ".", "branch": "microservices" } (NOTE: Use "clean" to nuke untracked files and "reset" for failed merges.)
 - `WorkspaceShellRequest`: { "command": "pytest ..." }
 - `WebReadRequest`: { "url": "..." }
 
