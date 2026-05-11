@@ -185,7 +185,7 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 - `WorkspaceSearchRequest`: { "query": "...", "path": "." }
 - `WorkspaceFileReadRequest`: { "path": "...", "offset_lines": 0, "limit_lines": 100 }
 - `WorkspaceFilePatchRequest`: { "path": "...", "chunks": [{"old_text": "...", "new_text": "..."}] }
-- `GitOperationRequest`: { "action": "status|commit|push|pull", "message": "...", "branch": "microservices" } (NOTE: "commit_and_push" is FORBIDDEN. Use separate steps.)
+- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull", "message": "...", "path": ".", "branch": "microservices" } (NOTE: Use separate steps for add, commit, push.)
 - `WorkspaceShellRequest`: { "command": "pytest ..." }
 - `WebReadRequest`: { "url": "..." }
 
