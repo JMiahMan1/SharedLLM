@@ -334,7 +334,7 @@ class GitOperationRequest(BaseRequest):
     push requires is_admin=True in user_context.
     """
     user_context: UserContext
-    action: Literal["status", "diff", "add", "commit", "pull", "push", "log"]
+    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "sync"]
     path: Optional[str] = Field(".", description="File path for 'add' action")
     commit_message: Optional[str] = Field(None, description="Required for 'commit' action")
     branch: Optional[str] = Field("microservices", description="Branch for pull/push")
