@@ -167,6 +167,17 @@ export const server = setupServer(
       : [...settings, saved];
     return HttpResponse.json(saved);
   }),
+  http.post('/api/settings', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    for (const [key, value] of Object.entries(body)) {
+      const existing = settings.find((setting) => setting.key === key);
+      const saved = { key, value: String(value ?? ''), description: existing?.description || null };
+      settings = existing
+        ? settings.map((setting) => setting.key === key ? saved : setting)
+        : [...settings, saved];
+    }
+    return HttpResponse.json({ status: 'SUCCESS' });
+  }),
   http.get('/health/ready', () => HttpResponse.json({
     status: 'READY',
     services: {

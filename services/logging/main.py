@@ -2,10 +2,11 @@
 import os
 import sqlite3
 import json
+import re
 from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Any, List, Optional
 
 app = FastAPI(title="SOA Logging Service")
 
@@ -22,8 +23,29 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"status": "ERROR", "message": "Internal Logging Error", "detail": str(exc)}
     )
 
-DB_PATH = "/app/data/logs.db"
+DB_PATH = os.getenv("LOGGING_DB_PATH", "/app/data/logs.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+MAX_LOG_FIELD_LENGTH = 4000
+SECRET_FIELD_NAMES = {
+    "api_key",
+    "authorization",
+    "cookie",
+    "github_token",
+    "gitlab_token",
+    "git_token",
+    "ha_token",
+    "nextcloud_pass",
+    "password",
+    "secret",
+    "token",
+}
+SECRET_PATTERNS = [
+    re.compile(r"Bearer\s+[A-Za-z0-9._\-]+", re.IGNORECASE),
+    re.compile(r"github_pat_[A-Za-z0-9_]+"),
+    re.compile(r"\bghp_[A-Za-z0-9]+\b"),
+    re.compile(r"\bglpat-[A-Za-z0-9\-_]+\b"),
+]
 
 def init_db():
     conn = sqlite3.connect(DB_PATH, timeout=30)
@@ -49,6 +71,47 @@ class LogEntry(BaseModel):
     level: str = "INFO"
     message: str
     context: Optional[dict] = None
+
+
+def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _trim_text(value: str) -> str:
+    if len(value) <= MAX_LOG_FIELD_LENGTH:
+        return value
+    return value[:MAX_LOG_FIELD_LENGTH] + "...[TRUNCATED]"
+
+
+def _sanitize_scalar(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    sanitized = value
+    for pattern in SECRET_PATTERNS:
+        sanitized = pattern.sub("[REDACTED]", sanitized)
+    return _trim_text(sanitized)
+
+
+def sanitize_log_payload(value: Any, parent_key: Optional[str] = None) -> Any:
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, inner_value in value.items():
+            key_lower = str(key).lower()
+            if key_lower in SECRET_FIELD_NAMES:
+                sanitized[key] = "[REDACTED]"
+            else:
+                sanitized[key] = sanitize_log_payload(inner_value, parent_key=key_lower)
+        return sanitized
+
+    if isinstance(value, list):
+        return [sanitize_log_payload(item, parent_key=parent_key) for item in value]
+
+    if isinstance(value, tuple):
+        return [sanitize_log_payload(item, parent_key=parent_key) for item in value]
+
+    return _sanitize_scalar(value)
 
 async def _fetch_logs(service: Optional[str] = None, user_id: Optional[str] = None, limit: int = 100):
     conn = sqlite3.connect(DB_PATH, timeout=30)
@@ -99,7 +162,8 @@ async def get_logs_admin_api(service: Optional[str] = None, limit: Optional[int]
     return await _fetch_logs(service=service, user_id="admin", limit=_resolve_limit(limit, lines))
 
 @app.delete("/api/logs")
-async def clear_logs_api():
+async def clear_logs_api(x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute("DELETE FROM logs")
     conn.commit()
@@ -107,7 +171,8 @@ async def clear_logs_api():
     return {"status": "success", "message": "Logs cleared"}
 
 @app.delete("/api/admin/logs")
-async def clear_logs_admin_api():
+async def clear_logs_admin_api(x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute("DELETE FROM logs")
     conn.commit()
@@ -162,11 +227,20 @@ async def websocket_endpoint_direct(websocket: WebSocket):
 @app.post("/log")
 @app.post("/logs")
 @app.post("/api/logs")
-async def log_event(entry: LogEntry):
+async def log_event(entry: LogEntry, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    sanitized_message = sanitize_log_payload(entry.message)
+    sanitized_context = sanitize_log_payload(entry.context or {})
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute(
         "INSERT INTO logs (user_id, service, level, message, context) VALUES (?, ?, ?, ?, ?)",
-        (entry.user_id, entry.service, entry.level, entry.message, json.dumps(entry.context or {}))
+        (
+            entry.user_id,
+            entry.service,
+            entry.level,
+            sanitized_message,
+            json.dumps(sanitized_context),
+        )
     )
     conn.commit()
     conn.close()
@@ -177,8 +251,8 @@ async def log_event(entry: LogEntry):
         "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         "service": entry.service,
         "level": entry.level,
-        "message": entry.message,
-        "context": entry.context
+        "message": sanitized_message,
+        "context": sanitized_context
     }
     await manager.broadcast(json.dumps(log_dict))
     

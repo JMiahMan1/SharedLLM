@@ -35,6 +35,7 @@ const LLMSettings: React.FC = () => {
     mutationFn: (payload: Record<string, string>) => api.updateSettingsBulk(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
+      queryClient.invalidateQueries({ queryKey: ['gateway-config'] });
       setDrafts({});
       toast.success('AI Compute Engine updated');
     },

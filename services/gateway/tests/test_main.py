@@ -37,6 +37,48 @@ def test_health_check(client: TestClient):
     assert resp.json()["status"] == "ok"
 
 @pytest.mark.asyncio
+async def test_bulk_settings_proxy_forwards_post(monkeypatch):
+    import main
+
+    captured = {}
+
+    class MockResponse:
+        def __init__(self, status_code=200, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {"status": "SUCCESS"}
+
+        def json(self):
+            return self._payload
+
+    class MockAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return MockResponse(payload={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", lambda timeout=10.0: MockAsyncClient())
+
+    class FakeRequest:
+        headers = {"Authorization": "Bearer test-token"}
+
+        async def json(self):
+            return {"ollama_assistant_model": "qwen3.5:14b"}
+
+    resp = await main.proxy_update_settings_bulk(FakeRequest())
+
+    assert resp.status_code == 200
+    assert captured["url"].endswith("/api/settings")
+    assert captured["json"] == {"ollama_assistant_model": "qwen3.5:14b"}
+    assert captured["headers"] == {"Authorization": "Bearer test-token"}
+
+@pytest.mark.asyncio
 async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     import main
     # Mock dependencies to avoid real network/ML calls
