@@ -137,6 +137,7 @@ services:
       - ./services/gateway/background_worker.py:/app/background_worker.py
       - ./services/gateway/orchestrator.py:/app/orchestrator.py
       - ./services/gateway/agent_loop.py:/app/agent_loop.py
+      - ./services/gateway/llm_providers.py:/app/llm_providers.py
       - ./services/gateway/config.py:/app/config.py
       - ./services/gateway/messaging.py:/app/messaging.py
       - ./services/gateway/schemas.py:/app/schemas.py
