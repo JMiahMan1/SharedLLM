@@ -87,7 +87,8 @@ async def handle_git(req) -> dict:
     """
     action: str = req.action.lower().strip()
     path: str = getattr(req, "path", ".") or "."
-    commit_message: Optional[str] = getattr(req, "commit_message", None)
+    # Support both 'message' and 'commit_message' to align with varying schemas
+    commit_message: Optional[str] = getattr(req, "message", None) or getattr(req, "commit_message", None)
     branch: str = getattr(req, "branch", "microservices") or "microservices"
     log_count: int = int(getattr(req, "log_count", 10) or 10)
     user_context = getattr(req, "user_context", None)
