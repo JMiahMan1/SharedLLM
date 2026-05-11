@@ -116,13 +116,24 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
     
-    # --- RETRY LOGIC FOR MODEL SWITCHING ---
-    MAX_INFERENCE_RETRIES = 3
-    ans = ""
+    # GBNF Grammar to force Natural Language + JSON format
+    TOOL_GRAMMAR = (
+        'root ::= content (json_block)?\n'
+        'content ::= [^`]*\n'
+        'json_block ::= "```json\\n" json_object "\\n```"\n'
+        'json_object ::= "{" space "\\"action\\":" space string "," space "\\"payload\\":" space json_value space "}"\n'
+        'json_value ::= json_object | json_array | string | number | "true" | "false" | "null"\n'
+        'json_array ::= "[" space (json_value ("," space json_value)*)? space "]"\n'
+        'string ::= "\\\"" ([^\\\"\\\\\\n] | "\\\\" [\\\"\\\\/bfnrt] | "\\\\u" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])* "\\\""\n'
+        'number ::= "-"? ([0-9] | [1-9][0-9]*) ("." [0-9]+)? ([eE] [+-]? [0-9]+)?\n'
+        'space ::= [ \\t\\n\\r]*'
+    )
     
+    options = {"grammar": TOOL_GRAMMAR, "temperature": 0.0}
+
     for retry_count in range(MAX_INFERENCE_RETRIES):
         try:
-            ans = await provider.generate(model, messages, chunk_callback=chunk_callback)
+            ans = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
             break # Success!
         except Exception as e:
             log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
