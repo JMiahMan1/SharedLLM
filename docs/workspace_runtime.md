@@ -153,6 +153,45 @@ service created specifically to fill that gap.
 - chat-driven README generation is handled in the Gateway and uses
   `workspace_runtime` for workspace inspection, file writes, and provider sync
 
+## Workspace Self-Edit Workflow
+
+Raven is allowed to commit and push autonomously, but only to non-protected
+review branches.
+
+Required branch policy:
+
+- direct autonomous pushes to protected branches such as `main`, `master`,
+  `development`, `dev`, and `release/*` are blocked in `workspace_runtime`
+- Raven should create or switch to a task branch such as `raven/<task-id>`
+- when a workflow starts on a protected branch and `auto_create_review_branch`
+  is enabled, the runtime creates a `raven/<user>/<file>-<timestamp>` branch
+  from the workspace `default_branch`
+- protected branches should remain protected in the Git provider with PR review
+  and status checks
+
+Required verification order for `POST /workflow/write-sync-commit`:
+
+1. resolve workspace and branch policy
+2. write the file
+3. run lint on the touched file or explicit `lint_paths`
+4. run targeted `pytest` when requested
+5. create the commit
+6. push only if the branch is non-protected and verification passed
+7. sync to the provider only after verification and Git lifecycle checks
+
+Autonomous push guardrail:
+
+- `push=true` requires `pytest_targets`
+- if the resolved push branch matches the protected-branch policy, the request
+  fails before push
+
+Review metadata:
+
+- workflow responses now include a `review` object intended for PR creation or
+  human code review handoff
+- the review payload includes `title`, `head`, `base`, changed files, lint
+  results, pytest results, and a reviewer checklist
+
 ## Expected Near-Term Expansion
 
 The next useful features are:
