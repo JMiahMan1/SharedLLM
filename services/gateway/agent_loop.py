@@ -63,7 +63,14 @@ class OllamaProvider(BaseLLMProvider):
                     content = ""
                     for line in lines:
                         try:
+                            # DEBUG: Log the raw line to see what the proxy is actually sending
+                            log.info(f"[OllamaProvider-RAW] {line}")
                             data = json.loads(line)
+                            
+                            # Handle errors from proxy/Ollama
+                            if "error" in data:
+                                content += f" [PROVIDER ERROR: {data['error']}] "
+                            
                             content += data.get("message", {}).get("content") or ""
                             if data.get("done"):
                                 break
@@ -72,7 +79,10 @@ class OllamaProvider(BaseLLMProvider):
                     return content
                 
                 try:
-                    return json.loads(raw_text).get("message", {}).get("content") or ""
+                    data = json.loads(raw_text)
+                    if "error" in data:
+                        return f" [PROVIDER ERROR: {data['error']}] "
+                    return data.get("message", {}).get("content") or ""
                 except json.JSONDecodeError as e:
                     log.error(f"[OllamaProvider-Hardened] Failed to parse JSON: {raw_text[:100]}... Error: {e}")
                     return ""
@@ -87,6 +97,9 @@ class OllamaProvider(BaseLLMProvider):
                         # DEBUG: Log the raw line to see what the proxy is actually sending
                         log.info(f"[OllamaProvider-RAW] {line}")
                         chunk_json = json.loads(line)
+                        if "error" in chunk_json:
+                            full_content += f" [PROVIDER ERROR: {chunk_json['error']}] "
+                        
                         content = chunk_json.get("message", {}).get("content") or ""
                         if content:
                             full_content += content
