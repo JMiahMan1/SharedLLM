@@ -181,12 +181,13 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 2. **HARDWARE LIMIT (8GB VRAM)**: You have extreme memory constraints. Do NOT read files larger than 300 lines. Use `WorkspaceSearchRequest` (ripgrep) to find the exact line numbers you need before reading a small offset window. 
 
 ## EXECUTION ENGINE
-- `DockerLogsRequest`: Audit container logs.
-- `WorkspaceSearchRequest`: Search for keywords/bugs without reading whole files.
-- `WorkspaceFileReadRequest`: Read SMALL segments of code using offset_lines.
-- `WorkspaceFilePatchRequest`: Apply fixes.
-- `WorkspaceShellRequest`: Run unit tests (pytest) to verify.
-- `WebReadRequest`: Audit UI states and authenticated pages.
+- `DockerLogsRequest`: { "container_name": "...", "tail_lines": 200 }
+- `WorkspaceSearchRequest`: { "query": "...", "path": "." }
+- `WorkspaceFileReadRequest`: { "path": "...", "offset_lines": 0, "limit_lines": 100 }
+- `WorkspaceFilePatchRequest`: { "path": "...", "chunks": [{"old_text": "...", "new_text": "..."}] }
+- `GitOperationRequest`: { "action": "status|commit|push|pull", "commit_message": "...", "branch": "microservices" }
+- `WorkspaceShellRequest`: { "command": "pytest ..." }
+- `WebReadRequest`: { "url": "..." }
 
 ### OUTPUT FORMAT (MANDATORY)
 ```json
