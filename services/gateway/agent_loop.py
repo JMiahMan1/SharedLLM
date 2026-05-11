@@ -63,7 +63,7 @@ class OllamaProvider(BaseLLMProvider):
                     for line in lines:
                         try:
                             data = json.loads(line)
-                            content += data.get("message", {}).get("content", "")
+                            content += data.get("message", {}).get("content") or ""
                             if data.get("done"):
                                 break
                         except json.JSONDecodeError:
@@ -71,7 +71,7 @@ class OllamaProvider(BaseLLMProvider):
                     return content
                 
                 try:
-                    return json.loads(raw_text).get("message", {}).get("content", "")
+                    return json.loads(raw_text).get("message", {}).get("content") or ""
                 except json.JSONDecodeError as e:
                     log.error(f"[OllamaProvider-Hardened] Failed to parse JSON: {raw_text[:100]}... Error: {e}")
                     return ""
@@ -84,7 +84,7 @@ class OllamaProvider(BaseLLMProvider):
                         continue
                     try:
                         chunk_json = json.loads(line)
-                        content = chunk_json.get("message", {}).get("content", "")
+                        content = chunk_json.get("message", {}).get("content") or ""
                         if content:
                             full_content += content
                             await chunk_callback(content)
