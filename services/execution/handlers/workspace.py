@@ -28,7 +28,7 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
     try:
         abs_path = resolve_safe_path(req.path)
         if not os.path.exists(abs_path):
-            return _fail(f"File not found: {req.path}")
+            return _fail_with_discovery(req.path, f"File not found: {req.path}")
         if not os.path.isfile(abs_path):
             return _fail(f"Path is not a file: {req.path}")
         
@@ -71,33 +71,55 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
         log.error(f"Workspace read failed: {e}")
         return _fail(str(e))
 
+def _get_discovery_suggestion(path: str) -> Optional[str]:
+    """Dynamically discovers similar files in the workspace to help agents self-correct."""
+    try:
+        filename = os.path.basename(path)
+        if not filename: return None
+        
+        matches = []
+        for root, dirs, files in os.walk(WORKSPACE_ROOT):
+            # Skip hidden directories like .git
+            if "/.git" in root: continue
+            for f in files:
+                if f.lower() == filename.lower():
+                    rel_path = os.path.relpath(os.path.join(root, f), WORKSPACE_ROOT)
+                    matches.append(rel_path)
+        
+        if matches:
+            # Filter out the exact path if it somehow matched
+            matches = [m for m in matches if m != path]
+            if matches:
+                return f"Did you mean: {', '.join(matches[:3])}?"
+    except Exception as e:
+        log.warning(f"Discovery suggestion failed: {e}")
+    return None
+
+def _fail_with_discovery(path: str, message: str) -> ExecutionResult:
+    suggestion = _get_discovery_suggestion(path)
+    if suggestion:
+        message += f" | {suggestion}"
+    return _fail(message)
+
 async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionResult:
     try:
         abs_path = resolve_safe_path(req.path)
+        exists = os.path.exists(abs_path)
+        
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
         
-        original_content = ""
-        if os.path.exists(abs_path):
-            with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
-                original_content = f.read()
-        
-        new_content = req.content
-        if getattr(req, "is_patch", False):
-            # Simple unified diff patch support could go here, 
-            # but for now we'll assume content IS the new content or handle patch logic.
-            # In SharedLLM, 'is_patch' usually means the LLM provided a diff.
-            # However, for simplicity and reliability, we prefer full writes.
-            pass
-
         with open(abs_path, "w", encoding="utf-8") as f:
-            f.write(new_content)
+            f.write(req.content)
             
         message = f"Successfully wrote to {req.path}."
-        if req.commit_after:
-            # We would normally trigger git commit here, but for now we'll just log it
-            message += " (Commit pending)"
+        
+        # Collision Detection: If creating a NEW file, check if it exists elsewhere
+        if not exists:
+            suggestion = _get_discovery_suggestion(req.path)
+            if suggestion:
+                message += f" | WARNING: {suggestion} You may have created a duplicate file in the wrong location."
             
-        return _ok(message, {"path": req.path, "bytes": len(new_content)})
+        return _ok(message, {"path": req.path, "bytes": len(req.content), "created_new": not exists})
     except Exception as e:
         log.error(f"Workspace write failed: {e}")
         return _fail(str(e))
@@ -210,7 +232,7 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
     try:
         abs_path = resolve_safe_path(req.path)
         if not os.path.exists(abs_path):
-            return _fail(f"File not found for patching: {req.path}")
+            return _fail_with_discovery(req.path, f"File not found for patching: {req.path}")
         
         with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -258,6 +280,7 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
             f.write(content)
             
         message = f"Applied {applied_count}/{len(req.chunks)} patches to {req.path}."
+            
         if failed_chunks:
             message += f" Failed to match {len(failed_chunks)} chunks."
             

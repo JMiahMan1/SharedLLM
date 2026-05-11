@@ -254,12 +254,10 @@ async def list_docker_containers():
 
 @app.post("/execute/git")
 async def execute_git(req: GitOperationRequest):
-    """
-    Perform a Git lifecycle operation on /workspace/SharedLLM.
-    Supports: status, diff, add, commit, pull, push (admin), log.
-    Part of the Ouroboros ACT phase.
-    """
-    return await git_handler.handle_git(req)
+    res = await git_handler.handle_git(req)
+    if res.status == "FAILURE":
+        raise HTTPException(status_code=400, detail=res.message)
+    return res
 
 
 @app.post("/execute/deploy")
@@ -318,29 +316,24 @@ async def execute_workspace_shell(req: WorkspaceShellRequest):
 
 @app.post("/execute/workspace_file_read", response_model=ExecutionResult)
 async def execute_workspace_file_read(req: WorkspaceFileReadRequest):
-    """
-    Read a file from the local Git workspace. 
-    Use this for source code analysis.
-    """
-    return await workspace.handle_workspace_read(req)
-
+    res = await workspace.handle_workspace_read(req)
+    if res.status == "FAILURE":
+        raise HTTPException(status_code=404, detail=res.message)
+    return res
 
 @app.post("/execute/workspace_file_write", response_model=ExecutionResult)
 async def execute_workspace_file_write(req: WorkspaceFileWriteRequest):
-    """
-    Write or overwrite a file in the local Git workspace.
-    Used for autonomous bug fixing.
-    """
-    return await workspace.handle_workspace_write(req)
-
+    res = await workspace.handle_workspace_write(req)
+    if res.status == "FAILURE":
+        raise HTTPException(status_code=400, detail=res.message)
+    return res
 
 @app.post("/execute/workspace_file_patch", response_model=ExecutionResult)
 async def execute_workspace_file_patch(req: WorkspaceFilePatchRequest):
-    """
-    Surgically patch a file in the local Git workspace.
-    Used for small bug fixes without full file overwrite.
-    """
-    return await workspace.handle_workspace_patch(req)
+    res = await workspace.handle_workspace_patch(req)
+    if res.status == "FAILURE":
+        raise HTTPException(status_code=400, detail=res.message)
+    return res
 
 
 @app.post("/execute/workspace_lint", response_model=ExecutionResult)

@@ -434,6 +434,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "diff": "GitOperationRequest",
                 "log": "GitOperationRequest",
                 "gitoperationrequest": "GitOperationRequest",
+                "edit_file": "WorkspaceFilePatchRequest",
+                "patch_file": "WorkspaceFilePatchRequest",
+                "file_patch": "WorkspaceFilePatchRequest",
+                "apply_patches": "WorkspaceFilePatchRequest",
                 "workspace_file_read": "WorkspaceFileReadRequest",
                 "workspace_file_write": "WorkspaceFileWriteRequest",
                 "workspace_file_patch": "WorkspaceFilePatchRequest"
