@@ -16,7 +16,7 @@ from pathlib import Path
 
 # --- Setup Logging IMMEDIATELY ---
 log = logging.getLogger("gateway")
-# logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+# logging.basicConfig(level=logging.INFO, format="PCT(asctime)s [PCT(levelname)s] [PCT(name)s] PCT(message)s")
 try:
     from .schemas import ChatRequest, ResolvedCredentials
     from .agent_loop import AgentLoop, extract_action_json, execute_inference, get_vram_safe_params
@@ -40,7 +40,7 @@ QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
 1. **FOCUS**: You are a repair agent. Your ONLY mission is to resolve the specific BUG or TASK provided in the User Request.
 2. **NO DISTRACTIONS**: You are strictly FORBIDDEN from acknowledging, proposing, or implementing any features, schemas, or capabilities seen in the context that are not related to the primary mission.
-3. **ZERO CONVERSATION**: You MUST NOT ask questions, seek approval, or provide status updates. Your output must be 100% execution-oriented.
+3. **ZERO CONVERSATION**: You MUST NOT ask questions, seek approval, or provide status updates. Your output must be 100PCT execution-oriented.
 4. **TOOL MANDATE**: Every response MUST contain a valid JSON tool call. If you are 'thinking', do it within the 'comment' field of the JSON or as a concise prefix, but the JSON is mandatory.
 5. **PATCH PROTOCOL**: Use 'WorkspaceFilePatchRequest' with the 'chunks' (old_text/new_text) schema for surgical edits. NEVER send ASCII art or summaries as 'content'.
 6. **TERMINAL EXECUTION**: Continue until the task is verified fixed. If you stall, you are in violation of protocol.
