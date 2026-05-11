@@ -804,6 +804,33 @@ def wants_workspace_readme_generation(query: str) -> bool:
     return action_requested and workspace_scoped
 
 
+def wants_direct_code_orchestration(query: str) -> bool:
+    q = (query or "").strip().lower()
+    action_requested = any(
+        signal in q
+        for signal in ("create", "write", "edit", "update", "modify", "add", "patch", "refactor")
+    )
+    file_scoped = any(
+        signal in q
+        for signal in (
+            ".py",
+            ".js",
+            ".ts",
+            ".tsx",
+            ".jsx",
+            "pytest file",
+            "test file",
+            "named ",
+            "file ",
+            "temp/",
+            "workspace",
+            "repo",
+            "repository",
+        )
+    )
+    return action_requested and file_scoped
+
+
 async def workspace_runtime_request(method: str, path: str, *, json_payload: dict | None = None, params: dict | None = None) -> dict:
     client = get_http_client()
 
@@ -1682,6 +1709,26 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         if is_openai:
             return _make_openai_response(ans, selected_model, "datetime")
         return _make_ollama_response(ans, selected_model, "datetime")
+
+    if wants_workspace_readme_generation(query):
+        return await generate_workspace_readme_via_coding_model(
+            body=body,
+            user_id=user_id,
+            refined_query=query,
+            selected_model=selected_model,
+            should_stream=should_stream,
+            is_openai=is_openai,
+        )
+
+    if wants_direct_code_orchestration(query):
+        return await orchestrate_code_change(
+            body=body,
+            user_id=user_id,
+            refined_query=query,
+            selected_model=selected_model,
+            should_stream=should_stream,
+            is_openai=is_openai,
+        )
 
     # 3. Semantic Routing (Fast Path Detection)
     intent, confidence = engine.classify(query)
