@@ -96,7 +96,7 @@ class OllamaProvider(BaseLLMProvider):
                         if chunk_json.get("done"):
                             break
                     except Exception as e:
-                        print(f"DEFEATIVE DEBUG: Error parsing streaming chunk: {e} | Raw line: {line!r}")
+                        print(f"DEFINITIVE DEBUG: Error parsing streaming chunk: {e} | Raw line: {line!r}")
         return full_content
 
 
