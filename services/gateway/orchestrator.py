@@ -70,9 +70,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     # 3. Autonomous Detection (Raven/Coding/Repair ONLY)
     # Raven runs in Workspaces and handles long-running or coding tasks.
     # Home Automation should NOT be treated as autonomous (no long-running loops)
-    autonomy_signals = ["raven", "audit", "repair", "fix", "deploy", "bootstrap", "coding", "develop",
-                        "push", "commit", "git", "patch", "workflow", "ci ", "pipeline",
-                        "nextcloud", "storage", "upload", "download", "my files"]
+    autonomy_signals = ["raven", "audit", "repair", "deploy", "bootstrap", "develop"]
     is_autonomous = any(k in query.lower() for k in autonomy_signals)
     
     # 4. Final Inference
