@@ -82,10 +82,11 @@ class OllamaProvider(BaseLLMProvider):
             async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    if not line:
+                    clean_line = line.strip()
+                    if not clean_line:
                         continue
                     try:
-                        chunk_json = json.loads(line)
+                        chunk_json = json.loads(clean_line)
                         if "error" in chunk_json:
                             full_content += f" [PROVIDER ERROR: {chunk_json['error']}] "
                         content = chunk_json.get("message", {}).get("content") or ""
@@ -95,7 +96,7 @@ class OllamaProvider(BaseLLMProvider):
                         if chunk_json.get("done"):
                             break
                     except Exception as e:
-                        log.error(f"Error parsing streaming chunk: {e} | Raw line: '{line!r}'")
+                        log.error(f"Error parsing streaming chunk: {e} | Raw line: {line!r}")
         return full_content
 
 
