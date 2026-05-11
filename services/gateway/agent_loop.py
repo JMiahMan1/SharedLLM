@@ -410,10 +410,26 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "WebRead": "WebReadRequest",
                 "Browse": "WebReadRequest",
                 "gitstatus": "GitOperationRequest",
+                "git_status": "GitOperationRequest",
                 "gitdiff": "GitOperationRequest",
+                "git_diff": "GitOperationRequest",
                 "gitlog": "GitOperationRequest",
-                "gitpull": "GitOperationRequest"
+                "git_log": "GitOperationRequest",
+                "gitpull": "GitOperationRequest",
+                "git_pull": "GitOperationRequest",
+                "git_add": "GitOperationRequest",
+                "git_commit": "GitOperationRequest",
+                "git_push": "GitOperationRequest",
+                "git_sync": "GitOperationRequest",
+                "gitoperationrequest": "GitOperationRequest",
+                "workspace_file_read": "WorkspaceFileReadRequest",
+                "workspace_file_write": "WorkspaceFileWriteRequest",
+                "workspace_file_patch": "WorkspaceFilePatchRequest"
             }
+            
+            # Normalize action name to lower-case for better matching
+            action = action.lower()
+            
             if action in action_map_aliases:
                 action = action_map_aliases[action]
 
