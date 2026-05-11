@@ -1337,7 +1337,25 @@ async def execute_command(endpoint: str, payload: dict) -> dict:
     except Exception as e:
       return {"status": "FAILURE", "message": str(e)}
 
-# --- Chat Handler ---
+# --- Middleware & Security ---
+@app.middleware("http")
+async def secure_logging_middleware(request: Request, call_next):
+    """Logs incoming requests while redacting sensitive security headers."""
+    # Redact sensitive headers for logging
+    safe_headers = dict(request.headers)
+    sensitive_keys = ["x-internal-secret", "x-api-key", "authorization", "cookie"]
+    for key in sensitive_keys:
+        if key in safe_headers:
+            safe_headers[key] = "[REDACTED]"
+            
+    log.info(f"REQUEST: {request.method} {request.url} | Headers: {safe_headers}")
+    
+    response = await call_next(request)
+    
+    log.info(f"RESPONSE: {request.method} {request.url} | Status: {response.status_code}")
+    return response
+
+# --- Core Handlers ---
 # Removed local extract_user_facts as it is now in history.py
 
 async def decompose_query(query: str) -> list[str]:
@@ -1464,7 +1482,6 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         msg = "The Identity service is currently unavailable. Please try again later."
         if is_openai: return _make_openai_response(msg, selected_model, "degraded")
         return _make_ollama_response(msg, selected_model, "degraded")
-    
     log.info(f"Chat request from {user_id} query='{query}'")
 
     # 3. Semantic Routing (Fast Path Detection)

@@ -22,7 +22,8 @@ import logging
 import os
 import re
 import shlex
-from typing import Optional
+from typing import Optional, Dict, Any
+from schemas import GitOperationRequest, GitExecutionResult
 
 log = logging.getLogger("execution.git")
 
@@ -76,6 +77,7 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
     except asyncio.TimeoutError:
         return {"returncode": -1, "stdout": "", "stderr": "Git command timed out after 60s."}
     except Exception as e:
+        log.error(f"Git execution failed: {e}")
         return {"returncode": -1, "stdout": "", "stderr": str(e)}
 
 
@@ -84,15 +86,32 @@ async def _get_remote_url(remote_name: str = "origin") -> str:
     return r["stdout"].strip()
 
 
-def _ok(action: str, detail: dict) -> dict:
-    return {"status": "SUCCESS", "message": f"git {action} completed.", "service": "git", "detail": detail}
+def _ok(action: str, detail: dict) -> GitExecutionResult:
+    return GitExecutionResult(status="SUCCESS", message=f"git {action} completed.", service="git", detail=detail)
 
 
-def _fail(action: str, detail: dict) -> dict:
-    return {"status": "FAILURE", "message": f"git {action} failed.", "service": "git", "detail": detail}
+def _fail(action: str, detail: dict) -> GitExecutionResult:
+    msg = f"git {action} failed."
+    # Integrate fuzzy discovery if detail has stderr about path
+    if "stderr" in detail and "pathspec" in detail["stderr"]:
+        # Extract path if possible
+        from handlers.workspace import _get_discovery_suggestion
+        # Try to find what was being added
+        match = re.search(r"pathspec '([^']+)'", detail["stderr"])
+        if match:
+            suggestion = _get_discovery_suggestion(match.group(1))
+            if suggestion:
+                msg += f" | {suggestion}"
+                
+    return GitExecutionResult(status="FAILURE", message=msg, service="git", detail=detail)
 
 
-async def handle_git(req) -> dict:
+async def _get_current_branch() -> str:
+    r = await _run_git(["branch", "--show-current"])
+    return r["stdout"].strip() or "main"
+
+
+async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     """
     Dispatch git operations based on req.action.
 
@@ -108,7 +127,16 @@ async def handle_git(req) -> dict:
     path: str = getattr(req, "path", ".") or "."
     # Support both 'message' and 'commit_message' to align with varying schemas
     commit_message: Optional[str] = getattr(req, "message", None) or getattr(req, "commit_message", None)
-    branch: str = getattr(req, "branch", "microservices") or "microservices"
+    
+    # Dynamic Branch Detection: Default to current branch if not explicitly set or if 'main' hallucination on 'microservices' repo
+    current_branch = await _get_current_branch()
+    branch: str = getattr(req, "branch", None) or current_branch
+    
+    # Hardened Pivot: If we are on microservices but agent says main, it is likely a hallucination
+    if current_branch == "microservices" and branch == "main":
+        log.info(f"[Git] Pivoting hallucinated branch 'main' to active branch 'microservices'")
+        branch = "microservices"
+
     log_count: int = int(getattr(req, "log_count", 10) or 10)
     user_context = getattr(req, "user_context", None)
     is_admin: bool = getattr(user_context, "is_admin", False) if user_context else False
@@ -176,10 +204,12 @@ async def handle_git(req) -> dict:
         return _ok("show", r)
 
     elif action == "add":
-        r = await _run_git(["add", path])
+        # Support multi-path staging if path contains spaces or is a list (though schema says str)
+        paths = shlex.split(path) if path else ["."]
+        r = await _run_git(["add"] + paths)
         if r["returncode"] != 0:
             return _fail("add", r)
-        return _ok("add", {"added_path": path, **r})
+        return _ok("add", {"added_paths": paths, **r})
 
     elif action == "commit":
         if not commit_message:

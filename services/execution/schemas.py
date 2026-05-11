@@ -67,6 +67,9 @@ class UserContext(BaseModel):
     api_key: Optional[str] = None
 
 
+
+
+
 class ExecutionResult(BaseModel):
     model_config = {"extra": "ignore"}
     status: Literal["SUCCESS", "FAILURE", "PARTIAL"]
@@ -203,10 +206,20 @@ class WorkspaceFileReadRequest(BaseRequest):
     Use this for reading CODE, SCRIPTS, and CONFIG.
     """
     user_context: UserContext
-    path: str = Field(..., description="Path relative to workspace root (e.g. 'services/gateway/main.py')")
+    path: str = Field(..., alias="file_path", description="Path relative to workspace root (e.g. 'services/gateway/main.py')")
     offset_lines: int = Field(0, ge=0, description="Start reading from this line number (1-indexed)")
     limit_lines: int = Field(1000, ge=1, le=5000, description="Max lines to read")
     summary_only: bool = Field(False, description="If true, returns only class/function signatures and docstrings (semantic map)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def pivot_file_read_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "file_path" in data and "path" not in data:
+                data["path"] = data.pop("file_path")
+        return data
+
+    model_config = {"extra": "ignore", "populate_by_name": True}
 
 class WorkspaceFileWriteRequest(BaseRequest):
     """
@@ -214,15 +227,54 @@ class WorkspaceFileWriteRequest(BaseRequest):
     Requires the FULL file content in the 'content' field.
     """
     user_context: UserContext
-    path: str = Field(..., description="Path relative to workspace root")
+    path: str = Field(..., alias="file_path", description="Path relative to workspace root")
     content: str
     commit_after: bool = False
     commit_message: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def pivot_file_write_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "file_path" in data and "path" not in data:
+                data["path"] = data.pop("file_path")
+        return data
+
+    model_config = {"extra": "ignore", "populate_by_name": True}
 
 class ReplacementChunk(BaseModel):
     model_config = {"extra": "ignore", "populate_by_name": True}
     old_text: str = Field(..., alias="target_content", description="The exact text to be replaced")
     new_text: str = Field(..., alias="replacement_content", description="The replacement text")
+
+    @model_validator(mode="before")
+    @classmethod
+    def pivot_chunk_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Pivot 'patch' or 'content' to 'new_text' if old_text is provided or empty
+            if "patch" in data and "new_text" not in data:
+                data["new_text"] = data.pop("patch")
+            if "content" in data and "new_text" not in data:
+                data["new_text"] = data.pop("content")
+            
+            # Pivot 'target_content' or 'original' to 'old_text'
+            if "target_content" in data and "old_text" not in data:
+                data["old_text"] = data.pop("target_content")
+            if "original" in data and "old_text" not in data:
+                data["old_text"] = data.pop("original")
+            if "search" in data and "old_text" not in data:
+                data["old_text"] = data.pop("search")
+            if "replace" in data and "new_text" not in data:
+                data["new_text"] = data.pop("replace")
+
+            # Fallback: if old_text is missing but we have a start_line hallucination
+            if "old_text" not in data:
+                # We can't easily get the old text from just a line number here without the file,
+                # so we default to "" and hope the unified diff parser or fuzzy matcher handles it
+                # OR we just let it fail if it's truly empty.
+                # However, many agents use empty old_text for insertion.
+                data["old_text"] = ""
+        return data
 
 class WorkspaceFilePatchRequest(BaseRequest):
     """
@@ -246,17 +298,41 @@ class WorkspaceFilePatchRequest(BaseRequest):
             # Pivot 'patch' or 'patches' to 'chunks'
             patch_data = data.get("patch") or data.get("patches")
             if patch_data and "chunks" not in data:
-                if isinstance(patch_data, dict):
+                if isinstance(patch_data, str):
+                    # Robustly parse unified diff including context
+                    old_lines = []
+                    new_lines = []
+                    for line in patch_data.splitlines():
+                        if line.startswith("---") or line.startswith("+++") or line.startswith("@@"):
+                            continue
+                        if line.startswith("-"):
+                            old_lines.append(line[1:])
+                        elif line.startswith("+"):
+                            new_lines.append(line[1:])
+                        else:
+                            # Context line - add to both
+                            clean_line = line[1:] if line.startswith(" ") else line
+                            old_lines.append(clean_line)
+                            new_lines.append(clean_line)
+                    
+                    if old_lines or new_lines:
+                        # Join and clean
+                        old_text = "\n".join(old_lines).strip()
+                        new_text = "\n".join(new_lines).strip()
+                        if old_text or new_text:
+                            data["chunks"] = [{"old_text": old_text, "new_text": new_text}]
+                elif isinstance(patch_data, dict):
                     # Convert search:replace dict to chunks
                     new_chunks = []
                     for k, v in patch_data.items():
-                        # Handle potential '-' or '+' prefixes from diff-style hallucinations
                         clean_k = k.lstrip("- ").strip()
                         clean_v = v.lstrip("+ ").strip()
                         new_chunks.append({"old_text": clean_k, "new_text": clean_v})
                     data["chunks"] = new_chunks
                 elif isinstance(patch_data, list):
                     data["chunks"] = patch_data
+                
+                # Cleanup to avoid alias confusion
                 data.pop("patch", None)
                 data.pop("patches", None)
         return data
@@ -388,6 +464,26 @@ class GitOperationRequest(BaseRequest):
     commit_message: Optional[str] = Field(None, description="Required for 'commit' action")
     branch: Optional[str] = Field("microservices", description="Branch for pull/push")
     log_count: Optional[int] = Field(10, ge=1, le=50, description="Number of commits for 'log'")
+
+    class Config:
+        extra = "ignore"
+
+    @model_validator(mode='before')
+    @classmethod
+    def pivot_git_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Pivot path hallucinations
+            for alias in ["file_path", "filepath", "target_path", "target", "paths"]:
+                if alias in data and "path" not in data:
+                    val = data.pop(alias)
+                    # If it is a list (like ["path"]), take the first one
+                    data["path"] = val[0] if isinstance(val, list) and val else val
+            # Pivot message hallucinations
+            if "message" in data and "commit_message" not in data:
+                data["commit_message"] = data["message"]
+            elif "commit_message" in data and "message" not in data:
+                data["message"] = data["commit_message"]
+        return data
 
 
 class DeploymentRequest(BaseRequest):
