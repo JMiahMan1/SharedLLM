@@ -245,6 +245,22 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
         )
 
 
+async def call_ollama(payload: Dict[str, Any], use_chat: bool = True) -> Dict[str, Any]:
+    """
+    Compatibility wrapper for the legacy chat-based inference path.
+    Existing tests still patch this symbol, so keep it as a stable seam.
+    """
+    settings = await get_llm_settings()
+    provider = await get_provider(settings)
+    content = await provider.generate(
+        payload["model"],
+        payload["messages"],
+        options=payload.get("options", {}),
+        chunk_callback=payload.get("chunk_callback"),
+    )
+    return {"message": {"content": content}}
+
+
 async def get_assistant_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
@@ -294,10 +310,12 @@ WORKSPACE_README_ACTION_HINTS = (
   "readme.md", "readme file",
 )
 AUTONOMOUS_SIGNALS = (
-  "look into the error", "analyze logs", "build the tool", "self repair", 
-  "fix the error", "auto-fix", "debug the system", "raven", "dev loop",
-  "check container logs", "rebuild service", "deploy fix", "repair", "execute fix",
-  "fix it", "debug it", "fix the code", "apply the fix"
+    "look into the error", "analyze logs", "build the tool", "self repair",
+    "self-heal", "self heal", "self-fix", "self fix", "fix the app",
+    "fix the service", "fix the codebase", "fix the error", "auto-fix",
+    "debug the system", "raven", "use raven", "dev loop", "agentic",
+    "autonomous", "check container logs", "rebuild service", "deploy fix",
+    "repair", "execute fix", "fix it", "debug it", "fix the code", "apply the fix"
 )
 TTS_SIGNALS = (
   "tts", "audiobook", "read this", "make audible", "clean for speech", 
@@ -593,12 +611,12 @@ async def select_model_for_query(query: str) -> str:
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     try:
-        from .prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT
+        from .prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
     except (ImportError, ValueError):
         try:
-            from prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT
+            from prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
         except ImportError:
-            from gateway.prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT
+            from gateway.prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
       try:
@@ -608,6 +626,8 @@ def select_system_instruction_for_query(query: str, selected_model: str) -> str:
           from prompts import RAVEN_NARRATOR_PROTOCOL
           return RAVEN_NARRATOR_PROTOCOL
     if any(token in q for token in AUTONOMOUS_SIGNALS):
+      if "raven" in q or "self repair" in q or "self-repair" in q:
+          return RAVEN_AUTONOMOUS_PROTOCOL
       return AUTONOMOUS_EVOLUTION_AGENT_PROMPT
     if any(token in q for token in CODING_SIGNALS):
       return CODE_HELPER_SYSTEM_INSTRUCTION
@@ -1722,7 +1742,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     # 4. Slow Path Execution (FIFO Queue Redirect)
     # Pack full context for the worker
-    default_sys = LIBRARIAN_SYSTEM_INSTRUCTION if "librarian" in selected_model else CODE_HELPER_SYSTEM_INSTRUCTION
+    default_sys = select_system_instruction_for_query(query, selected_model)
     job_payload = {
         "model": selected_model,
         "query": query,

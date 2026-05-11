@@ -22,9 +22,10 @@ import pytest
 import gateway.main as gateway_main
 from gateway.main import app, select_model_for_query, select_system_instruction_for_query
 from gateway.prompts import (
-    AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION,
+    AUTONOMOUS_EVOLUTION_AGENT_PROMPT,
     CODE_HELPER_SYSTEM_INSTRUCTION,
     LIBRARIAN_SYSTEM_INSTRUCTION,
+    RAVEN_AUTONOMOUS_PROTOCOL,
 )
 
 
@@ -78,6 +79,7 @@ def _json_request(payload: dict) -> Request:
     )
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "query",
     [
@@ -89,10 +91,11 @@ def _json_request(payload: dict) -> Request:
         "Edit this file: greeting.py and change one string",
     ],
 )
-def test_select_model_for_query_uses_coding_model_for_code_requests(query):
-    assert select_model_for_query(query) == "qwen2.5-coder:7b"
+async def test_select_model_for_query_uses_coding_model_for_code_requests(query):
+    assert await select_model_for_query(query) == "qwen2.5-coder:7b"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "query",
     [
@@ -101,8 +104,8 @@ def test_select_model_for_query_uses_coding_model_for_code_requests(query):
         "Play some jazz in the kitchen",
     ],
 )
-def test_select_model_for_query_uses_assistant_model_for_general_requests(query):
-    assert select_model_for_query(query) == "qwen3:latest"
+async def test_select_model_for_query_uses_assistant_model_for_general_requests(query):
+    assert await select_model_for_query(query) == "qwen3:latest"
 
 
 def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
@@ -116,7 +119,7 @@ def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
     finally:
         monkeypatch.setattr(gateway_main, "__package__", original_package)
 
-    assert selected == AUTONOMOUS_DEVELOPER_SYSTEM_INSTRUCTION
+    assert selected == RAVEN_AUTONOMOUS_PROTOCOL
 
 
 @pytest.mark.asyncio
@@ -249,7 +252,7 @@ def test_chat_slow_path_uses_coding_model_for_code_requests(client):
          patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
          patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
          patch("gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("gateway.main.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
             json={"query": "Help me fix this Python traceback in the gateway service", "voice_id": "alice"},
@@ -281,7 +284,7 @@ def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies(c
          patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
          patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
          patch("gateway.main.engine.classify", return_value=("media_transport", 0.99)), \
-         patch("gateway.main.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
             json={"query": "Fix this Python code bug in math_utils.py", "voice_id": "alice", "model": "qwen2.5-coder:7b"},
@@ -311,7 +314,7 @@ def test_chat_slow_path_respects_explicit_coding_model_for_plain_edit_prompts(cl
          patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
          patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
          patch("gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("gateway.main.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
             json={
@@ -347,7 +350,7 @@ def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
          patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
          patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
          patch("gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("gateway.main.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
             json={"query": "What should I make for dinner?", "voice_id": "alice"},
@@ -441,7 +444,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
          patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
          patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
          patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)), \
+         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)), \
          patch.object(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request, post=fake_post, get=fake_get)):
         response = await gateway_main.generate_workspace_readme_via_coding_model(
             body={
@@ -479,6 +482,14 @@ def test_select_system_instruction_for_query_uses_librarian_prompt_for_general_q
         "qwen3:latest",
     )
     assert instruction == LIBRARIAN_SYSTEM_INSTRUCTION
+
+
+def test_select_system_instruction_for_query_uses_raven_prompt_for_explicit_repair_queries():
+    instruction = select_system_instruction_for_query(
+        "Use Raven to self repair the gateway service",
+        "qwen2.5-coder:7b",
+    )
+    assert instruction == RAVEN_AUTONOMOUS_PROTOCOL
 
 
 def test_gateway_top_level_import_loads_prompts():
