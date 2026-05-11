@@ -115,10 +115,53 @@ async def handle_git(req) -> dict:
         })
 
     elif action == "diff":
-        r = await _run_git(["diff", "--stat"])
+        # Enhanced diff: support full diff by default
+        diff_args = ["diff"]
+        if path and path.startswith("--"):
+            diff_args.append(path) # e.g. --cached
+        elif path and path != ".":
+            diff_args.append(path)
+            
+        r = await _run_git(diff_args)
         if r["returncode"] != 0:
             return _fail("diff", r)
-        return _ok("diff", {"diff_stat": r["stdout"]})
+        return _ok("diff", r)
+
+    elif action == "branch":
+        # List branches or create new one
+        args = ["branch"]
+        if path and path != ".":
+            args.append(path)
+        r = await _run_git(args)
+        if r["returncode"] != 0:
+            return _fail("branch", r)
+        return _ok("branch", r)
+
+    elif action == "checkout":
+        # Switch branch
+        if not path or path == ".":
+            return _fail("checkout", {"error": "branch name required in 'path' field"})
+        r = await _run_git(["checkout", path])
+        if r["returncode"] != 0:
+            return _fail("checkout", r)
+        return _ok("checkout", r)
+
+    elif action == "clean":
+        # Force remove untracked files
+        r = await _run_git(["clean", "-fd"])
+        if r["returncode"] != 0:
+            return _fail("clean", r)
+        return _ok("clean", r)
+
+    elif action == "show":
+        # Show commit details
+        args = ["show", "--summary"]
+        if path and path != ".":
+            args = ["show", path]
+        r = await _run_git(args)
+        if r["returncode"] != 0:
+            return _fail("show", r)
+        return _ok("show", r)
 
     elif action == "add":
         r = await _run_git(["add", path])
