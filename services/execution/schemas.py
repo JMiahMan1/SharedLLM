@@ -51,6 +51,7 @@ class BaseRequest(BaseModel):
 
 class UserContext(BaseModel):
     """Resolved user credentials forwarded by the Gateway."""
+    model_config = {"extra": "ignore"}
     user: str
     is_admin: bool = False
     ha_url: Optional[str] = None
