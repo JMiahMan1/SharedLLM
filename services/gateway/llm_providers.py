@@ -47,7 +47,31 @@ class OllamaProvider(BaseLLMProvider):
             if not chunk_callback:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
                 resp.raise_for_status()
-                return resp.json().get("message", {}).get("content", "")
+                
+                # Harden: Strip keep-alive spaces and handle potential multi-line/streamed JSON
+                raw_text = resp.text.strip()
+                if not raw_text:
+                    return ""
+                
+                # If the response contains multiple JSON objects (NDJSON), take the last one or merge
+                if "\n" in raw_text:
+                    lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
+                    content = ""
+                    for line in lines:
+                        try:
+                            data = json.loads(line)
+                            content += data.get("message", {}).get("content", "")
+                            if data.get("done"):
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                    return content
+                
+                try:
+                    return json.loads(raw_text).get("message", {}).get("content", "")
+                except json.JSONDecodeError as e:
+                    log.error(f"[OllamaProvider] Failed to parse JSON: {raw_text[:100]}... Error: {e}")
+                    return ""
 
             # Streaming
             async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
