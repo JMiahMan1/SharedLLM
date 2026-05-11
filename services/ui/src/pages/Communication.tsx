@@ -69,23 +69,18 @@ const Communication = () => {
     end: '',
   });
 
-  const { data: contacts = [] } = useQuery({
-    queryKey: ['contacts'],
-    queryFn: () => api.getContacts(),
-  });
-
   useEffect(() => {
     if (isEventModalOpen) {
-       api.executeAction('calendar', 'list', {}).then(res => {
-         if (res.status === 'SUCCESS' && res.data) {
-           setCalendars(res.data);
-           if (res.data.length > 0 && !selectedCalendar) {
-             setSelectedCalendar(res.data[0].id);
-           }
-         }
-       });
+      api.getCalendarList().then((res) => {
+        const detail = res.detail as { calendars?: { id: string; display_name: string }[] } | undefined;
+        const calendarItems = detail?.calendars ?? [];
+        setCalendars(calendarItems);
+        if (calendarItems.length > 0 && !selectedCalendar) {
+          setSelectedCalendar(calendarItems[0].id);
+        }
+      });
     }
-  }, [isEventModalOpen]);
+  }, [isEventModalOpen, selectedCalendar]);
 
   const { data: timers = [] } = useQuery<TimerRecord[]>({
     queryKey: ['communication-timers'],
@@ -385,6 +380,7 @@ const Communication = () => {
 
           <div className="space-y-4">
             <select
+              aria-label="Announcement target device"
               value={announcementDevice}
               onChange={(event) => setAnnouncementDevice(event.target.value)}
               className="glass-input w-full bg-black/30"
@@ -617,6 +613,7 @@ const Communication = () => {
             <label className="space-y-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Target Calendar</span>
               <select
+                aria-label="Calendar selection"
                 value={selectedCalendar}
                 onChange={(e) => setSelectedCalendar(e.target.value)}
                 className="glass-input w-full bg-black/30"
