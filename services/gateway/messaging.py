@@ -25,7 +25,13 @@ class InferenceJobQueue:
         self.redis_url = redis_url
         self._redis: Optional[redis.Redis] = None
         self.QUEUE_KEY = "raven:inference_queue"
+        self.PROCESSING_KEY = "raven:inference_processing"
+        self.DEAD_LETTER_KEY = "raven:inference_dead_letter"
         self.JOB_PREFIX = "raven:job:"
+        self.LEASE_PREFIX = "raven:lease:"
+        self.DEFAULT_TTL_SECONDS = 3600
+        self.LEASE_TTL_SECONDS = 120
+        self.MAX_ATTEMPTS = 3
 
     async def connect(self):
         if not self._redis:
@@ -44,12 +50,17 @@ class InferenceJobQueue:
             "status": JobStatus.QUEUED,
             "payload": payload,
             "created_at": time.time(),
+            "attempts": 0,
             "result": None,
             "error": None
         }
 
         # Store job metadata
-        await self._redis.set(f"{self.JOB_PREFIX}{job_id}", json.dumps(job_data), ex=3600) # 1 hour expiry
+        await self._redis.set(
+            f"{self.JOB_PREFIX}{job_id}",
+            json.dumps(job_data),
+            ex=self.DEFAULT_TTL_SECONDS,
+        )
         
         # Push to FIFO queue (Right push)
         await self._redis.rpush(self.QUEUE_KEY, job_id)
@@ -57,25 +68,44 @@ class InferenceJobQueue:
         log.info(f"Job {job_id} enqueued for user {user_id}")
         return job_id
 
-    async def pop_job(self) -> Optional[Dict[str, Any]]:
-        """Pops the next job from the queue (Left pop)."""
+    async def claim_job(self) -> Optional[Dict[str, Any]]:
+        """
+        Atomically claims the next queued job and places it into the processing list.
+        The lease must be renewed while work is in progress.
+        """
         if not self._redis:
             await self.connect()
 
-        job_id = await self._redis.lpop(self.QUEUE_KEY)
+        job_id = await self._redis.lmove(self.QUEUE_KEY, self.PROCESSING_KEY, "LEFT", "RIGHT")
         if not job_id:
             return None
 
         job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
         if not job_raw:
+            await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)
             return None
 
         job = json.loads(job_raw)
         job["status"] = JobStatus.PROCESSING
         job["started_at"] = time.time()
-        
-        await self._redis.set(f"{self.JOB_PREFIX}{job_id}", json.dumps(job), ex=3600)
+        job["attempts"] = int(job.get("attempts", 0)) + 1
+
+        await self._redis.set(
+            f"{self.JOB_PREFIX}{job_id}",
+            json.dumps(job),
+            ex=self.DEFAULT_TTL_SECONDS,
+        )
+        await self.heartbeat_job(job_id)
         return job
+
+    async def pop_job(self) -> Optional[Dict[str, Any]]:
+        """Backward-compatible alias for older callers."""
+        return await self.claim_job()
+
+    async def heartbeat_job(self, job_id: str):
+        if not self._redis:
+            await self.connect()
+        await self._redis.set(f"{self.LEASE_PREFIX}{job_id}", str(time.time()), ex=self.LEASE_TTL_SECONDS)
 
     async def complete_job(self, job_id: str, result: Any):
         """Marks a job as completed and stores the result."""
@@ -87,8 +117,13 @@ class InferenceJobQueue:
         job["status"] = JobStatus.COMPLETED
         job["result"] = result
         job["completed_at"] = time.time()
-        
-        await self._redis.set(f"{self.JOB_PREFIX}{job_id}", json.dumps(job), ex=3600)
+
+        await self._redis.set(
+            f"{self.JOB_PREFIX}{job_id}",
+            json.dumps(job),
+            ex=self.DEFAULT_TTL_SECONDS,
+        )
+        await self._finalize_job(job_id)
         log.info(f"Job {job_id} completed.")
 
     async def fail_job(self, job_id: str, error: str):
@@ -101,8 +136,13 @@ class InferenceJobQueue:
         job["status"] = JobStatus.FAILED
         job["error"] = error
         job["completed_at"] = time.time()
-        
-        await self._redis.set(f"{self.JOB_PREFIX}{job_id}", json.dumps(job), ex=3600)
+
+        await self._redis.set(
+            f"{self.JOB_PREFIX}{job_id}",
+            json.dumps(job),
+            ex=self.DEFAULT_TTL_SECONDS,
+        )
+        await self._finalize_job(job_id)
         log.error(f"Job {job_id} failed: {error}")
 
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -145,3 +185,62 @@ class InferenceJobQueue:
     async def close(self):
         if self._redis:
             await self._redis.close()
+
+    async def reclaim_expired_jobs(self) -> int:
+        """
+        Requeue jobs whose worker lease expired.
+        After MAX_ATTEMPTS, move them to the dead-letter list and mark failed.
+        """
+        if not self._redis:
+            await self.connect()
+
+        reclaimed = 0
+        processing_jobs = await self._redis.lrange(self.PROCESSING_KEY, 0, -1)
+        for job_id in processing_jobs:
+            lease_exists = await self._redis.exists(f"{self.LEASE_PREFIX}{job_id}")
+            if lease_exists:
+                continue
+
+            job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
+            if not job_raw:
+                await self._finalize_job(job_id)
+                continue
+
+            job = json.loads(job_raw)
+            if job.get("status") != JobStatus.PROCESSING:
+                await self._finalize_job(job_id)
+                continue
+
+            attempts = int(job.get("attempts", 0))
+            await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)
+
+            if attempts >= self.MAX_ATTEMPTS:
+                job["status"] = JobStatus.FAILED
+                job["error"] = "Job lease expired too many times."
+                job["completed_at"] = time.time()
+                await self._redis.set(
+                    f"{self.JOB_PREFIX}{job_id}",
+                    json.dumps(job),
+                    ex=self.DEFAULT_TTL_SECONDS,
+                )
+                await self._redis.rpush(self.DEAD_LETTER_KEY, job_id)
+                log.error("Job %s moved to dead-letter queue after %s expired attempts", job_id, attempts)
+                continue
+
+            job["status"] = JobStatus.QUEUED
+            await self._redis.set(
+                f"{self.JOB_PREFIX}{job_id}",
+                json.dumps(job),
+                ex=self.DEFAULT_TTL_SECONDS,
+            )
+            await self._redis.rpush(self.QUEUE_KEY, job_id)
+            reclaimed += 1
+            log.warning("Re-queued expired job %s after lease loss (attempt %s)", job_id, attempts)
+
+        return reclaimed
+
+    async def _finalize_job(self, job_id: str):
+        if not self._redis:
+            await self.connect()
+        await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)
+        await self._redis.delete(f"{self.LEASE_PREFIX}{job_id}")

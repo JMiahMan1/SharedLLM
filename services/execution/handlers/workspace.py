@@ -2,12 +2,23 @@
 import os
 import logging
 import difflib
+import shlex
 from typing import Dict, Any, Optional
 from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceSearchRequest, WorkspaceShellRequest, ExecutionResult
 
 log = logging.getLogger("execution.workspace")
 
 WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "/workspace/SharedLLM")
+READ_ONLY_SHELL_COMMANDS = {
+    "cat", "find", "git", "head", "ls", "pwd", "rg", "sed", "tail", "wc"
+}
+VERIFICATION_SHELL_COMMANDS = {
+    "black", "eslint", "flake8", "pytest", "python", "python3"
+}
+SHELL_BLOCKLIST_TOKENS = {"&&", ";", "||", "|", ">", ">>", "<"}
+SHELL_BLOCKLIST_COMMANDS = {
+    "bash", "chmod", "cp", "git-commit", "git-push", "mv", "rm", "sh"
+}
 
 def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service="workspace", detail=detail)
@@ -198,13 +209,40 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         else:
             return _fail("Neither 'command' nor 'commands' provided")
 
+        parsed = shlex.split(final_cmd)
+        if not parsed:
+            return _fail("Shell command is empty")
+
+        if any(token in final_cmd for token in SHELL_BLOCKLIST_TOKENS):
+            return _fail("Shell operators are not allowed for autonomous workspace commands")
+
+        base_command = parsed[0]
+        normalized_command = f"{base_command}-{parsed[1]}" if base_command == "git" and len(parsed) > 1 else base_command
+
+        if normalized_command in SHELL_BLOCKLIST_COMMANDS:
+            return _fail(
+                "Mutating shell commands are blocked. Use workspace write/patch tools and workspace runtime verification workflows instead."
+            )
+
+        allowed = normalized_command in READ_ONLY_SHELL_COMMANDS or base_command in VERIFICATION_SHELL_COMMANDS
+        if not allowed:
+            return _fail(
+                f"Shell command '{normalized_command}' is not allowed. Use read/search tools or the workspace runtime workflow."
+            )
+
+        if base_command in {"python", "python3"} and parsed[1:3] != ["-m", "pytest"]:
+            return _fail("Only pytest execution is allowed through python shell commands")
+
+        if base_command == "git" and len(parsed) > 1 and parsed[1] not in {"status", "diff", "log", "show"}:
+            return _fail("Only read-only git shell commands are allowed")
+
         log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
         # Enforce a max timeout of 300s
         safe_timeout = min(req.timeout, 300)
         
         proc = subprocess.run(
-            final_cmd,
-            shell=True,
+            parsed,
+            shell=False,
             cwd=abs_cwd,
             capture_output=True,
             text=True,

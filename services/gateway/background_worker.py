@@ -68,7 +68,11 @@ class RavenWorker:
         log.info("Inference worker listening for jobs...")
         while self.is_running:
             try:
-                job = await self.job_queue.pop_job()
+                reclaimed = await self.job_queue.reclaim_expired_jobs()
+                if reclaimed:
+                    log.warning("Recovered %s expired Raven job(s) back into the queue.", reclaimed)
+
+                job = await self.job_queue.claim_job()
                 if job:
                     log.info(f"Processing job {job['job_id']} for {job['user_id']}")
                     await self._process_inference_job(job)
@@ -81,8 +85,10 @@ class RavenWorker:
     async def _process_inference_job(self, job: Dict[str, Any]):
         job_id = job["job_id"]
         payload = job["payload"]
+        heartbeat_task = None
         
         try:
+            heartbeat_task = asyncio.create_task(self._job_heartbeat(job_id))
             # 1. Inference Orchestration
 
             # 2. Singleton Inference with Full Orchestration and Streaming support
@@ -107,6 +113,13 @@ class RavenWorker:
             tb = traceback.format_exc()
             log.error(f"Failed to process job {job_id}: {e}\n{tb}")
             await self.job_queue.fail_job(job_id, str(e))
+        finally:
+            if heartbeat_task:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
 
     async def _trigger_tts_callback(self, payload: Dict[str, Any], message: str):
         """Proactively broadcast result via TTS."""
@@ -166,6 +179,11 @@ class RavenWorker:
         await self.job_queue.enqueue_job("raven_admin", {
             "query": query, "model": "qwen2.5-coder:7b", "system": "You are a repair agent.", "stream": False
         })
+
+    async def _job_heartbeat(self, job_id: str):
+        while self.is_running:
+            await asyncio.sleep(30)
+            await self.job_queue.heartbeat_job(job_id)
 
 # Global instance
 worker = RavenWorker()
