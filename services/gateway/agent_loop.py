@@ -241,13 +241,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     # 2. Resolve Role-Based Model (Coder/Assistant) if selected_model is generic or "auto"
     if selected_model in ["auto", "assistant", "coder"]:
+        tech_keywords = ["coder", "fix", "repair", "audit", "mission", "raven", "development", "git", "workspace"]
+        is_technical = any(word in query.lower() for word in tech_keywords) or "coder" in selected_model
+        
         if active_provider_name == "openrouter":
-            if "coder" in selected_model or "fix" in query.lower() or "repair" in query.lower():
+            if is_technical:
                 selected_model = settings.get("cloud_coding_model", "anthropic/claude-3.5-sonnet")
             else:
                 selected_model = settings.get("cloud_assistant_model", "google/gemini-2.0-flash-001")
         else:
-            if "coder" in selected_model or "fix" in query.lower() or "repair" in query.lower():
+            if is_technical:
                 selected_model = settings.get("ollama_coding_model", "qwen2.5-coder:7b")
             else:
                 selected_model = settings.get("ollama_assistant_model", "qwen3.5:9b")
