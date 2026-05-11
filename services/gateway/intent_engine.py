@@ -146,20 +146,26 @@ class IntentEngine:
         Returns (intent_name, confidence_score).
         """
         q = query.lower().strip()
+        log.info(f"[IntentEngine] Classifying query: '{q}'")
         
         # 1. Hardcoded Keyword Fallbacks (Safety/Test logic)
-        # We only use these for VERY simple queries to avoid hijacking complex ones.
         if q in ["play", "play music", "start playing", "resume music"]:
+            log.info(f"[IntentEngine] Keyword match: play_media")
             return "play_media", 1.0
         if q in ["pause", "pause music", "stop the music", "stop playing"]:
+            log.info(f"[IntentEngine] Keyword match: pause_media")
             return "pause_media", 1.0
         if q in ["turn on", "power on", "switch on"]:
+            log.info(f"[IntentEngine] Keyword match: turn_on")
             return "turn_on", 1.0
         if q in ["turn off", "power off", "switch off"]:
+            log.info(f"[IntentEngine] Keyword match: turn_off")
             return "turn_off", 1.0
         if q in ["index", "reindex", "scan my library"]:
+            log.info(f"[IntentEngine] Keyword match: index_storage")
             return "index_storage", 1.0
         if q in ["sync home assistant", "refresh devices"]:
+            log.info(f"[IntentEngine] Keyword match: sync_ha")
             return "sync_ha", 1.0
 
         # 2. Semantic Routing (if active)
@@ -180,6 +186,7 @@ class IntentEngine:
             best_score = float(similarities[max_idx])
             best_intent = self.intent_labels[max_idx]
 
+            log.info(f"[IntentEngine] Semantic Match: winner='{best_intent}' score={best_score:.4f} query='{query}'")
             return best_intent, best_score
             
         except Exception as e:
