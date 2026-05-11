@@ -131,13 +131,15 @@ def extract_action_json(text: str) -> dict | None:
     
     text = re.sub(r"^INFO:.*?\n", "", text, flags=re.MULTILINE)
     
-    match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+    # Priority 1: Properly fenced JSON block (allow optional closing fence)
+    match = re.search(r"```json\s*(\{.*?\})(?:\s*```|$)", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(1))
         except:
             pass
 
+    # Priority 2: Outer-most braces (robust fallback)
     first_brace = text.find("{")
     last_brace = text.rfind("}")
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
@@ -354,13 +356,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         tool_data = extract_action_json(ans)
         
         if not tool_data:
+            # If the last step was an error, we MUST NOT terminate. We must force a correction.
+            if exec_data and exec_data.get("status") == "ERROR":
+                log.warning(f"[AgentLoop] JSON extraction failed following an ERROR. Re-prompting for correction...")
+                action_log.append(f"ITERATION {iter_num}: Failed to parse your JSON. Ensure you provide a complete, valid JSON block inside ```json ``` tags.")
+                continue
+
             if agent_iter > 0:
-                # If we've already done work, it's possible it's finished. 
-                # But let's try one more nudge if it sounds conversational or preachy.
-                conversational_indicators = ["details", "proceed", "example", "please", "sorry", "assist", "capability", "primary function", "reaching out"]
+                # If we've already done work, check for conversational drift.
+                conversational_indicators = ["details", "proceed", "example", "please", "sorry", "assist", "capability", "primary function", "reaching out", "fixed request"]
                 if any(word in ans.lower() for word in conversational_indicators):
-                    log.info(f"[AgentLoop] Detected conversational drift/refusal. Re-prompting aggressively...")
-                    exec_data = {"status": "ERROR", "message": "CRITICAL: You are an autonomous agent. Conversation and refusals are FORBIDDEN. You MUST execute the next step using a JSON tool call block immediately. Do not apologize, just execute."}
+                    log.info(f"[AgentLoop] Detected conversational drift/refusal/loop-closure attempt. Re-prompting...")
+                    exec_data = {"status": "ERROR", "message": "CRITICAL: The task is NOT finished. You provided an explanation but NO valid JSON action. You MUST execute the next step using a JSON tool call block immediately."}
                     continue
                 log.info(f"[AgentLoop] Mission likely accomplished. Terminating loop.")
                 break
