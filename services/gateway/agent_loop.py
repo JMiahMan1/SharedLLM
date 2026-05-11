@@ -535,4 +535,40 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.error(f"[AgentLoop] Tool execution failed: {e}")
             exec_data = {"status": "ERROR", "message": str(e)}
 
+    async def _persist_learning(summary: str) -> None:
+        try:
+            tags = ["raven", "autonomous", "repair"]
+            if "workspace" in query.lower():
+                tags.append("workspace")
+            if "git" in query.lower():
+                tags.append("git")
+            if "deployment" in query.lower() or "restart" in query.lower():
+                tags.append("deployment")
+
+            payload = {
+                "user_context": creds.model_dump(),
+                "topic": f"Raven repair: {query[:80]}",
+                "content": summary,
+                "tags": list(dict.fromkeys(tags)),
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{EXECUTION_SVC}/execute/learning",
+                    json=payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                )
+                if resp.status_code != 200:
+                    log.warning(f"[AgentLoop] Learning persistence failed: {resp.status_code} {resp.text}")
+        except Exception as e:
+            log.warning(f"[AgentLoop] Learning persistence skipped: {e}")
+
+    if action_log and not (isinstance(exec_data, dict) and exec_data.get("status") == "ERROR"):
+        learning_summary = "\n".join([
+            f"Query: {query}",
+            f"Actions: {' | '.join(action_log)}",
+            f"Final answer: {ans}",
+        ])
+        await _persist_learning(learning_summary)
+
     return ans

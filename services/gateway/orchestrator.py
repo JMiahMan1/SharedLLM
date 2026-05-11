@@ -50,6 +50,22 @@ async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
             base_url=settings.get("llm_local_url", OLLAMA_URL)
         )
 
+
+async def call_ollama(payload: Dict[str, Any], use_chat: bool = True) -> Dict[str, Any]:
+    """
+    Legacy-compatible inference seam for tests and direct provider calls.
+    The underlying provider is still resolved dynamically from Identity settings.
+    """
+    settings = await get_llm_settings()
+    provider = await get_provider(settings)
+    content = await provider.generate(
+        payload["model"],
+        payload["messages"],
+        options=payload.get("options", {}),
+        chunk_callback=payload.get("chunk_callback"),
+    )
+    return {"message": {"content": content}}
+
 async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
     """
     Handles the full Jarvis orchestration pipeline:
@@ -71,7 +87,11 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     # 3. Autonomous Detection (Raven/Coding/Repair ONLY)
     # Raven runs in Workspaces and handles long-running or coding tasks.
     # Home Automation should NOT be treated as autonomous (no long-running loops)
-    autonomy_signals = ["raven", "audit", "repair", "deploy", "bootstrap", "develop"]
+    autonomy_signals = [
+        "raven", "use raven", "audit", "repair", "self repair", "self-heal",
+        "self fix", "deploy", "bootstrap", "develop", "fix the app",
+        "fix the service", "fix the codebase", "agentic", "autonomous"
+    ]
     is_autonomous = any(k in query.lower() for k in autonomy_signals)
     
     # 4. Final Inference
@@ -109,9 +129,6 @@ async def _fetch_rag_context(query: str, user_id: str) -> str:
     return rag_context
 
 async def _single_turn_inference(query: str, model: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
-    settings = await get_llm_settings()
-    provider = await get_provider(settings)
-
     system = f"You are the SharedLLM Assistant. Context:\n{rag_context}\n\nIf the user wants to control a device or perform a task, output a JSON block like: ```json\n{{\"action\": \"LightControlRequest\", \"payload\": {{\"entity_id\": \"light.xyz\", \"action\": \"turn_on\"}}}}\n``` or ```json\n{{\"action\": \"StorageListRequest\", \"payload\": {{\"path\": \"/\"}}}}\n```. If you execute a tool, do NOT include any other text in your response."
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
 
@@ -138,7 +155,16 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
 
     for retry_count in range(MAX_INFERENCE_RETRIES):
         try:
-            ans = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
+            data = await call_ollama(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "options": options,
+                    "chunk_callback": chunk_callback,
+                },
+                use_chat=True,
+            )
+            ans = data.get("message", {}).get("content", "")
             break # Success!
         except Exception as e:
             log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
@@ -214,4 +240,3 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
             return f"I found a tool call for '{action}', but it is not supported in the standard path. Please ask Raven to perform this task."
 
     return ans
-
