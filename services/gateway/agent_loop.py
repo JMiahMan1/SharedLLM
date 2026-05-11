@@ -475,6 +475,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
                 
+                # RECOVERY: If the LLM sent a nested payload for a GitOperationRequest but forgot the inner 'action',
+                # we inject it here using the original action name (e.g. 'status', 'add', etc.)
+                if lookup_action == "gitoperationrequest" and isinstance(payload, dict) and "action" not in payload:
+                    # 'action' variable at this point is likely "GitOperationRequest" (mapped)
+                    # We want the original one from the tool call
+                    orig_action = str(tool_data.get("action") or tool_data.get("operation") or "").lower()
+                    if orig_action.startswith("git_"):
+                        orig_action = orig_action.replace("git_", "")
+                    payload["action"] = orig_action
+
                 # ALWAYS inject user_context. Pydantic schemas require it for validation.
                 payload["user_context"] = {
                     "user": creds.user,
@@ -491,14 +501,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 }
 
                 async with httpx.AsyncClient(timeout=120.0) as client:
-                    # Redact sensitive values for logging
+                    # Secure Log Redaction
                     log_payload = json.loads(json.dumps(payload)) # Deep copy
-                    if "user_context" in log_payload:
-                        sensitive_keys = ["ha_token", "nextcloud_pass", "github_token", "gitlab_token", "git_token", "api_key", "openai_key"]
-                        for sk in sensitive_keys:
-                            if sk in log_payload["user_context"] and log_payload["user_context"][sk]:
-                                log_payload["user_context"][sk] = "[REDACTED]"
-                        
+                    def redact(d):
+                        if isinstance(d, dict):
+                            for k, v in d.items():
+                                if k in ["github_token", "gitlab_token", "git_token", "api_key", "ha_token", "nextcloud_pass"]:
+                                    d[k] = "[REDACTED]"
+                                else:
+                                    redact(v)
+                        elif isinstance(d, list):
+                            for item in d:
+                                redact(item)
+                    redact(log_payload)
+                    
                     log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                     log.info(f"[AgentLoop] Tool response: {resp.status_code}")
