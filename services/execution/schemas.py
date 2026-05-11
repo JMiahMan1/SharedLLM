@@ -4,11 +4,37 @@ Pydantic schemas for all Execution Bridge endpoints.
 Strict validation is the primary defense against malformed gateway payloads.
 """
 from typing import Optional, Literal, Any, Dict, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class BaseRequest(BaseModel):
     model_config = {"extra": "ignore"}
+
+    @model_validator(mode='before')
+    @classmethod
+    def handle_common_aliases(cls, data: Any) -> Any:
+        """Automatically map common hallucinations to schema-correct fields."""
+        if isinstance(data, dict):
+            # Map 'file_path' or 'file' to 'path'
+            if "path" not in data:
+                if "file_path" in data:
+                    data["path"] = data["file_path"]
+                elif "file" in data:
+                    data["path"] = data["file"]
+            
+            # Map 'message' to 'commit_message' or vice-versa
+            if "message" in data and "commit_message" not in data:
+                data["commit_message"] = data["message"]
+            if "commit_message" in data and "message" not in data:
+                data["message"] = data["commit_message"]
+
+            # Map 'limit' to 'limit_lines' and 'offset' to 'offset_lines'
+            if "limit" in data and "limit_lines" not in data:
+                data["limit_lines"] = data["limit"]
+            if "offset" in data and "offset_lines" not in data:
+                data["offset_lines"] = data["offset"]
+                
+        return data
 
 class UserContext(BaseModel):
     """Resolved user credentials forwarded by the Gateway."""
