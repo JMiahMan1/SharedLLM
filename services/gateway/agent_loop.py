@@ -53,7 +53,6 @@ class OllamaProvider(BaseLLMProvider):
                 
                 # Harden: Strip keep-alive spaces and handle potential multi-line/streamed JSON
                 raw_text = resp.text.strip()
-                log.info(f"[OllamaProvider-RAW-BLOCK] {raw_text[:500]}") # Log first 500 chars
                 if not raw_text:
                     return ""
                 
@@ -63,8 +62,6 @@ class OllamaProvider(BaseLLMProvider):
                     content = ""
                     for line in lines:
                         try:
-                            # DEBUG: Log the raw line to see what the proxy is actually sending
-                            log.info(f"[OllamaProvider-RAW] {line}")
                             data = json.loads(line)
                             
                             # Handle errors from proxy/Ollama
@@ -94,8 +91,6 @@ class OllamaProvider(BaseLLMProvider):
                     if not line:
                         continue
                     try:
-                        # DEBUG: Log the raw line to see what the proxy is actually sending
-                        log.info(f"[OllamaProvider-RAW] {line}")
                         chunk_json = json.loads(line)
                         if "error" in chunk_json:
                             full_content += f" [PROVIDER ERROR: {chunk_json['error']}] "
