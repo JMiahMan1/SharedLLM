@@ -18,10 +18,12 @@ class BaseRequest(BaseModel):
             if "action" in data and isinstance(data["action"], str) and data["action"].startswith("git_"):
                 data["action"] = data["action"].replace("git_", "")
 
-            # Map 'file_path' or 'file' to 'path'
+            # Map 'file_path', 'repository_path', or 'file' to 'path'
             if "path" not in data:
                 if "file_path" in data:
                     data["path"] = data["file_path"]
+                elif "repository_path" in data:
+                    data["path"] = data["repository_path"]
                 elif "file" in data:
                     data["path"] = data["file"]
             
