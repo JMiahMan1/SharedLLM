@@ -13,6 +13,10 @@ import re
 import traceback
 from datetime import datetime
 from pathlib import Path
+
+# --- Setup Logging IMMEDIATELY ---
+log = logging.getLogger("gateway")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 try:
     from .schemas import ChatRequest, ResolvedCredentials
     from .agent_loop import AgentLoop, extract_action_json, execute_inference, get_vram_safe_params
@@ -158,9 +162,7 @@ except (ImportError, ValueError):
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 job_queue = InferenceJobQueue(REDIS_URL)
 
-# --- Setup Logging ---
-log = logging.getLogger("gateway")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+# REDIS moved below imports
 
 # --- Ouroboros Worker ---
 try:
