@@ -4,7 +4,7 @@ import json
 import asyncio
 import httpx
 import re
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict, List, Callable, Awaitable
 from fastapi.responses import JSONResponse
 
 try:
