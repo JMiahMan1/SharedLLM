@@ -462,12 +462,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(payload)}")
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                    exec_data = resp.json()
+                    log.info(f"[AgentLoop] Tool response: {resp.status_code}")
                     
-                    # --- ADD TO SCRATCHPAD ---
+                    if resp.status_code == 422:
+                        try:
+                            error_detail = resp.json().get("detail", "Validation failed")
+                            msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'commit_message') instead of 'command' or 'args'."
+                        except:
+                            msg = f"SCHEMA ERROR (422): {resp.text}. Check your field names."
+                        exec_data = {"status": "ERROR", "message": msg}
+                    else:
+                        exec_data = resp.json()
+
                     short_msg = exec_data.get("message", "Success")
                     action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
-                    log.info(f"[AgentLoop] Tool response: {resp.status_code}")
             else:
                 log.warning(f"[AgentLoop] Unknown action: {action}")
                 exec_data = {"status": "ERROR", "message": f"Unknown action: {action}"}
