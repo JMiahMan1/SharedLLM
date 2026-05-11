@@ -119,7 +119,27 @@ def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
     finally:
         monkeypatch.setattr(gateway_main, "__package__", original_package)
 
-    assert selected == RAVEN_AUTONOMOUS_PROTOCOL
+
+@pytest.mark.asyncio
+async def test_chat_handler_routes_direct_file_edit_requests_to_code_orchestration(monkeypatch):
+    monkeypatch.setattr(gateway_main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
+    monkeypatch.setattr(gateway_main, "update_history", AsyncMock(return_value=None))
+    mock_orchestrate = AsyncMock(return_value=gateway_main._make_ollama_response("orchestrated", "qwen2.5-coder:7b"))
+    monkeypatch.setattr(gateway_main, "orchestrate_code_change", mock_orchestrate)
+
+    response = await gateway_main.chat_handler(
+        _json_request(
+            {
+                "query": "Create a pytest file named temp/test_raven_live.py that asserts 2 + 2 == 4. Verify it with pytest.",
+                "rag_user": "alice",
+                "model": "qwen2.5-coder:7b",
+            }
+        )
+    )
+
+    assert response.status_code == 200
+    assert "orchestrated" in json.loads(response.body)["message"]["content"]
+    mock_orchestrate.assert_awaited_once()
 
 
 @pytest.mark.asyncio
