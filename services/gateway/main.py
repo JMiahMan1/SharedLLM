@@ -281,6 +281,27 @@ async def execute_inference(payload: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _parse_llm_json_object(raw: Any) -> dict:
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("Empty LLM response")
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+        if fenced:
+            parsed = json.loads(fenced.group(1))
+        else:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                raise
+            parsed = json.loads(text[start:end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM response was not a JSON object")
+    return parsed
+
+
 async def get_assistant_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
@@ -1136,7 +1157,7 @@ async def orchestrate_code_change(
     data = await execute_inference(payload)
     try:
         plan = data.get("message", {}).get("content") or data.get("response")
-        plan_data = json.loads(plan)
+        plan_data = _parse_llm_json_object(plan)
     except Exception as e:
         log.error(f"Failed to parse coding plan: {e}\nRaw: {plan}")
         raise HTTPException(status_code=500, detail="Invalid JSON plan from coding model")
@@ -1398,7 +1419,7 @@ async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
       end = raw.rfind("}")
       if start == -1 or end == -1 or end <= start:
           return None
-      json_data = json.loads(raw[start:end + 1])
+      json_data = _parse_llm_json_object(raw[start:end + 1])
       if not isinstance(json_data, dict):
           return None
       query_value = str(json_data.get("query") or "").strip()

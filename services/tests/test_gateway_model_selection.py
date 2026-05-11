@@ -315,6 +315,56 @@ async def test_orchestrate_code_change_uses_review_branch_workflow_payload(monke
     assert payload["message"]["content"].find("Review Branch") != -1
 
 
+@pytest.mark.asyncio
+async def test_orchestrate_code_change_parses_fenced_json_payload(monkeypatch):
+    async def fake_execute_inference(payload):
+        return {
+            "message": {
+                "content": """```json
+{
+  "relative_path": "temp/test_raven_live.py",
+  "content": "def test_raven_sanity():\\n    assert 2 + 2 == 4\\n",
+  "reasoning": "Create a minimal sanity test.",
+  "test_cmd": "pytest temp/test_raven_live.py -q"
+}
+```"""
+            }
+        }
+
+    async def fake_workspace_runtime_request(method, path, *, json_payload=None, params=None):
+        if path != "/workflow/write-sync-commit":
+            raise AssertionError(f"Unexpected path: {path}")
+        return {
+            "commit": {"commit": "abc123"},
+            "provider_sync": {"status": "SUCCESS"},
+            "review": {
+                "head": "raven/alice/test-raven-live",
+                "base": "main",
+                "summary": {
+                    "pytest": {"passed": True, "targets": ["temp/test_raven_live.py"]},
+                },
+            },
+        }
+
+    monkeypatch.setattr(gateway_main, "resolve_chat_workspace", AsyncMock(return_value={"id": "alice-demo"}))
+    monkeypatch.setattr(gateway_main, "build_workspace_readme_context", AsyncMock(return_value="workspace context"))
+    monkeypatch.setattr(gateway_main, "execute_inference", fake_execute_inference)
+    monkeypatch.setattr(gateway_main, "workspace_runtime_request", fake_workspace_runtime_request)
+
+    response = await gateway_main.orchestrate_code_change(
+        body={},
+        user_id="alice",
+        refined_query="Create a pytest file named temp/test_raven_live.py that asserts 2 + 2 == 4. Verify it with pytest.",
+        selected_model="qwen3.6-35b-a3b:q4_k_m",
+        should_stream=False,
+        is_openai=False,
+    )
+
+    payload = json.loads(response.body)
+    assert response.status_code == 200
+    assert "temp/test_raven_live.py" in payload["message"]["content"]
+
+
 @pytest.mark.local_only
 def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     captured = {}
