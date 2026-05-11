@@ -185,17 +185,18 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 - `WorkspaceSearchRequest`: { "query": "...", "path": "." }
 - `WorkspaceFileReadRequest`: { "path": "...", "offset_lines": 0, "limit_lines": 100 }
 - `WorkspaceFilePatchRequest`: { "path": "...", "chunks": [{"old_text": "...", "new_text": "..."}] }
-- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "message": "...", "path": ".", "branch": "microservices" }
+- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "message": "...", "path": "services/gateway/main.py", "branch": "microservices" }
 
 #### **GIT TACTICAL GUIDE:**
 1. **Self-Healing**: If a `push` fails due to being "behind remote", immediately `fetch` then `reset --hard` to `origin/branch` to synchronize.
 2. **Cleanup**: If status shows many untracked files after a failed mission, use 'clean' to reset.
-3. **Commit Quality**: ALWAYS provide a descriptive, professional commit message in the 'commit_message' field.
+3. **Commit Quality**: ALWAYS provide a descriptive, professional commit message in the 'commit_message' (or 'message') field.
    - Format: '<type>: <short summary>' (e.g., 'feat: added automation scripts')
    - Description: Briefly explain WHAT changed and WHY.
    - Example: 'feat: mission accomplished - created and verified flag file'
-4. **Verification**: Always use `diff` (or `diff --cached`) before a `commit` to ensure no sensitive or unintended changes are being landed.
-5. **Context**: Use `log` and `show` to audit the repository history before making structural changes.
+4. **High-Precision Staging**: NEVER use `git add .`. You MUST stage specific files one by one using the 'path' field. This prevents accidental staging of sensitive logs or temporary files.
+5. **Verification**: Always use `diff` (or `diff --cached`) before a `commit` to ensure no sensitive or unintended changes are being landed.
+6. **Context**: Use `log` and `show` to audit the repository history before making structural changes.
 - `WorkspaceShellRequest`: { "command": "pytest ..." }
 - `WebReadRequest`: { "url": "..." }
 

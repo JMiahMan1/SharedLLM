@@ -68,6 +68,7 @@ class UserContext(BaseModel):
 
 
 class ExecutionResult(BaseModel):
+    model_config = {"extra": "ignore"}
     status: Literal["SUCCESS", "FAILURE", "PARTIAL"]
     message: str
     service: str
@@ -219,8 +220,9 @@ class WorkspaceFileWriteRequest(BaseRequest):
     commit_message: Optional[str] = None
 
 class ReplacementChunk(BaseModel):
-    old_text: str = Field(..., description="The exact text to be replaced")
-    new_text: str = Field(..., description="The replacement text")
+    model_config = {"extra": "ignore", "populate_by_name": True}
+    old_text: str = Field(..., alias="target_content", description="The exact text to be replaced")
+    new_text: str = Field(..., alias="replacement_content", description="The replacement text")
 
 class WorkspaceFilePatchRequest(BaseRequest):
     """
@@ -228,10 +230,38 @@ class WorkspaceFilePatchRequest(BaseRequest):
     Use this for small fixes to avoid providing the full file content.
     """
     user_context: UserContext
-    path: str = Field(..., description="Path relative to workspace root")
-    chunks: List[ReplacementChunk]
+    path: str = Field(..., alias="file_path", description="Path relative to workspace root")
+    chunks: List[ReplacementChunk] = Field(..., alias="patch")
     commit_after: bool = False
     commit_message: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def pivot_file_patch_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Pivot 'file_path' to 'path'
+            if "file_path" in data and "path" not in data:
+                data["path"] = data.pop("file_path")
+            
+            # Pivot 'patch' or 'patches' to 'chunks'
+            patch_data = data.get("patch") or data.get("patches")
+            if patch_data and "chunks" not in data:
+                if isinstance(patch_data, dict):
+                    # Convert search:replace dict to chunks
+                    new_chunks = []
+                    for k, v in patch_data.items():
+                        # Handle potential '-' or '+' prefixes from diff-style hallucinations
+                        clean_k = k.lstrip("- ").strip()
+                        clean_v = v.lstrip("+ ").strip()
+                        new_chunks.append({"old_text": clean_k, "new_text": clean_v})
+                    data["chunks"] = new_chunks
+                elif isinstance(patch_data, list):
+                    data["chunks"] = patch_data
+                data.pop("patch", None)
+                data.pop("patches", None)
+        return data
+
+    model_config = {"extra": "ignore", "populate_by_name": True}
 
 class WorkspaceShellRequest(BaseRequest):
     """

@@ -20,6 +20,7 @@ Security:
 import asyncio
 import logging
 import os
+import re
 import shlex
 from typing import Optional
 
@@ -40,7 +41,18 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
     args — list of git sub-command + arguments (NOT including 'git' itself).
     """
     cmd = ["git"] + args
-    log.info(f"[Git] Running: {' '.join(shlex.quote(a) for a in cmd)} in {cwd}")
+    
+    # Redact tokens from log output
+    safe_cmd = []
+    for arg in cmd:
+        if "github_pat_" in arg or "ghp_" in arg:
+            # Simple heuristic: if it looks like a token, redact it
+            redacted = re.sub(r"(https://)[^@]+(@)", r"\1[REDACTED]\2", arg)
+            safe_cmd.append(redacted)
+        else:
+            safe_cmd.append(arg)
+    
+    log.info(f"[Git] Running: {' '.join(shlex.quote(a) for a in safe_cmd)} in {cwd}")
     try:
         env = os.environ.copy()
         # Fix: Ignore bad permissions on config file by using -F /dev/null
@@ -205,13 +217,20 @@ async def handle_git(req) -> dict:
         
         # Determine the appropriate token for this host
         token = None
+        log.info(f"[Git] Resolving token for {remote_url} | user={getattr(user_context, 'user', 'unknown')}")
+        
         if "github.com" in remote_url:
             token = getattr(user_context, "github_token", None)
+            log.info(f"[Git] Selected GitHub token: {'[PRESENT]' if token else '[MISSING]'}")
         elif "gitlab" in remote_url:
             token = getattr(user_context, "gitlab_token", None)
+            log.info(f"[Git] Selected GitLab token: {'[PRESENT]' if token else '[MISSING]'}")
         
         # Fallback to generic git_token
-        token = token or getattr(user_context, "git_token", None)
+        if not token:
+            token = getattr(user_context, "git_token", None)
+            if token:
+                log.info("[Git] Using generic git_token fallback.")
         
         if token and remote_url.startswith("https://"):
             # Inject token for HTTPS auth: https://<token>@host/...
