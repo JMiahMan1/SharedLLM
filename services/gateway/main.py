@@ -296,6 +296,10 @@ AUTONOMOUS_SIGNALS = (
   "check container logs", "rebuild service", "deploy fix", "repair", "execute fix",
   "fix it", "debug it", "fix the code", "apply the fix"
 )
+TTS_SIGNALS = (
+  "tts", "audiobook", "read this", "make audible", "clean for speech", 
+  "narration", "voiceover", "ebook to speech", "pdf to speech", "prosody", "ssml"
+)
 
 # --- Capability Configuration ---
 # Maps intents to the credential fields required in ResolvedCredentials
@@ -574,12 +578,12 @@ async def contextualize_query(query: str, history: list) -> str:
 
 
 async def select_model_for_query(query: str) -> str:
-    """Route obvious coding and librarian tasks to specialized models."""
+    """Route obvious coding, autonomous, and librarian tasks to specialized models."""
     q = (query or "").lower()
 
-    if any(token in q for token in CODING_SIGNALS):
+    if any(token in q for token in CODING_SIGNALS) or any(token in q for token in AUTONOMOUS_SIGNALS):
       return await get_coding_model()
-    if any(token in q for token in LIBRARIAN_SIGNALS):
+    if any(token in q for token in LIBRARIAN_SIGNALS) or any(token in q for token in TTS_SIGNALS):
       return await get_librarian_model()
     return await get_assistant_model()
 
@@ -593,6 +597,13 @@ def select_system_instruction_for_query(query: str, selected_model: str) -> str:
         except ImportError:
             from gateway.prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT
     q = (query or "").lower()
+    if any(token in q for token in TTS_SIGNALS):
+      try:
+          from .prompts import RAVEN_NARRATOR_PROTOCOL
+          return RAVEN_NARRATOR_PROTOCOL
+      except ImportError:
+          from prompts import RAVEN_NARRATOR_PROTOCOL
+          return RAVEN_NARRATOR_PROTOCOL
     if any(token in q for token in AUTONOMOUS_SIGNALS):
       return AUTONOMOUS_EVOLUTION_AGENT_PROMPT
     if any(token in q for token in CODING_SIGNALS):
