@@ -18,6 +18,7 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
 RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
 IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
+STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://storage:8005")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 
@@ -213,5 +214,4 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
             return f"I found a tool call for '{action}', but it is not supported in the standard path. Please ask Raven to perform this task."
 
     return ans
-
 

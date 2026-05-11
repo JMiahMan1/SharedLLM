@@ -87,7 +87,7 @@ const OverviewPane = () => {
           {workspaces.map((workspace) => (
             <div key={workspace.id} className="glass-card p-4">
               <div className="flex items-center justify-between gap-4 overflow-hidden">
-                <p className="font-semibold text-white truncate">{workspace.name}</p>
+                <p className="font-semibold text-white truncate">{workspace.display_name || workspace.id}</p>
                 <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
                   {workspace.available ? 'Available' : 'Unavailable'}
                 </span>

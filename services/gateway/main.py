@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import re
 import traceback
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 # --- Setup Logging IMMEDIATELY ---
@@ -697,6 +698,44 @@ def extract_media_transport_command(query: str) -> str | None:
     return None
 
 
+def is_time_or_date_query(query: str) -> bool:
+    q = (query or "").strip().lower()
+    if not q:
+        return False
+    return any(
+        phrase in q for phrase in (
+            "what time is it",
+            "current time",
+            "time is it",
+            "what is the date",
+            "what date is it",
+            "today's date",
+            "todays date",
+            "current date",
+            "date today",
+        )
+    )
+
+
+def build_time_or_date_response(query: str) -> str:
+    tz_name = os.getenv("TIMEZONE", "America/Phoenix")
+    try:
+        now = datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        now = datetime.now().astimezone()
+        tz_name = str(now.tzinfo or tz_name)
+
+    q = (query or "").strip().lower()
+    wants_time = any(token in q for token in ("time", "clock"))
+    wants_date = "date" in q or "day" in q or "today" in q
+
+    if wants_time and wants_date:
+        return f"It is {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d, %Y')} ({tz_name})."
+    if wants_date and not wants_time:
+        return f"Today is {now.strftime('%A, %B %d, %Y')} ({tz_name})."
+    return f"It is {now.strftime('%I:%M %p')} ({tz_name})."
+
+
 def has_explicit_action_request(query: str) -> bool:
     q = (query or "").strip().lower()
     if not q:
@@ -1093,6 +1132,20 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
 
     requested_normalized = _normalize_name(requested_lower)
 
+    def _matches_requested_device(entity: dict) -> bool:
+      if not requested_normalized:
+          return True
+      attrs = entity.get("attributes") or {}
+      friendly = str(attrs.get("friendly_name") or "")
+      friendly_normalized = _normalize_name(friendly)
+      if not friendly_normalized:
+          return False
+      return (
+          friendly_normalized == requested_normalized
+          or requested_normalized in friendly_normalized
+          or friendly_normalized in requested_normalized
+      )
+
     def _score(entity: dict) -> tuple[int, str]:
       eid = entity.get("entity_id", "")
       attrs = entity.get("attributes") or {}
@@ -1109,8 +1162,10 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
           score += 120
       elif requested_normalized and requested_normalized in friendly_normalized:
           score += 80
+      elif requested_normalized and friendly_normalized in requested_normalized:
+          score += 60
       if "music assistant queue" in source:
-          score += 50
+          score += 200
       if device_class == "speaker":
           score += 20
       if state not in {"unavailable", "unknown"}:
@@ -1124,6 +1179,13 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
     candidates = [e for e in entities if isinstance(e, dict) and e.get("entity_id", "").startswith("media_player.")]
     if not candidates:
       return fallback
+
+    if requested_normalized:
+      matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
+      if matched_candidates:
+          candidates = matched_candidates
+      else:
+          return fallback
 
     if requested_normalized:
       matching_ma_queues = []
@@ -1143,6 +1205,83 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
     ranked = sorted((_score(e) for e in candidates), reverse=True)
     best_score, best_eid = ranked[0]
     return best_eid if best_score > 0 else candidates[0]["entity_id"]
+
+
+def resolve_video_target(query: str, entities: list[dict]) -> str:
+    """
+    Resolve a cast/video-capable media target for video-like requests.
+    Prefer entities whose friendly name matches the requested device and avoid
+    Music Assistant queues for video playback.
+    """
+    _, requested_device = extract_media_request(query)
+    requested_lower = requested_device.lower() if requested_device else ""
+    fallback = "auto"
+
+    def _normalize_name(value: str) -> str:
+      cleaned = re.sub(r"[^a-z0-9]+", " ", (value or "").lower())
+      cleaned = re.sub(r"\b(remote)\b", " ", cleaned)
+      return " ".join(cleaned.split())
+
+    requested_normalized = _normalize_name(requested_lower)
+
+    def _matches_requested_device(entity: dict) -> bool:
+      if not requested_normalized:
+          return True
+      attrs = entity.get("attributes") or {}
+      friendly = str(attrs.get("friendly_name") or "")
+      friendly_normalized = _normalize_name(friendly)
+      if not friendly_normalized:
+          return False
+      return (
+          friendly_normalized == requested_normalized
+          or requested_normalized in friendly_normalized
+          or friendly_normalized in requested_normalized
+      )
+
+    def _score(entity: dict) -> tuple[int, str]:
+      eid = entity.get("entity_id", "")
+      attrs = entity.get("attributes") or {}
+      friendly = str(attrs.get("friendly_name") or "").lower()
+      friendly_normalized = _normalize_name(friendly)
+      source = str(attrs.get("source") or "").lower()
+      device_class = str(attrs.get("device_class") or "").lower()
+      state = str(entity.get("state") or "").lower()
+
+      score = 0
+      if requested_lower and requested_lower in friendly:
+          score += 100
+      if requested_normalized and requested_normalized == friendly_normalized:
+          score += 120
+      elif requested_normalized and requested_normalized in friendly_normalized:
+          score += 80
+      elif requested_normalized and friendly_normalized in requested_normalized:
+          score += 60
+      if "music assistant queue" in source:
+          score -= 200
+      if any(token in eid for token in ("cast", "android", "chromecast")):
+          score += 100
+      if any(token in friendly for token in ("cast", "android tv", "google tv", "tv")):
+          score += 60
+      if device_class in {"tv", "receiver"}:
+          score += 30
+      if state not in {"unavailable", "unknown"}:
+          score += 10
+      return score, eid
+
+    candidates = [e for e in entities if isinstance(e, dict) and e.get("entity_id", "").startswith("media_player.")]
+    if not candidates:
+      return fallback
+
+    if requested_normalized:
+      matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
+      if matched_candidates:
+          candidates = matched_candidates
+      else:
+          return fallback
+
+    ranked = sorted((_score(e) for e in candidates), reverse=True)
+    best_score, best_eid = ranked[0]
+    return best_eid if best_score > 0 else fallback
 
 
 
@@ -1488,13 +1627,36 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         return _make_ollama_response(msg, selected_model, "degraded")
     log.info(f"Chat request from {user_id} query='{query}'")
 
+    if is_time_or_date_query(query):
+        ans = build_time_or_date_response(query)
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", ans)
+        if is_openai:
+            return _make_openai_response(ans, selected_model, "datetime")
+        return _make_ollama_response(ans, selected_model, "datetime")
+
     # 3. Semantic Routing (Fast Path Detection)
     intent, confidence = engine.classify(query)
     is_fast_path = engine.is_fast_path(intent, confidence)
+    resolved_entity = None
     
     if is_fast_path:
+        media_entities = None
+        if intent in ["play_media", "pause_media"]:
+            media_entities = await fetch_ha_entities(creds)
+
         # Attempt entity extraction/resolution for control intents
-        resolved_entity = engine.extract_entity(query, intent)
+        if intent == "play_media":
+            if is_likely_video_request(query):
+                resolved_entity = resolve_video_target(query, media_entities or [])
+                log.info(f"[FastPath] BYPASSED for video-like play request; resolved target='{resolved_entity}' and deferring to full tool path")
+                is_fast_path = False
+            else:
+                resolved_entity = resolve_media_target(query, media_entities or [])
+        elif intent == "pause_media":
+            resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [])
+        else:
+            resolved_entity = engine.extract_entity(query, intent)
         
         # If the intent requires an entity (light, media) but we couldn't resolve one,
         # fallback to the slow-path (LLM) to avoid 'light.auto' errors.
@@ -1511,7 +1673,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "turn_on": "/execute/light",
             "turn_off": "/execute/light",
             "play_media": "/execute/media/play",
-            "pause_media": "/execute/media/play",
+            "pause_media": "/execute/media/transport",
             "index_storage": "/index/full",
             "sync_ha": "/health",
         }
@@ -1530,6 +1692,22 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     "path": "/", "recursive": True
                 }
                 svc_base = STORAGE_SVC
+            elif intent == "play_media":
+                media_query, _ = extract_media_request(query)
+                exec_payload = {
+                    "user_context": creds.model_dump(),
+                    "entity_id": resolved_entity or "auto",
+                    "query": media_query or query,
+                    "media_content_type": "artist",
+                }
+                svc_base = EXECUTION_SVC
+            elif intent == "pause_media":
+                exec_payload = {
+                    "user_context": creds.model_dump(),
+                    "entity_id": resolved_entity or "auto",
+                    "command": "pause",
+                }
+                svc_base = EXECUTION_SVC
             else:
                 svc_base = EXECUTION_SVC
 

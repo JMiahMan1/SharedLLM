@@ -56,7 +56,12 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 ]
             
             res_data = await loop.run_in_executor(None, _list)
-            return ExecutionResult(status="SUCCESS", message=str(res_data), service="calendar_list", data=res_data)
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"Loaded {len(res_data)} calendar(s).",
+                service="calendar_list",
+                detail={"calendars": res_data},
+            )
 
         elif action == "read":
             def _read():
