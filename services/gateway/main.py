@@ -20,7 +20,7 @@ log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 try:
     from .schemas import ChatRequest, ResolvedCredentials
-    from .agent_loop import AgentLoop, extract_action_json, execute_inference, get_vram_safe_params
+    from .agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
     from .config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
         STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
@@ -29,7 +29,7 @@ try:
     from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from schemas import ChatRequest, ResolvedCredentials
-    from agent_loop import AgentLoop, extract_action_json, execute_inference, get_vram_safe_params
+    from agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
         STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
@@ -259,6 +259,26 @@ async def call_ollama(payload: Dict[str, Any], use_chat: bool = True) -> Dict[st
         chunk_callback=payload.get("chunk_callback"),
     )
     return {"message": {"content": content}}
+
+
+async def execute_inference(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Gateway-local compatibility wrapper for payload-based inference calls.
+    `agent_loop.execute_inference` now expects provider/model/messages/options, but
+    this module and its tests still call `execute_inference(payload)`.
+    """
+    settings = await get_llm_settings()
+    provider = await get_provider(settings)
+    result = await provider_execute_inference(
+        provider,
+        payload["model"],
+        payload["messages"],
+        payload.get("options", {}),
+    )
+    content = str(result.get("message", {}).get("content") or "")
+    if "response" not in result:
+        result["response"] = content
+    return result
 
 
 async def get_assistant_model():
