@@ -77,6 +77,10 @@ class ExecutionResult(BaseModel):
     service: str
     detail: Optional[Dict[str, Any]] = None
 
+class GitExecutionResult(ExecutionResult):
+    """Specific result for Git operations."""
+    pass
+
 
 # ─── Media / Music ──────────────────────────────────────────────────────────────
 
