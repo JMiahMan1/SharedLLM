@@ -102,7 +102,7 @@ class WorkspaceShellRequest(BaseModel):
     command: str
 
 class GitOperationRequest(BaseModel):
-    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "sync"]
+    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset"]
     path: Optional[str] = "."
     message: Optional[str] = None
     branch: Optional[str] = "microservices"

@@ -183,6 +183,30 @@ async def handle_git(req) -> dict:
             return _fail(action, r)
         return _ok(action, {"branch": branch, **r})
 
+    elif action == "fetch":
+        # Fetch supports token injection too
+        remote_url = await _get_remote_url("origin")
+        token = getattr(user_context, "github_token", None) or getattr(user_context, "git_token", None)
+        
+        if token and remote_url.startswith("https://"):
+            from urllib.parse import urlparse
+            parsed = urlparse(remote_url)
+            auth_url = f"https://{token}@{parsed.hostname}{parsed.path}"
+            r = await _run_git(["fetch", auth_url, branch])
+        else:
+            r = await _run_git(["fetch", "origin", branch])
+            
+        if r["returncode"] != 0:
+            return _fail("fetch", r)
+        return _ok("fetch", r)
+
+    elif action == "reset":
+        # Hard reset to origin branch for recovery
+        r = await _run_git(["reset", "--hard", f"origin/{branch}"])
+        if r["returncode"] != 0:
+            return _fail("reset", r)
+        return _ok("reset", r)
+
     elif action == "log":
         r = await _run_git(["log", f"--oneline", f"-{log_count}"])
         if r["returncode"] != 0:
