@@ -367,7 +367,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.info(f"[AgentLoop] Re-prompting for autonomous tool execution...")
             continue
 
-        log.info(f"[AgentLoop] Dispatching action: {tool_data.get('action')}")
+        action_name = tool_data.get("action", "").lower()
+        if action_name not in ALLOWED_TOOLS:
+            log.warning(f"[AgentLoop] Unknown action: {action_name}")
+            valid_list = ", ".join(sorted(list(ALLOWED_TOOLS)))
+            error_msg = (
+                f"SCHEMA ERROR: Unknown action '{action_name}'. "
+                f"You MUST use one of the following valid tool names: {valid_list}. "
+                "Correct your JSON and try again."
+            )
+            action_log.append(f"ITERATION {iter_num}: {error_msg}")
+            exec_data = {"status": "ERROR", "message": error_msg}
+            continue
+
+        log.info(f"[AgentLoop] Dispatching action: {action_name}")
 
         try:
             action = tool_data.get("action")
