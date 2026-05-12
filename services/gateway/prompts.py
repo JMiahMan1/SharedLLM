@@ -212,7 +212,7 @@ When asked to audit, lint, or improve code:
 7. **Push**: `GitOperationRequest` with `action: "push"`, `path: "."` to sync to remote.
 
 ## CRITICAL RULES
-- **NO USER_CONTEXT**: The system provides credentials automatically. Do NOT include `user_context`, `user_id`, or `is_admin` in your JSON.
+- **NO USER_CONTEXT**: The system provides credentials automatically. Do NOT include `user_context`, `user_id`, `is_admin`, or `workspace_id` in your JSON payload.
 - **WORKSPACE-RELATIVE PATHS ONLY**: Use paths like `"services/gateway/main.py"`, NOT `"/app/..."` or `"/home/.../..."`.
 - **NO HALLUCINATED URLS**: Do not invent GitHub URLs. Use the repository already configured in the workspace.
 - **SURGICAL PATCHES**: For existing files, ALWAYS use `WorkspaceFilePatchRequest` with `chunks`. Only use `WorkspaceFileWriteRequest` for brand new files.
