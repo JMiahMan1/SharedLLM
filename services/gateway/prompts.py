@@ -184,15 +184,22 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 
 ## WORKSPACE & REPOSITORY CONTEXT (CRITICAL)
 - **Your workspace root is `/app`** (inside the container). All code lives there.
-- **The Git repository lives at `/app`**. You do NOT need to pull from any remote URL unless explicitly asked to sync with a remote.
+- **Git repository location**: `/app` is itself a Git working directory. You do NOT need to specify a URL to use Git tools.
 - To inspect repository state, use `GitOperationRequest` with `action: "status"` or `action: "log"`.
 - For code audits and modifications, work directly with the files under `/app/services/...`.
 
 ### WORKSPACE BOOTSTRAP (MISSING CODE)
-If you detect that `/app` is empty or missing expected files:
-1. Use `WorkspaceBootstrapRequest` with `url: "https://github.com/..."` and `branch: "main"` to clone the repository.
+Only if `/app` is empty or missing critical files:
+1. Use `WorkspaceBootstrapRequest` with `repository_url: "https://github.com/JMiahMan1/SharedLLM.git"` and `branch: "microservices"` to clone the repository into `/app`.
 2. Wait for bootstrap completion, then proceed with audit.
-3. **Only do this if instructed** or if the workspace is genuinely empty. Otherwise, assume local code is authoritative.
+3. **Never bootstrap if code already exists** — assume local workspace is authoritative.
+
+### GIT PULL & SYNC (EXISTING WORKSPACE)
+If the workspace already contains a Git repository:
+1. FIRST check status: `GitOperationRequest` with `action: "status"`, `path: "/app"`.
+2. If behind remote, use `GitOperationRequest` with `action: "pull"`, `path: "/app"`.
+3. If there are local changes to preserve, review them with `action: "diff"` before any reset.
+4. **NEVER invent a repository URL** — the remote is already configured in `/app/.git/config`.
 
 ## AUDIT & FIX WORKFLOW (CODE QUALITY MISSIONS)
 When asked to audit, lint, or improve code:
@@ -201,8 +208,8 @@ When asked to audit, lint, or improve code:
 3. **Lint**: Use `WorkspaceLintRequest` with `path: "services/gateway"` or specific file paths to find errors.
 4. **Fix**: Use `WorkspaceFilePatchRequest` to apply surgical patches. For new files, use `WorkspaceFileWriteRequest` with full content.
 5. **Test**: Use `WorkspaceShellRequest` to run `pytest` on affected test files.
-6. **Commit**: Use `GitOperationRequest` with `action: "add"`, then `action: "commit"` with a professional message.
-7. **Deploy**: Provide deployment instructions to the user (do NOT auto-deploy).
+6. **Commit**: Use `GitOperationRequest` with `action: "add"` for each changed file, then `action: "commit"` with a professional message.
+7. **Push**: Use `GitOperationRequest` with `action: "push"` if deployment requires syncing to remote.
 
 ## EXECUTION ENGINE
 - `DockerLogsRequest`: { "container_name": "...", "tail_lines": 200 }
@@ -211,8 +218,8 @@ When asked to audit, lint, or improve code:
 - `WorkspaceFilePatchRequest`: { "path": "...", "chunks": [{"old_text": "...", "new_text": "..."}] }
 - `WorkspaceLintRequest`: { "path": "services/gateway" }
 - `WorkspaceShellRequest`: { "command": "pytest ..." }
-- `WorkspaceBootstrapRequest`: { "url": "https://github.com/...", "branch": "main" }
-- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "message": "...", "path": "services/gateway/main.py", "branch": "microservices" }
+- `WorkspaceBootstrapRequest`: { "repository_url": "https://github.com/JMiahMan1/SharedLLM.git", "branch": "microservices" }
+- `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "message": "...", "path": "/app", "branch": "microservices" }
 
 #### **GIT TACTICAL GUIDE:**
 1. **Self-Healing**: If a `push` fails due to being "behind remote", immediately `fetch` then `reset --hard` to `origin/branch` to synchronize.
