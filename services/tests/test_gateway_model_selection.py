@@ -20,8 +20,10 @@ from starlette.requests import Request
 import pytest
 
 import gateway.main as gateway_main
+import gateway.orchestrator as gateway_orchestrator
 from gateway.main import app, select_model_for_query, select_system_instruction_for_query
 from gateway.prompts import (
+    ASSIST_SYSTEM_INSTRUCTION,
     AUTONOMOUS_EVOLUTION_AGENT_PROMPT,
     CODE_HELPER_SYSTEM_INSTRUCTION,
     LIBRARIAN_SYSTEM_INSTRUCTION,
@@ -365,6 +367,90 @@ async def test_orchestrate_code_change_parses_fenced_json_payload(monkeypatch):
     assert "temp/test_raven_live.py" in payload["message"]["content"]
 
 
+@pytest.mark.asyncio
+async def test_single_turn_inference_supports_capability_index_tool(monkeypatch):
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return SimpleNamespace(
+                status_code=200,
+                text="",
+                json=lambda: {"message": "Capability index refreshed."},
+            )
+
+    monkeypatch.setattr(
+        gateway_orchestrator,
+        "call_ollama",
+        AsyncMock(
+            return_value={
+                "message": {
+                    "content": """```json
+{"action":"CapabilityIndexRequest","payload":{"scope":"full"}}
+```"""
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(gateway_orchestrator.httpx, "AsyncClient", FakeAsyncClient)
+
+    creds = gateway_main.ResolvedCredentials(user="alice")
+    result = await gateway_orchestrator._single_turn_inference(
+        query="Refresh your capability index.",
+        model="qwen3:latest",
+        system_prompt=ASSIST_SYSTEM_INSTRUCTION,
+        rag_context="",
+        history=[],
+        creds=creds,
+    )
+
+    assert result == "Capability index refreshed."
+    assert captured["url"].endswith("/execute/index_capabilities")
+    assert captured["json"]["scope"] == "full"
+    assert captured["json"]["user_context"]["user"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_single_turn_inference_uses_assist_prompt_with_full_capability_guide(monkeypatch):
+    captured = {}
+
+    async def fake_call_ollama(payload, use_chat=True):
+        captured["payload"] = payload
+        return {"message": {"content": "I can help with that."}}
+
+    monkeypatch.setattr(gateway_orchestrator, "call_ollama", fake_call_ollama)
+
+    creds = gateway_main.ResolvedCredentials(user="alice")
+    result = await gateway_orchestrator._single_turn_inference(
+        query="What is the temperature upstairs?",
+        model="qwen3:latest",
+        system_prompt=ASSIST_SYSTEM_INSTRUCTION,
+        rag_context="[HA_ENTITIES]\nsensor.upstairs_temperature",
+        history=[],
+        creds=creds,
+    )
+
+    system_message = captured["payload"]["messages"][0]["content"]
+    assert result == "I can help with that."
+    assert system_message.startswith(ASSIST_SYSTEM_INSTRUCTION)
+    assert "System Capability Context:" in system_message
+    assert "ClimateRequest" in system_message
+    assert "CapabilityIndexRequest" in system_message
+    assert "sensor.upstairs_temperature" in system_message
+
+
 @pytest.mark.local_only
 def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     captured = {}
@@ -491,7 +577,7 @@ def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
     assert response.status_code == 200
     assert captured["use_chat"] is True
     assert captured["payload"]["model"] == "qwen3:latest"
-    assert captured["payload"]["messages"][0]["content"] == LIBRARIAN_SYSTEM_INSTRUCTION
+    assert captured["payload"]["messages"][0]["content"] == ASSIST_SYSTEM_INSTRUCTION
     assert captured["payload"]["messages"][-1]["content"].startswith("CONTEXT:\n")
 
 
@@ -608,12 +694,21 @@ def test_select_system_instruction_for_query_uses_code_helper_prompt_for_coding_
     assert instruction == CODE_HELPER_SYSTEM_INSTRUCTION
 
 
-def test_select_system_instruction_for_query_uses_librarian_prompt_for_general_queries():
+def test_select_system_instruction_for_query_uses_assist_prompt_for_general_queries():
     instruction = select_system_instruction_for_query(
         "What should I make for dinner?",
         "qwen3:latest",
     )
-    assert instruction == LIBRARIAN_SYSTEM_INSTRUCTION
+    assert instruction == ASSIST_SYSTEM_INSTRUCTION
+
+
+def test_select_system_instruction_for_query_keeps_librarian_alias_for_general_queries():
+    instruction = select_system_instruction_for_query(
+        "What should I make for dinner?",
+        "qwen3:latest",
+    )
+    assert instruction == ASSIST_SYSTEM_INSTRUCTION
+    assert LIBRARIAN_SYSTEM_INSTRUCTION == ASSIST_SYSTEM_INSTRUCTION
 
 
 def test_select_system_instruction_for_query_uses_raven_prompt_for_explicit_repair_queries():
@@ -633,8 +728,8 @@ def test_gateway_top_level_import_loads_prompts():
         [
             sys.executable,
             "-c",
-            "import main; assert hasattr(main, 'LIBRARIAN_SYSTEM_INSTRUCTION'); "
-            "assert main.LIBRARIAN_SYSTEM_INSTRUCTION",
+            "import main; assert hasattr(main, 'ASSIST_SYSTEM_INSTRUCTION'); "
+            "assert main.ASSIST_SYSTEM_INSTRUCTION",
         ],
         cwd=gateway_dir,
         env=env,

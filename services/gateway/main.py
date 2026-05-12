@@ -144,20 +144,20 @@ try:
     from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, DeploymentRequest, SystemLearningRequest, WorkspaceBootstrapRequest
     from .intent_engine import engine
     from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-    from .prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+    from .prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
     from .messaging import InferenceJobQueue, JobStatus
 except (ImportError, ValueError):
     try:
         from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
         from services.gateway.intent_engine import engine
         from services.gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-        from services.gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+        from services.gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
         from services.gateway.messaging import InferenceJobQueue, JobStatus
     except ImportError:
         from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
         from intent_engine import engine
         from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-        from prompts import CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+        from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
         from messaging import InferenceJobQueue, JobStatus
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -674,7 +674,7 @@ def select_system_instruction_for_query(query: str, selected_model: str) -> str:
       return CODE_HELPER_SYSTEM_INSTRUCTION
     # Librarian is for research/knowledge queries. 
     # For everything else, use the standard Librarian prompt which now includes hardware control.
-    return LIBRARIAN_SYSTEM_INSTRUCTION
+    return ASSIST_SYSTEM_INSTRUCTION
 
 
 def is_coding_query(query: str) -> bool:

@@ -8,9 +8,11 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 try:
     from .schemas import ResolvedCredentials
     from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+    from .config import WORKSPACE_RUNTIME_SVC
 except (ImportError, ValueError):
     from schemas import ResolvedCredentials
     from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+    from config import WORKSPACE_RUNTIME_SVC
 
 log = logging.getLogger("gateway.orchestrator")
 
@@ -20,6 +22,72 @@ RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
 IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
 STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://storage:8005")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
+    "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
+    "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
+    "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
+    "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
+    "climaterequest": (EXECUTION_SVC, "/execute/climate"),
+    "securityrequest": (EXECUTION_SVC, "/execute/security"),
+    "announcementrequest": (EXECUTION_SVC, "/execute/announce"),
+    "haservicerequest": (EXECUTION_SVC, "/execute/ha_service"),
+    "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
+    "noterequest": (EXECUTION_SVC, "/execute/note"),
+    "timerrequest": (EXECUTION_SVC, "/execute/timer"),
+    "talkrequest": (EXECUTION_SVC, "/execute/talk"),
+    "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
+    "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
+    "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
+    "dockercomposerequest": (EXECUTION_SVC, "/execute/docker"),
+    "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
+    "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
+    "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
+    "volumeinventoryrequest": (EXECUTION_SVC, "/execute/volumes"),
+    "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
+    "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
+    "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
+    "workspacelintrequest": (EXECUTION_SVC, "/execute/workspace_lint"),
+    "workspacesearchrequest": (EXECUTION_SVC, "/execute/workspace_search"),
+    "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
+    "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
+    "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
+    "storagelistrequest": (EXECUTION_SVC, "/execute/storage_list"),
+    "workspacebootstraprequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/bootstrap"),
+    "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
+    "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
+    "storageindexrequest": (STORAGE_SVC, "/index/full"),
+}
+
+SINGLE_TURN_TOOL_GUIDE = """
+Available tool schemas for standard chat include:
+- LightControlRequest: turn lights or switches on/off.
+- MediaPlayRequest: start audio or media playback on a target device.
+- MediaTransportRequest: pause, resume, stop, next, or previous playback.
+- TVCastRequest: cast video content to a display target.
+- ClimateRequest: read temperatures or change HVAC/climate settings.
+- SecurityRequest: inspect or change locks, alarms, and doors.
+- AnnouncementRequest: speak or broadcast a message to household devices.
+- HAServiceRequest: call a raw Home Assistant domain/service pair.
+- CalendarRequest: create or inspect calendar items.
+- NoteRequest: create or retrieve household notes.
+- TimerRequest: create, cancel, or inspect timers.
+- TalkRequest: send a conversational or TTS message to a device.
+- WebSearchRequest and WebReadRequest: search or read public web pages.
+- DockerLogsRequest and DockerComposeRequest: inspect or operate containers.
+- GitOperationRequest: inspect or mutate git state.
+- DeploymentRequest: restart, build, or stop services.
+- CapabilityIndexRequest and VolumeInventoryRequest: inspect system capabilities and storage.
+- WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, WorkspaceBootstrapRequest: inspect and modify workspace state.
+- StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest: inspect and manage storage providers.
+- SystemLearningRequest and DiscoverySyncRequest: record learnings and refresh discovered devices.
+
+When a tool is appropriate, output a fenced JSON object with exactly:
+```json
+{"action":"SCHEMA_NAME","payload":{...}}
+```
+Do not say you lack access to tools when the request maps to one of these capabilities.
+""".strip()
 
 
 async def get_llm_settings() -> Dict[str, str]:
@@ -105,7 +173,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
         ans = await AgentLoop(query, model, full_system, short_term, user_id, creds)
     else:
         # Librarian handles standard single-turn inference
-        ans = await _single_turn_inference(query, model, rag_context, short_term, creds, chunk_callback)
+        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback)
         
     return ans
 
@@ -128,8 +196,8 @@ async def _fetch_rag_context(query: str, user_id: str) -> str:
         log.error(f"RAG search failed: {e}")
     return rag_context
 
-async def _single_turn_inference(query: str, model: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
-    system = f"You are the SharedLLM Assistant. Context:\n{rag_context}\n\nIf the user wants to control a device or perform a task, output a JSON block like: ```json\n{{\"action\": \"LightControlRequest\", \"payload\": {{\"entity_id\": \"light.xyz\", \"action\": \"turn_on\"}}}}\n``` or ```json\n{{\"action\": \"StorageListRequest\", \"payload\": {{\"path\": \"/\"}}}}\n```. If you execute a tool, do NOT include any other text in your response."
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
+    system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
@@ -187,40 +255,8 @@ async def _single_turn_inference(query: str, model: str, rag_context: str, histo
         action = tool_data.get("action", "").lower().strip()
         log.info(f"[_single_turn_inference] Tool call detected: {action}")
         
-        # Comprehensive Tool Map (sync with agent_loop.py)
-        action_map = {
-            "lightcontrolrequest": "/execute/light",
-            "mediaplayrequest": "/execute/media/play",
-            "mediatransportrequest": "/execute/media/transport",
-            "tvcastrequest": "/execute/tv_cast",
-            "climaterequest": "/execute/climate",
-            "securityrequest": "/execute/security",
-            "announcementrequest": "/execute/announce",
-            "haservicerequest": "/execute/ha_service",
-            "calendarrequest": "/execute/calendar",
-            "noterequest": "/execute/note",
-            "timerrequest": "/execute/timer",
-            "talkrequest": "/execute/talk",
-            "websearchrequest": "/execute/web_search",
-            "webreadrequest": "/execute/web_read",
-            "discoverysyncrequest": "/execute/discovery_sync",
-            "storageindexrequest": "/index/full",
-            # Workspace / Git tools (Nextcloud + code)
-            "workspacefilereadrequest": "/execute/workspace_file_read",
-            "workspacefilewriterequest": "/execute/workspace_file_write",
-            "workspacefilepatchrequest": "/execute/workspace_file_patch",
-            "workspacesearchrequest": "/execute/workspace_search",
-            "workspaceshellrequest": "/execute/workspace_shell",
-            "gitoperationrequest": "/execute/git",
-            "storagefilereadrequest": "/execute/storage_file_read",
-            "storagefilewriterequest": "/execute/storage_file_write",
-            "storagelistrequest": "/execute/storage_list",
-            "dockerlogsrequest": "/execute/docker_logs",
-        }
-
-        if action in action_map:
-            endpoint = action_map[action]
-            svc_base = STORAGE_SVC if "storage" in action or "index" in action else EXECUTION_SVC
+        if action in SINGLE_TURN_TOOL_ENDPOINTS:
+            svc_base, endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
             
             try:
                 payload = tool_data.get("payload", tool_data)
