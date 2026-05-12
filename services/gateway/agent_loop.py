@@ -360,6 +360,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         tool_data = extract_action_json(ans)
         
+        # Normalize alternative schemas: { "name": "...", "parameters": {...} } → { "action": "...", "payload": {...} }
+        if tool_data:
+            if "name" in tool_data and "action" not in tool_data:
+                tool_data["action"] = tool_data.pop("name")
+            if "parameters" in tool_data and "payload" not in tool_data:
+                tool_data["payload"] = tool_data.pop("parameters")
+            if "function" in tool_data and "action" not in tool_data:
+                tool_data["action"] = tool_data["function"].get("name", "")
+                tool_data["payload"] = tool_data["function"].get("arguments", {})
+        
         if not tool_data:
             # Blank/whitespace-only response is a failure — re-prompt
             if not ans or not ans.strip():
