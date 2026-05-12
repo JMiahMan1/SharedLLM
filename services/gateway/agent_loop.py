@@ -262,6 +262,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     exec_data = None
     ans = ""
     timed_out = False
+    successful_tool_calls = 0  # Track successful tool executions
     
     # --- VRAM-SAFE SCRATCHPAD ---
     action_log = []
@@ -363,16 +364,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 action_log.append(f"ITERATION {iter_num}: Failed to parse your JSON. Ensure you provide a complete, valid JSON block inside ```json ``` tags.")
                 continue
 
-            if agent_iter > 0:
-                # If we've already done work, check for conversational drift.
-                conversational_indicators = ["details", "proceed", "example", "please", "sorry", "assist", "capability", "primary function", "reaching out", "fixed request"]
-                if any(word in ans.lower() for word in conversational_indicators):
-                    log.info(f"[AgentLoop] Detected conversational drift/refusal/loop-closure attempt. Re-prompting...")
-                    exec_data = {"status": "ERROR", "message": "CRITICAL: The task is NOT finished. You provided an explanation but NO valid JSON action. You MUST execute the next step using a JSON tool call block immediately."}
-                    continue
-                log.info(f"[AgentLoop] Mission likely accomplished. Terminating loop.")
+            if agent_iter > 0 and successful_tool_calls > 0:
+                # We've already made progress with at least one successful tool call,
+                # and now the agent is giving a textual answer — likely final.
+                log.info(f"[AgentLoop] Agent provided textual answer after {successful_tool_calls} successful tool call(s). Terminating loop.")
                 break
-            log.info(f"[AgentLoop] Re-prompting for autonomous tool execution...")
+            
+            if agent_iter >= 3:
+                # After 3 iterations with no valid tool call, force termination to prevent infinite loop
+                log.error(f"[AgentLoop] No valid tool calls after {agent_iter + 1} iterations. Terminating to prevent runaway.")
+                ans = "ERROR: Agent failed to produce valid tool calls after multiple attempts. Last response: " + ans[:200]
+                break
+                
+            log.info(f"[AgentLoop] Re-prompting for autonomous tool execution (iter {agent_iter + 1})...")
             continue
 
         action_name = tool_data.get("action", "").lower()
@@ -536,6 +540,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
                     short_msg = exec_data.get("message", "Success")
                     action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
+                    # Track successful tool executions (non-ERROR responses)
+                    if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
+                        successful_tool_calls += 1
             else:
                 log.warning(f"[AgentLoop] Unknown action: {action}")
                 exec_data = {"status": "ERROR", "message": f"Unknown action: {action}"}
