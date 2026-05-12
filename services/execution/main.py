@@ -282,8 +282,6 @@ async def execute_docker(req: DockerComposeRequest):
         return _fail("No services or containers specified", "docker")
     
     for svc in services:
-        # Mocking DeploymentRequest for each service
-        from schemas import DeploymentRequest
         # Ensure prefix
         container_name = svc if svc.startswith("sharedllm_") else f"sharedllm_{svc}"
         mock_req = DeploymentRequest(

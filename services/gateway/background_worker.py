@@ -18,9 +18,9 @@ except (ImportError, ValueError):
     from orchestrator import process_full_orchestration
 
 try:
-    from .messaging import InferenceJobQueue, JobStatus, INFERENCE_LOCK
+    from .messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
 except (ImportError, ValueError):
-    from messaging import InferenceJobQueue, JobStatus, INFERENCE_LOCK
+    from messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
 
 log = logging.getLogger("gateway.background_worker")
 
@@ -38,6 +38,21 @@ class RavenWorker:
         self._health_task = None
         self._inference_task = None
         self.job_queue = InferenceJobQueue(os.getenv("REDIS_URL", "redis://redis:6379/0"))
+        # Autonomous detection signals — must match orchestrator list
+        self._autonomy_signals = [
+            "raven", "use raven", "audit", "repair", "self repair", "self-heal",
+            "self fix", "deploy", "bootstrap", "develop", "fix the app",
+            "fix the service", "fix the codebase", "agentic", "autonomous"
+        ]
+
+    def _is_autonomous_job(self, payload: Dict[str, Any], user_id: str) -> bool:
+        """Determine if a job requires Tier-3 (Raven) exclusive lock."""
+        query = str(payload.get("query", "")).lower()
+        if any(signal in query for signal in self._autonomy_signals):
+            return True
+        if user_id.lower() in ("raven_admin", "raven"):
+            return True
+        return False
 
     async def start(self):
         if self.is_running:
@@ -85,43 +100,34 @@ class RavenWorker:
     async def _process_inference_job(self, job: Dict[str, Any]):
         job_id = job["job_id"]
         payload = job["payload"]
+        user_id = job.get("user_id", "")
         heartbeat_task = None
+        
+        # Determine job tier (2 = Librarian, 3 = Raven) for concurrency control
+        is_autonomous = self._is_autonomous_job(payload, user_id)
         
         try:
             heartbeat_task = asyncio.create_task(self._job_heartbeat(job_id))
-            # 1. Inference Orchestration
-
-            # 2. Singleton Inference with Full Orchestration and Streaming support
-            async with INFERENCE_LOCK:
-                log.info(f"Inference Lock ACQUIRED for job {job_id}")
-                
-                async def chunk_callback(chunk: str):
-                    await self.job_queue.push_chunk(job_id, chunk)
-                
-                ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
-                log.info(f"Inference Lock RELEASED for job {job_id}")
-
-            # 3. Tool Extraction & Execution (Future Phases will expand this)
-            # 4. Proactive TTS Callback for Voice Clients
-            if payload.get("client") == "voice" or payload.get("source") == "home_assistant":
-                await self._trigger_tts_callback(payload, ans)
-
+            
+            # Acquire appropriate lock based on tier, then run orchestration
+            if is_autonomous:
+                log.info(f"[Worker] Acquiring TIER3 (Raven) lock for job {job_id}")
+                async with TIER3_LOCK:
+                    async def chunk_callback(chunk: str):
+                        await self.job_queue.push_chunk(job_id, chunk)
+                    payload["_job_id"] = job_id  # traceability
+                    ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
+            else:
+                log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
+                async with TIER2_SEMAPHORE:
+                    async def chunk_callback(chunk: str):
+                        await self.job_queue.push_chunk(job_id, chunk)
+                    payload["_job_id"] = job_id
+                    ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
+            
             await self.job_queue.complete_job(job_id, ans)
             
         except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            log.error(f"Failed to process job {job_id}: {e}\n{tb}")
-            await self.job_queue.fail_job(job_id, str(e))
-        finally:
-            if heartbeat_task:
-                heartbeat_task.cancel()
-                try:
-                    await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-
-    async def _trigger_tts_callback(self, payload: Dict[str, Any], message: str):
         """Proactively broadcast result via TTS."""
         try:
             creds = payload.get("creds", {})

@@ -8,7 +8,11 @@ import redis.asyncio as redis
 
 log = logging.getLogger("gateway.messaging")
 
-INFERENCE_LOCK = asyncio.Lock()
+# Tiered Inference Concurrency Control
+# - TIER2_SEMAPHORE: Allows up to 3 concurrent non-autonomous (Librarian) jobs
+# - TIER3_LOCK: Exclusive lock for autonomous (Raven) jobs (only one at a time)
+TIER2_SEMAPHORE = asyncio.Semaphore(3)
+TIER3_LOCK = asyncio.Lock()
 
 class JobStatus:
     QUEUED = "queued"
