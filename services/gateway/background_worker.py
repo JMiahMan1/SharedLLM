@@ -128,6 +128,19 @@ class RavenWorker:
             await self.job_queue.complete_job(job_id, ans)
             
         except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            log.error(f"Failed to process job {job_id}: {e}\n{tb}")
+            await self.job_queue.fail_job(job_id, str(e))
+        finally:
+            if heartbeat_task:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+
+    async def _trigger_tts_callback(self, payload: Dict[str, Any], message: str):
         """Proactively broadcast result via TTS."""
         try:
             creds = payload.get("creds", {})
@@ -151,7 +164,6 @@ class RavenWorker:
         except Exception as e:
             log.error(f"TTS Callback failed: {e}")
 
-    # --- Legacy Health Check Methods ---
     async def perform_health_check(self):
         log.info("Performing Raven health check...")
         containers = await self._get_containers()
