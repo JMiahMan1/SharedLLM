@@ -14,9 +14,9 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 try:
-    from .messaging import INFERENCE_LOCK
+    from .config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET
 except (ImportError, ValueError):
-    from messaging import INFERENCE_LOCK
+    from config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET
 
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 

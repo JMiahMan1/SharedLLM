@@ -197,9 +197,6 @@ CONFIG = {
 }
 
 # Global Inference Lock (Strategy 8: Singleton Queue)
-# Ensures only one LLM request is processed at a time to protect 8GB VRAM.
-INFERENCE_LOCK = asyncio.Lock()
-
 async def fetch_global_setting(key: str, default: str = "") -> str:
     """Fetch a global setting from the Identity Service."""
     try:
@@ -282,24 +279,38 @@ async def execute_inference(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _parse_llm_json_object(raw: Any) -> dict:
+    """
+    Robust JSON extractor for LLM outputs.
+    Mirrors extract_action_json logic from agent_loop for consistency.
+    """
     text = str(raw or "").strip()
     if not text:
         raise ValueError("Empty LLM response")
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
-        if fenced:
-            parsed = json.loads(fenced.group(1))
-        else:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                raise
-            parsed = json.loads(text[start:end + 1])
-    if not isinstance(parsed, dict):
-        raise ValueError("LLM response was not a JSON object")
-    return parsed
+    
+    # Strip INFO logs that sometimes bleed into response
+    text = re.sub(r"^INFO:.*?\n", "", text, flags=re.MULTILINE)
+    
+    # Priority 1: Fenced JSON block
+    match = re.search(r"```json\s*(\{.*?\})(?:\s*```|$)", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass  # Fall through to outer braces
+    
+    # Priority 2: Outer-most braces with de-hanging
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidate = text[first_brace:last_brace+1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            # Try to fix common trailing comma issues
+            cleaned = re.sub(r",\s*([\]}])", r"\1", candidate)
+            return json.loads(cleaned)
+    
+    raise ValueError(f"Could not extract JSON from LLM response: {text[:200]}")
 
 
 async def get_assistant_model():
