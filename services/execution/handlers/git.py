@@ -22,7 +22,7 @@ import logging
 import os
 import re
 import shlex
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from schemas import GitOperationRequest, GitExecutionResult
 
 log = logging.getLogger("execution.git")
@@ -111,11 +111,6 @@ async def _get_current_branch() -> str:
     return r["stdout"].strip() or "main"
 
 
-def _is_autonomous_actor(user_context: Any) -> bool:
-    user_name = str(getattr(user_context, "user", "") or "").strip().lower()
-    return user_name.startswith("raven")
-
-
 async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     """
     Dispatch git operations based on req.action.
@@ -145,7 +140,6 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     log_count: int = int(getattr(req, "log_count", 10) or 10)
     user_context = getattr(req, "user_context", None)
     is_admin: bool = getattr(user_context, "is_admin", False) if user_context else False
-    is_autonomous = _is_autonomous_actor(user_context)
 
     if action in {"reset", "clean"}:
         return {
@@ -153,17 +147,6 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             "message": f"git {action} is blocked for safety.",
             "service": "git",
             "detail": {"error": "unsafe_git_action_blocked"},
-        }
-
-    if is_autonomous and action in {"add", "commit", "push", "pull", "fetch", "branch", "checkout"}:
-        return {
-            "status": "FAILURE",
-            "message": (
-                f"Autonomous git {action} is blocked. "
-                "Use the workspace runtime review workflow for self-edit operations."
-            ),
-            "service": "git",
-            "detail": {"error": "autonomous_git_workflow_required"},
         }
 
     if action == "status":

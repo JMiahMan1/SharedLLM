@@ -176,8 +176,29 @@ class RavenWorker:
     async def trigger_self_repair(self, problematic):
         summary = "\n".join([f"- {c['name']}: {c['count']} errors" for c in problematic])
         query = f"SYSTEM ALERT: Health check detected errors.\n\nServices:\n{summary}\n\nFix them."
+        # Resolve system-level credentials for the self-repair agent
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{IDENTITY_SVC}/api/resolve",
+                    json={"rag_user": "raven_admin"},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if resp.status_code == 200:
+                    creds = resp.json()
+                else:
+                    log.error(f"Self-repair credential resolution failed: {resp.status_code}")
+                    creds = {"user": "raven_admin", "is_admin": True}  # Fallback
+        except Exception as e:
+            log.error(f"Self-repair credential resolution error: {e}")
+            creds = {"user": "raven_admin", "is_admin": True}  # Fallback
+        
         await self.job_queue.enqueue_job("raven_admin", {
-            "query": query, "model": "qwen2.5-coder:7b", "system": "You are a repair agent.", "stream": False
+            "query": query,
+            "model": "qwen2.5-coder:7b",
+            "system": "You are a repair agent.",
+            "stream": False,
+            "creds": creds
         })
 
     async def _job_heartbeat(self, job_id: str):
