@@ -849,8 +849,11 @@ def requests_status_followup(query: str) -> bool:
 
 def wants_workspace_readme_generation(query: str) -> bool:
     q = (query or "").strip().lower()
+    # Raven autonomous tasks should not take the fast readme path
+    if "raven" in q:
+        return False
     if "readme" not in q:
-      return False
+        return False
     action_requested = any(signal in q for signal in WORKSPACE_README_ACTION_HINTS)
     workspace_scoped = any(signal in q for signal in ("workspace", "repo", "repository", "folder", "temp", "nextcloud", "git"))
     return action_requested and workspace_scoped
@@ -858,6 +861,9 @@ def wants_workspace_readme_generation(query: str) -> bool:
 
 def wants_direct_code_orchestration(query: str) -> bool:
     q = (query or "").strip().lower()
+    # Raven autonomous tasks must go through AgentLoop, not the Librarian's fast code path
+    if "raven" in q:
+        return False
     action_requested = any(
         signal in q
         for signal in ("create", "write", "edit", "update", "modify", "add", "patch", "refactor")
