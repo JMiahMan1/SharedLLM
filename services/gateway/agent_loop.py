@@ -15,7 +15,6 @@ try:
         RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
     )
     from .schemas import ResolvedCredentials
-    from .messaging import INFERENCE_LOCK
     from .llm_providers import BaseLLMProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from config import (
@@ -25,7 +24,6 @@ except (ImportError, ValueError):
         RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
     )
     from schemas import ResolvedCredentials
-    from messaging import INFERENCE_LOCK
     from llm_providers import BaseLLMProvider, OpenRouterProvider
 
 # --- HARDENED OLLAMA PROVIDER ---
