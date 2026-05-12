@@ -1885,6 +1885,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         if should_stream:
             async def standard_stream_gen():
                 last_pos = -1
+                last_keepalive = asyncio.get_event_loop().time()
                 while True:
                     job = await job_queue.get_job_status(job_id)
                     if not job: break
@@ -1910,6 +1911,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         if is_openai: yield f"data: {json.dumps(_make_openai_chunk(f'[ERROR]: {err}', selected_model, 'stop'))}\n\n"
                         else: yield json.dumps(_make_ollama_chunk(f"[ERROR]: {err}", selected_model, True)) + "\n"
                         break
+
+                    if is_openai:
+                        now = asyncio.get_event_loop().time()
+                        if now - last_keepalive >= 5.0:
+                            # SSE comment heartbeat keeps OpenAI-compatible clients like Open WebUI
+                            # from treating slower tool calls as dead connections.
+                            yield ": keepalive\n\n"
+                            last_keepalive = now
                     
                     # Optional: Yield queue position if it changes
                     pos = await job_queue.get_queue_position(job_id)

@@ -70,6 +70,16 @@ def get_collection(name: str):
         log.error(f"Failed to get collection {name}: {e}")
         raise HTTPException(status_code=500, detail="Database error")
 
+
+def _freeze_for_hash(value):
+    if isinstance(value, dict):
+        return tuple(sorted((str(k), _freeze_for_hash(v)) for k, v in value.items()))
+    if isinstance(value, list):
+        return tuple(_freeze_for_hash(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_for_hash(item) for item in value))
+    return value
+
 @app.post("/rag/search", response_model=SearchResponse, dependencies=[Depends(require_internal)])
 async def search(req: SearchRequest):
     collection = get_collection(req.collection_name)
@@ -104,7 +114,14 @@ async def search(req: SearchRequest):
             docs = results["documents"][0]
             metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
             for i, (doc, meta) in enumerate(zip(docs, metas)):
-                key = (doc, tuple(sorted(meta.items(), key=lambda x: str(x[0]))))
+                key = (
+                    doc,
+                    tuple(
+                        sorted(
+                            (str(k), _freeze_for_hash(v)) for k, v in meta.items()
+                        )
+                    ),
+                )
                 scores[key] = scores.get(key, 0) + (1.0 / (K_RRF + i + 1))
 
         process_results(vector_results)
