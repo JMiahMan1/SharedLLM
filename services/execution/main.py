@@ -498,8 +498,8 @@ async def execute_ha_service(req: HAServiceRequest):
 
 @app.get("/discovery/entities")
 async def discovery_entities(ha_url: str, ha_token: str):
-    states = await ha_client.get_states(ha_url, ha_token)
-    areas = await ha_client.get_areas(ha_url, ha_token)
+    states = await ha_client.get_states(ha_url, ha_token) or []
+    areas = await ha_client.get_areas(ha_url, ha_token) or {}
     
     # Merge area_name into attributes for each entity
     for s in states:
