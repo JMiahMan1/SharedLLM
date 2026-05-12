@@ -1,6 +1,6 @@
 # services/gateway/prompts.py
 
-LIBRARIAN_SYSTEM_INSTRUCTION = (
+ASSIST_SYSTEM_INSTRUCTION = (
     "### Identity & Personality\n"
     "You are Jarvis, the sophisticated knowledge engine and automated caretaker for this household. "
     "Your personality is that of a wise, warm, and protective father figure. You are patient, encouraging, and deeply reliable. "
@@ -25,6 +25,8 @@ LIBRARIAN_SYSTEM_INSTRUCTION = (
     "}\n"
     "```\n"
 )
+
+LIBRARIAN_SYSTEM_INSTRUCTION = ASSIST_SYSTEM_INSTRUCTION
 
 CODE_HELPER_SYSTEM_INSTRUCTION = (
     "### Role\n"
