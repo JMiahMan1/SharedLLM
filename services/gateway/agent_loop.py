@@ -10,7 +10,9 @@ from fastapi.responses import JSONResponse
 try:
     from .config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
-        STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT
+        STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT,
+        RAVEN_MAX_TOTAL_SECONDS, RAVEN_ITERATION_TIMEOUT,
+        RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
     )
     from .schemas import ResolvedCredentials
     from .messaging import INFERENCE_LOCK
@@ -18,7 +20,9 @@ try:
 except (ImportError, ValueError):
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
-        STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT
+        STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT,
+        RAVEN_MAX_TOTAL_SECONDS, RAVEN_ITERATION_TIMEOUT,
+        RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
     )
     from schemas import ResolvedCredentials
     from messaging import INFERENCE_LOCK
@@ -255,12 +259,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     }
 
     MAX_TOOL_ITERATIONS = 30
-    HEARTBEAT_INTERVAL = 15
-    HUNG_THRESHOLD = 240
+    loop_start = asyncio.get_event_loop().time()
     agent_messages = ollama_payload.get("messages", [])[:]
     exec_data = None
     ans = ""
-    loop_start = asyncio.get_event_loop().time()
+    timed_out = False
     
     # --- VRAM-SAFE SCRATCHPAD ---
     action_log = []
@@ -269,20 +272,28 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         iter_num = agent_iter + 1
         iter_start = asyncio.get_event_loop().time()
         
-        log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | total elapsed {iter_start - loop_start:.0f}s")
+        # --- HARD TIMEOUT CHECK ---
+        elapsed_total = iter_start - loop_start
+        if elapsed_total > RAVEN_MAX_TOTAL_SECONDS:
+            log.error(f"[AgentLoop] HARD TIMEOUT after {elapsed_total:.0f}s at iteration {iter_num}")
+            ans = f"ERROR: Raven job exceeded time limit of {RAVEN_MAX_TOTAL_SECONDS}s. Partial result: {ans or 'No output yet'}"
+            timed_out = True
+            break
+        
+        log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | total elapsed {elapsed_total:.0f}s")
 
         heartbeat_stop = asyncio.Event()
 
         async def _heartbeat(iter_n: int, t0: float) -> None:
             while not heartbeat_stop.is_set():
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                await asyncio.sleep(RAVEN_HEARTBEAT_INTERVAL)
                 if heartbeat_stop.is_set():
                     break
                 elapsed = asyncio.get_event_loop().time() - t0
-                if elapsed > HUNG_THRESHOLD:
-                    log.warning(f"[AgentLoop] \u26a0 HUNG WARNING \u2014 iter {iter_n} has been waiting {elapsed:.0f}s for Ollama response")
+                if elapsed > RAVEN_HUNG_THRESHOLD:
+                    log.warning(f"[AgentLoop] ⚠ HUNG WARNING — iter {iter_n} waiting {elapsed:.0f}s for Ollama")
                 else:
-                    log.info(f"[AgentLoop] \u2665 heartbeat \u2014 iter {iter_n} | waiting for Ollama {elapsed:.0f}s")
+                    log.info(f"[AgentLoop] ♥ heartbeat — iter {iter_n} | waiting for Ollama {elapsed:.0f}s")
 
         hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
 

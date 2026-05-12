@@ -11,6 +11,12 @@ WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://workspace
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 OLLAMA_TIMEOUT = 180.0
 
+# Raven job constraints
+RAVEN_MAX_TOTAL_SECONDS = int(os.getenv("RAVEN_MAX_TOTAL_SECONDS", "600"))  # 10 minutes
+RAVEN_ITERATION_TIMEOUT = int(os.getenv("RAVEN_ITERATION_TIMEOUT", "180"))  # 3 minutes per iteration
+RAVEN_HEARTBEAT_INTERVAL = int(os.getenv("RAVEN_HEARTBEAT_INTERVAL", "15"))  # seconds
+RAVEN_HUNG_THRESHOLD = int(os.getenv("RAVEN_HUNG_THRESHOLD", "240"))  # seconds
+
 CONFIG = {
     "assistant_model": os.getenv("ASSISTANT_MODEL", "qwen3.5:9b"),
     "librarian_model": os.getenv("LIBRARIAN_MODEL", "qwen3.5:9b"),
