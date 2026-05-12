@@ -53,3 +53,29 @@ def test_ingest_and_search(mocker):
     results = search_resp.json()["results"]
     assert len(results) == 1
     assert results[0]["content"] == "Test doc content"
+
+
+def test_hybrid_search_handles_list_metadata_values(mocker):
+    mock_collection = mocker.Mock()
+    query_result = {
+        "documents": [["Capability doc"]],
+        "metadatas": [[{"user_id": "alice", "tags": ["ha", "temperature"], "nested": {"rooms": ["upstairs"]}}]],
+    }
+    mock_collection.query.side_effect = [query_result, query_result]
+    mocker.patch("main.get_collection", return_value=mock_collection)
+
+    search_resp = client.post(
+        "/rag/search",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "query": "temperature upstairs",
+            "user_id": "alice",
+            "k": 1,
+        },
+    )
+
+    assert search_resp.status_code == 200
+    results = search_resp.json()["results"]
+    assert len(results) == 1
+    assert results[0]["content"] == "Capability doc"
+    assert results[0]["metadata"]["tags"] == ["ha", "temperature"]
