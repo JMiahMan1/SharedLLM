@@ -334,6 +334,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     )
                     
                     ans = data.get("message", {}).get("content", "Error.")
+                    if not ans or not ans.strip():
+                        log.warning(f"[AgentLoop] Empty output from model on attempt {retry_count + 1}; treating as failure.")
+                        raise Exception("Empty model output")
                     inference_success = True
                     break # Success!
                 except Exception as e:
