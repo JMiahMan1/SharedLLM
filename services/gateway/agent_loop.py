@@ -254,7 +254,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         "messages": [
             {"role": "system", "content": full_system}
         ] + short_term + [{"role": "user", "content": query}],
-        "stream": False
+        "stream": False,
+        "format": "json"  # Force JSON output mode (Ollama 0.1.28+)
     }
 
     MAX_TOOL_ITERATIONS = 30
