@@ -52,20 +52,25 @@ def test_hard_timeout_threshold(elapsed_seconds, expected_timeout):
 
 def test_timeout_clean_termination_flow():
     """Verify that when timeout occurs, the loop breaks and ans is set appropriately."""
-    # Simulate loop state
-    loop_start = asyncio.get_event_loop().time() - 601  # 601s ago
-    iter_start = asyncio.get_event_loop().time()
-    max_seconds = 600
+    # Simulate loop state using asyncio
+    async def simulate():
+        loop = asyncio.get_event_loop()
+        loop_start = loop.time() - 601  # 601s ago
+        iter_start = loop.time()
+        max_seconds = 600
+        
+        elapsed = iter_start - loop_start
+        timed_out = elapsed > max_seconds
+        assert timed_out is True
+        
+        # Simulated ans before timeout
+        partial_result = "Step 5: GitOperationRequest -> files pulled"
+        ans = f"ERROR: Raven job exceeded time limit of {max_seconds}s. Partial result: {partial_result}"
+        
+        assert "ERROR: Raven job exceeded time limit" in ans
+        assert "Step 5" in ans
     
-    timed_out, elapsed = simulate_timeout_check(iter_start, loop_start, max_seconds)
-    assert timed_out is True
-    
-    # Simulated ans before timeout
-    partial_result = "Step 5: GitOperationRequest -> files pulled"
-    ans = f"ERROR: Raven job exceeded time limit of {max_seconds}s. Partial result: {partial_result}"
-    
-    assert "ERROR: Raven job exceeded time limit" in ans
-    assert "Step 5" in ans
+    asyncio.run(simulate())
 
 
 def test_heartbeat_interval_config():
