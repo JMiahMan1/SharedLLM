@@ -358,22 +358,26 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         tool_data = extract_action_json(ans)
         
         if not tool_data:
-            # If the last step was an error, we MUST NOT terminate. We must force a correction.
+            # Blank/whitespace-only response is a failure — re-prompt
+            if not ans or not ans.strip():
+                log.warning(f"[AgentLoop] Empty response on iter {iter_num}; re-prompting...")
+                action_log.append(f"ITERATION {iter_num}: Model returned empty response — forcing correction.")
+                continue
+
+            # If the previous tool call resulted in an ERROR, we MUST NOT terminate.
+            # Force a retry regardless of other conditions.
             if exec_data and exec_data.get("status") == "ERROR":
                 log.warning(f"[AgentLoop] JSON extraction failed following an ERROR. Re-prompting for correction...")
-                action_log.append(f"ITERATION {iter_num}: Failed to parse your JSON. Ensure you provide a complete, valid JSON block inside ```json ``` tags.")
+                action_log.append(f"ITERATION {iter_num}: Failed to parse your JSON after tool error. Ensure you provide a valid JSON block inside ```json ``` tags.")
                 continue
 
             if agent_iter > 0 and successful_tool_calls > 0:
-                # We've already made progress with at least one successful tool call,
-                # and now the agent is giving a textual answer — likely final.
                 log.info(f"[AgentLoop] Agent provided textual answer after {successful_tool_calls} successful tool call(s). Terminating loop.")
                 break
-            
+             
             if agent_iter >= 3:
-                # After 3 iterations with no valid tool call, force termination to prevent infinite loop
                 log.error(f"[AgentLoop] No valid tool calls after {agent_iter + 1} iterations. Terminating to prevent runaway.")
-                ans = "ERROR: Agent failed to produce valid tool calls after multiple attempts. Last response: " + ans[:200]
+                ans = "ERROR: Agent failed to produce valid tool calls after multiple attempts. Last response: " + (ans[:200] if ans else "empty")
                 break
                 
             log.info(f"[AgentLoop] Re-prompting for autonomous tool execution (iter {agent_iter + 1})...")
