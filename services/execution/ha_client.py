@@ -133,6 +133,8 @@ async def get_states(ha_url: str, ha_token: str) -> list:
             return resp.json()
         except Exception as e:
             log.error(f"[ha_client] get_states failed: {e}")
+            return []  # Ensure empty list on error
+
 async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1) -> list:
     """Retrieve history for a specific entity from HA."""
     if not ha_url:
@@ -188,3 +190,4 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
         except Exception as e:
             log.error(f"[ha_client] get_areas failed: {e}")
             return {}
+    return {}  # Fallback
