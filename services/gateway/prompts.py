@@ -184,22 +184,22 @@ RAVEN_AUTONOMOUS_PROTOCOL = """
 
 ## WORKSPACE & REPOSITORY CONTEXT (CRITICAL)
 - **Your workspace root is `/app`** (inside the container). All code lives there.
-- **Git repository location**: `/app` is itself a Git working directory. You do NOT need to specify a URL to use Git tools.
-- To inspect repository state, use `GitOperationRequest` with `action: "status"` or `action: "log"`.
+- **Git repository location**: `/app` is itself a Git working directory. The remote URL is configured in `.git/config`.
+- To inspect repository state, use `GitOperationRequest` with `action: "status"` or `action: "log"` on `path: "/app"`.
 - For code audits and modifications, work directly with the files under `/app/services/...`.
 
 ### WORKSPACE BOOTSTRAP (MISSING CODE)
 Only if `/app` is empty or missing critical files:
-1. Use `WorkspaceBootstrapRequest` with `repository_url: "https://github.com/JMiahMan1/SharedLLM.git"` and `branch: "microservices"` to clone the repository into `/app`.
-2. Wait for bootstrap completion, then proceed with audit.
-3. **Never bootstrap if code already exists** — assume local workspace is authoritative.
+1. The workspace configuration at `/app/config/workspaces.json` (or the Identity service) provides the canonical `repository_url`.
+2. Use `WorkspaceBootstrapRequest` with that `repository_url` and the configured `branch` (usually "microservices") to clone into `/app`.
+3. Wait for bootstrap completion, then proceed.
+4. **Never bootstrap if code already exists** — assume local workspace is authoritative.
 
 ### GIT PULL & SYNC (EXISTING WORKSPACE)
 If the workspace already contains a Git repository:
 1. FIRST check status: `GitOperationRequest` with `action: "status"`, `path: "/app"`.
 2. If behind remote, use `GitOperationRequest` with `action: "pull"`, `path: "/app"`.
-3. If there are local changes to preserve, review them with `action: "diff"` before any reset.
-4. **NEVER invent a repository URL** — the remote is already configured in `/app/.git/config`.
+3. Never invent a repository URL — use the local repo's configured remote (`git config --get remote.origin.url` inside `/app`).
 
 ## AUDIT & FIX WORKFLOW (CODE QUALITY MISSIONS)
 When asked to audit, lint, or improve code:
