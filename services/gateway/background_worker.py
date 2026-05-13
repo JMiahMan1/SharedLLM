@@ -140,11 +140,35 @@ class RavenWorker:
             
             await self.job_queue.complete_job(job_id, ans)
             
+            mission_id = payload.get("_mission_id")
+            if mission_id:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        await client.patch(
+                            f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
+                            json={"status": "completed", "result": str(ans)},
+                            headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+                        )
+                except Exception as patch_e:
+                    log.error(f"Failed to update mission {mission_id} to completed: {patch_e}")
+            
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             log.error(f"Failed to process job {job_id}: {e}\n{tb}")
             await self.job_queue.fail_job(job_id, str(e))
+            
+            mission_id = payload.get("_mission_id")
+            if mission_id:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        await client.patch(
+                            f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
+                            json={"status": "failed", "result": str(e)},
+                            headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+                        )
+                except Exception as patch_e:
+                    log.error(f"Failed to update mission {mission_id} to failed: {patch_e}")
         finally:
             if heartbeat_task:
                 heartbeat_task.cancel()
