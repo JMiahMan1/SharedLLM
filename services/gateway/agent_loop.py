@@ -249,9 +249,12 @@ _stream_redis = None
 
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None) -> Any:
     global _stream_redis
+    full_audit_log = []
     
     async def stream_event(event_type: str, data: str):
         if not mission_id: return
+        import time
+        full_audit_log.append({"type": event_type, "data": data, "timestamp": time.time()})
         global _stream_redis
         if not _stream_redis:
             _stream_redis = redis.from_url(REDIS_URL, decode_responses=True)
@@ -648,5 +651,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             f"Final answer: {ans}",
         ])
         await _persist_learning(learning_summary)
+
+    if mission_id and full_audit_log:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.patch(
+                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                    json={"output_log": json.dumps(full_audit_log)},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+        except Exception as e:
+            log.warning(f"[AgentLoop] Failed to persist output_log for mission {mission_id}: {e}")
 
     return ans
