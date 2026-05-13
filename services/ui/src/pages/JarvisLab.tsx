@@ -20,6 +20,7 @@ const JarvisLab = () => {
             ['overview', 'Overview'],
             ['tests', 'Tests'],
             ['logs', 'Logs'],
+            ['missions', 'Missions'],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -37,6 +38,7 @@ const JarvisLab = () => {
       {activeTab === 'overview' && <OverviewPane />}
       {activeTab === 'tests' && <TestsPane />}
       {activeTab === 'logs' && <LogTelemetryStream />}
+      {activeTab === 'missions' && <MissionsPane />}
     </div>
   );
 };
@@ -225,6 +227,114 @@ const LogTelemetryStream = () => {
           <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
             Waiting for live log traffic...
           </p>
+        )}
+      </div>
+    </section>
+  );
+};
+
+const MissionsPane = () => {
+  const [missionQuery, setMissionQuery] = useState('');
+  const { data: missions = [], refetch } = useQuery({
+    queryKey: ['user-missions'],
+    queryFn: () => api.getUserMissions(),
+    refetchInterval: 5000,
+  });
+
+  const createMissionMutation = useMutation({
+    mutationFn: () => api.createUserMission(missionQuery),
+    onSuccess: () => {
+      setMissionQuery('');
+      toast.success('Mission Dispatched');
+      refetch();
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to dispatch mission'),
+  });
+
+  return (
+    <section className="glass-panel p-6">
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <div>
+          <h3 className="text-xl font-bold text-white flex items-center gap-2">
+            <Play size={20} className="text-indigo-400" />
+            Raven Autonomous Missions
+          </h3>
+          <p className="text-sm text-slate-400 mt-1">Assign long-running background tasks to Raven (e.g., File conversions, analysis).</p>
+        </div>
+      </div>
+
+      <div className="flex gap-3 mb-8">
+        <input
+          type="text"
+          value={missionQuery}
+          onChange={(e) => setMissionQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && missionQuery.trim()) {
+              createMissionMutation.mutate();
+            }
+          }}
+          placeholder="Describe the task (e.g., 'Convert all PNGs in the Assets workspace to WebP')"
+          className="glass-input flex-1"
+        />
+        <button
+          onClick={() => createMissionMutation.mutate()}
+          disabled={!missionQuery.trim() || createMissionMutation.isPending}
+          className="glass-button px-6 py-3 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/30 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center gap-2"
+        >
+          {createMissionMutation.isPending ? 'Dispatching...' : (
+            <>
+              <Play size={14} /> Dispatch
+            </>
+          )}
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Active & Recent Missions</h4>
+        
+        {missions.length === 0 ? (
+          <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
+            No active missions.
+          </div>
+        ) : (
+          missions.map((mission: any) => (
+            <div key={mission.id} className="glass-card p-4 border-l-4 border-l-indigo-500/50 flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
+                      mission.status === 'completed' ? 'bg-emerald-500/10 text-emerald-300' :
+                      mission.status === 'failed' ? 'bg-red-500/10 text-red-300' :
+                      mission.status === 'executing' ? 'bg-indigo-500/10 text-indigo-300 animate-pulse' :
+                      'bg-slate-500/10 text-slate-300'
+                    }`}>
+                      {mission.status}
+                    </span>
+                    <span className="text-xs text-slate-400">Mission #{mission.id}</span>
+                  </div>
+                  <p className="text-sm text-white line-clamp-2">{mission.proposed_mission}</p>
+                </div>
+              </div>
+              
+              {(mission.status === 'executing' || mission.progress > 0) && (
+                <div className="w-full bg-black/40 rounded-full h-1.5 overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      mission.status === 'failed' ? 'bg-red-500' :
+                      mission.status === 'completed' ? 'bg-emerald-500' : 'bg-indigo-500'
+                    }`}
+                    style={{ width: `${Math.max(5, mission.progress)}%` }}
+                  />
+                </div>
+              )}
+              
+              {mission.result && (
+                <div className="p-3 bg-black/30 rounded-xl border border-white/5 text-xs text-slate-300 font-mono overflow-x-auto whitespace-pre-wrap">
+                  {mission.result}
+                </div>
+              )}
+            </div>
+          ))
         )}
       </div>
     </section>

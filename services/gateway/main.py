@@ -191,9 +191,9 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120.0"))
 # ---- Dynamic Model Config ----
 CONFIG = {
-    "assistant_model": "qwen3.5:9b",
-    "coding_model": "qwen3.5:9b",
-    "librarian_model": "qwen3.5:9b"
+    "assistant_model": "",
+    "coding_model": "",
+    "librarian_model": ""
 }
 
 # Global Inference Lock (Strategy 8: Singleton Queue)
@@ -317,24 +317,24 @@ async def get_assistant_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
     if active == "openrouter":
-        return settings.get("cloud_assistant_model", "google/gemini-2.0-flash-001")
-    return settings.get("ollama_assistant_model", "qwen3.5:9b")
+        return settings.get("cloud_assistant_model")
+    return settings.get("ollama_assistant_model") or settings.get("assistant_model")
 
 
 async def get_coding_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
     if active == "openrouter":
-        return settings.get("cloud_coding_model", "anthropic/claude-3.5-sonnet")
-    return settings.get("ollama_coding_model", "qwen2.5-coder:7b")
+        return settings.get("cloud_coding_model")
+    return settings.get("ollama_coding_model") or settings.get("coding_model")
 
 
 async def get_librarian_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
     if active == "openrouter":
-        return settings.get("cloud_librarian_model", "google/gemini-2.0-flash-001")
-    return settings.get("ollama_librarian_model", "qwen3.5:9b")
+        return settings.get("cloud_librarian_model")
+    return settings.get("ollama_librarian_model") or settings.get("librarian_model")
 
 async def fetch_autonomous_protocols() -> str:
     """Fetch the latest autonomous protocols from the Identity Service GlobalSettings."""
@@ -2671,6 +2671,134 @@ async def proxy_admin_volumes(request: Request):
             timeout=120.0,
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
+# ---- Autonomous Ops (Raven) Endpoints ----
+@app.get("/api/admin/raven/config")
+async def get_raven_config(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    
+    settings = await get_llm_settings()
+    return {
+        "raven_suspended": settings.get("raven_suspended", "false").lower() == "true",
+        "raven_scan_interval": int(settings.get("raven_scan_interval", "300")),
+        "raven_error_threshold": int(settings.get("raven_error_threshold", "5")),
+        "active_coding_model": settings.get("coding_model") or settings.get("ollama_coding_model")
+    }
+
+@app.patch("/api/admin/raven/config")
+async def update_raven_config(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    body = await request.json()
+    
+    async with get_http_client() as client:
+        for k, v in body.items():
+            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold"]:
+                await client.patch(
+                    f"{IDENTITY_SVC}/api/settings/{k}",
+                    json={"value": str(v).lower() if isinstance(v, bool) else str(v)},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+    return {"status": "SUCCESS"}
+
+@app.get("/api/admin/raven/queue")
+async def get_raven_queue(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    
+    async with get_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/raven/missions",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/admin/raven/queue/{id}/execute")
+async def execute_raven_mission(id: int, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    
+    async with get_http_client() as client:
+        # Get mission
+        resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        missions = resp.json()
+        target = next((m for m in missions if m["id"] == id), None)
+        if not target:
+            raise HTTPException(status_code=404, detail="Mission not found")
+            
+        system_prompt = ""
+        if target["mission_type"] == "admin_fix":
+            protocols = await fetch_autonomous_protocols()
+            system_prompt = f"{protocols}\n\n[ADMIN ROZ ACTIVE]\nYou are the Raven Sentinel operating in the Restricted Operating Zone. Your mission is to fix backend/frontend components. You have elevated access. Execute the following mission:\n{target['proposed_mission']}"
+        else:
+            system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission. Execute the following task to the best of your ability:\n{target['proposed_mission']}"
+        
+        # Push job
+        await job_queue.enqueue_job("raven_admin", {
+            "query": target["proposed_mission"],
+            "model": target["coding_model"],
+            "system": system_prompt,
+            "stream": False,
+            "creds": creds,
+            "_mission_id": target["id"]
+        })
+        
+        # Update status
+        await client.patch(
+            f"{IDENTITY_SVC}/api/raven/missions/{id}",
+            json={"status": "executing"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+    return {"status": "SUCCESS", "message": "Mission dispatched."}
+
+# ---- User Missions Endpoints ----
+from pydantic import BaseModel
+class UserMissionRequest(BaseModel):
+    query: str
+    priority: int = 1
+
+@app.post("/api/raven/missions")
+async def create_user_mission(body: UserMissionRequest, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds: raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    settings = await get_llm_settings()
+    coding_model = settings.get("coding_model") or settings.get("ollama_coding_model")
+    if not coding_model:
+        raise HTTPException(status_code=400, detail="No coding model configured. Mission cannot be dispatched.")
+        
+    mission_payload = {
+        "mission_type": "user_task",
+        "priority": body.priority,
+        "proposed_mission": body.query,
+        "coding_model": coding_model,
+        "user_id": creds.get("user_id") # We need to ensure user_id is in creds or we look it up
+    }
+    
+    async with get_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/raven/missions",
+            json=mission_payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return {"status": "SUCCESS", "mission": resp.json()}
+
+@app.get("/api/raven/missions")
+async def get_user_missions(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds: raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Ideally filter by user_id if we want isolation, for now just proxy it all
+    async with get_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/raven/missions",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        missions = [m for m in resp.json() if m["mission_type"] != "admin_fix" or creds.get("is_admin")]
+        return JSONResponse(status_code=resp.status_code, content=missions)
+
 # ---- Config Endpoints ----
 
 @app.get("/api/config/models")
