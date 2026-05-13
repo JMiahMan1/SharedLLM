@@ -325,9 +325,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             
             for retry_count in range(MAX_INFERENCE_RETRIES):
                 try:
-                    dynamic_settings = await get_dynamic_llm_settings()
-                    vram_params = await get_vram_safe_params(selected_model, dynamic_settings)
-                    ollama_payload["options"] = vram_params
+                     dynamic_settings = await get_dynamic_llm_settings()
+                     vram_params = await get_vram_safe_params(selected_model, dynamic_settings)
+                     ollama_payload["options"] = vram_params
+                     log.info(f"[AgentLoop] Inference options: {vram_params}")
                     
                     log.info(f"[AgentLoop] Executing inference (Attempt {retry_count + 1}/{MAX_INFERENCE_RETRIES}) for {selected_model}")
                     data = await execute_inference(
