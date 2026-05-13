@@ -172,6 +172,30 @@ export interface RagStats {
   breakdown?: Record<string, { chunks: number; documents: number }>;
 }
 
+export interface RavenMission {
+  id: number;
+  mission_type: string;
+  priority: number;
+  target_container?: string | null;
+  error_summary?: string | null;
+  proposed_mission: string;
+  coding_model?: string | null;
+  status: string;
+  progress: number;
+  scheduled_for?: string | null;
+  created_at: string;
+  output_log?: string | null;
+  result?: string | null;
+  user_id?: number | null;
+}
+
+export interface RavenConfig {
+  raven_suspended: boolean;
+  raven_scan_interval: number;
+  raven_error_threshold: number;
+  active_coding_model: string | null;
+}
+
 const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
   ...raw,
   full_name: raw.full_name ?? raw.display_name ?? '',
@@ -564,6 +588,36 @@ export const api = {
 
   async importNextcloudUsers(): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/auth/import/nextcloud');
+    return resp.data;
+  },
+
+  async getRavenConfig(): Promise<RavenConfig> {
+    const resp = await apiClient.get('/api/admin/raven/config');
+    return resp.data;
+  },
+
+  async updateRavenConfig(config: Partial<RavenConfig>): Promise<{ status: string }> {
+    const resp = await apiClient.patch('/api/admin/raven/config', config);
+    return resp.data;
+  },
+
+  async getAdminRavenQueue(): Promise<RavenMission[]> {
+    const resp = await apiClient.get('/api/admin/raven/queue');
+    return resp.data;
+  },
+
+  async executeAdminRavenMission(id: number): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/admin/raven/queue/${id}/execute`);
+    return resp.data;
+  },
+
+  async getUserMissions(): Promise<RavenMission[]> {
+    const resp = await apiClient.get('/api/raven/missions');
+    return resp.data;
+  },
+
+  async createUserMission(query: string, priority = 1): Promise<{ status: string; mission: RavenMission }> {
+    const resp = await apiClient.post('/api/raven/missions', { query, priority });
     return resp.data;
   },
 };

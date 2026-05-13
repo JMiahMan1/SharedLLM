@@ -142,3 +142,35 @@ class GlobalSettingRead(BaseModel):
 
 class GlobalSettingUpdate(BaseModel):
     value: str
+
+class RavenMissionCreate(BaseModel):
+    mission_type: str = "admin_fix"
+    priority: int = 1
+    target_container: Optional[str] = None
+    error_summary: Optional[str] = None
+    proposed_mission: str
+    coding_model: Optional[str] = None
+    user_id: Optional[int] = None
+
+class RavenMissionUpdate(BaseModel):
+    status: Optional[str] = None
+    progress: Optional[int] = None
+    scheduled_for: Optional[str] = None
+    output_log: Optional[str] = None
+    result: Optional[str] = None
+
+class RavenMissionRead(BaseModel):
+    id: int
+    mission_type: str
+    priority: int
+    target_container: Optional[str] = None
+    error_summary: Optional[str] = None
+    proposed_mission: str
+    coding_model: Optional[str] = None
+    status: str
+    progress: int
+    scheduled_for: Optional[str] = None
+    created_at: str
+    output_log: Optional[str] = None
+    result: Optional[str] = None
+    user_id: Optional[int] = None

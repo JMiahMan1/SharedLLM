@@ -18,7 +18,7 @@ RAVEN_HEARTBEAT_INTERVAL = int(os.getenv("RAVEN_HEARTBEAT_INTERVAL", "30"))  # s
 RAVEN_HUNG_THRESHOLD = int(os.getenv("RAVEN_HUNG_THRESHOLD", "600"))  # seconds
 
 CONFIG = {
-    "assistant_model": os.getenv("ASSISTANT_MODEL", "qwen3.5:9b"),
-    "librarian_model": os.getenv("LIBRARIAN_MODEL", "qwen3.5:9b"),
-    "coding_model": os.getenv("CODING_MODEL", "qwen2.5-coder:7b"),
+    "assistant_model": os.getenv("ASSISTANT_MODEL", ""),
+    "librarian_model": os.getenv("LIBRARIAN_MODEL", ""),
+    "coding_model": os.getenv("CODING_MODEL", ""),
 }

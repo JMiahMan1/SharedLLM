@@ -73,10 +73,23 @@ class RavenWorker:
     async def _health_loop(self):
         while self.is_running:
             try:
-                await asyncio.sleep(CHECK_INTERVAL_SECONDS)
-                await self.perform_health_check()
+                from agent_loop import get_dynamic_llm_settings
+                settings = await get_dynamic_llm_settings()
+                
+                is_suspended = settings.get("raven_suspended", "false").lower() == "true"
+                scan_interval = int(settings.get("raven_scan_interval", "300"))
+                error_threshold = int(settings.get("raven_error_threshold", "5"))
+                
+                if is_suspended:
+                    log.info("Raven health checks are suspended. Standing by...")
+                    await asyncio.sleep(scan_interval)
+                    continue
+
+                await self.perform_health_check(error_threshold, settings)
+                await asyncio.sleep(scan_interval)
             except Exception as e:
                 log.error(f"Error in Health loop: {e}")
+                await asyncio.sleep(300)
 
     async def _inference_loop(self):
         """The Singleton Inference Worker — Processes jobs one by one."""
@@ -164,17 +177,17 @@ class RavenWorker:
         except Exception as e:
             log.error(f"TTS Callback failed: {e}")
 
-    async def perform_health_check(self):
+    async def perform_health_check(self, error_threshold: int, settings: Dict[str, Any]):
         log.info("Performing Raven health check...")
         containers = await self._get_containers()
         if not containers: return
         problematic = []
         for c in containers:
             errs = await self._get_errors(c["name"])
-            if len(errs) >= ERROR_THRESHOLD:
+            if len(errs) >= error_threshold:
                 problematic.append({"name": c["name"], "count": len(errs), "sample": errs[:3]})
         if problematic:
-            await self.trigger_self_repair(problematic)
+            await self.trigger_self_repair(problematic, settings)
 
     async def _get_containers(self):
         try:
@@ -191,41 +204,38 @@ class RavenWorker:
                 if resp.status_code == 200: return resp.json().get("detail", {}).get("lines", [])
         except: return []
 
-    async def trigger_self_repair(self, problematic):
-        summary = "\n".join([f"- {c['name']}: {c['count']} errors" for c in problematic])
-        query = f"SYSTEM ALERT: Health check detected errors.\n\nServices:\n{summary}\n\nFix them."
-        # Resolve system-level credentials for the self-repair agent using the default account
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    f"{IDENTITY_SVC}/api/resolve",
-                    json={"rag_user": "default"},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if resp.status_code == 200:
-                    creds = resp.json()
-                else:
-                    log.error(f"Self-repair credential resolution failed: {resp.status_code}")
-                    creds = {"user": "default", "is_admin": True}  # Fallback
-        except Exception as e:
-            log.error(f"Self-repair credential resolution error: {e}")
-            creds = {"user": "default", "is_admin": True}  # Fallback
-        
-        try:
-            from agent_loop import get_dynamic_llm_settings
-            settings = await get_dynamic_llm_settings()
-            coding_model = settings.get("ollama_coding_model", "qwen2.5-coder:7b")
-        except Exception as e:
-            log.error(f"Failed to fetch coding model for repair, falling back: {e}")
-            coding_model = "qwen2.5-coder:7b"
+    async def trigger_self_repair(self, problematic, settings):
+        coding_model = settings.get("coding_model") or settings.get("ollama_coding_model")
+        if not coding_model or coding_model == "auto":
+            log.error("No valid coding model configured in Identity. Triage queue may fail to execute.")
+            # We still push the anomaly, but the UI must be used to assign a model.
 
-        await self.job_queue.enqueue_job("raven_admin", {
-            "query": query,
-            "model": coding_model,
-            "system": "You are a repair agent.",
-            "stream": False,
-            "creds": creds
-        })
+        for c in problematic:
+            summary = f"Detected {c['count']} errors."
+            query = f"SYSTEM ALERT: Health check detected errors.\n\nServices:\n- {c['name']}: {c['count']} errors\n\nFix them."
+            
+            mission_payload = {
+                "mission_type": "admin_fix",
+                "target_container": c["name"],
+                "error_summary": summary,
+                "proposed_mission": query,
+                "coding_model": coding_model
+            }
+            
+            try:
+                # Push to Identity Triage Queue instead of executing immediately
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions",
+                        json=mission_payload,
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                    if resp.status_code == 200:
+                        log.info(f"Mission for {c['name']} successfully pushed to Triage Queue.")
+                    else:
+                        log.error(f"Failed to push mission to Triage Queue: {resp.text}")
+            except Exception as e:
+                log.error(f"Error pushing to Triage Queue: {e}")
 
     async def _job_heartbeat(self, job_id: str):
         while self.is_running:
