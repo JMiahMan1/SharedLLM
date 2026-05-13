@@ -2787,7 +2787,30 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         )
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        return {"status": "SUCCESS", "mission": resp.json()}
+        
+        mission_data = resp.json()
+        
+        # Enqueue the job for execution
+        system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission. Execute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
+        
+        await job_queue.enqueue_job(creds.get("user_id") or "raven_user", {
+            "query": mission_data["proposed_mission"],
+            "model": coding_model,
+            "system": system_prompt,
+            "stream": False,
+            "creds": creds,
+            "_mission_id": mission_data["id"]
+        })
+        
+        # Update status to executing
+        await client.patch(
+            f"{IDENTITY_SVC}/api/raven/missions/{mission_data['id']}",
+            json={"status": "executing"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        mission_data["status"] = "executing"
+        
+        return {"status": "SUCCESS", "mission": mission_data}
 
 @app.get("/api/raven/missions")
 async def get_user_missions(request: Request):
