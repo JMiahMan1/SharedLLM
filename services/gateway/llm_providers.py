@@ -93,14 +93,15 @@ class OllamaProvider(BaseLLMProvider):
                         chunk_json = json.loads(clean_line)
                         if "error" in chunk_json:
                             full_content += f" [PROVIDER ERROR: {chunk_json['error']}] "
-                        content = chunk_json.get("message", {}).get("content") or ""
-                        if content:
-                            full_content += content
-                            await chunk_callback(content)
+                        msg = chunk_json.get("message", {})
+                        chunk = msg.get("content") or msg.get("thinking") or ""
+                        if chunk:
+                            full_content += chunk
+                            await chunk_callback(chunk)
                         if chunk_json.get("done"):
                             break
                     except Exception as e:
-                        print(f"DEFINITIVE DEBUG: Error parsing streaming chunk: {e} | Raw line: {line!r}")
+                        log.error(f"[OllamaProvider] Error parsing streaming chunk: {e} | Raw line: {line!r}")
         return full_content
 
 
