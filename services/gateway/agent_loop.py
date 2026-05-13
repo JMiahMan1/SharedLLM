@@ -84,10 +84,16 @@ class OllamaProvider(BaseLLMProvider):
                     try:
                         chunk_json = json.loads(clean_line)
                         if "error" in chunk_json: full_content += f" [PROVIDER ERROR: {chunk_json['error']}] "
+                        # Extract both content and thinking (some models route tokens to thinking even with thinking=False)
                         content = chunk_json.get("message", {}).get("content") or ""
+                        thinking = chunk_json.get("message", {}).get("thinking") or ""
                         if content:
                             full_content += content
                             await chunk_callback(content)
+                        elif thinking:
+                            # Fallback: use thinking tokens when content is empty
+                            full_content += thinking
+                            await chunk_callback(thinking)
                         if chunk_json.get("done"): break
                     except Exception as e:
                         log.error(f"Error parsing streaming chunk: {e} | Raw line: {line!r}")
