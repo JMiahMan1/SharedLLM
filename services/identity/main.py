@@ -128,12 +128,16 @@ async def _ensure_default_settings(session: Session) -> None:
         
         # Dynamic Resolution for models
         if setting.get("value") == "auto":
-            if setting["key"] == "coding_model":
+            if setting["key"] in ("coding_model", "ollama_coding_model"):
                 setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:9b")
-            elif setting["key"] == "librarian_model":
+            elif setting["key"] in ("librarian_model", "ollama_librarian_model"):
                 setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:9b")
-            elif setting["key"] == "assistant_model":
+            elif setting["key"] in ("assistant_model", "ollama_assistant_model"):
                 setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:9b")
+            elif setting["key"] == "cloud_coding_model":
+                setting["value"] = "anthropic/claude-3.5-sonnet"
+            elif setting["key"] in ("cloud_assistant_model", "cloud_librarian_model"):
+                setting["value"] = "google/gemini-2.0-flash-001"
 
         session.add(GlobalSetting(**setting))
         inserted = True
@@ -903,6 +907,55 @@ def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depen
 def manual_seed(force: bool = False, session: Session = Depends(get_session)):
     count = seed_from_env(session, force=force)
     return {"status": "SUCCESS", "count": count}
+
+# ─── Raven Missions (Autonomous Ops & User Tasks) ───────────────────────────────
+from .models import RavenMission
+from .schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
+from typing import List
+
+@app.get("/api/raven/missions", response_model=List[RavenMissionRead])
+def get_missions(session: Session = Depends(get_session)):
+    missions = session.exec(select(RavenMission).order_by(RavenMission.created_at.desc())).all()
+    return missions
+
+@app.post("/api/raven/missions", response_model=RavenMissionRead)
+def create_mission(
+    body: RavenMissionCreate,
+    session: Session = Depends(get_session)
+):
+    mission = RavenMission(**body.model_dump())
+    session.add(mission)
+    session.commit()
+    session.refresh(mission)
+    return mission
+
+@app.patch("/api/raven/missions/{mission_id}", response_model=RavenMissionRead)
+def update_mission(
+    mission_id: int,
+    body: RavenMissionUpdate,
+    session: Session = Depends(get_session)
+):
+    mission = session.exec(select(RavenMission).where(RavenMission.id == mission_id)).first()
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    
+    update_data = body.model_dump(exclude_unset=True)
+    for k, v in update_data.items():
+        setattr(mission, k, v)
+        
+    session.add(mission)
+    session.commit()
+    session.refresh(mission)
+    return mission
+
+@app.delete("/api/raven/missions/{mission_id}")
+def delete_mission(mission_id: int, session: Session = Depends(get_session)):
+    mission = session.exec(select(RavenMission).where(RavenMission.id == mission_id)).first()
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    session.delete(mission)
+    session.commit()
+    return {"status": "SUCCESS"}
 
 
 @app.post("/api/auth/import/nextcloud")

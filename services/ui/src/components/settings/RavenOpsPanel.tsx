@@ -1,0 +1,181 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { api, type RavenConfig, type RavenMission } from '../../services/api';
+import HelpTooltip from '../ui/HelpTooltip';
+
+export default function RavenOpsPanel() {
+  const queryClient = useQueryClient();
+  const [draftConfig, setDraftConfig] = useState<Partial<RavenConfig>>({});
+
+  const { data: config, isLoading: configLoading } = useQuery<RavenConfig>({
+    queryKey: ['raven-config'],
+    queryFn: () => api.getRavenConfig(),
+  });
+
+  const { data: missions = [], isLoading: missionsLoading } = useQuery<RavenMission[]>({
+    queryKey: ['raven-missions-admin'],
+    queryFn: () => api.getAdminRavenQueue(),
+    refetchInterval: 10000,
+  });
+
+  const updateConfigMutation = useMutation({
+    mutationFn: (newConfig: Partial<RavenConfig>) => api.updateRavenConfig(newConfig),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['raven-config'] });
+      setDraftConfig({});
+      toast.success('Raven Configuration Updated');
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to update configuration'),
+  });
+
+  const executeMissionMutation = useMutation({
+    mutationFn: (id: number) => api.executeAdminRavenMission(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['raven-missions-admin'] });
+      toast.success('Mission Dispatched to Raven ROZ');
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to dispatch mission'),
+  });
+
+  if (configLoading) {
+    return <div className="text-slate-400 animate-pulse text-sm">Loading Sentinel Protocols...</div>;
+  }
+
+  const currentConfig = { ...config, ...draftConfig };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+            <ShieldAlert size={20} className="text-red-400" />
+            Autonomous Ops (Raven)
+          </h3>
+          <p className="mt-1 text-sm text-slate-400">Sentinel ROZ Control Panel and Mission Triage.</p>
+        </div>
+        <HelpTooltip docName="raven_ops_implementation.md" sectionTitle="Interception & Triage Workflow" label="Autonomous Ops" />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="glass-card p-4 border border-white/10 flex flex-col justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+              <PowerOff size={12} /> Master Switch
+            </p>
+            <p className="text-sm text-slate-300 mb-4">Suspend or resume the background observation loop.</p>
+          </div>
+          <button
+            onClick={() => updateConfigMutation.mutate({ raven_suspended: !currentConfig.raven_suspended })}
+            disabled={updateConfigMutation.isPending}
+            className={`w-full py-2 rounded-xl text-xs font-black uppercase tracking-widest transition ${
+              currentConfig.raven_suspended 
+                ? 'bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/30' 
+                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30'
+            }`}
+          >
+            {currentConfig.raven_suspended ? 'Asleep' : 'Active'}
+          </button>
+        </div>
+
+        <div className="glass-card p-4 border border-white/10 flex flex-col justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+              <Clock size={12} /> Scan Frequency
+            </p>
+            <p className="text-sm text-slate-300 mb-4">How often Raven scans logs.</p>
+          </div>
+          <select
+            value={currentConfig.raven_scan_interval}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              setDraftConfig({ ...draftConfig, raven_scan_interval: val });
+              updateConfigMutation.mutate({ raven_scan_interval: val });
+            }}
+            disabled={updateConfigMutation.isPending}
+            className="glass-input w-full bg-black/30 text-xs"
+          >
+            <option value={60}>Every Minute</option>
+            <option value={300}>Every 5 Minutes</option>
+            <option value={3600}>Hourly</option>
+            <option value={86400}>Daily</option>
+          </select>
+        </div>
+
+        <div className="glass-card p-4 border border-white/10 flex flex-col justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+              <AlertTriangle size={12} /> Error Threshold
+            </p>
+            <p className="text-sm text-slate-300 mb-4">Errors required to trigger an anomaly.</p>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min={1}
+              value={currentConfig.raven_error_threshold}
+              onChange={(e) => setDraftConfig({ ...draftConfig, raven_error_threshold: parseInt(e.target.value, 10) || 5 })}
+              className="glass-input flex-1 text-xs"
+            />
+            <button
+              onClick={() => updateConfigMutation.mutate({ raven_error_threshold: currentConfig.raven_error_threshold })}
+              disabled={updateConfigMutation.isPending || !draftConfig.raven_error_threshold}
+              className="glass-button px-3 py-1 text-[10px] font-black uppercase"
+            >
+              Set
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h4 className="flex items-center gap-2 text-sm font-bold text-slate-300 mb-4 uppercase tracking-widest">
+          <Activity size={16} className="text-orange-400" />
+          Pending Triage Queue
+        </h4>
+        
+        {missionsLoading ? (
+           <div className="text-slate-500 text-sm italic">Loading missions...</div>
+        ) : missions.filter(m => m.mission_type === 'admin_fix').length === 0 ? (
+           <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
+             No pending anomalies detected in the architecture.
+           </div>
+        ) : (
+          <div className="space-y-3">
+            {missions.filter(m => m.mission_type === 'admin_fix').map((mission) => (
+              <div key={mission.id} className="glass-card p-4 border-l-4 border-l-orange-500/50">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-3 mb-1">
+                       <span className="bg-orange-500/10 text-orange-300 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest">
+                         {mission.status}
+                       </span>
+                       <span className="text-sm font-bold text-white truncate">Target: {mission.target_container || 'System'}</span>
+                    </div>
+                    <p className="text-xs text-slate-400 line-clamp-2">{mission.error_summary}</p>
+                    <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-widest">Detected: {new Date(mission.created_at).toLocaleString()}</p>
+                  </div>
+                  
+                  <div className="flex-shrink-0">
+                    <button
+                      onClick={() => executeMissionMutation.mutate(mission.id)}
+                      disabled={executeMissionMutation.isPending || mission.status !== 'pending'}
+                      className="glass-button bg-red-500/10 border-red-500/20 text-red-300 hover:bg-red-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                    >
+                      {executeMissionMutation.isPending ? 'Dispatching...' : (
+                        <>
+                          <Play size={12} /> Run Fix Now
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

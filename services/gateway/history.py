@@ -33,10 +33,10 @@ async def fetch_librarian_model() -> str:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return data.get("value", "qwen3.5:9b")
+                return data.get("value", "")
     except Exception as e:
         log.warning(f"Failed to fetch librarian_model: {e}")
-    return "qwen3.5:9b" # Safe fallback
+    return "" # Safe fallback
 
 async def get_history(user_id: str) -> list:
     """Retrieves conversation history as a list of dicts."""

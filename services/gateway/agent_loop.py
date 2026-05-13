@@ -255,14 +255,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         
         if active_provider_name == "openrouter":
             if is_technical:
-                selected_model = settings.get("cloud_coding_model", "anthropic/claude-3.5-sonnet")
+                selected_model = settings.get("cloud_coding_model")
             else:
-                selected_model = settings.get("cloud_assistant_model", "google/gemini-2.0-flash-001")
+                selected_model = settings.get("cloud_assistant_model")
         else:
             if is_technical:
-                selected_model = settings.get("ollama_coding_model", "qwen2.5-coder:7b")
+                selected_model = settings.get("ollama_coding_model") or settings.get("coding_model")
             else:
-                selected_model = settings.get("ollama_assistant_model", "qwen3.5:9b")
+                selected_model = settings.get("ollama_assistant_model") or settings.get("assistant_model")
 
     log.info(f"[AgentLoop] Active Provider: {active_provider_name} | Model: {selected_model}")
 

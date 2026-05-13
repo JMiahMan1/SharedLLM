@@ -28,6 +28,7 @@ import type {
 import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import LLMSettings from '../components/settings/LLMSettings';
+import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 
 type UserFormState = {
   username: string;
@@ -517,9 +518,13 @@ const Admin = () => {
         </section>
 
         <section className="space-y-8 min-w-0 overflow-hidden">
-      <section className="glass-panel p-8 border-purple-500/20">
-        <LLMSettings />
-      </section>
+          <section className="glass-panel p-8 border-red-500/20">
+            <RavenOpsPanel />
+          </section>
+
+          <section className="glass-panel p-8 border-purple-500/20">
+            <LLMSettings />
+          </section>
 
           <div className="glass-panel p-6">
             <div className="mb-6 flex items-center justify-between">
