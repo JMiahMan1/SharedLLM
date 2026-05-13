@@ -909,8 +909,12 @@ def manual_seed(force: bool = False, session: Session = Depends(get_session)):
     return {"status": "SUCCESS", "count": count}
 
 # ─── Raven Missions (Autonomous Ops & User Tasks) ───────────────────────────────
-from .models import RavenMission
-from .schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
+try:
+    from .models import RavenMission
+    from .schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
+except ImportError:
+    from models import RavenMission
+    from schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
 from typing import List
 
 @app.get("/api/raven/missions", response_model=List[RavenMissionRead])

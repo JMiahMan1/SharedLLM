@@ -16,3 +16,4 @@ playwright
 html2text
 docker>=7.0.0
 edge-tts
+html2text
