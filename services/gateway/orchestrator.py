@@ -170,7 +170,8 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
         except (ImportError, ValueError):
             from agent_loop import AgentLoop
         # Raven handles autonomous loops
-        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds)
+        mission_id = job_payload.get("_mission_id")
+        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id)
     else:
         # Librarian handles standard single-turn inference
         ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback)

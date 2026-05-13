@@ -4,10 +4,12 @@ import json
 import asyncio
 import httpx
 import re
+import redis.asyncio as redis
 from typing import Optional, Any, Dict, List, Callable, Awaitable
 from fastapi.responses import JSONResponse
 
 try:
+    from .history import REDIS_URL
     from .config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
         STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT,
@@ -17,6 +19,7 @@ try:
     from .schemas import ResolvedCredentials
     from .llm_providers import BaseLLMProvider, OpenRouterProvider
 except (ImportError, ValueError):
+    from history import REDIS_URL
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
         STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT,
@@ -225,9 +228,9 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
             timeout=timeout
         )
 
-async def execute_inference(provider: BaseLLMProvider, model: str, messages: list, options: dict) -> dict:
+async def execute_inference(provider: BaseLLMProvider, model: str, messages: list, options: dict, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> dict:
     """Delegates inference to the specified provider."""
-    content = await provider.generate(model, messages, options=options)
+    content = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
     return {"message": {"role": "assistant", "content": content}}
 
 _global_http_client: Optional[httpx.AsyncClient] = None
@@ -242,7 +245,21 @@ def get_http_client() -> httpx.AsyncClient:
     return _global_http_client
 
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials) -> Any:
+_stream_redis = None
+
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None) -> Any:
+    global _stream_redis
+    
+    async def stream_event(event_type: str, data: str):
+        if not mission_id: return
+        global _stream_redis
+        if not _stream_redis:
+            _stream_redis = redis.from_url(REDIS_URL, decode_responses=True)
+        try:
+            await _stream_redis.publish(f"raven:mission:stream:{mission_id}", json.dumps({"type": event_type, "data": data}))
+        except Exception as e:
+            log.warning(f"Failed to stream event: {e}")
+
     # 1. Fetch dynamic settings and resolve active provider/model
     settings = await get_dynamic_llm_settings()
     provider = await get_provider(settings)
@@ -297,6 +314,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             timed_out = True
             break
         
+        await stream_event("system", f"Agent loop iteration {iter_num}/{MAX_TOOL_ITERATIONS} started.")
         log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | total elapsed {elapsed_total:.0f}s")
 
         heartbeat_stop = asyncio.Event()
@@ -344,11 +362,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     ollama_payload["options"] = vram_params
                     log.info(f"[AgentLoop] Inference options: {vram_params}")
                     log.info(f"[AgentLoop] Executing inference (Attempt {retry_count + 1}/{MAX_INFERENCE_RETRIES}) for {selected_model}")
+                    
+                    async def chunk_logger(chunk: str):
+                        await stream_event("reasoning", chunk)
+
                     data = await execute_inference(
-                        provider,
-                        selected_model,
-                        ollama_payload["messages"],
-                        ollama_payload.get("options", {})
+                        provider, 
+                        selected_model, 
+                        ollama_payload["messages"], 
+                        ollama_payload.get("options", {}),
+                        chunk_callback=chunk_logger
                     )
                     
                     ans = data.get("message", {}).get("content", "Error.")
@@ -427,6 +450,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             exec_data = {"status": "ERROR", "message": error_msg}
             continue
 
+        await stream_event("action", f"Executing Tool: {action_name}")
         log.info(f"[AgentLoop] Dispatching action: {action_name}")
 
         try:
@@ -559,6 +583,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 redact(item)
                     redact(log_payload)
                     
+                    await stream_event("action_payload", json.dumps(log_payload, indent=2))
                     log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                     log.info(f"[AgentLoop] Tool response: {resp.status_code}")
@@ -574,6 +599,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         exec_data = resp.json()
 
                     short_msg = exec_data.get("message", "Success")
+                    await stream_event("result_success", short_msg)
                     action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
                     # Track successful tool executions (non-ERROR responses)
                     if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
@@ -583,6 +609,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 exec_data = {"status": "ERROR", "message": f"Unknown action: {action}"}
 
         except Exception as e:
+            await stream_event("result_error", str(e))
             log.error(f"[AgentLoop] Tool execution failed: {e}")
             exec_data = {"status": "ERROR", "message": str(e)}
 

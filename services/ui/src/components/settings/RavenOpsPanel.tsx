@@ -5,11 +5,13 @@ import toast from 'react-hot-toast';
 import { api, type RavenConfig, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
 import RavenAuditLog from './RavenAuditLog';
+import RavenLiveTrace from './RavenLiveTrace';
 
 export default function RavenOpsPanel() {
   const queryClient = useQueryClient();
   const [draftConfig, setDraftConfig] = useState<Partial<RavenConfig>>({});
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
+  const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
 
   const { data: config, isLoading: configLoading } = useQuery<RavenConfig>({
     queryKey: ['raven-config'],
@@ -225,7 +227,12 @@ export default function RavenOpsPanel() {
                     </p>
                   </div>
                   <div className="flex-shrink-0">
-                     {/* Placeholder for Watch Live button */}
+                     <button
+                       onClick={() => setLiveMissionId(mission.id)}
+                       className="glass-button bg-blue-500/10 border-blue-500/20 text-blue-300 hover:bg-blue-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                     >
+                       <Terminal size={12} /> Watch Live
+                     </button>
                   </div>
                 </div>
               </div>
@@ -237,6 +244,12 @@ export default function RavenOpsPanel() {
       <RavenAuditLog 
         isOpen={isAuditLogOpen} 
         onClose={() => setIsAuditLogOpen(false)} 
+      />
+
+      <RavenLiveTrace
+        isOpen={liveMissionId !== null}
+        onClose={() => setLiveMissionId(null)}
+        missionId={liveMissionId}
       />
     </div>
   );
