@@ -1133,42 +1133,42 @@ async def orchestrate_code_change(
 ) -> JSONResponse | dict | StreamingResponse:
     workspace = await resolve_chat_workspace(body, user_id)
     if not workspace:
-      msg = "I could not resolve an available workspace for this code orchestration request."
-      if is_openai: return _make_openai_response(msg, selected_model, stream=should_stream)
-      return _make_ollama_response(msg, selected_model, stream=should_stream)
+        msg = "I could not resolve an available workspace for this code orchestration request."
+        if is_openai: return _make_openai_response(msg, selected_model, stream=should_stream)
+        return _make_ollama_response(msg, selected_model, stream=should_stream)
 
     workspace_id = workspace.get("id")
     workspace_context = await build_workspace_readme_context(workspace, user_id)
     
     prompt = (
-      "### Task: Plan a Code Change\n"
-      "Analyze the user request and provide a precise execution plan.\n\n"
-      "### Instructions:\n"
-      "1. Identify the 'relative_path' for the file.\n"
-      "2. Provide the full 'content' for the file.\n"
-      "3. Write a detailed 'reasoning' (2-3 sentences) explaining the change and its structure.\n"
-      "4. **Verification Command**: If tests are needed, provide a 'test_cmd' that uses pytest and targets the smallest relevant scope.\n"
-      "   - Example: 'pytest tests/test_feature.py -q'.\n"
-      "   - Linting is handled automatically by the workspace runtime, so do not emit flake8 or eslint commands here.\n\n"
-      "### Return ONLY JSON:\n"
-      "{\n"
-      "  \"relative_path\": \"string\",\n"
-      "  \"content\": \"string\",\n"
-      "  \"reasoning\": \"string\",\n"
-      "  \"test_cmd\": \"string (optional)\"\n"
-      "}\n\n"
-      f"### Workspace Context:\n{workspace_context}\n\n"
-      f"### User Request: {refined_query}\n"
+        "### Task: Plan a Code Change\n"
+        "Analyze the user request and provide a precise execution plan.\n\n"
+        "### Instructions:\n"
+        "1. Identify the 'relative_path' for the file.\n"
+        "2. Provide the full 'content' for the file.\n"
+        "3. Write a detailed 'reasoning' (2-3 sentences) explaining the change and its structure.\n"
+        "4. **Verification Command**: If tests are needed, provide a 'test_cmd' that uses pytest and targets the smallest relevant scope.\n"
+        "   - Example: 'pytest tests/test_feature.py -q'.\n"
+        "   - Linting is handled automatically by the workspace runtime, so do not emit flake8 or eslint commands here.\n\n"
+        "### Return ONLY JSON:\n"
+        "{\n"
+        '  "relative_path": "string",\n'
+        '  "content": "string",\n'
+        '  "reasoning": "string",\n'
+        '  "test_cmd": "string (optional)"\n'
+        "}\n\n"
+        f"### Workspace Context:\n{workspace_context}\n\n"
+        f"### User Request: {refined_query}\n"
     )
     
-     payload = {
-       "model": selected_model,
-       "messages": [
-         {"role": "system", "content": CODE_HELPER_SYSTEM_INSTRUCTION},
-         {"role": "user", "content": prompt},
-       ],
-       "stream": False,
-     }
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": CODE_HELPER_SYSTEM_INSTRUCTION},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+    }
     
     data = await execute_inference(payload)
     try:
