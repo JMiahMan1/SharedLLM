@@ -166,11 +166,11 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
     local_url = settings.get("llm_local_url", OLLAMA_URL)
     max_ctx = int(settings.get("llm_local_max_ctx", "4096"))
     params = {
-        "num_ctx": max_ctx,
         "num_predict": 1024,  # Allow sufficient tokens for full JSON tool calls
         "temperature": 0.1,
         "top_p": 0.9,
-        "repeat_penalty": 1.1
+        "repeat_penalty": 1.1,
+        "thinking": False,  # Disable thinking blocks to get content faster
     }
 
     try:
