@@ -6,7 +6,7 @@ import asyncio
 import httpx
 import random
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from typing import Optional, Any, Dict, List
 from fastapi.responses import JSONResponse, StreamingResponse
 import re
@@ -2802,6 +2802,45 @@ async def get_user_missions(request: Request):
         )
         missions = [m for m in resp.json() if m["mission_type"] != "admin_fix" or creds.get("is_admin")]
         return JSONResponse(status_code=resp.status_code, content=missions)
+
+@app.websocket("/api/raven/missions/{id}/stream")
+async def raven_mission_stream(websocket: WebSocket, id: int):
+    await websocket.accept()
+    try:
+        try:
+            from history import REDIS_URL
+        except (ImportError, ValueError):
+            from .history import REDIS_URL
+        
+        import redis.asyncio as redis
+        r = redis.from_url(REDIS_URL, decode_responses=True)
+        pubsub = r.pubsub()
+        channel = f"raven:mission:stream:{id}"
+        await pubsub.subscribe(channel)
+        
+        async def reader():
+            try:
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        await websocket.send_text(message["data"])
+            except Exception as e:
+                log.warning(f"Pubsub reader error: {e}")
+
+        reader_task = asyncio.create_task(reader())
+        try:
+            while True:
+                await websocket.receive_text() # keep alive or detect disconnect
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:
+            log.warning(f"WebSocket error: {e}")
+        finally:
+            reader_task.cancel()
+            await pubsub.unsubscribe(channel)
+            await r.close()
+    except Exception as e:
+        log.error(f"WebSocket setup error: {e}")
+        await websocket.close()
 
 # ---- Config Endpoints ----
 
