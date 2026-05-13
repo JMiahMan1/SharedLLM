@@ -61,7 +61,8 @@ class OllamaProvider(BaseLLMProvider):
                     for line in lines:
                         try:
                             data = json.loads(line)
-                            if "error" in data: content += f" [PROVIDER ERROR: {data['error']}] "
+                            if "error" in data:
+                                raise RuntimeError(f"Provider error: {data['error']}")
                             msg = data.get("message", {})
                             chunk = msg.get("content") or msg.get("thinking") or ""
                             content += chunk
@@ -71,7 +72,8 @@ class OllamaProvider(BaseLLMProvider):
                 
                 try:
                     data = json.loads(raw_text)
-                    if "error" in data: return f" [PROVIDER ERROR: {data['error']}] "
+                    if "error" in data:
+                        raise RuntimeError(f"Provider error: {data['error']}")
                     msg = data.get("message", {})
                     return msg.get("content") or msg.get("thinking") or ""
                 except json.JSONDecodeError as e:
@@ -86,7 +88,8 @@ class OllamaProvider(BaseLLMProvider):
                     if not clean_line: continue
                     try:
                         chunk_json = json.loads(clean_line)
-                        if "error" in chunk_json: full_content += f" [PROVIDER ERROR: {chunk_json['error']}] "
+                        if "error" in chunk_json:
+                            raise RuntimeError(f"Provider error: {chunk_json['error']}")
                         # Extract both content and thinking (some models route tokens to thinking even with thinking=False)
                         content = chunk_json.get("message", {}).get("content") or ""
                         thinking = chunk_json.get("message", {}).get("thinking") or ""
@@ -98,6 +101,8 @@ class OllamaProvider(BaseLLMProvider):
                             full_content += thinking
                             await chunk_callback(thinking)
                         if chunk_json.get("done"): break
+                    except RuntimeError:
+                        raise  # Let provider errors propagate to AgentLoop retry logic
                     except Exception as e:
                         log.error(f"Error parsing streaming chunk: {e} | Raw line: {line!r}")
         return full_content
