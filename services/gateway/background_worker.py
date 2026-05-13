@@ -126,6 +126,18 @@ class RavenWorker:
             if is_autonomous:
                 log.info(f"[Worker] Acquiring TIER3 (Raven) lock for job {job_id}")
                 async with TIER3_LOCK:
+                    mission_id = payload.get("_mission_id")
+                    if mission_id:
+                        try:
+                            async with httpx.AsyncClient(timeout=10.0) as client:
+                                await client.patch(
+                                    f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
+                                    json={"status": "executing"},
+                                    headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+                                )
+                        except Exception as patch_e:
+                            log.error(f"Failed to update mission {mission_id} to executing: {patch_e}")
+                            
                     async def chunk_callback(chunk: str):
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id  # traceability
@@ -133,6 +145,18 @@ class RavenWorker:
             else:
                 log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
                 async with TIER2_SEMAPHORE:
+                    mission_id = payload.get("_mission_id")
+                    if mission_id:
+                        try:
+                            async with httpx.AsyncClient(timeout=10.0) as client:
+                                await client.patch(
+                                    f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
+                                    json={"status": "executing"},
+                                    headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+                                )
+                        except Exception as patch_e:
+                            log.error(f"Failed to update mission {mission_id} to executing: {patch_e}")
+                            
                     async def chunk_callback(chunk: str):
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id

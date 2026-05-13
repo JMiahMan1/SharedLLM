@@ -2750,7 +2750,7 @@ async def execute_raven_mission(id: int, request: Request):
         # Update status
         await client.patch(
             f"{IDENTITY_SVC}/api/raven/missions/{id}",
-            json={"status": "executing"},
+            json={"status": "queued"},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
     return {"status": "SUCCESS", "message": "Mission dispatched."}
@@ -2802,13 +2802,13 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
             "_mission_id": mission_data["id"]
         })
         
-        # Update status to executing
+        # Update status to queued
         await client.patch(
             f"{IDENTITY_SVC}/api/raven/missions/{mission_data['id']}",
-            json={"status": "executing"},
+            json={"status": "queued"},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        mission_data["status"] = "executing"
+        mission_data["status"] = "queued"
         
         return {"status": "SUCCESS", "mission": mission_data}
 
