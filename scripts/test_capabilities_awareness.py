@@ -2,7 +2,7 @@ import httpx
 import json
 import sys
 
-GATEWAY_URL = "http://192.168.2.205:8080/api/chat"
+GATEWAY_URL = "http://ai.local:8080/api/chat"
 INTERNAL_SECRET = "change-me-in-production"
 
 tests = [

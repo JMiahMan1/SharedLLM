@@ -4,7 +4,7 @@ import asyncio
 import json
 
 # Configuration
-SERVER_IP = "192.168.2.205"
+SERVER_IP = "ai.local"
 GATEWAY_URL = f"http://{SERVER_IP}:8080" # All frontend calls go here
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 

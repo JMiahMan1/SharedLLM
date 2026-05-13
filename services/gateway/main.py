@@ -451,8 +451,8 @@ app.add_middleware(
         "http://localhost",
         "http://localhost:5173",
         "http://localhost:8080",
-        "http://192.168.2.205",
-        "http://192.168.2.205:8080",
+        "http://ai.local",
+        "http://ai.local:8080",
         "https://ai.local",
         "http://ai.local"
     ],

@@ -4,7 +4,7 @@ import asyncio
 import json
 
 # Configuration
-SERVER_IP = "192.168.2.205"
+SERVER_IP = "ai.local"
 GATEWAY_URL = f"http://{SERVER_IP}:8080" # Via Caddy
 IDENTITY_URL = f"http://{SERVER_IP}:8001"
 EXECUTION_URL = f"http://{SERVER_IP}:8003"

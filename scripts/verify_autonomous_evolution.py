@@ -2,8 +2,8 @@ import httpx
 import json
 import time
 
-GATEWAY_URL = "http://192.168.2.205:8080/api/chat"
-RAG_URL = "http://192.168.2.205:8080/api/storage" # Or internal if possible, but let's hit gateway
+GATEWAY_URL = "http://ai.local:8080/api/chat"
+RAG_URL = "http://ai.local:8080/api/storage" # Or internal if possible, but let's hit gateway
 INTERNAL_SECRET = "change-me-in-production"
 
 tests = [

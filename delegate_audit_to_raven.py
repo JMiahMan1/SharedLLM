@@ -3,7 +3,7 @@ import asyncio
 import json
 import sys
 
-SERVER_IP = "192.168.2.205"
+SERVER_IP = "ai.local"
 GATEWAY_URL = f"http://{SERVER_IP}:8080"
 API_KEY = "c7133d7546cee7bbd04dcf48cb7efc2bf3a080d7a1032ac3"
 

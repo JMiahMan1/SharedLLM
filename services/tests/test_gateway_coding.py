@@ -2,7 +2,7 @@ import httpx
 import json
 import time
 
-GATEWAY_URL = "http://192.168.2.205:11435"
+GATEWAY_URL = "http://ai.local:11435"
 # In a real test, we would get this from a proper auth flow, 
 # but for smoke tests we assume localhost bypass or pre-known secret.
 INTERNAL_SECRET = "change-me-in-production"
