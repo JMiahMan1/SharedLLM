@@ -2,7 +2,7 @@ import httpx
 import json
 import time
 
-GATEWAY_URL = "http://192.168.2.205:11435"
+GATEWAY_URL = "http://ai.local:11435"
 INTERNAL_SECRET = "change-me-in-production"
 
 def run_coding_task(description, expected_markers, workspace_id="SharedLLM", relative_path=None):
@@ -37,7 +37,7 @@ def run_coding_task(description, expected_markers, workspace_id="SharedLLM", rel
         if relative_path:
             verify_payload = {"workspace_id": workspace_id, "relative_path": relative_path}
             # Note: We call the runtime directly to verify the source of truth
-            RUNTIME_URL = "http://192.168.2.205:8007" # SharedLLM's workspace_runtime
+            RUNTIME_URL = "http://ai.local:8007" # SharedLLM's workspace_runtime
             v_resp = httpx.post(f"{RUNTIME_URL}/files/read", json=verify_payload, headers=headers)
             if v_resp.status_code == 200:
                 file_data = v_resp.json()

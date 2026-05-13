@@ -1,0 +1,6 @@
+                        content = chunk_json.get("message", {}).get("content") or ""
+                        print(f"[STREAM DEBUG] chunk done={chunk_json.get('done')} content_len={len(content)} content={content[:50]!r}")
+                        if content:
+                            full_content += content
+                            await chunk_callback(content)
+                        print(f"[STREAM DEBUG] full_content_len={len(full_content)}")

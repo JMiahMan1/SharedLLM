@@ -4,7 +4,7 @@
 
 **Commit:** `902f69d` feat(raven): implement hard timeout and configurable heartbeat parameters  
 ** Branch:** `microservices`  
-**Deployment Target:** `192.168.2.205` (ai.local) — SharedLLM production stack
+**Deployment Target:** `ai.local` (ai.local) — SharedLLM production stack
 
 ---
 
@@ -32,7 +32,7 @@
 
 ## Deployment Steps
 
-### On Host (192.168.2.205)
+### On Host (ai.local)
 
 ```bash
 # 1. Navigate to workspace

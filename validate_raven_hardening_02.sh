@@ -1,11 +1,11 @@
 #!/bin/bash
 # Raven Hardening Slice 02 — Post-Deployment Validation
-# Run this script on the server (192.168.2.205) after deployment
+# Run this script on the server (ai.local) after deployment
 # Tests the hardened AgentLoop timeout and heartbeat logic
 
 set -e
 
-REMOTE_HOST="192.168.2.205"
+REMOTE_HOST="ai.local"
 REMOTE_USER="ai-server"
 REMOTE_PATH="/home/jeremiah/Summers Drive/Code/SharedLLM"
 
