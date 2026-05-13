@@ -1161,15 +1161,14 @@ async def orchestrate_code_change(
       f"### User Request: {refined_query}\n"
     )
     
-    payload = {
-      "model": selected_model,
-      "messages": [
-        {"role": "system", "content": CODE_HELPER_SYSTEM_INSTRUCTION},
-        {"role": "user", "content": prompt},
-      ],
-      "stream": False,
-      "format": "json"
-    }
+     payload = {
+       "model": selected_model,
+       "messages": [
+         {"role": "system", "content": CODE_HELPER_SYSTEM_INSTRUCTION},
+         {"role": "user", "content": prompt},
+       ],
+       "stream": False,
+     }
     
     data = await execute_inference(payload)
     try:
