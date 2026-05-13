@@ -17,7 +17,7 @@ export default function RavenOpsPanel() {
   const { data: missions = [], isLoading: missionsLoading } = useQuery<RavenMission[]>({
     queryKey: ['raven-missions-admin'],
     queryFn: () => api.getAdminRavenQueue(),
-    refetchInterval: 10000,
+    refetchInterval: 3000,
   });
 
   const updateConfigMutation = useMutation({
@@ -137,13 +137,13 @@ export default function RavenOpsPanel() {
         
         {missionsLoading ? (
            <div className="text-slate-500 text-sm italic">Loading missions...</div>
-        ) : missions.filter(m => m.mission_type === 'admin_fix').length === 0 ? (
+        ) : missions.filter(m => m.mission_type === 'admin_fix' && m.status === 'pending').length === 0 ? (
            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
              No pending anomalies detected in the architecture.
            </div>
         ) : (
           <div className="space-y-3">
-            {missions.filter(m => m.mission_type === 'admin_fix').map((mission) => (
+            {missions.filter(m => m.mission_type === 'admin_fix' && m.status === 'pending').map((mission) => (
               <div key={mission.id} className="glass-card p-4 border-l-4 border-l-orange-500/50">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
@@ -169,6 +169,53 @@ export default function RavenOpsPanel() {
                         </>
                       )}
                     </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-8 pt-8 border-t border-white/10">
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="flex items-center gap-2 text-sm font-bold text-slate-300 uppercase tracking-widest">
+            <Activity size={16} className="text-emerald-400 animate-pulse" />
+            Active Missions Monitor
+          </h4>
+        </div>
+
+        {missionsLoading ? (
+           <div className="text-slate-500 text-sm italic">Loading active missions...</div>
+        ) : missions.filter(m => m.status === 'running' || m.status === 'queued').length === 0 ? (
+           <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
+             No missions are currently running.
+           </div>
+        ) : (
+          <div className="space-y-3">
+            {missions.filter(m => m.status === 'running' || m.status === 'queued').map((mission) => (
+              <div key={mission.id} className="glass-card p-4 border-l-4 border-l-emerald-500/50">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-3 mb-1">
+                       <span className="bg-emerald-500/10 text-emerald-300 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest flex items-center gap-1">
+                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                         {mission.status}
+                       </span>
+                       <span className="text-sm font-bold text-white truncate">Target: {mission.target_container || 'System'}</span>
+                       <span className="text-xs text-slate-400 ml-2">({mission.mission_type})</span>
+                    </div>
+                    <p className="text-xs text-slate-400 line-clamp-1 mb-2">{mission.proposed_mission}</p>
+                    <div className="w-full bg-black/40 rounded-full h-1.5 mb-1 overflow-hidden">
+                      <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${mission.progress || 0}%` }}></div>
+                    </div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-widest flex justify-between">
+                      <span>Progress: {mission.progress || 0}%</span>
+                      <span>Dispatched: {new Date(mission.created_at).toLocaleString()}</span>
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0">
+                     {/* Placeholder for Watch Live button */}
                   </div>
                 </div>
               </div>
