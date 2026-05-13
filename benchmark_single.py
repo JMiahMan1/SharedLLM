@@ -3,7 +3,7 @@ import time
 import json
 import os
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://192.168.2.114:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://jeremiah-home-desktop.local:11434")
 
 PROMPT = """
 Write a Python class 'MultiTenantLock' that uses Redis (redis-py) to implement a distributed lock.

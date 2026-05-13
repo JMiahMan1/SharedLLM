@@ -1,11 +1,11 @@
 #!/bin/bash
 # Raven Hardening Slice 02 — Deployment Script
-# This script deploys the changes to 192.168.2.205 (ai.local)
+# This script deploys the changes to ai.local (ai.local)
 # Prerequisites: SSH access to ai-server user, docker-compose installed
 
 set -e  # exit on error
 
-REMOTE_HOST="192.168.2.205"
+REMOTE_HOST="ai.local"
 REMOTE_USER="ai-server"
 REMOTE_PATH="/home/jeremiah/Summers Drive/Code/SharedLLM"
 BRANCH="microservices"
@@ -80,7 +80,7 @@ echo "=== Deployment Complete ==="
 echo ""
 echo "Post-deployment checks:"
 echo "1. Monitor gateway logs: ssh ${REMOTE_USER}@${REMOTE_HOST} 'docker-compose logs -f gateway'"
-echo "2. Verify Raven jobs in UI: http://192.168.2.205:8080/lab"
+echo "2. Verify Raven jobs in UI: http://ai.local:8080/lab"
 echo "3. Check for 'HARD TIMEOUT' warnings in logs (should be rare)"
 echo ""
 echo "Rollback (if needed):"

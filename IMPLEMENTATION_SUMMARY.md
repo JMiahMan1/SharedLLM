@@ -109,7 +109,7 @@ RAVEN_HUNG_THRESHOLD = int(os.getenv("RAVEN_HUNG_THRESHOLD", "240"))
 
 ### Deployment Instructions
 
-**Target:** `192.168.2.205` (ai.local)  
+**Target:** `ai.local` (ai.local)  
 **User:** `ai-server` (or `jeremiah`)  
 **Path:** `/home/jeremiah/Summers Drive/Code/SharedLLM`
 
@@ -117,7 +117,7 @@ RAVEN_HUNG_THRESHOLD = int(os.getenv("RAVEN_HUNG_THRESHOLD", "240"))
 
 ```bash
 # 1. SSH into the service
-ssh ai-server@192.168.2.205
+ssh ai-server@ai.local
 
 # 2. Navigate to workspace
 cd "/home/jeremiah/Summers Drive/Code/SharedLLM"
