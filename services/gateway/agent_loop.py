@@ -252,13 +252,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     log.info(f"[AgentLoop] Active Provider: {active_provider_name} | Model: {selected_model}")
 
-     ollama_payload = {
-         "model": selected_model,
-         "messages": [
-             {"role": "system", "content": full_system}
-         ] + short_term + [{"role": "user", "content": query}],
-         "stream": False,
-     }
+    ollama_payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": full_system}
+        ] + short_term + [{"role": "user", "content": query}],
+        "stream": False,
+    }
 
     MAX_TOOL_ITERATIONS = 30
     loop_start = asyncio.get_event_loop().time()
