@@ -421,6 +421,10 @@ def get_http_client() -> httpx.AsyncClient:
     return _global_http_client
 
 @asynccontextmanager
+async def borrow_http_client():
+    yield get_http_client()
+
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Gateway starting up...")
     engine.load()
@@ -2058,7 +2062,7 @@ async def proxy_change_password(request: Request):
 @app.post("/api/users/{username}/password")
 async def proxy_admin_set_password(username: str, request: Request):
     body = await request.json()
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/users/{username}/password",
             json=body,
@@ -2069,7 +2073,7 @@ async def proxy_admin_set_password(username: str, request: Request):
 
 @app.post("/api/auth/import/nextcloud")
 async def proxy_import_nextcloud_users(request: Request):
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/auth/import/nextcloud",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
@@ -2626,7 +2630,7 @@ async def purge_storage_collection(collection_name: str, request: Request):
 
     body = await request.json()
     
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         resp = await client.post(
             f"{RAG_SVC}/rag/purge/{collection_name}?user_id={user_id}",
             json=body.get("filter", {}),
@@ -2663,7 +2667,7 @@ async def proxy_admin_volumes(request: Request):
     if not creds_data.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
 
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/volumes",
             json={"user_context": creds_data},
@@ -2691,7 +2695,7 @@ async def update_raven_config(request: Request):
     if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
     body = await request.json()
     
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         for k, v in body.items():
             if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold"]:
                 await client.patch(
@@ -2706,7 +2710,7 @@ async def get_raven_queue(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
     
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/raven/missions",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
@@ -2718,7 +2722,7 @@ async def execute_raven_mission(id: int, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
     
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         # Get mission
         resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions", headers={"X-Internal-Secret": INTERNAL_SECRET})
         missions = resp.json()
@@ -2775,7 +2779,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         "user_id": creds.get("user_id") # We need to ensure user_id is in creds or we look it up
     }
     
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/raven/missions",
             json=mission_payload,
@@ -2791,7 +2795,7 @@ async def get_user_missions(request: Request):
     if not creds: raise HTTPException(status_code=401, detail="Unauthorized")
     
     # Ideally filter by user_id if we want isolation, for now just proxy it all
-    async with get_http_client() as client:
+    async with borrow_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/raven/missions",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
