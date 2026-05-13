@@ -211,9 +211,17 @@ class RavenWorker:
             log.error(f"Self-repair credential resolution error: {e}")
             creds = {"user": "default", "is_admin": True}  # Fallback
         
+        try:
+            from agent_loop import get_dynamic_llm_settings
+            settings = await get_dynamic_llm_settings()
+            coding_model = settings.get("ollama_coding_model", "qwen2.5-coder:7b")
+        except Exception as e:
+            log.error(f"Failed to fetch coding model for repair, falling back: {e}")
+            coding_model = "qwen2.5-coder:7b"
+
         await self.job_queue.enqueue_job("raven_admin", {
             "query": query,
-            "model": "qwen2.5-coder:7b",
+            "model": coding_model,
             "system": "You are a repair agent.",
             "stream": False,
             "creds": creds
