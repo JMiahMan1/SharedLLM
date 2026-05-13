@@ -4,10 +4,12 @@ import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle } from 'luc
 import toast from 'react-hot-toast';
 import { api, type RavenConfig, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
+import RavenAuditLog from './RavenAuditLog';
 
 export default function RavenOpsPanel() {
   const queryClient = useQueryClient();
   const [draftConfig, setDraftConfig] = useState<Partial<RavenConfig>>({});
+  const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
 
   const { data: config, isLoading: configLoading } = useQuery<RavenConfig>({
     queryKey: ['raven-config'],
@@ -55,7 +57,15 @@ export default function RavenOpsPanel() {
           </h3>
           <p className="mt-1 text-sm text-slate-400">Sentinel ROZ Control Panel and Mission Triage.</p>
         </div>
-        <HelpTooltip docName="raven_ops_implementation.md" sectionTitle="Interception & Triage Workflow" label="Autonomous Ops" />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsAuditLogOpen(true)}
+            className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-300 hover:bg-slate-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+          >
+            Audit Log
+          </button>
+          <HelpTooltip docName="raven_ops_implementation.md" sectionTitle="Interception & Triage Workflow" label="Autonomous Ops" />
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -223,6 +233,11 @@ export default function RavenOpsPanel() {
           </div>
         )}
       </div>
+
+      <RavenAuditLog 
+        isOpen={isAuditLogOpen} 
+        onClose={() => setIsAuditLogOpen(false)} 
+      />
     </div>
   );
 }
