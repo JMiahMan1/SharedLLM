@@ -83,6 +83,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 class WorkspaceRef(BaseModel):
     workspace_id: Optional[str] = None
     local_path: Optional[str] = None
+    host_mount_path: Optional[str] = None
+    container_mount_path: Optional[str] = None
     rag_user: Optional[str] = None
     voice_id: Optional[str] = None
     device_id: Optional[str] = None
@@ -374,14 +376,20 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     is_admin = bool(identity and identity.get("is_admin"))
     match = None
 
+    # Resolution priority: workspace_id > container_mount_path > local_path
     if ref.workspace_id:
         match = next((item for item in registry if item.get("id") == ref.workspace_id), None)
-    elif ref.local_path:
-        match = next((item for item in registry if item.get("local_path") == ref.local_path), None)
+    elif ref.container_mount_path or ref.local_path:
+        lookup_path = ref.container_mount_path or ref.local_path
+        match = next(
+            (item for item in registry
+             if (item.get("container_mount_path") or item.get("local_path")) == lookup_path),
+            None
+        )
         if match is None:
-            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "local_path": ref.local_path}
+            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "local_path": lookup_path}
     else:
-        raise HTTPException(status_code=400, detail="workspace_id or local_path is required")
+        raise HTTPException(status_code=400, detail="workspace_id or local_path/container_mount_path is required")
 
     if match is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -392,17 +400,28 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     if access_policy == "admin_only" and not is_admin:
         raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' requires an admin identity")
     owner_user = str(match.get("owner_user") or "").strip()
-    if owner_user and not is_admin and owner_user != resolved_user:
+
+    # Default Shared Profile: owner_user="default" grants read+git_status to all authenticated users
+    is_default_shared = owner_user == "default"
+    if owner_user and not is_admin and owner_user != resolved_user and not is_default_shared:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    resolved_path = resolve_safe_path(get_workspace_root(), str(match["local_path"]))
+    # Use container_mount_path if available, fallback to local_path
+    effective_path = str(match.get("container_mount_path") or match["local_path"])
+    resolved_path = resolve_safe_path(get_workspace_root(), effective_path)
     if not resolved_path.is_dir():
-         raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {match['local_path']}")
+         raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {effective_path}")
     workspace = dict(match)
     workspace["resolved_path"] = str(resolved_path)
     workspace["scope"] = str(workspace.get("scope") or "user")
     workspace["access_policy"] = access_policy
-    workspace["capabilities"] = _workspace_capabilities(workspace)
+
+    # For default-shared workspaces accessed by non-owners, restrict capabilities to read-only
+    if is_default_shared and not is_admin and owner_user != resolved_user:
+        workspace["capabilities"] = ["read", "git_status"]
+    else:
+        workspace["capabilities"] = _workspace_capabilities(workspace)
+
     if resolved_user:
         workspace["resolved_user"] = resolved_user
     if identity:
@@ -1000,7 +1019,9 @@ def list_workspaces(
         item = dict(entry)
         access_policy = _workspace_access_policy(entry)
         owner_user = str(item.get("owner_user") or "").strip()
-        if owner_user and not is_admin and owner_user != resolved_user:
+        is_default_shared = owner_user == "default"
+        # Show workspace if: no owner, user is admin, user is owner, OR workspace is default-shared
+        if owner_user and not is_admin and owner_user != resolved_user and not is_default_shared:
             continue
         if access_policy == "admin_only" and resolved_user and not is_admin:
             continue
@@ -1012,14 +1033,19 @@ def list_workspaces(
             items.append(item)
             continue
         try:
-            item["resolved_path"] = str(resolve_safe_path(get_workspace_root(), str(entry["local_path"])))
+            effective_path = str(entry.get("container_mount_path") or entry["local_path"])
+            item["resolved_path"] = str(resolve_safe_path(get_workspace_root(), effective_path))
             item["available"] = True
         except HTTPException:
             item["resolved_path"] = None
             item["available"] = False
         item["scope"] = str(item.get("scope") or "user")
         item["access_policy"] = access_policy
-        item["capabilities"] = _workspace_capabilities(item)
+        # Default-shared workspaces get restricted capabilities for non-owners
+        if is_default_shared and not is_admin and owner_user != resolved_user:
+            item["capabilities"] = ["read", "git_status"]
+        else:
+            item["capabilities"] = _workspace_capabilities(item)
         if resolved_user:
             item["resolved_user"] = resolved_user
         if identity:

@@ -43,6 +43,7 @@ services:
     build: ./services/execution
     container_name: sharedllm_execution
     restart: unless-stopped
+    user: "1000:1000"
     env_file:
       - .env
     extra_hosts:
@@ -53,6 +54,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - RAG_SVC_URL=http://rag:8004
       - TZ=America/Phoenix
+      - HOME=/home/sharedllm
     group_add:
       - "${DOCKER_GID:-980}"
     security_opt:
@@ -63,7 +65,7 @@ services:
       - ./services/tests:/app/tests
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/workspace/SharedLLM
-      - /home/jeremiah/.ssh:/root/.ssh:ro
+      - /home/jeremiah/.ssh:/home/sharedllm/.ssh:ro
       - kokoro_models:/app/models
 
   rag:
@@ -112,6 +114,7 @@ services:
       dockerfile: services/gateway/Dockerfile
     container_name: sharedllm_gateway
     restart: unless-stopped
+    user: "1000:1000"
     env_file:
       - .env
     extra_hosts:
@@ -132,6 +135,7 @@ services:
       - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
       - CODING_MODEL=${CODING_MODEL:-qwen2.5-coder:7b}
       - TZ=America/Phoenix
+      - HOME=/home/sharedllm
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
       - ./services/gateway/main.py:/app/main.py
@@ -145,8 +149,8 @@ services:
       - ./services/gateway/history.py:/app/history.py
       - ./services/gateway/prompts.py:/app/prompts.py
       - ./services/gateway/intent_engine.py:/app/intent_engine.py
-      - huggingface_cache:/root/.cache/huggingface
-      - qdrant_cache:/root/.cache/qdrant
+      - huggingface_cache:/home/sharedllm/.cache/huggingface
+      - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
 
   logging:
@@ -180,6 +184,7 @@ services:
     build: ./services/workspace_runtime
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
+    user: "1000:1000"
     ports:
       - 8007:8007
     environment:
@@ -192,6 +197,7 @@ services:
       - WORKSPACE_RUNTIME_ROOT=/workspace/SharedLLM
       - GIT_WEBHOOK_SECRET=${GIT_WEBHOOK_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
+      - HOME=/home/sharedllm
     volumes:
       - ./:/workspace/SharedLLM
       - ./services/workspace_runtime:/app
