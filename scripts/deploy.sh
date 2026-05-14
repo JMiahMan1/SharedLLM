@@ -9,6 +9,30 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_FILE="$REPO_DIR/data/deploy.log"
+# Detect IDs for Docker
+export PUID=$(id -u)
+export PGID=$(id -g)
+export DOCKER_GID=$(getent group docker | cut -d: -f3)
+
+# Fallback if DOCKER_GID is empty (e.g. group not found)
+if [ -z "$DOCKER_GID" ]; then
+    DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 980)
+fi
+
+# Pre-flight check: ensure critical environment variables are injected
+if [ -z "${INTERNAL_SECRET:-}" ]; then
+    if [ -f "$REPO_DIR/.env" ]; then
+        set -a
+        source "$REPO_DIR/.env"
+        set +a
+    fi
+fi
+
+if [ -z "${INTERNAL_SECRET:-}" ]; then
+    echo "FATAL: INTERNAL_SECRET is not set in the environment or .env file!"
+    exit 1
+fi
+
 COMPOSE="docker compose"
 
 # Ensure log dir exists
@@ -23,10 +47,17 @@ log() {
 cd "$REPO_DIR"
 
 log "========================================="
-log "SharedLLM Auto-Deploy Started"
+log "SharedLLM Deployment System"
 log "Branch: $(git rev-parse --abbrev-ref HEAD)"
 log "Commit: $(git rev-parse --short HEAD)"
 log "========================================="
+
+# If arguments are passed, act as a docker compose wrapper (like up.sh)
+if [ "$#" -gt 0 ]; then
+    log "Custom command detected: $COMPOSE $*"
+    $COMPOSE "$@"
+    exit 0
+fi
 
 # --- Step 1: Check what changed ---
 CHANGED_FILES=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || true)
