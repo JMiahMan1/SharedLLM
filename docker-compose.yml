@@ -43,7 +43,7 @@ services:
     build: ./services/execution
     container_name: sharedllm_execution
     restart: unless-stopped
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
     extra_hosts:
@@ -114,7 +114,7 @@ services:
       dockerfile: services/gateway/Dockerfile
     container_name: sharedllm_gateway
     restart: unless-stopped
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
     extra_hosts:
@@ -184,7 +184,7 @@ services:
     build: ./services/workspace_runtime
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - 8007:8007
     environment:
