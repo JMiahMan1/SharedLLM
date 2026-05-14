@@ -20,6 +20,8 @@ export interface Workspace {
   id: string;
   display_name: string;
   local_path: string;
+  host_mount_path?: string | null;
+  container_mount_path?: string | null;
   resolved_path?: string | null;
   available?: boolean;
   nextcloud_path?: string | null;
@@ -31,7 +33,10 @@ export interface Workspace {
   capabilities: string[];
   owner_user?: string | null;
   auto_pull_enabled: boolean;
+  auto_backup_enabled?: boolean;
   webhook_token?: string | null;
+  quarantined?: boolean;
+  last_raven_mission_id?: number | null;
 }
 
 type WorkspaceListResponse =

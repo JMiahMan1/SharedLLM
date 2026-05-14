@@ -6,7 +6,9 @@ class Workspace(SQLModel, table=True):
     id: str = Field(primary_key=True)
     display_name: str
     access_policy: str = Field(default="authenticated")
-    local_path: str
+    local_path: str  # Legacy: kept for backward compat, maps to container_mount_path
+    host_mount_path: Optional[str] = None  # Absolute path on host (e.g. /home/jeremiah/Code/SharedLLM)
+    container_mount_path: Optional[str] = None  # Path inside container (e.g. relative to WORKSPACE_RUNTIME_ROOT)
     nextcloud_path: Optional[str] = None
     repo_url: Optional[str] = None
     git_remote: Optional[str] = Field(default="origin")
@@ -21,3 +23,9 @@ class Workspace(SQLModel, table=True):
     webhook_token_enc: Optional[str] = Field(default=None)
     quarantined: bool = Field(default=False)
     last_raven_mission_id: Optional[int] = Field(default=None)
+
+    @property
+    def effective_container_path(self) -> str:
+        """Returns the path to use for container-internal operations."""
+        return self.container_mount_path or self.local_path
+

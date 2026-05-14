@@ -20,13 +20,14 @@ function cn(...inputs: ClassValue[]) {
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-  { icon: Settings, label: 'System Matrix', path: '/admin', adminOnly: true },
+  { icon: Boxes, label: 'My Workspaces', path: '/workspaces' },
   { icon: UserCircle, label: 'Identity', path: '/identity' },
   { icon: MessageSquare, label: 'Communication', path: '/communication' },
-  { icon: FlaskConical, label: 'Jarvis Lab', path: '/lab', adminOnly: true },
   { icon: Database, label: 'Knowledge Hub', path: '/knowledge' },
-  { icon: Boxes, label: 'Workspaces', path: '/workspaces', adminOnly: true },
   { icon: HelpCircle, label: 'Help Hub', path: '/docs' },
+  // Admin-only: System Ops & Raven
+  { icon: Settings, label: 'System Ops & Raven', path: '/admin', adminOnly: true },
+  { icon: FlaskConical, label: 'Jarvis Lab', path: '/lab', adminOnly: true },
 ];
 
 const Sidebar = () => {

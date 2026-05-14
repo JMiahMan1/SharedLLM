@@ -67,7 +67,7 @@ function App() {
             <Route path="/communication" element={<ProtectedRoute><Communication /></ProtectedRoute>} />
             <Route path="/lab" element={<ProtectedRoute requireAdmin={true}><JarvisLab /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute><KnowledgeHub /></ProtectedRoute>} />
-            <Route path="/workspaces" element={<ProtectedRoute requireAdmin={true}><Workspaces /></ProtectedRoute>} />
+            <Route path="/workspaces" element={<ProtectedRoute><Workspaces /></ProtectedRoute>} />
             <Route path="/docs" element={<ProtectedRoute><Docs /></ProtectedRoute>} />
           </Routes>
         </Router>

@@ -9,5 +9,14 @@ RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BA
 COPY services/gateway/. .
 COPY docs ./docs
 COPY README.md EXAMPLES.md TESTING.md ./
+
+# --- Privilege Drop: create dedicated sharedllm user (UID/GID 1000) ---
+RUN groupadd -g 1000 sharedllm || true \
+    && useradd -u 1000 -g 1000 -m -s /bin/bash sharedllm || true \
+    && chown -R 1000:1000 /app \
+    && mkdir -p /home/sharedllm/.cache/huggingface /home/sharedllm/.cache/qdrant \
+    && chown -R 1000:1000 /home/sharedllm
+ENV HOME=/home/sharedllm
+
 EXPOSE 8002
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "11435"]
