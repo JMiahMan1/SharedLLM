@@ -460,12 +460,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if "function" in tool_data and "action" not in tool_data:
                 tool_data["action"] = tool_data["function"].get("name", "")
                 tool_data["payload"] = tool_data["function"].get("arguments", {})
+
+            log.info(f"[AgentLoop] Normalized Tool Data: {tool_data}")
         
-        if not tool_data:
+        if not tool_data or not tool_data.get("action"):
             # Blank/whitespace-only response is a failure — re-prompt
             if not ans or not ans.strip():
                 log.warning(f"[AgentLoop] Empty response on iter {iter_num}; re-prompting...")
                 action_log.append(f"ITERATION {iter_num}: Model returned empty response — forcing correction.")
+                continue
+
+            # If tool_data exists but has no action, it might be a malformed JSON that parsed but is missing keys
+            if tool_data and not tool_data.get("action"):
+                log.warning(f"[AgentLoop] Tool data missing 'action' key: {tool_data}")
+                action_log.append(f"ITERATION {iter_num}: Your JSON is missing the 'action' key. Use one of the provided tool names.")
                 continue
 
             # If the previous tool call resulted in an ERROR, we MUST NOT terminate.
