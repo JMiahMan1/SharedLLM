@@ -40,6 +40,9 @@
     handle /api/workspaces* {
         reverse_proxy gateway:11435
     }
+    handle /api/models* {
+        reverse_proxy gateway:11435
+    }
 
     handle /api/logs* {
         reverse_proxy logging:8006
@@ -77,6 +80,9 @@
     }
 
     handle /api/admin/raven* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/admin/services* {
         reverse_proxy gateway:11435
     }
 
