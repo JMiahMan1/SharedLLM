@@ -17,7 +17,8 @@ def health():
 
 # Initialize Docker client
 try:
-    client = docker.from_env()
+    # Explicitly use the unix socket to avoid "http+docker" scheme errors
+    client = docker.DockerClient(base_url="unix://var/run/docker.sock")
 except Exception as e:
     print(f"Warning: Failed to initialize docker client: {e}")
     client = None
