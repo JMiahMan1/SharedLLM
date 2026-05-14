@@ -165,17 +165,6 @@ def extract_action_json(text: str) -> dict | None:
 
 async def get_dynamic_llm_settings() -> dict:
     """Fetches elastic LLM routing configuration directly from the Identity DB."""
-    defaults = {
-        "assistant_model": "llama3.2:latest",
-        "coding_model": "qwen2.5-coder:latest",
-        "ollama_assistant_model": "llama3.2:latest",
-        "ollama_coding_model": "qwen2.5-coder:latest",
-        "cloud_assistant_model": "google/gemini-2.5-flash",
-        "cloud_coding_model": "google/gemini-2.5-flash",
-        "active_llm_provider": "ollama",
-        "jarvis_model": "Jarvis:latest"
-    }
-    
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(
@@ -183,16 +172,14 @@ async def get_dynamic_llm_settings() -> dict:
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status_code == 200:
-                # Convert list of {key: x, value: y} into a flat dictionary
                 fetched = {item["key"]: item["value"] for item in resp.json()}
-                # Merge with defaults, ignoring 'auto'
-                for k, v in defaults.items():
-                    if fetched.get(k) in [None, "auto", ""]:
-                        fetched[k] = v
+                for k, v in list(fetched.items()):
+                    if v in ["auto", ""]:
+                        fetched[k] = None
                 return fetched
     except Exception as e:
         log.error(f"[AgentLoop] Failed to fetch dynamic LLM settings: {e}")
-    return defaults
+    return {}
 
 async def get_vram_safe_params(model: str, settings: dict) -> dict:
     """Dynamically checks VRAM pressure using DB constraints."""
