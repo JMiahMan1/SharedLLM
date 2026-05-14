@@ -215,6 +215,16 @@ async def fetch_global_setting(key: str, default: str = "") -> str:
 
 async def get_llm_settings() -> Dict[str, str]:
     """Fetches full LLM settings from Identity Service."""
+    defaults = {
+        "assistant_model": "llama3.2:latest",
+        "coding_model": "qwen2.5-coder:latest",
+        "ollama_assistant_model": "llama3.2:latest",
+        "ollama_coding_model": "qwen2.5-coder:latest",
+        "cloud_assistant_model": "google/gemini-2.5-flash",
+        "cloud_coding_model": "google/gemini-2.5-flash",
+        "active_llm_provider": "ollama",
+        "jarvis_model": "Jarvis:latest"
+    }
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(
@@ -222,10 +232,14 @@ async def get_llm_settings() -> Dict[str, str]:
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status_code == 200:
-                return {item["key"]: item["value"] for item in resp.json()}
+                fetched = {item["key"]: item["value"] for item in resp.json()}
+                for k, v in defaults.items():
+                    if fetched.get(k) in [None, "auto", ""]:
+                        fetched[k] = v
+                return fetched
     except Exception as e:
         log.error(f"Failed to fetch dynamic LLM settings: {e}")
-    return {}
+    return defaults
 
 
 async def get_provider(settings: dict) -> BaseLLMProvider:
