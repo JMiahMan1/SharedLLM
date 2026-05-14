@@ -140,14 +140,16 @@ class OpenRouterProvider(BaseLLMProvider):
                 resp.raise_for_status()
                 data = resp.json()
                 msg = data.get("choices", [{}])[0].get("message", {})
-                content = msg.get("content", "")
-                reasoning = msg.get("reasoning_content", "")
-                if reasoning:
-                    return f"<think>\n{reasoning}\n</think>\n{content}"
-                return content
+                content = msg.get("content", "") or ""
+                reasoning = msg.get("reasoning_content", "") or ""
+                # Return only the visible content; fall back to reasoning if model
+                # put its entire answer in the thinking block (some model configs do this)
+                return content if content.strip() else reasoning
 
-            # Streaming
-            in_reasoning = False
+            # Streaming — reasoning_content is internal thinking, do NOT stream it
+            # to chunk_callback. Accumulate separately as a fallback only.
+            full_content = ""
+            full_reasoning = ""
             async with client.stream("POST", self.base_url, json=payload, headers=headers) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -160,29 +162,21 @@ class OpenRouterProvider(BaseLLMProvider):
                         try:
                             chunk_json = json.loads(data_str)
                             delta = chunk_json.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
-                            reasoning = delta.get("reasoning_content", "")
-                            
-                            chunk_to_yield = ""
+                            content = delta.get("content") or ""
+                            reasoning = delta.get("reasoning_content") or ""
+
                             if reasoning:
-                                if not in_reasoning:
-                                    chunk_to_yield += "<think>\n"
-                                    in_reasoning = True
-                                chunk_to_yield += reasoning
-                                
-                            if content is not None and content != "":
-                                if in_reasoning:
-                                    chunk_to_yield += "\n</think>\n"
-                                    in_reasoning = False
-                                chunk_to_yield += content
-                                
-                            if chunk_to_yield:
-                                full_content += chunk_to_yield
-                                await chunk_callback(chunk_to_yield)
+                                full_reasoning += reasoning
+
+                            if content:
+                                full_content += content
+                                await chunk_callback(content)
                         except Exception as e:
                             log.error(f"Error parsing streaming chunk: {e}")
-                            
-            if in_reasoning:
-                full_content += "\n</think>\n"
-                await chunk_callback("\n</think>\n")
-        return full_content
+
+            # If the model never emitted content (thinking-only response), fall back
+            # to the accumulated reasoning so the AgentLoop can still extract a JSON action.
+            if not full_content.strip() and full_reasoning.strip():
+                log.warning("[OpenRouterProvider] No content chunks received; falling back to reasoning_content")
+                return full_reasoning
+            return full_content
