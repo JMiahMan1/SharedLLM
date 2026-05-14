@@ -7,6 +7,10 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
 app = FastAPI(title="Control Plane Service")
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "control_plane"}
+
 # Initialize Docker client
 try:
     client = docker.from_env()
