@@ -123,11 +123,6 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - CONTROL_PLANE_URL=http://control_plane:8008
       - REDIS_URL=redis://redis:6379/0
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
-      - OLLAMA_TIMEOUT=600
-      - FAST_PATH_THRESHOLD=${FAST_PATH_THRESHOLD:-0.85}
-      - CODING_MODEL=${CODING_MODEL:-qwen2.5-coder:7b}
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
     volumes:
