@@ -15,6 +15,7 @@ try:
 except (ImportError, ValueError):
     from config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET
 
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 
 def _get_history_key(user: str) -> str:
