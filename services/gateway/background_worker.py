@@ -8,10 +8,7 @@ import asyncio
 import logging
 import httpx
 import os
-import json
-import time
 from typing import Any, Dict, Optional
-from datetime import datetime
 try:
     from .orchestrator import process_full_orchestration
     from .config import SYSTEM_IDENTITY
@@ -23,7 +20,7 @@ except (ImportError, ValueError):
 try:
     from .messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
 except (ImportError, ValueError):
-    from messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
+    from messaging import InferenceJobQueue, TIER2_SEMAPHORE, TIER3_LOCK
 
 log = logging.getLogger("gateway.background_worker")
 
@@ -65,7 +62,8 @@ class RavenWorker:
         await self._recover_orphaned_missions()
         self._health_task = asyncio.create_task(self._health_loop())
         self._inference_task = asyncio.create_task(self._inference_loop())
-        log.info("Raven Background Worker (Health + Inference) started.")
+        self._talk_task = asyncio.create_task(self._talk_monitor_loop())
+        log.info("Raven Background Worker (Health + Inference + Talk Monitor) started.")
 
     async def _recover_orphaned_missions(self):
         """
@@ -96,8 +94,12 @@ class RavenWorker:
 
     async def stop(self):
         self.is_running = False
-        if self._health_task: self._health_task.cancel()
-        if self._inference_task: self._inference_task.cancel()
+        if self._health_task:
+            self._health_task.cancel()
+        if self._inference_task:
+            self._inference_task.cancel()
+        if self._talk_task:
+            self._talk_task.cancel()
         await self.job_queue.close()
         log.info("Raven Background Worker stopped.")
 
@@ -140,6 +142,102 @@ class RavenWorker:
             except Exception as e:
                 log.error(f"Error in Inference loop: {e}")
                 await asyncio.sleep(5.0)
+
+    async def _talk_monitor_loop(self):
+        """Polls Nextcloud Talk for @jarvis mentions."""
+        log.info("Talk Monitor worker started.")
+        import redis.asyncio as redis
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
+        
+        while self.is_running:
+            try:
+                await self._check_talk_once(r)
+                await asyncio.sleep(10) # Poll every 10 seconds
+            except Exception as e:
+                log.error(f"Error in Talk Monitor loop: {e}")
+                await asyncio.sleep(30)
+
+    async def _check_talk_once(self, r):
+        """Perform a single poll of Nextcloud Talk."""
+        # 1. Resolve system credentials
+        creds = await self._get_system_creds()
+        if not creds or not creds.get("nextcloud_user"):
+            return
+
+        # 2. List rooms
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            list_resp = await client.post(
+                f"{EXECUTION_SVC}/execute/talk",
+                json={"user_context": creds, "action": "list"},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if list_resp.status_code != 200:
+                return
+            
+            rooms = list_resp.json().get("detail", {}).get("conversations", [])
+            for room in rooms:
+                token = room["token"]
+                
+                msg_resp = await client.post(
+                    f"{EXECUTION_SVC}/execute/talk",
+                    json={"user_context": creds, "action": "messages", "token": token, "limit": 5},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if msg_resp.status_code != 200:
+                    continue
+                    
+                messages = msg_resp.json().get("detail", {}).get("messages", [])
+                if not messages:
+                    continue
+                    
+                messages.sort(key=lambda m: m.get("id") or 0)
+                
+                last_processed = await r.get(f"jarvis:talk:last_msg:{token}")
+                new_last = last_processed
+                
+                for msg in messages:
+                    msg_id = str(msg.get("id"))
+                    if last_processed and int(msg_id) <= int(last_processed):
+                        continue
+                    
+                    new_last = msg_id
+                    content = msg.get("message", "")
+                    actor_id = msg.get("actor_id", "")
+                    
+                    if actor_id == creds.get("nextcloud_user"):
+                        continue
+
+                    if "@jarvis" in content.lower():
+                        query = content.replace("@jarvis", "").strip()
+                        log.info(f"[TalkMonitor] Detected @jarvis mention in room {token}: {query}")
+                        
+                        await self.job_queue.push_job(
+                            user_id=creds["user"],
+                            payload={
+                                "query": query,
+                                "model": "auto",
+                                "creds": creds,
+                                "_talk_token": token,
+                                "_talk_source": "nextcloud"
+                            }
+                        )
+                
+                if new_last != last_processed:
+                    await r.set(f"jarvis:talk:last_msg:{token}", new_last)
+
+    async def _get_system_creds(self) -> Optional[Dict[str, Any]]:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    "http://identity:8001/api/resolve",
+                    json={"rag_user": "default"},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if resp.status_code == 200:
+                    return resp.json()
+        except Exception as e:
+            log.error(f"Failed to resolve system credentials: {e}")
+        return None
 
     async def _process_inference_job(self, job: Dict[str, Any]):
         job_id = job["job_id"]
@@ -201,7 +299,8 @@ class RavenWorker:
                         log.warning(f"[Worker] Orchestration for mission {mission_id} was CANCELLED.")
                         ans = "Mission aborted by user."
                     finally:
-                        if kill_monitor: kill_monitor.cancel()
+                        if kill_monitor:
+                            kill_monitor.cancel()
             else:
                 log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
                 async with TIER2_SEMAPHORE:
@@ -224,6 +323,11 @@ class RavenWorker:
             
             await self.job_queue.complete_job(job_id, ans)
             
+            # --- TALK CALLBACK ---
+            talk_token = payload.get("_talk_token")
+            if talk_token:
+                await self._trigger_talk_callback(payload, str(ans))
+
             mission_id = payload.get("_mission_id")
             if mission_id:
                 try:
@@ -285,10 +389,36 @@ class RavenWorker:
         except Exception as e:
             log.error(f"TTS Callback failed: {e}")
 
+    async def _trigger_talk_callback(self, payload: Dict[str, Any], message: str):
+        """Send response back to Nextcloud Talk."""
+        try:
+            creds = payload.get("creds", {})
+            token = payload.get("_talk_token")
+            if not token:
+                return
+            
+            talk_payload = {
+                "user_context": creds,
+                "action": "send",
+                "token": token,
+                "message": message
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await client.post(
+                    f"{EXECUTION_SVC}/execute/talk",
+                    json=talk_payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+            log.info(f"Talk callback sent to room {token}")
+        except Exception as e:
+            log.error(f"Talk Callback failed: {e}")
+
     async def perform_health_check(self, error_threshold: int, settings: Dict[str, Any]):
         log.info("Performing Raven health check...")
         containers = await self._get_containers()
-        if not containers: return
+        if not containers:
+            return
         problematic = []
         for c in containers:
             errs = await self._get_errors(c["name"])

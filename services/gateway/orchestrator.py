@@ -3,7 +3,6 @@ import asyncio
 import logging
 import httpx
 import os
-import json
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 try:
     from .schemas import ResolvedCredentials
@@ -81,6 +80,7 @@ Available tool schemas for standard chat include:
 - WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, WorkspaceBootstrapRequest: inspect and modify workspace state.
 - StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest: inspect and manage storage providers.
 - SystemLearningRequest and DiscoverySyncRequest: record learnings and refresh discovered devices.
+- IdentityRequest: manage user profiles, discover new users from Nextcloud/HA, and sync Nextcloud users.
 
 When a tool is appropriate, output a fenced JSON object with exactly:
 ```json

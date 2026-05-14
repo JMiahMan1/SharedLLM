@@ -121,7 +121,7 @@ ALLOWED_TOOLS = {
     "workspaceshellrequest", "storagefilereadrequest", 
     "storagefilewriterequest", "storagelistrequest", "workspacebootstraprequest", 
     "systemlearningrequest", "discoverysyncrequest", "storageindexrequest",
-    "dockercomposerequest",
+    "dockercomposerequest", "identityrequest",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -556,6 +556,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
                 "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
                 "storageindexrequest": (STORAGE_SVC, "/index/full"),
+                "identityrequest": (EXECUTION_SVC, "/execute/identity"),
             }
 
             lookup_action = action.lower().strip() if action else ""

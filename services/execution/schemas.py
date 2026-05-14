@@ -70,6 +70,14 @@ class UserContext(BaseModel):
 
 
 
+class IdentityRequest(BaseRequest):
+    user_context: UserContext
+    action: Literal["list", "import_nextcloud", "discover", "create", "delete"]
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    is_admin: bool = False
+
 class ExecutionResult(BaseModel):
     model_config = {"extra": "ignore"}
     status: Literal["SUCCESS", "FAILURE", "PARTIAL"]

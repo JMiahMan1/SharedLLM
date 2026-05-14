@@ -3,16 +3,18 @@ import os
 import logging
 import asyncio
 import httpx
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from uuid import uuid4
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
+from fastapi.responses import JSONResponse
+import traceback
 try:
     from . import ha_client
     from .schemas import (
         UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
-        CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
+        CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
@@ -29,7 +31,7 @@ except (ImportError, ValueError):
         from execution.schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
+            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
@@ -45,7 +47,7 @@ except (ImportError, ValueError):
         from schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, TalkRequest,
+            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
@@ -111,8 +113,6 @@ async def lifespan(app: FastAPI):
     log.info("Execution Bridge shutting down.")
 
 
-from fastapi.responses import JSONResponse
-import traceback
 
 app = FastAPI(
     title="SharedLLM Execution Bridge",
@@ -209,6 +209,44 @@ async def execute_timer(req: TimerRequest):
 @app.post("/execute/talk", response_model=ExecutionResult)
 async def execute_talk(req: TalkRequest):
     return await talk.handle_talk(req)
+
+@app.post("/execute/identity", response_model=ExecutionResult)
+async def execute_identity(req: IdentityRequest):
+    """
+    Proxy user management actions to the Identity service.
+    """
+    action = req.action
+    log.info(f"[identity] Proxying action={action} for user={req.user_context.user}")
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = {"X-Internal-Secret": INTERNAL_SECRET}
+            if action == "import_nextcloud":
+                resp = await client.post(f"{IDENTITY_SVC_URL}/api/auth/import/nextcloud", headers=headers)
+            elif action == "discover":
+                resp = await client.get(f"{IDENTITY_SVC_URL}/api/auth/discover", headers=headers)
+            elif action == "list":
+                resp = await client.get(f"{IDENTITY_SVC_URL}/api/users", headers=headers)
+            elif action == "create":
+                payload = {
+                    "username": req.username,
+                    "display_name": req.display_name or req.username,
+                    "is_admin": req.is_admin
+                }
+                resp = await client.post(f"{IDENTITY_SVC_URL}/api/users", json=payload, headers=headers)
+            elif action == "delete":
+                resp = await client.delete(f"{IDENTITY_SVC_URL}/api/users/{req.username}", headers=headers)
+            else:
+                return _fail(f"Action {action} not supported", "identity")
+            
+            if resp.status_code in (200, 201, 204):
+                data = resp.json() if resp.status_code != 204 else {}
+                return _ok(f"Identity action '{action}' successful.", "identity", data)
+            else:
+                return _fail(f"Identity service returned {resp.status_code}: {resp.text}", "identity")
+    except Exception as e:
+        log.error(f"Identity proxy error: {e}")
+        return _fail(f"Identity proxy failed: {e}", "identity")
 
 @app.post("/execute/web_search", response_model=ExecutionResult)
 async def execute_web_search(req: WebSearchRequest):
@@ -586,7 +624,7 @@ async def execute_announce(req: AnnouncementRequest):
 
     # Fallback to local Piper if Kokoro failed or wasn't chosen
     if not result.get("ok"):
-        log.info(f"[announce] Falling back to HA Piper...")
+        log.info("[announce] Falling back to HA Piper...")
         result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "piper", target_player, {
             "message": req.message
         })
@@ -611,7 +649,8 @@ async def discovery_entities(ha_url: str, ha_token: str):
     for s in states:
         eid = s.get("entity_id")
         if eid in areas:
-            if "attributes" not in s: s["attributes"] = {}
+            if "attributes" not in s:
+                s["attributes"] = {}
             s["attributes"]["area_id"] = areas[eid]
     return {"entities": states}
 
