@@ -242,6 +242,7 @@ services:
     restart: unless-stopped
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./services/control_plane:/app
