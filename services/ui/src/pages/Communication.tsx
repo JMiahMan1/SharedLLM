@@ -66,41 +66,44 @@ const Communication = () => {
     end: '',
   });
 
-  const { data: timers = [] } = useQuery<TimerRecord[]>({
+  const { data: timers = EMPTY_ARRAY } = useQuery<TimerRecord[]>({
     queryKey: ['communication-timers'],
     queryFn: () => api.getTimers(),
     refetchInterval: 10000,
   });
 
-  const { data: mediaTargets = [] } = useQuery<DeviceAssignment[], Error, DeviceAssignment[]>({
+  const { data: mediaTargets = EMPTY_ARRAY } = useQuery<DeviceAssignment[], Error, DeviceAssignment[]>({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
     select: (data) => data.filter((device) => device.device_id.startsWith('media_player.')),
   });
 
-  const { data: calendars = [] } = useQuery<ExecutionResponse, Error, { id: string; display_name: string }[]>({
+  const { data: calendarList } = useQuery<ExecutionResponse>({
     queryKey: ['calendar-list'],
     queryFn: () => api.getCalendarList(),
-    select: (response) => detailList<{ id: string; display_name: string }>(response, 'calendars'),
   });
+
+  const calendars = useMemo(() => 
+    detailList<{ id: string; display_name: string }>(calendarList, 'calendars'),
+    [calendarList]
+  );
 
   const { data: calendarEvents, refetch: refetchCalendarEvents } = useQuery<ExecutionResponse>({
     queryKey: ['calendar-events', selectedCalendar],
     queryFn: () => api.getCalendarEvents(selectedCalendar),
   });
 
-  const { data: talkConversations = [] } = useQuery<ExecutionResponse, Error, TalkConversation[]>({
+  const { data: talkConversations = EMPTY_ARRAY } = useQuery<ExecutionResponse, Error, TalkConversation[]>({
     queryKey: ['talk-conversations'],
     queryFn: () => api.getTalkConversations(),
     refetchInterval: 15000,
     select: (response) => detailList<TalkConversation>(response, 'conversations'),
   });
 
-  const { data: talkMessages = [], refetch: refetchTalkMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
+  const { data: talkMessages = EMPTY_ARRAY, refetch: refetchTalkMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
     queryKey: ['talk-messages', selectedTalkToken],
-    queryFn: () => api.getTalkMessages(selectedTalkToken),
-    enabled: Boolean(selectedTalkToken),
-    refetchInterval: selectedTalkToken ? 8000 : false,
+    queryFn: () => api.getTalkMessages(selectedTalkToken!),
+    enabled: !!selectedTalkToken,
     select: (response) => detailList<TalkMessage>(response, 'messages'),
   });
 
