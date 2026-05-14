@@ -235,14 +235,18 @@ async def get_llm_settings() -> Dict[str, str]:
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
     active_provider = settings.get("active_llm_provider", "ollama")
+    import os
+    timeout = float(settings.get("ollama_timeout", os.getenv("OLLAMA_TIMEOUT", "600")))
     if active_provider == "openrouter":
         return OpenRouterProvider(
             api_key=settings.get("llm_cloud_api_key", ""),
-            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions")
+            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
+            timeout=timeout
         )
     else:
         return OllamaProvider(
-            base_url=settings.get("llm_local_url", OLLAMA_URL)
+            base_url=settings.get("llm_local_url", OLLAMA_URL),
+            timeout=timeout
         )
 
 

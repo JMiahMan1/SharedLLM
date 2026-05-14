@@ -223,7 +223,8 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
     if active_provider == "openrouter":
         return OpenRouterProvider(
             api_key=settings.get("llm_cloud_api_key", ""),
-            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions")
+            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
+            timeout=timeout
         )
     else:
         return OllamaProvider(
