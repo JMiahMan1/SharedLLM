@@ -48,9 +48,13 @@ COMPOSE="docker compose"
 # If running as a non-root user, ensure named volumes are writable by that user.
 if [ "$PUID" != "0" ]; then
     log "Ensuring volume permissions for user $PUID:$PGID..."
+    # Project prefix is usually the lowercase directory name
+    PROJECT_PREFIX="sharedllm"
     VOLUMES=("identity_db" "chroma_data" "logging_data" "workspace_runtime_data" "redis_data")
     for VOL in "${VOLUMES[@]}"; do
-        docker run --rm -v "$VOL:/data" busybox sh -c "chown -R $PUID:$PGID /data && chmod -R 775 /data"
+        FULL_VOL_NAME="${PROJECT_PREFIX}_${VOL}"
+        log "Fixing permissions for volume: $FULL_VOL_NAME"
+        docker run --rm -v "$FULL_VOL_NAME:/data" busybox sh -c "chown -R $PUID:$PGID /data && chmod -R 775 /data" 2>/dev/null || true
     done
 fi
 
