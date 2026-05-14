@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 # Load local .env
 load_dotenv()
 
-IDENTITY_URL = "http://localhost:8001"
+LIVE_TEST_URL = os.getenv("LIVE_TEST_URL")
+IDENTITY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:8001"
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
 # Expected values from .env for verification

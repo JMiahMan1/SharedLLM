@@ -158,7 +158,6 @@ except (ImportError, ValueError):
         from history import update_history, ping_redis
         from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
         from messaging import InferenceJobQueue, JobStatus
-
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 job_queue = InferenceJobQueue(REDIS_URL)
 
@@ -184,6 +183,7 @@ RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
 LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://127.0.0.1:8006")
 WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://127.0.0.1:8007")
+CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://127.0.0.1:8008")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -2763,7 +2763,25 @@ async def get_raven_queue(request: Request):
         resp = await client.get(
             f"{IDENTITY_SVC}/api/raven/missions",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/admin/services/{service_name}/restart")
+async def restart_service(service_name: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{CONTROL_PLANE_URL}/api/restart/{service_name}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Service {service_name} not found")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 @app.post("/api/admin/raven/queue/{id}/execute")

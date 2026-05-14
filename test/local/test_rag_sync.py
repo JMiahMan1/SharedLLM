@@ -4,7 +4,8 @@ import httpx
 import pytest
 import time
 
-GATEWAY_URL = "http://localhost:11435"
+LIVE_TEST_URL = os.getenv("LIVE_TEST_URL")
+GATEWAY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:11435"
 RAG_URL = "http://localhost:8004"
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
@@ -12,6 +13,7 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 def client():
     return httpx.Client(timeout=30.0)
 
+@pytest.mark.skipif(LIVE_TEST_URL is not None, reason="RAG service is internal and not exposed externally")
 def test_rag_sync_flow(client):
     """
     Test: Trigger HA entity fetch and verify RAG indexing.
