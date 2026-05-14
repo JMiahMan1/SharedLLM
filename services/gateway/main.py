@@ -2235,8 +2235,10 @@ async def proxy_list_calendars(request: Request):
 
 
 @app.get("/api/communication/calendar/events")
-async def proxy_read_calendar(request: Request):
+async def proxy_read_calendar(request: Request, calendar_name: str = None):
     payload = {"action": "read"}
+    if calendar_name:
+        payload["calendar_name"] = calendar_name
     return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
 
 

@@ -44,8 +44,6 @@ const Communication = () => {
   const [announcementDevice, setAnnouncementDevice] = useState('');
   const [announcementMessage, setAnnouncementMessage] = useState('');
   const [announcementVolume, setAnnouncementVolume] = useState(0.6);
-  const [eventSummary, setEventSummary] = useState('');
-  const [eventStartTime, setEventStartTime] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [noteResult, setNoteResult] = useState<ExecutionResponse | null>(null);
@@ -59,8 +57,6 @@ const Communication = () => {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
-  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
-  const [calendars, setCalendars] = useState<{id: string, display_name: string}[]>([]);
   const [selectedCalendar, setSelectedCalendar] = useState('');
   const [eventForm, setEventForm] = useState({
     summary: '',
@@ -69,18 +65,17 @@ const Communication = () => {
     end: '',
   });
 
+  const calendars = useMemo(
+    () => detailList<{ id: string; display_name: string }>(calendarList, 'calendars'),
+    [calendarList]
+  );
+
   useEffect(() => {
-    if (isEventModalOpen) {
-      api.getCalendarList().then((res) => {
-        const detail = res.detail as { calendars?: { id: string; display_name: string }[] } | undefined;
-        const calendarItems = detail?.calendars ?? [];
-        setCalendars(calendarItems);
-        if (calendarItems.length > 0 && !selectedCalendar) {
-          setSelectedCalendar(calendarItems[0].id);
-        }
-      });
+    if (calendars.length > 0 && !selectedCalendar) {
+      setSelectedCalendar(calendars[0].id);
     }
-  }, [isEventModalOpen, selectedCalendar]);
+  }, [calendars, selectedCalendar]);
+
 
   const { data: timers = [] } = useQuery<TimerRecord[]>({
     queryKey: ['communication-timers'],
@@ -99,8 +94,8 @@ const Communication = () => {
   });
 
   const { data: calendarEvents, refetch: refetchCalendarEvents } = useQuery<ExecutionResponse>({
-    queryKey: ['calendar-events'],
-    queryFn: () => api.getCalendarEvents(),
+    queryKey: ['calendar-events', selectedCalendar],
+    queryFn: () => api.getCalendarEvents(selectedCalendar),
   });
 
   const { data: talkConversationsResponse } = useQuery<ExecutionResponse>({
@@ -177,12 +172,15 @@ const Communication = () => {
   });
 
   const calendarMutation = useMutation({
-    mutationFn: () => api.addCalendarEvent({ summary: eventSummary, start_time: eventStartTime }),
+    mutationFn: () => api.addCalendarEvent({ 
+      summary: eventForm.summary, 
+      start_time: eventForm.start, 
+      calendar_name: selectedCalendar 
+    }),
     onSuccess: () => {
       refetchCalendarEvents();
       toast.success('Calendar event added');
-      setEventSummary('');
-      setEventStartTime('');
+      setEventForm({ ...eventForm, summary: '', start: '' });
     },
     onError: (error: Error) => toast.error(error.message || 'Failed to add event'),
   });
@@ -638,20 +636,17 @@ const Communication = () => {
           <div className="mt-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_auto]">
             <input
               type="text"
-              value={eventStartTime}
-              onChange={(event) => setEventStartTime(event.target.value)}
+              value={eventForm.start}
+              onChange={(e) => setEventForm({ ...eventForm, start: e.target.value })}
               className="glass-input"
               placeholder="Start time (e.g. tomorrow at 2pm)"
             />
             <button
               onClick={() => {
-                const summary = eventForm.summary || eventSummary;
-                if (!summary.trim() || !eventStartTime.trim()) {
+                if (!eventForm.summary.trim() || !eventForm.start.trim()) {
                   toast.error('Enter an event title and time');
                   return;
                 }
-                // Use the consolidated state
-                setEventSummary(summary);
                 calendarMutation.mutate();
               }}
               className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
