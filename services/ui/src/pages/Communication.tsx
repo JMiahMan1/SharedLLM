@@ -65,32 +65,22 @@ const Communication = () => {
     end: '',
   });
 
-  const calendars = useMemo(
-    () => detailList<{ id: string; display_name: string }>(calendarList, 'calendars'),
-    [calendarList]
-  );
-
-  useEffect(() => {
-    if (calendars.length > 0 && !selectedCalendar) {
-      setSelectedCalendar(calendars[0].id);
-    }
-  }, [calendars.length, selectedCalendar]);
-
-
   const { data: timers = [] } = useQuery<TimerRecord[]>({
     queryKey: ['communication-timers'],
     queryFn: () => api.getTimers(),
     refetchInterval: 10000,
   });
 
-  const { data: devices = [] } = useQuery<DeviceAssignment[]>({
+  const { data: mediaTargets = [] } = useQuery<DeviceAssignment[], Error, DeviceAssignment[]>({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
+    select: (data) => data.filter((device) => device.device_id.startsWith('media_player.')),
   });
 
-  const { data: calendarList } = useQuery<ExecutionResponse>({
+  const { data: calendars = [] } = useQuery<ExecutionResponse, Error, { id: string; display_name: string }[]>({
     queryKey: ['calendar-list'],
     queryFn: () => api.getCalendarList(),
+    select: (response) => detailList<{ id: string; display_name: string }>(response, 'calendars'),
   });
 
   const { data: calendarEvents, refetch: refetchCalendarEvents } = useQuery<ExecutionResponse>({
@@ -98,43 +88,38 @@ const Communication = () => {
     queryFn: () => api.getCalendarEvents(selectedCalendar),
   });
 
-  const { data: talkConversationsResponse } = useQuery<ExecutionResponse>({
+  const { data: talkConversations = [] } = useQuery<ExecutionResponse, Error, TalkConversation[]>({
     queryKey: ['talk-conversations'],
     queryFn: () => api.getTalkConversations(),
     refetchInterval: 15000,
+    select: (response) => detailList<TalkConversation>(response, 'conversations'),
   });
 
-  const { data: talkMessagesResponse, refetch: refetchTalkMessages } = useQuery<ExecutionResponse>({
+  const { data: talkMessages = [], refetch: refetchTalkMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
     queryKey: ['talk-messages', selectedTalkToken],
     queryFn: () => api.getTalkMessages(selectedTalkToken),
     enabled: Boolean(selectedTalkToken),
     refetchInterval: selectedTalkToken ? 8000 : false,
+    select: (response) => detailList<TalkMessage>(response, 'messages'),
   });
 
-  const mediaTargets = useMemo(
-    () => devices.filter((device) => device.device_id.startsWith('media_player.')),
-    [devices],
-  );
-  const talkConversations = useMemo(
-    () => detailList<TalkConversation>(talkConversationsResponse, 'conversations'),
-    [talkConversationsResponse],
-  );
-  const talkMessages = useMemo(
-    () => detailList<TalkMessage>(talkMessagesResponse, 'messages'),
-    [talkMessagesResponse],
-  );
+  useEffect(() => {
+    if (calendars.length > 0 && !selectedCalendar) {
+      setSelectedCalendar(calendars[0].id);
+    }
+  }, [calendars, selectedCalendar]);
 
   useEffect(() => {
     if (!announcementDevice && mediaTargets.length > 0) {
       setAnnouncementDevice(mediaTargets[0].device_id);
     }
-  }, [announcementDevice, mediaTargets.length]);
+  }, [announcementDevice, mediaTargets]);
 
   useEffect(() => {
     if (!selectedTalkToken && talkConversations.length > 0) {
       setSelectedTalkToken(talkConversations[0].token);
     }
-  }, [selectedTalkToken, talkConversations.length]);
+  }, [selectedTalkToken, talkConversations]);
 
   const createTimerMutation = useMutation({
     mutationFn: () => api.createTimer({ title: timerTitle, duration_str: timerDuration }),
