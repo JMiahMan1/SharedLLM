@@ -128,6 +128,7 @@ services:
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - CONTROL_PLANE_URL=http://control_plane:8008
       - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
@@ -234,6 +235,16 @@ services:
       - TZ=America/Phoenix
     depends_on:
       - gateway
+
+  control_plane:
+    build: ./services/control_plane
+    container_name: sharedllm_control_plane
+    restart: unless-stopped
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./services/control_plane:/app
 
 volumes:
   identity_db:
