@@ -16,6 +16,7 @@ temp/
 temp_output/
 *.log*
 .codex
+.kilo
 services/storage/index_checkpoint.json
 services/workspace_runtime/config/
 /data/*
