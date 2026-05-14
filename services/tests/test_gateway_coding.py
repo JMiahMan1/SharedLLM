@@ -5,7 +5,7 @@ import time
 GATEWAY_URL = "http://ai.local:11435"
 # In a real test, we would get this from a proper auth flow, 
 # but for smoke tests we assume localhost bypass or pre-known secret.
-INTERNAL_SECRET = "change-me-in-production"
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 def test_coding_chat():
     print("Testing Coding LLM via Gateway Chat...")

@@ -7,7 +7,7 @@ import time
 SERVER_IP = os.getenv("SERVER_IP", "localhost")
 GATEWAY_URL = f"http://{SERVER_IP}:8080"
 WORKSPACE_RUNTIME_URL = f"http://{SERVER_IP}:8007"
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 def wait_for_service(url, timeout=30):
     start_time = time.time()

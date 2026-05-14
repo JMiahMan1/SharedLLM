@@ -7,7 +7,7 @@ from schemas import SystemLearningRequest, ExecutionResult
 log = logging.getLogger("execution.learning")
 
 RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 async def handle_system_learning(req: SystemLearningRequest) -> ExecutionResult:
     try:

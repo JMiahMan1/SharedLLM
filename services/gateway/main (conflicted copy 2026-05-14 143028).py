@@ -184,7 +184,7 @@ STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
 LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://127.0.0.1:8006")
 WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://127.0.0.1:8007")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://127.0.0.1:8008")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120.0"))
@@ -2881,6 +2881,7 @@ except (ImportError, ValueError):
 
 class UserMissionRequest(BaseModel):
     query: str
+    slug: Optional[str] = None
     priority: int = 1
     coding_model: Optional[str] = None
 
@@ -2896,6 +2897,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         raise HTTPException(status_code=400, detail="No coding model configured. Mission cannot be dispatched.")
         
     mission_payload = {
+        "slug": body.slug,
         "mission_type": "user_task",
         "priority": body.priority,
         "proposed_mission": body.query,
@@ -2988,7 +2990,9 @@ async def kill_mission(request: Request, id_or_slug: str):
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
+        # SET key with 1-hour TTL for poll-based kill (agent_loop.py checks this)
         await r.set(f"raven:mission:kill:{real_id}", "KILL", ex=3600)
+        # PUBLISH for event-driven kill (background_worker.py monitors this)
         await r.publish(f"raven:mission:kill:{real_id}", "KILL")
         await r.close()
         
@@ -3008,22 +3012,6 @@ async def get_user_missions(request: Request):
         )
         missions = [m for m in resp.json() if m["mission_type"] != "admin_fix" or creds.get("is_admin")]
         return JSONResponse(status_code=resp.status_code, content=missions)
-
-@app.patch("/api/raven/missions/{id_or_slug}")
-async def update_mission_status(id_or_slug: str, body: Dict[str, Any], request: Request):
-    creds = await _resolve_identity_from_request(request)
-    if not creds:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    async with borrow_http_client() as client:
-        resp = await client.patch(
-            f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
-            json=body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        return resp.json()
 
 @app.websocket("/api/raven/missions/{id_or_slug}/stream")
 async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):

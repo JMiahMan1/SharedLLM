@@ -63,7 +63,7 @@ except (ImportError, ValueError):
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 log = logging.getLogger("execution")
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
 
 async def resolve_internal_user(user_id: str) -> Optional[Dict[str, Any]]:
