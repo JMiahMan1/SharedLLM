@@ -66,3 +66,4 @@ class ProviderMirrorRequest(BaseModel):
     provider: ProviderConfig
     remote_path: str
     local_path: str  # Only works if storage svc has access to local fs
+    excludes: list[str] = Field(default_factory=list)
