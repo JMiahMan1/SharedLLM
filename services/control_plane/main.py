@@ -41,16 +41,38 @@ def restart_service(service_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/status/{service_name}", dependencies=[Depends(verify_internal_secret)])
-def get_service_status(service_name: str):
-    if not client:
-        raise HTTPException(status_code=500, detail="Docker client not initialized")
-    
+@app.get("/api/status/{service_name}")
+def get_service_status(service_name: str, x_internal_secret: str = Header(None)):
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     try:
         container = client.containers.get(service_name)
-        return {"status": "SUCCESS", "container_status": container.status}
+        return {
+            "name": container.name,
+            "status": container.status,
+            "image": container.image.tags[0] if container.image.tags else "unknown"
+        }
     except docker.errors.NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
+        raise HTTPException(status_code=404, detail="Service not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/containers")
+def list_containers(x_internal_secret: str = Header(None)):
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        containers = client.containers.list(all=True)
+        # Only show sharedllm containers for security
+        results = []
+        for c in containers:
+            if c.name.startswith("sharedllm_"):
+                results.append({
+                    "name": c.name,
+                    "status": c.status,
+                    "image": c.image.tags[0] if c.image.tags else "unknown"
+                })
+        return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
