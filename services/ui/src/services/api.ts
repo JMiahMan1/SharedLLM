@@ -477,8 +477,8 @@ export const api = {
     return resp.data;
   },
 
-  async getCalendarEvents(): Promise<ExecutionResponse> {
-    const resp = await apiClient.get('/api/communication/calendar/events');
+  async getCalendarEvents(calendar_name?: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.get('/api/communication/calendar/events', { params: { calendar_name } });
     return resp.data;
   },
 
