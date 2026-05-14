@@ -54,6 +54,8 @@ bash scripts/deploy.sh
 - **Fast Path Routing**: Semantic intent classification bypasses LLMs for >90% match rates (<100ms latency).
 - **Smart Power Sync**: Automatically powers on TVs/Media players before executing playback commands.
 - **RAG Memory**: Persistent semantic history and document context for more relevant AI responses.
+- **Capability Enforcement**: Granular, per-workspace security policies (read, write, git_status, git_diff, git_write, pytest) that confine autonomous agents to authorized operations.
+- **Dynamic Sync Exclusions**: Provider-agnostic file filtering (e.g., .git, node_modules) managed via a tag-based UI to protect repository integrity during automated syncs.
 
 ---
 

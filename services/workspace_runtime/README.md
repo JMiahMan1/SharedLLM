@@ -170,19 +170,23 @@ Workflow responses now include a `review` payload with PR-ready metadata:
 
 Implemented:
 
-- read/write file access
-- policy-based workspace resolution
-- git inspection and controlled local git mutation
-- provider scan and explicit provider file sync for mapped workspaces
-- orchestrated workflow execution for single-file edit/sync/commit/push flows
-- targeted test execution
-- safe workspace file listing for chat-driven context gathering
+- DB-backed workspace registry with automatic SQLite migrations.
+- `excludes` field for per-workspace sync filtering (e.g., `.git`, `node_modules`).
+- Background Nextcloud sync worker with dynamic exclusion enforcement.
+- Granular capability enforcement (`read`, `write`, `git_status`, `git_diff`, `git_write`, `pytest`).
+- advanced `system` workspace isolation.
+- safe workspace resolution under the mounted root.
+- read-only file access.
+- guarded text file writes with optional `expected_sha256` conflict checks.
+- `git status`, `git diff`, `git add`, `git commit`, branch creation, and push.
+- provider-folder scans and explicit file sync via the Storage provider layer.
+- workflow orchestration for incremental local edit -> provider sync -> git lifecycle execution.
+- targeted `pytest` execution.
 
 Not yet implemented:
 
 - workspace registry mutation APIs
 - direct Gateway orchestration against these endpoints
-- DB-backed workspace registry records
 - document or note mutation APIs
 - provider writeback after local authoritative changes
   only text file sync is implemented today, not broader folder mirroring
