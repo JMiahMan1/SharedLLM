@@ -306,6 +306,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             {"role": "system", "content": full_system}
         ] + short_term + [{"role": "user", "content": query}],
         "stream": False,
+        # Disable extended reasoning/thinking mode for qwen3-style models.
+        # Raven needs fast, direct JSON tool calls — not a multi-minute reasoning chain.
+        "options": {"enable_thinking": False},
     }
 
     MAX_TOOL_ITERATIONS = 30
