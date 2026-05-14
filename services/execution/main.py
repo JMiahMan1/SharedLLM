@@ -4,6 +4,7 @@ import logging
 import asyncio
 import httpx
 from typing import Dict, Any, List, Optional
+from uuid import uuid4
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
 try:
@@ -15,7 +16,7 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest, DiscoverySyncRequest
+        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest
     )
     from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
     from .handlers import docker_logs as docker_logs_handler
@@ -32,7 +33,7 @@ except (ImportError, ValueError):
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
         from execution.handlers import docker_logs as docker_logs_handler
@@ -48,7 +49,7 @@ except (ImportError, ValueError):
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest
         )
         from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
         from handlers import docker_logs as docker_logs_handler
@@ -79,8 +80,9 @@ async def resolve_internal_user(user_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 async def require_internal(request: Request, x_internal_secret: str = Header(None)):
-    if request.url.path == "/health":
+    if request.url.path == "/health" or request.url.path.startswith("/media/"):
         return
+
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -90,8 +92,24 @@ async def require_internal(request: Request, x_internal_secret: str = Header(Non
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Execution Bridge starting up.")
+    # Auto-download Kokoro models if missing
+    os.makedirs("/app/models", exist_ok=True)
+    kokoro_path = "/app/models/kokoro-v1.0.onnx"
+    voices_path = "/app/models/voices-v1.0.bin"
+    if not os.path.exists(kokoro_path) or not os.path.exists(voices_path):
+        log.info("Downloading default Kokoro TTS models...")
+        import subprocess
+        try:
+            if not os.path.exists(kokoro_path):
+                subprocess.run(["curl", "-L", "-o", kokoro_path, "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"], check=True)
+            if not os.path.exists(voices_path):
+                subprocess.run(["curl", "-L", "-o", voices_path, "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"], check=True)
+            log.info("Kokoro models downloaded successfully.")
+        except Exception as e:
+            log.error(f"Failed to auto-download Kokoro models: {e}")
     yield
     log.info("Execution Bridge shutting down.")
+
 
 from fastapi.responses import JSONResponse
 import traceback
@@ -111,6 +129,18 @@ async def global_exception_handler(request, exc):
         status_code=500,
         content={"status": "FAILURE", "message": err_msg, "service": "execution", "detail": traceback.format_exc().splitlines()[-3:]}
     )
+
+
+# Transient cache for locally-generated media (TTS announcements)
+TEMP_AUDIO_CACHE: Dict[str, bytes] = {}
+
+@app.get("/media/{media_id}")
+async def get_temp_media(media_id: str):
+    """Serves transient audio files for HA playback."""
+    if media_id not in TEMP_AUDIO_CACHE:
+        raise HTTPException(status_code=404, detail="Media expired or not found")
+    from fastapi.responses import Response
+    return Response(content=TEMP_AUDIO_CACHE[media_id], media_type="audio/wav")
 
 def _ok(message: str, service: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service=service, detail=detail)
@@ -384,6 +414,41 @@ async def execute_storage_file_write(req: StorageFileWriteRequest):
     return await storage.handle_storage_write(req)
 
 
+@app.post("/execute/tts", response_model=ExecutionResult)
+async def execute_tts(req: TTSRequest):
+    """
+    Converts text to speech using the local Kokoro engine or Edge-TTS.
+    Returns the audio bytes as a base64 encoded string in the detail.
+    """
+    from tts import text_to_speech
+    import base64
+    try:
+        audio_bytes = await text_to_speech(req.text, voice=req.voice, storybook=req.storybook)
+        if not audio_bytes:
+            return _fail("TTS generation returned empty bytes", "tts")
+        
+        return _ok(
+            f"TTS generated successfully ({len(audio_bytes)} bytes)",
+            "tts",
+            {
+                "audio_base64": base64.b64encode(audio_bytes).decode('utf-8'),
+                "mime_type": "audio/wav",
+                "length_bytes": len(audio_bytes)
+            }
+        )
+    except Exception as e:
+        log.error(f"TTS endpoint error: {e}")
+        return _fail(f"TTS generation failed: {str(e)}", "tts")
+
+
+@app.post("/execute/storage_text_to_audio", response_model=ExecutionResult)
+async def execute_storage_text_to_audio(req: StorageTextToAudioRequest):
+    """
+    Converts a text file in Nextcloud storage to an audio file.
+    """
+    return await storage.handle_storage_tts(req)
+
+
 @app.post("/execute/learning", response_model=ExecutionResult)
 async def execute_system_learning(req: SystemLearningRequest):
     """
@@ -439,51 +504,96 @@ async def execute_index_capabilities():
 
 # ─── Infrastructure Endpoints ────────────────────────────────────────────────────────
 
+@app.get("/execute/tts/voices")
+async def list_tts_voices():
+    """List available voices for the active TTS engine."""
+    from .tts import get_tts_engine
+    engine = get_tts_engine()
+    return {"status": "SUCCESS", "voices": engine.list_voices()}
+
+@app.post("/execute/tts/download")
+async def download_tts_voice(voice_type: str = "kokoro-v1.0"):
+    """
+    Downloads the Kokoro ONNX model and voices if missing.
+    """
+    import subprocess
+    log.info(f"[tts] Downloading model files for {voice_type}")
+    
+    links = [
+        ("kokoro-v1.0.onnx", "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"),
+        ("voices-v1.0.bin", "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin")
+    ]
+    
+    results = []
+    for filename, url in links:
+        path = f"/app/models/{filename}"
+        if os.path.exists(path):
+            results.append(f"{filename} already exists.")
+            continue
+        try:
+            cmd = ["curl", "-L", "-o", path, url]
+            subprocess.run(cmd, check=True)
+            results.append(f"Successfully downloaded {filename}")
+        except Exception as e:
+            results.append(f"Failed to download {filename}: {e}")
+    return {"status": "SUCCESS", "results": results}
+
 @app.post("/execute/announce", response_model=ExecutionResult)
 async def execute_announce(req: AnnouncementRequest):
-    # Announcements are currently cross-domain (Volume + TTS)
     ctx = req.user_context
     target_player = req.entity_id
     if not target_player.startswith("media_player."):
         target_player = f"media_player.{target_player}"
 
-    log.info(f"[announce] START user={ctx.user} target={target_player} msg='{req.message}' vol={req.volume}")
+    log.info(f"[announce] START user={ctx.user} target={target_player} msg='{req.message}'")
     
-    # 1. Ensure the device is turned on (crucial for TVs)
-    log.info(f"[announce] Step 1: Powering on {target_player}")
-    pwr_res = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", target_player, {})
-    log.info(f"[announce] Power on result: {pwr_res}")
-    # Give it a tiny bit of time to wake up if it was off
-    await asyncio.sleep(1.5)
+    # 1. Power on
+    await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", target_player, {})
+    await asyncio.sleep(1.0)
 
     # 2. Set volume
-    log.info(f"[announce] Step 2: Setting volume to {req.volume}")
-    vol_res = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
-    log.info(f"[announce] Volume set result: {vol_res}")
+    await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
     
-    # 3. TTS Announce
-    log.info(f"[announce] Step 3: Triggering TTS")
-    # Most common integrations: google_translate_say, cloud_say
-    # These services target the media player directly.
-    tts_services = ["google_translate_say", "cloud_say", "piper"]
+    # 3. TTS
+    result = {"ok": False, "error": "No engine selected"}
     
-    result = {"ok": False, "error": "No TTS service succeeded"}
-    
-    for tts_srv in tts_services:
-        log.info(f"[announce] Trying tts.{tts_srv} on {target_player}...")
-        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", tts_srv, target_player, {
+    if req.tts_engine == "kokoro":
+        from .tts import text_to_speech
+        try:
+            audio_bytes = await text_to_speech(req.message, storybook=req.storybook)
+            if not audio_bytes:
+                return _fail("Kokoro returned empty audio", "announce")
+            
+            media_id = f"tts-{uuid4().hex[:8]}"
+            TEMP_AUDIO_CACHE[media_id] = audio_bytes
+            media_url = f"http://execution:8003/media/{media_id}"
+            
+            log.info(f"[announce] Playing Kokoro URL: {media_url}")
+            result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target_player, {
+                "media_content_id": media_url,
+                "media_content_type": "audio/wav"
+            })
+            
+            if req.save_path:
+                from .handlers import storage as storage_handler
+                from .schemas import StorageFileWriteRequest
+                await storage_handler.handle_storage_write(StorageFileWriteRequest(
+                    user_context=ctx, path=req.save_path, content=audio_bytes
+                ))
+        except Exception as e:
+            log.error(f"[announce] Kokoro failed: {e}")
+            result = {"ok": False, "error": str(e)}
+
+    # Fallback to local Piper if Kokoro failed or wasn't chosen
+    if not result.get("ok"):
+        log.info(f"[announce] Falling back to HA Piper...")
+        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "piper", target_player, {
             "message": req.message
         })
-        if result.get("ok"):
-            log.info(f"[announce] SUCCESS using tts.{tts_srv}")
-            break
-        else:
-            log.warning(f"[announce] tts.{tts_srv} failed: {result.get('error')}")
+
 
     if result.get("ok"):
         return _ok(f"Announcement sent successfully to {target_player}.", "announce")
-    
-    log.error(f"[announce] ALL TTS attempts failed for {target_player}")
     return _fail(f"Announcement failed: {result.get('error')}", "announce", result)
 
 @app.post("/execute/ha_service", response_model=ExecutionResult)
@@ -498,15 +608,11 @@ async def execute_ha_service(req: HAServiceRequest):
 async def discovery_entities(ha_url: str, ha_token: str):
     states = await ha_client.get_states(ha_url, ha_token) or []
     areas = await ha_client.get_areas(ha_url, ha_token) or {}
-    
-    # Merge area_name into attributes for each entity
     for s in states:
         eid = s.get("entity_id")
         if eid in areas:
-            if "attributes" not in s:
-                s["attributes"] = {}
-            s["attributes"]["area_id"] = areas[eid] # Overwrite area_id with human name for RAG
-            
+            if "attributes" not in s: s["attributes"] = {}
+            s["attributes"]["area_id"] = areas[eid]
     return {"entities": states}
 
 @app.get("/discovery/history")

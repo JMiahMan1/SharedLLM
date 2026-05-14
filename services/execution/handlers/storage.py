@@ -2,7 +2,8 @@
 import logging
 import requests
 from typing import Dict, Any
-from schemas import StorageFileReadRequest, StorageFileWriteRequest, ExecutionResult
+from schemas import StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest, ExecutionResult
+from tts import text_to_speech
 from nextcloud_client import resolve_credentials, webdav_url
 
 log = logging.getLogger("execution.storage")
@@ -52,4 +53,47 @@ async def handle_storage_write(req: StorageFileWriteRequest) -> ExecutionResult:
             
     except Exception as e:
         log.error(f"Storage write failed: {e}")
+        return _fail(str(e))
+
+async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
+    try:
+        url, user, pw = resolve_credentials(req.user_context)
+        if not all([url, user, pw]):
+            return _fail("Missing Nextcloud credentials.")
+            
+        # 1. Read input file
+        input_url = webdav_url(url, user, req.input_path)
+        log.info(f"[storage_tts] Reading input: {req.input_path}")
+        resp = requests.get(input_url, auth=(user, pw), timeout=30, verify=False)
+        if resp.status_code != 200:
+            return _fail(f"Failed to read input file ({resp.status_code})")
+        
+        text = resp.text
+        if not text.strip():
+            return _fail("Input file is empty.")
+
+        # 2. Generate Audio
+        log.info(f"[storage_tts] Generating audio (storybook={req.storybook}, voice={req.voice})")
+        audio_bytes = await text_to_speech(text, voice=req.voice, storybook=req.storybook)
+        if not audio_bytes:
+            return _fail("TTS generation returned empty bytes")
+
+        # 3. Write output file
+        out_path = req.output_path
+        if not out_path:
+            # Default to same name with .wav
+            base_path = req.input_path.rsplit(".", 1)[0]
+            out_path = f"{base_path}.wav"
+            
+        output_url = webdav_url(url, user, out_path)
+        log.info(f"[storage_tts] Writing output: {out_path}")
+        put_resp = requests.put(output_url, auth=(user, pw), data=audio_bytes, timeout=60, verify=False)
+        
+        if put_resp.status_code in (200, 201, 204):
+            return _ok(f"Successfully converted {req.input_path} to audio at {out_path}", {"path": out_path, "size": len(audio_bytes)})
+        else:
+            return _fail(f"Failed to write output audio ({put_resp.status_code}): {put_resp.text[:200]}")
+            
+    except Exception as e:
+        log.error(f"Storage TTS failed: {e}")
         return _fail(str(e))

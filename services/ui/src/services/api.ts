@@ -194,6 +194,8 @@ export interface RavenConfig {
   raven_scan_interval: number;
   raven_error_threshold: number;
   active_coding_model: string | null;
+  system_default_tts_voice: string;
+  system_default_tts_engine: string;
 }
 
 const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
@@ -596,9 +598,19 @@ export const api = {
     return resp.data;
   },
 
-  async updateRavenConfig(config: Partial<RavenConfig>): Promise<{ status: string }> {
-    const resp = await apiClient.patch('/api/admin/raven/config', config);
-    return resp.data;
+  updateRavenConfig: async (config: Partial<RavenConfig>): Promise<{ status: string }> => {
+    const { data } = await apiClient.patch('/api/admin/raven/config', config);
+    return data;
+  },
+
+  getRavenVoices: async (): Promise<{ status: string, voices: string[] }> => {
+    const { data } = await apiClient.get('/api/admin/raven/tts/voices');
+    return data;
+  },
+
+  downloadRavenModels: async (): Promise<{ status: string, results: string[] }> => {
+    const { data } = await apiClient.post('/execute/tts/download');
+    return data;
   },
 
   async getAdminRavenQueue(): Promise<RavenMission[]> {

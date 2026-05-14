@@ -22,3 +22,6 @@ CONFIG = {
     "librarian_model": os.getenv("LIBRARIAN_MODEL", ""),
     "coding_model": os.getenv("CODING_MODEL", ""),
 }
+
+# System account for autonomous actions
+SYSTEM_IDENTITY = "raven_system"
