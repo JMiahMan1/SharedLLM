@@ -133,15 +133,22 @@ def extract_action_json(text: str) -> dict | None:
     if not text:
         return None
     
-    text = re.sub(r"^INFO:.*?\n", "", text, flags=re.MULTILINE)
+    # Strip potential uvicorn/system logs that small models sometimes echo
+    text = re.sub(r"^(INFO|WARNING|ERROR|DEBUG):.*?\n", "", text, flags=re.MULTILINE)
     
-    # Priority 1: Properly fenced JSON block (allow optional closing fence)
+    # Priority 1: Properly fenced JSON block
     match = re.search(r"```json\s*(\{.*?\})(?:\s*```|$)", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(1))
         except:
-            pass
+            # Try to fix common trailing comma or unescaped quote issues
+            try:
+                candidate = match.group(1)
+                cleaned = re.sub(r",\s*([\]}])", r"\1", candidate)
+                return json.loads(cleaned)
+            except:
+                pass
 
     # Priority 2: Outer-most braces (robust fallback)
     first_brace = text.find("{")
@@ -683,6 +690,21 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             f"Final answer: {ans}",
         ])
         await _persist_learning(learning_summary)
+
+    # --- SUMMARIZATION PHASE ---
+    if successful_tool_calls > 0:
+        # If the last response still looks like a tool call or is very short/messy, force a clean summary
+        if extract_action_json(ans) or len(ans.strip()) < 20 or "was was was" in ans:
+            log.info("[AgentLoop] Finalizing with clean summarization phase...")
+            summary_prompt = [
+                {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise."},
+                {"role": "user", "content": f"MISSION: {query}\n\nACTIONS TAKEN:\n" + "\n".join(action_log) + f"\n\nLAST RAW RESULT: {ans}\n\nProvide a final summary:"}
+            ]
+            try:
+                data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.3})
+                ans = data.get("message", {}).get("content", ans)
+            except Exception as e:
+                log.warning(f"[AgentLoop] Summarization phase failed: {e}")
 
     if mission_id and full_audit_log:
         try:
