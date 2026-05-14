@@ -77,6 +77,7 @@ class GlobalSetting(SQLModel, table=True):
 class RavenMission(SQLModel, table=True):
     """Pending or completed autonomous missions for Raven (Admin ROZ or User Tasks)."""
     id: Optional[int] = Field(default=None, primary_key=True)
+    slug: Optional[str] = Field(default=None, index=True, unique=True)
     mission_type: str = Field(default="admin_fix") # admin_fix, user_task, media_conversion
     priority: int = Field(default=1) # 1 (Low) to 5 (Critical)
     target_container: Optional[str] = None

@@ -2881,6 +2881,7 @@ except (ImportError, ValueError):
 
 class UserMissionRequest(BaseModel):
     query: str
+    slug: Optional[str] = None
     priority: int = 1
     coding_model: Optional[str] = None
 
@@ -2896,6 +2897,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         raise HTTPException(status_code=400, detail="No coding model configured. Mission cannot be dispatched.")
         
     mission_payload = {
+        "slug": body.slug,
         "mission_type": "user_task",
         "priority": body.priority,
         "proposed_mission": body.query,

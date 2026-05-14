@@ -95,6 +95,13 @@ def _ensure_schema_upgrades() -> None:
             if "key_prefix" not in key_columns:
                 conn.execute(text("ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR"))
             conn.commit()
+    
+    if "ravenmission" in inspector.get_table_names():
+        raven_columns = {column["name"] for column in inspector.get_columns("ravenmission")}
+        with engine.connect() as conn:
+            if "slug" not in raven_columns:
+                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN slug VARCHAR"))
+            conn.commit()
 
 
 async def _ensure_default_settings(session: Session) -> None:
@@ -917,33 +924,58 @@ except ImportError:
     from schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
 from typing import List
 
+def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
+    try:
+        mid = int(mission_id_or_slug)
+        mission = session.exec(select(RavenMission).where(RavenMission.id == mid)).first()
+    except ValueError:
+        mission = session.exec(select(RavenMission).where(RavenMission.slug == mission_id_or_slug)).first()
+    
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return mission
+
 @app.get("/api/raven/missions", response_model=List[RavenMissionRead])
 def get_missions(session: Session = Depends(get_session)):
     missions = session.exec(select(RavenMission).order_by(RavenMission.created_at.desc())).all()
     return missions
+
+@app.get("/api/raven/missions/{mission_id_or_slug}", response_model=RavenMissionRead)
+def get_mission(mission_id_or_slug: str, session: Session = Depends(get_session)):
+    return _resolve_mission(mission_id_or_slug, session)
 
 @app.post("/api/raven/missions", response_model=RavenMissionRead)
 def create_mission(
     body: RavenMissionCreate,
     session: Session = Depends(get_session)
 ):
+    # Ensure slug uniqueness if provided
+    if body.slug:
+        existing = session.exec(select(RavenMission).where(RavenMission.slug == body.slug)).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Mission slug '{body.slug}' already exists")
+            
     mission = RavenMission(**body.model_dump())
     session.add(mission)
     session.commit()
     session.refresh(mission)
     return mission
 
-@app.patch("/api/raven/missions/{mission_id}", response_model=RavenMissionRead)
+@app.patch("/api/raven/missions/{mission_id_or_slug}", response_model=RavenMissionRead)
 def update_mission(
-    mission_id: int,
+    mission_id_or_slug: str,
     body: RavenMissionUpdate,
     session: Session = Depends(get_session)
 ):
-    mission = session.exec(select(RavenMission).where(RavenMission.id == mission_id)).first()
-    if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
+    mission = _resolve_mission(mission_id_or_slug, session)
     
     update_data = body.model_dump(exclude_unset=True)
+    # Prevent slug collision on update
+    if "slug" in update_data and update_data["slug"] and update_data["slug"] != mission.slug:
+        existing = session.exec(select(RavenMission).where(RavenMission.slug == update_data["slug"])).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Mission slug '{update_data['slug']}' already exists")
+
     for k, v in update_data.items():
         setattr(mission, k, v)
         
@@ -951,6 +983,13 @@ def update_mission(
     session.commit()
     session.refresh(mission)
     return mission
+
+@app.delete("/api/raven/missions/{mission_id_or_slug}")
+def delete_mission(mission_id_or_slug: str, session: Session = Depends(get_session)):
+    mission = _resolve_mission(mission_id_or_slug, session)
+    session.delete(mission)
+    session.commit()
+    return {"status": "SUCCESS"}
 
 @app.delete("/api/raven/missions/{mission_id}")
 def delete_mission(mission_id: int, session: Session = Depends(get_session)):

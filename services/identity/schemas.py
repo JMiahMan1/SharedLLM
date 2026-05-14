@@ -148,6 +148,7 @@ class GlobalSettingUpdate(BaseModel):
     value: str
 
 class RavenMissionCreate(BaseModel):
+    slug: Optional[str] = None
     mission_type: str = "admin_fix"
     priority: int = 1
     target_container: Optional[str] = None
@@ -157,6 +158,7 @@ class RavenMissionCreate(BaseModel):
     user_id: Optional[int] = None
 
 class RavenMissionUpdate(BaseModel):
+    slug: Optional[str] = None
     status: Optional[str] = None
     progress: Optional[int] = None
     scheduled_for: Optional[str] = None
@@ -165,6 +167,7 @@ class RavenMissionUpdate(BaseModel):
 
 class RavenMissionRead(BaseModel):
     id: int
+    slug: Optional[str] = None
     mission_type: str
     priority: int
     target_container: Optional[str] = None
