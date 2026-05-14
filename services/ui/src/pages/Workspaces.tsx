@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../context/AuthContext';
 import { 
   Database, 
   Plus, 
@@ -25,6 +26,8 @@ const generateWebhookToken = () =>
 
 const Workspaces = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin ?? false;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingWs, setEditingWs] = useState<Workspace | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -33,6 +36,8 @@ const Workspaces = () => {
     id: '',
     display_name: '',
     local_path: '',
+    host_mount_path: '',
+    container_mount_path: '',
     git_remote: 'origin',
     default_branch: 'main',
     sync_mode: 'local_git_authoritative',
@@ -101,6 +106,8 @@ const Workspaces = () => {
       id: '',
       display_name: '',
       local_path: '',
+      host_mount_path: '',
+      container_mount_path: '',
       git_remote: 'origin',
       default_branch: 'main',
       sync_mode: 'local_git_authoritative',
@@ -131,34 +138,36 @@ const Workspaces = () => {
     <div className="space-y-8 pb-12 animate-in fade-in duration-500">
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">Workspaces</h2>
-          <p className="mt-1 text-slate-400">Manage repository locations and automated sync triggers.</p>
+          <h2 className="text-3xl font-bold tracking-tight text-white">{isAdmin ? 'Workspaces' : 'My Workspaces'}</h2>
+          <p className="mt-1 text-slate-400">{isAdmin ? 'Manage repository locations and automated sync triggers.' : 'View your workspaces and shared resources.'}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => {
-              toast.promise(
-                Promise.all(workspaces.map(ws => api.pullWorkspace(ws.id))),
-                {
-                  loading: 'Synchronizing all repositories...',
-                  success: 'All workspaces up to date',
-                  error: 'One or more pulls failed'
-                }
-              ).then(() => queryClient.invalidateQueries({ queryKey: ['workspaces'] }));
-            }}
-            className="glass-button px-6 py-2.5 bg-slate-800/40 border-slate-700/50 text-slate-300 font-bold flex items-center gap-2"
-          >
-            <GitPullRequest size={18} />
-            Sync All
-          </button>
-          <button 
-            onClick={openCreate}
-            className="glass-button px-6 py-2.5 bg-indigo-600/20 border-indigo-500/30 text-indigo-300 font-bold flex items-center gap-2"
-          >
-            <Plus size={18} />
-            Add Repository
-          </button>
-        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => {
+                toast.promise(
+                  Promise.all(workspaces.map(ws => api.pullWorkspace(ws.id))),
+                  {
+                    loading: 'Synchronizing all repositories...',
+                    success: 'All workspaces up to date',
+                    error: 'One or more pulls failed'
+                  }
+                ).then(() => queryClient.invalidateQueries({ queryKey: ['workspaces'] }));
+              }}
+              className="glass-button px-6 py-2.5 bg-slate-800/40 border-slate-700/50 text-slate-300 font-bold flex items-center gap-2"
+            >
+              <GitPullRequest size={18} />
+              Sync All
+            </button>
+            <button 
+              onClick={openCreate}
+              className="glass-button px-6 py-2.5 bg-indigo-600/20 border-indigo-500/30 text-indigo-300 font-bold flex items-center gap-2"
+            >
+              <Plus size={18} />
+              Add Repository
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="grid gap-6">
@@ -198,6 +207,11 @@ const Workspaces = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <h3 className="text-xl font-bold text-white truncate">{ws.display_name}</h3>
+                          {ws.owner_user === 'default' && (
+                            <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-blue-500/20">
+                              <Globe size={10} /> Shared
+                            </span>
+                          )}
                           {ws.quarantined && (
                             <span className="flex items-center gap-1 bg-red-500/10 text-red-400 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-red-500/20 animate-pulse">
                               <ShieldAlert size={10} /> Quarantined
@@ -207,34 +221,45 @@ const Workspaces = () => {
                         <p className="text-xs font-mono text-slate-500 truncate">ID: {ws.id}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => openEdit(ws)}
-                        className="p-2 rounded-xl text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
-                      >
-                        <Edit3 size={18} />
-                      </button>
-                      <button 
-                        onClick={() => {
-                          if (confirm(`Are you sure you want to delete ${ws.display_name}?`)) {
-                            deleteMutation.mutate(ws.id);
-                          }
-                        }}
-                        className="p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
+                    {isAdmin && (
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => openEdit(ws)}
+                          className="p-2 rounded-xl text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
+                        >
+                          <Edit3 size={18} />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete ${ws.display_name}?`)) {
+                              deleteMutation.mutate(ws.id);
+                            }
+                          }}
+                          className="p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Host Path</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Container Path</p>
                       <div className="flex items-center gap-2 text-sm text-slate-300">
                         <Folder size={14} className="text-slate-600" />
-                        <span className="font-mono truncate">{ws.local_path}</span>
+                        <span className="font-mono truncate">{ws.container_mount_path || ws.local_path}</span>
                       </div>
                     </div>
+                    {ws.host_mount_path && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Host Path</p>
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
+                          <Folder size={14} className="text-slate-600" />
+                          <span className="font-mono truncate">{ws.host_mount_path}</span>
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Git Status</p>
@@ -380,18 +405,33 @@ const Workspaces = () => {
           </label>
 
           <label className="space-y-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Local Path (Relative to Root)</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Container Mount Path</span>
             <div className="relative">
               <Folder size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
               <input 
                 type="text" 
-                value={form.local_path}
-                onChange={(e) => setForm({ ...form, local_path: e.target.value })}
+                value={form.container_mount_path || form.local_path}
+                onChange={(e) => setForm({ ...form, container_mount_path: e.target.value, local_path: e.target.value })}
                 placeholder="your/repository/folder"
                 className="glass-input w-full pl-10"
               />
             </div>
-            <p className="text-[10px] text-slate-600 italic">This path is relative to the backend's workspace directory.</p>
+            <p className="text-[10px] text-slate-600 italic">Path relative to the backend's workspace root. Used for all internal operations (git, file read/write).</p>
+          </label>
+
+          <label className="space-y-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Host Mount Path <span className="text-slate-600 normal-case">(optional)</span></span>
+            <div className="relative">
+              <Folder size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+              <input 
+                type="text" 
+                value={form.host_mount_path || ''}
+                onChange={(e) => setForm({ ...form, host_mount_path: e.target.value })}
+                placeholder="/home/user/projects/my-repo"
+                className="glass-input w-full pl-10"
+              />
+            </div>
+            <p className="text-[10px] text-slate-600 italic">Absolute path on the host machine. Used by Nextcloud sync and for your reference.</p>
           </label>
 
           <div className="grid gap-4 md:grid-cols-2">

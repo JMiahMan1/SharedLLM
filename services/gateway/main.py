@@ -2888,6 +2888,9 @@ async def kill_mission(request: Request, id: int):
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
+        # SET key with 1-hour TTL for poll-based kill (agent_loop.py checks this)
+        await r.set(f"raven:mission:kill:{id}", "KILL", ex=3600)
+        # PUBLISH for event-driven kill (background_worker.py monitors this)
         await r.publish(f"raven:mission:kill:{id}", "KILL")
         await r.close()
         

@@ -334,6 +334,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             timed_out = True
             break
         
+        # --- HARD KILL SWITCH (Redis polling) ---
+        if mission_id:
+            try:
+                if not _stream_redis:
+                    _stream_redis = redis.from_url(REDIS_URL, decode_responses=True)
+                kill_flag = await _stream_redis.get(f"raven:mission:kill:{mission_id}")
+                if kill_flag:
+                    log.warning(f"[AgentLoop] KILL SWITCH ACTIVATED for mission {mission_id} at iteration {iter_num}")
+                    await stream_event("system", f"MissionAborted: Kill switch activated by operator at iteration {iter_num}.")
+                    ans = f"MISSION ABORTED: Kill switch activated at iteration {iter_num}. {successful_tool_calls} tool call(s) completed before termination."
+                    break
+            except Exception as kill_err:
+                log.warning(f"[AgentLoop] Kill switch check failed (non-fatal): {kill_err}")
+        
         await stream_event("system", f"Agent loop iteration {iter_num}/{MAX_TOOL_ITERATIONS} started.")
         log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | total elapsed {elapsed_total:.0f}s")
 

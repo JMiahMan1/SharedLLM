@@ -32,6 +32,10 @@ def _migrate_workspace_table():
             conn.execute(text("ALTER TABLE workspace ADD COLUMN webhook_token_enc VARCHAR"))
         if "auto_backup_enabled" not in columns:
             conn.execute(text("ALTER TABLE workspace ADD COLUMN auto_backup_enabled BOOLEAN DEFAULT 0"))
+        if "host_mount_path" not in columns:
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN host_mount_path VARCHAR"))
+        if "container_mount_path" not in columns:
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN container_mount_path VARCHAR"))
 
 
 def get_session():
