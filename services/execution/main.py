@@ -435,6 +435,39 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
         return _fail(f"Discovery sync bridge error: {e}", "discovery")
 
 
+@app.post("/execute/identity", response_model=ExecutionResult)
+async def execute_identity(req: IdentityRequest):
+    """
+    Proxy identity management requests (list, import, discover) to the Identity service.
+    """
+    IDENTITY_SVC = os.getenv("IDENTITY_SVC", "http://identity:8001")
+    try:
+        action = req.action
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if action == "import_nextcloud":
+                resp = await client.post(f"{IDENTITY_SVC}/api/auth/import/nextcloud", headers={"X-Internal-Secret": INTERNAL_SECRET})
+            elif action == "list":
+                resp = await client.get(f"{IDENTITY_SVC}/api/users", headers={"X-Internal-Secret": INTERNAL_SECRET})
+            elif action == "discover":
+                resp = await client.get(f"{IDENTITY_SVC}/api/users/discover", headers={"X-Internal-Secret": INTERNAL_SECRET})
+            else:
+                return _fail(f"Identity action '{action}' not yet implemented via tool interface.", "identity")
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                msg = f"Identity action '{action}' succeeded."
+                if isinstance(data, list):
+                    msg += f" Found {len(data)} results."
+                elif isinstance(data, dict) and "message" in data:
+                    msg = data["message"]
+                return _ok(msg, "identity", {"data": data})
+            else:
+                return _fail(f"Identity service returned {resp.status_code}: {resp.text}", "identity")
+    except Exception as e:
+        log.error(f"Identity tool error: {e}")
+        return _fail(f"Identity bridge error: {e}", "identity")
+
+
 @app.post("/execute/storage_file_read", response_model=ExecutionResult)
 async def execute_storage_file_read(req: StorageFileReadRequest):
     """
