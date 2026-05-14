@@ -64,7 +64,7 @@ Available tool schemas:
 - AnnouncementRequest: Broadcast high-fidelity local Kokoro TTS messages.
 - CalendarRequest, NoteRequest, TimerRequest, TalkRequest: Personal assistance.
 - WebSearchRequest, WebReadRequest: Search/read public web pages.
-- DockerLogsRequest, DockerComposeRequest, ControlPlaneRequest: Container & service management.
+- DockerLogsRequest, DockerComposeRequest, DeploymentRequest, ControlPlaneRequest: Container & service management.
 - GitOperationRequest: Version control (status, add, commit, push, pull, log, diff, sync).
 - CapabilityIndexRequest, VolumeInventoryRequest: System & storage inspection.
 - WorkspaceFileRead/Write/Patch/Lint/Search/Shell/Bootstrap: Workspace & development tasks.
