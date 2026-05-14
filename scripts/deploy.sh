@@ -50,7 +50,7 @@ if [ "$PUID" != "0" ]; then
     log "Ensuring volume permissions for user $PUID:$PGID..."
     VOLUMES=("identity_db" "chroma_data" "logging_data" "workspace_runtime_data" "redis_data")
     for VOL in "${VOLUMES[@]}"; do
-        docker run --rm -v "$VOL:/data" busybox chown -R "$PUID:$PGID" /data 2>/dev/null || true
+        docker run --rm -v "$VOL:/data" busybox sh -c "chown -R $PUID:$PGID /data && chmod -R 775 /data"
     done
 fi
 
