@@ -19,3 +19,4 @@ edge-tts
 html2text
 kokoro-onnx
 onnxruntime
+soundfile
