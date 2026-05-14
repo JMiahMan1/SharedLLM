@@ -47,7 +47,9 @@ class KokoroTTSEngine:
             return await self._generate_storybook(text, voice)
         
         text = self._normalize_text(text)
-        samples, sample_rate = self._kokoro.create(text, voice=voice, speed=1.0, lang="en-us")
+        samples, sample_rate = await asyncio.to_thread(
+            self._kokoro.create, text, voice=voice, speed=1.0, lang="en-us"
+        )
         return self._samples_to_bytes(samples, sample_rate)
 
 
@@ -69,7 +71,9 @@ class KokoroTTSEngine:
             normalized = self._normalize_text(content)
             if not normalized.strip(): continue
             
-            samples, last_sample_rate = self._kokoro.create(normalized, voice=voice, speed=1.0, lang="en-us")
+            samples, last_sample_rate = await asyncio.to_thread(
+                self._kokoro.create, normalized, voice=voice, speed=1.0, lang="en-us"
+            )
             all_samples.append(samples)
             
         if not all_samples: return b""
