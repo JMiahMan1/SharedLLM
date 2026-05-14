@@ -40,7 +40,6 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
     "dockercomposerequest": (EXECUTION_SVC, "/execute/docker"),
     "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
-    "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),
     "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
     "volumeinventoryrequest": (EXECUTION_SVC, "/execute/volumes"),
     "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
@@ -75,7 +74,7 @@ Available tool schemas for standard chat include:
 - WebSearchRequest and WebReadRequest: search or read public web pages.
 - DockerLogsRequest and DockerComposeRequest: inspect or operate containers.
 - GitOperationRequest: inspect or mutate git state.
-- DeploymentRequest: restart, build, or stop services.
+- ControlPlaneRequest: restart or check status of services.
 - CapabilityIndexRequest and VolumeInventoryRequest: inspect system capabilities and storage.
 - WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, WorkspaceBootstrapRequest: inspect and modify workspace state.
 - StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest: inspect and manage storage providers.
@@ -259,7 +258,28 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         action = tool_data.get("action", "").lower().strip()
         log.info(f"[_single_turn_inference] Tool call detected: {action}")
         
-        if action in SINGLE_TURN_TOOL_ENDPOINTS:
+        if action == "controlplanerequest":
+            payload = tool_data.get("payload", tool_data)
+            service_name = payload.get("service_name")
+            sub_action = payload.get("action", "restart")
+            if not service_name:
+                return "Error: service_name is required"
+            CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://control_plane:8008")
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    if sub_action == "restart":
+                        resp = await client.post(f"{CONTROL_PLANE_URL}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                    else:
+                        resp = await client.get(f"{CONTROL_PLANE_URL}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                    
+                    if resp.status_code == 200:
+                        return f"Control Plane '{sub_action}' succeeded on {service_name}: {resp.text}"
+                    return f"Control Plane error {resp.status_code}: {resp.text}"
+            except Exception as e:
+                log.error(f"Control Plane execution error: {e}")
+                return f"Control Plane execution failed: {e}"
+        
+        elif action in SINGLE_TURN_TOOL_ENDPOINTS:
             svc_base, endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
             
             try:

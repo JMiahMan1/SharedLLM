@@ -108,9 +108,9 @@ class GitOperationRequest(BaseModel):
     branch: Optional[str] = "microservices"
     log_count: Optional[int] = 10
 
-class DeploymentRequest(BaseModel):
-    service: str
-    action: Literal["restart", "build", "stop"]
+class ControlPlaneRequest(BaseModel):
+    service_name: str
+    action: Literal["restart", "status"]
 
 class SystemLearningRequest(BaseModel):
     key: str
