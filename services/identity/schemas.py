@@ -39,6 +39,7 @@ class ResolvedCredentials(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None  # decrypted at resolution time
+    preferred_tts_voice: Optional[str] = "af_heart"
 
 
 # ─── External CRUD schemas ─────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ class UserCreate(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None
+    preferred_tts_voice: Optional[str] = "af_heart"
 
 
 class UserUpdate(BaseModel):
@@ -84,6 +86,7 @@ class UserUpdate(BaseModel):
     git_url: Optional[str] = None
     git_user: Optional[str] = None
     git_token: Optional[str] = None
+    preferred_tts_voice: Optional[str] = None
     voice_fingerprint: Optional[str] = None
     is_admin: Optional[bool] = None
     is_system_default: Optional[bool] = None
@@ -107,6 +110,7 @@ class UserRead(BaseModel):
     git_url: Optional[str] = None
     git_user: Optional[str] = None
     voice_fingerprint: Optional[str] = None
+    preferred_tts_voice: Optional[str] = "af_heart"
     # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses
 
 

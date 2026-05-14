@@ -2302,7 +2302,11 @@ async def proxy_send_announcement(request: Request):
         "entity_id": body.get("entity_id"),
         "message": body.get("message"),
         "volume": body.get("volume", 0.6),
+        "tts_engine": body.get("tts_engine", "kokoro"),
+        "storybook": body.get("storybook", False),
+        "save_path": body.get("save_path")
     }
+
     return await _proxy_execution_with_identity(request, "/execute/announce", payload)
 
 
@@ -2708,7 +2712,9 @@ async def get_raven_config(request: Request):
         "raven_suspended": settings.get("raven_suspended", "false").lower() == "true",
         "raven_scan_interval": int(settings.get("raven_scan_interval", "300")),
         "raven_error_threshold": int(settings.get("raven_error_threshold", "5")),
-        "active_coding_model": settings.get("coding_model") or settings.get("ollama_coding_model")
+        "active_coding_model": settings.get("coding_model") or settings.get("ollama_coding_model"),
+        "system_default_tts_voice": settings.get("system_default_tts_voice", "af_heart"),
+        "system_default_tts_engine": settings.get("system_default_tts_engine", "kokoro")
     }
 
 @app.patch("/api/admin/raven/config")
@@ -2719,13 +2725,25 @@ async def update_raven_config(request: Request):
     
     async with borrow_http_client() as client:
         for k, v in body.items():
-            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold"]:
+            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold", "system_default_tts_voice", "system_default_tts_engine"]:
                 await client.patch(
                     f"{IDENTITY_SVC}/api/settings/{k}",
                     json={"value": str(v).lower() if isinstance(v, bool) else str(v)},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
     return {"status": "SUCCESS"}
+@app.get("/api/admin/raven/tts/voices")
+async def get_raven_tts_voices(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/tts/voices",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 
 @app.get("/api/admin/raven/queue")
 async def get_raven_queue(request: Request):

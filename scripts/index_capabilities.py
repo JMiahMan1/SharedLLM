@@ -61,8 +61,11 @@ def index_capabilities():
         "VolumeInventoryRequest": "Inspects Docker volume usage (Admin only).",
         "CapabilityIndexRequest": "Triggers this re-indexing script to refresh tool definitions.",
         "WorkspaceBootstrapRequest": "Autonomously initializes or clones a repository into a workspace path if it is missing.",
-        "SystemLearningRequest": "Persists successful bug fixes and architectural insights to the RAG ledger."
+        "SystemLearningRequest": "Persists successful bug fixes and architectural insights to the RAG ledger.",
+        "TTSRequest": "Converts text to speech using local Kokoro engine. Supports storybook mode.",
+        "StorageTextToAudioRequest": "Converts a text file in Nextcloud storage to an audio file using Kokoro narration."
     }
+
     
     # Process Execution and Workspace Schemas
     # We prioritize execution schemas first, then check workspace_runtime

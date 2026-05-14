@@ -117,6 +117,20 @@ class SystemLearningRequest(BaseModel):
     content: str
     category: str = "general"
 
+class AnnouncementRequest(BaseModel):
+    entity_id: str
+    message: str
+    volume: Optional[float] = 0.6
+    tts_engine: Optional[Literal["kokoro", "piper"]] = "kokoro"
+    storybook: bool = False
+    save_path: Optional[str] = None
+
+class HAServiceRequest(BaseModel):
+    domain: str
+    service: str
+    entity_id: str
+    service_data: Optional[Dict[str, Any]] = {}
+
 class WorkspaceBootstrapRequest(BaseModel):
     workspace_id: Optional[str] = None
     local_path: Optional[str] = None
