@@ -72,7 +72,7 @@ async def run_benchmark():
                 start_time = time.time()
                 try:
                     resp = await client.post(
-                        f"{GATEWAY_URL}/api/chat/completions",
+                        f"{GATEWAY_URL}/v1/chat/completions",
                         json={
                             "model": model_id,
                             "messages": [{"role": "user", "content": task["query"]}],
