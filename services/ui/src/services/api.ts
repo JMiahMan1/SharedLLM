@@ -620,4 +620,9 @@ export const api = {
     const resp = await apiClient.post('/api/raven/missions', { query, priority });
     return resp.data;
   },
+
+  async killRavenMission(id: number): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/raven/missions/${id}/kill`);
+    return resp.data;
+  },
 };
