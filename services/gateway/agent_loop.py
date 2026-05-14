@@ -395,11 +395,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             
             for retry_count in range(MAX_INFERENCE_RETRIES):
                 try:
+                    # Stick to the requested model for all attempts in autonomous missions
+                    model_to_use = selected_model
                     dynamic_settings = await get_dynamic_llm_settings()
-                    vram_params = await get_vram_safe_params(selected_model, dynamic_settings)
+                    vram_params = await get_vram_safe_params(model_to_use, dynamic_settings)
                     ollama_payload["options"] = vram_params
                     log.info(f"[AgentLoop] Inference options: {vram_params}")
-                    log.info(f"[AgentLoop] Executing inference (Attempt {retry_count + 1}/{MAX_INFERENCE_RETRIES}) for {selected_model}")
+                    log.info(f"[AgentLoop] Executing inference (Attempt {retry_count + 1}/{MAX_INFERENCE_RETRIES}) for {model_to_use}")
                     
                     async def chunk_logger(chunk: str):
                         await stream_event("reasoning", chunk)
