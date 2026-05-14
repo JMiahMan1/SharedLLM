@@ -2837,6 +2837,17 @@ async def raven_mission_stream(websocket: WebSocket, id: int):
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
+        
+        # 1. Send all existing historical messages first
+        history_key = f"raven:mission:history:{id}"
+        existing_logs = await r.lrange(history_key, 0, -1)
+        for msg in existing_logs:
+            try:
+                await websocket.send_text(msg)
+            except Exception:
+                pass
+                
+        # 2. Subscribe to new messages
         pubsub = r.pubsub()
         channel = f"raven:mission:stream:{id}"
         await pubsub.subscribe(channel)

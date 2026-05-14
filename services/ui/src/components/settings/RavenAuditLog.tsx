@@ -22,6 +22,46 @@ export default function RavenAuditLog({ isOpen, onClose }: RavenAuditLogProps) {
     (m) => m.status === 'completed' || m.status === 'failed'
   ).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
+  const renderLog = (logData: string | null | undefined) => {
+    if (!logData) return <div className="text-slate-500 italic">No execution log available.</div>;
+    try {
+      const parsed = JSON.parse(logData);
+      if (Array.isArray(parsed)) {
+        return (
+          <div className="space-y-2">
+            {parsed.map((entry, idx) => {
+              const timeStr = entry.timestamp ? new Date(entry.timestamp * 1000).toISOString().split('T')[1].slice(0,-1) : '';
+              let textColor = 'text-slate-400';
+              if (entry.type === 'action') textColor = 'text-yellow-400 font-bold';
+              else if (entry.type === 'action_payload') textColor = 'text-yellow-300/80';
+              else if (entry.type === 'result_success') textColor = 'text-emerald-400 font-bold';
+              else if (entry.type === 'result_error') textColor = 'text-red-400 font-bold';
+              else if (entry.type === 'reasoning') textColor = 'text-blue-400';
+              
+              return (
+                <div key={idx} className={textColor}>
+                  <span className="opacity-50 select-none mr-2">[{timeStr}]</span>
+                  {entry.type === 'action_payload' ? (
+                    <div className="pl-6 mt-1 mb-2">
+                      <div className="bg-white/5 border-l-2 border-yellow-500/50 p-2 rounded-r text-xs">
+                        {entry.data}
+                      </div>
+                    </div>
+                  ) : (
+                    <span>{entry.data}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+    } catch (e) {
+      // Not JSON, just return raw string
+    }
+    return <div>{logData}</div>;
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Raven Audit Log" size="4xl">
       <div className="flex h-[600px] gap-4">
@@ -93,7 +133,7 @@ export default function RavenAuditLog({ isOpen, onClose }: RavenAuditLogProps) {
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Execution Log</span>
                   </div>
                   <div className="flex-1 overflow-y-auto p-3 custom-scrollbar text-xs font-mono text-slate-300 whitespace-pre-wrap">
-                    {selectedMission.output_log || 'No execution log available.'}
+                    {renderLog(selectedMission.output_log)}
                   </div>
                 </div>
 
