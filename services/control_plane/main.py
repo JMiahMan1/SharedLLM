@@ -5,6 +5,10 @@ from typing import Optional
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
+import logging
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("control_plane")
+
 app = FastAPI(title="Control Plane Service")
 
 @app.get("/health")
@@ -33,6 +37,7 @@ def restart_service(service_name: str):
         raise HTTPException(status_code=400, detail="Can only restart sharedllm_ prefixed containers")
 
     try:
+        log.info(f"Restarting service: {service_name}")
         container = client.containers.get(service_name)
         container.restart()
         return {"status": "SUCCESS", "message": f"Container {service_name} restarted successfully"}
@@ -41,10 +46,8 @@ def restart_service(service_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/status/{service_name}")
-def get_service_status(service_name: str, x_internal_secret: str = Header(None)):
-    if x_internal_secret != INTERNAL_SECRET:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+@app.get("/api/status/{service_name}", dependencies=[Depends(verify_internal_secret)])
+def get_service_status(service_name: str):
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
     try:
@@ -59,10 +62,8 @@ def get_service_status(service_name: str, x_internal_secret: str = Header(None))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/containers")
-def list_containers(x_internal_secret: str = Header(None)):
-    if x_internal_secret != INTERNAL_SECRET:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+@app.get("/api/containers", dependencies=[Depends(verify_internal_secret)])
+def list_containers():
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
     try:
