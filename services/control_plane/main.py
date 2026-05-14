@@ -11,11 +11,18 @@ app = FastAPI(title="Control Plane Service")
 def health():
     return {"status": "ok", "service": "control_plane"}
 
+import logging
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("control_plane")
+
 # Initialize Docker client
 try:
     client = docker.from_env()
+    log.info("Docker client initialized successfully.")
 except Exception as e:
-    print(f"Warning: Failed to initialize docker client: {e}")
+    import traceback
+    log.error(f"Failed to initialize docker client: {e}")
+    log.error(traceback.format_exc())
     client = None
 
 def verify_internal_secret(x_internal_secret: str = Header(...)):
