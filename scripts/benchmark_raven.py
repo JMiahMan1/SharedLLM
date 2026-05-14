@@ -3,41 +3,38 @@ import os
 import json
 import time
 
-# Load secrets from environment (populated by deploy.sh or manual export)
+# Load secrets from environment
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:8080")
 
-MODELS_TO_TEST = [] # Will be populated via /api/models
-
-AUDIT_LOG_PATH = "/home/jeremiah/.gemini/antigravity/brain/1403f7bd-1016-4690-8270-4b98d9503c62/artifacts/raven_pipeline_audit.md"
-
-def update_audit_inventory(models):
-    try:
-        with open(AUDIT_LOG_PATH, "r") as f:
-            lines = f.readlines()
-        
-        with open(AUDIT_LOG_PATH, "w") as f:
-            for line in lines:
-                if "Active Models**: [Awaiting" in line:
-                    f.write(f"*   **Active Models**: {', '.join(models)}\n")
-                else:
-                    f.write(line)
-        print(f"Updated Audit Log inventory with {len(models)} models.")
-    except Exception as e:
-        print(f"Could not update Audit Log: {e}")
-
-TASKS = [
-    {"name": "fast_path", "query": "turn on the office lights", "expected_type": "intent"},
-    {"name": "tool_use", "query": "list my files on nextcloud", "expected_type": "tool_call"},
-    {"name": "code_gen", "query": "write a python function to calculate fibonacci", "expected_type": "text"}
-]
+MODELS_TO_TEST = []
+RESULTS_FILE = "data/raven_audit_results.json"
 
 def log_result(model_name, task_name, success, latency):
     print(f"[{model_name}] Task: {task_name} | Success: {success} | Latency: {latency:.2f}s")
+    # Save raw results for retrieval
+    results = []
+    if os.path.exists(RESULTS_FILE):
+        try:
+            with open(RESULTS_FILE, "r") as f:
+                results = json.load(f)
+        except: pass
+    
+    results.append({
+        "model": model_name,
+        "task": task_name,
+        "success": success,
+        "latency": latency,
+        "timestamp": time.time()
+    })
+    
+    os.makedirs("data", exist_ok=True)
+    with open(RESULTS_FILE, "w") as f:
+        json.dump(results, f, indent=2)
 
 async def run_benchmark():
     if not INTERNAL_SECRET:
-        print("ERROR: INTERNAL_SECRET is missing. Run with export INTERNAL_SECRET=...")
+        print("ERROR: INTERNAL_SECRET is missing.")
         return
 
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -46,7 +43,8 @@ async def run_benchmark():
             m_resp = await client.get(f"{GATEWAY_URL}/api/models")
             if m_resp.status_code == 200:
                 discovered = m_resp.json().get("models", [])
-                update_audit_inventory(discovered)
+                print(f"Discovered models: {discovered}")
+                
                 # Sort models: small first, large last
                 small_models = []
                 large_models = []
@@ -61,10 +59,16 @@ async def run_benchmark():
                 MODELS_TO_TEST.extend(large_models)
             else:
                 print(f"Warning: Could not fetch models ({m_resp.status_code})")
-                MODELS_TO_TEST.append("qwen2.5-coder:7b") # fallback
+                MODELS_TO_TEST.append("qwen2.5-coder:7b")
         except Exception as e:
             print(f"Discovery error: {e}")
             MODELS_TO_TEST.append("qwen2.5-coder:7b")
+
+        TASKS = [
+            {"name": "fast_path", "query": "turn on the office lights"},
+            {"name": "tool_use", "query": "list my files on nextcloud"},
+            {"name": "code_gen", "query": "write a python function to calculate fibonacci"}
+        ]
 
         for model_id in MODELS_TO_TEST:
             print(f"\n--- Benchmarking Model: {model_id} ---")
