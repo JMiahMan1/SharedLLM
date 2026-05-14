@@ -2874,10 +2874,8 @@ async def execute_raven_mission(id: int, request: Request):
 # ---- User Missions Endpoints ----
 from pydantic import BaseModel
 try:
-    from .orchestrator import SINGLE_TURN_TOOL_GUIDE
     from .messaging import job_queue
 except (ImportError, ValueError):
-    from orchestrator import SINGLE_TURN_TOOL_GUIDE
     from messaging import job_queue
 
 class UserMissionRequest(BaseModel):
@@ -2915,6 +2913,12 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         mission_data = resp.json()
         
         # Enqueue the job for execution
+        # Move import inside to break circular dependency
+        try:
+            from .orchestrator import SINGLE_TURN_TOOL_GUIDE
+        except (ImportError, ValueError):
+            from orchestrator import SINGLE_TURN_TOOL_GUIDE
+
         target_model = body.coding_model or coding_model
         system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
         system_prompt += SINGLE_TURN_TOOL_GUIDE
