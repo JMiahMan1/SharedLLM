@@ -87,6 +87,21 @@ def list_containers(x_internal_secret: str = Header(None)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/containers/{service_name}/logs")
+def get_container_logs(service_name: str, tail: int = 100, x_internal_secret: str = Header(None)):
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not client:
+        raise HTTPException(status_code=500, detail="Docker client not initialized")
+    try:
+        container = client.containers.get(service_name)
+        logs = container.logs(tail=tail, stdout=True, stderr=True).decode("utf-8")
+        return {"name": service_name, "logs": logs}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8008)
