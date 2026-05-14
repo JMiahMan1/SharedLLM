@@ -201,9 +201,13 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
                     data = json.loads(raw_text)
                     models = data.get("models", [])
                     if len(models) > 1:
-                        safe_ctx = max(2048, max_ctx // 2)
+                        # 35B models need at least 4k context to handle complex system prompts + tool history
+                        safe_ctx = max(4096, max_ctx // 2)
                         params["num_ctx"] = safe_ctx
                         log.info(f"[AgentLoop] VRAM PRESSURE. Scaling context down to {safe_ctx}.")
+                    else:
+                        # If only one model is loaded, give it the full requested context
+                        params["num_ctx"] = max_ctx
                 except json.JSONDecodeError:
                     log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}")
     except Exception:
@@ -436,10 +440,23 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         
         # Normalize alternative schemas: { "name": "...", "parameters": {...} } → { "action": "...", "payload": {...} }
         if tool_data:
+            # Handle "tool" or "operation" keys used as "action"
+            if "tool" in tool_data and "action" not in tool_data:
+                tool_data["action"] = tool_data.pop("tool")
+            if "operation" in tool_data and "action" not in tool_data:
+                tool_data["action"] = tool_data.pop("operation")
+            
+            # Handle standard "name" (OpenAI/Ollama format)
             if "name" in tool_data and "action" not in tool_data:
                 tool_data["action"] = tool_data.pop("name")
+            
+            # Handle "arguments" or "parameters" keys used as "payload"
+            if "arguments" in tool_data and "payload" not in tool_data:
+                tool_data["payload"] = tool_data.pop("arguments")
             if "parameters" in tool_data and "payload" not in tool_data:
                 tool_data["payload"] = tool_data.pop("parameters")
+            
+            # Handle "function" nesting (Legacy OpenAI format)
             if "function" in tool_data and "action" not in tool_data:
                 tool_data["action"] = tool_data["function"].get("name", "")
                 tool_data["payload"] = tool_data["function"].get("arguments", {})
