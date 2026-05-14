@@ -12,8 +12,9 @@ import {
   Folder, 
   Globe, 
   ShieldCheck,
-  ExternalLink,
-  ChevronRight
+  ShieldAlert,
+  RotateCcw,
+  AlertTriangle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type Workspace } from '../services/api';
@@ -77,6 +78,15 @@ const Workspaces = () => {
       toast.success(`Successfully pulled latest changes on ${data.branch}`);
     },
     onError: (err: Error) => toast.error(err.message || 'Git pull failed'),
+  });
+
+  const revertMutation = useMutation({
+    mutationFn: (id: string) => api.revertWorkspace(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+      toast.success('Workspace reverted to previous stable state');
+    },
+    onError: (err: Error) => toast.error(err.message || 'Revert failed'),
   });
 
   const openEdit = (ws: Workspace) => {
@@ -186,7 +196,14 @@ const Workspaces = () => {
                         <Database size={24} />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-xl font-bold text-white truncate">{ws.display_name}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-bold text-white truncate">{ws.display_name}</h3>
+                          {ws.quarantined && (
+                            <span className="flex items-center gap-1 bg-red-500/10 text-red-400 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-red-500/20 animate-pulse">
+                              <ShieldAlert size={10} /> Quarantined
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs font-mono text-slate-500 truncate">ID: {ws.id}</p>
                       </div>
                     </div>
@@ -244,6 +261,30 @@ const Workspaces = () => {
                       </div>
                     )}
                   </div>
+
+                  {ws.quarantined && (
+                    <div className="mt-6 p-4 rounded-2xl bg-red-500/5 border border-red-500/10 flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <AlertTriangle className="text-red-400" size={20} />
+                        <div>
+                          <p className="text-xs font-bold text-white uppercase tracking-widest">Autonomous Lockdown</p>
+                          <p className="text-[10px] text-slate-400">Raven flagged this workspace after Mission #{ws.last_raven_mission_id}. Operations are restricted.</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          if (confirm('Are you sure you want to revert this workspace to its previous stable state? This will discard the last Raven patch.')) {
+                            revertMutation.mutate(ws.id);
+                          }
+                        }}
+                        disabled={revertMutation.isPending}
+                        className="glass-button bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                      >
+                        <RotateCcw size={12} className={revertMutation.isPending ? 'animate-spin' : ''} />
+                        {revertMutation.isPending ? 'Reverting...' : 'Rollback & Restore'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Webhook Section */}
