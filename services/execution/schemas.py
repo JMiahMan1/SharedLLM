@@ -180,6 +180,7 @@ class NoteRequest(BaseRequest):
     content: Optional[str] = None
     category: Optional[str] = "General"
     item: Optional[str] = None # For check_off
+    storage: Optional[Literal["nextcloud", "local"]] = "nextcloud"
 
 
 # ─── Timers / Alarms ────────────────────────────────────────────────────────────

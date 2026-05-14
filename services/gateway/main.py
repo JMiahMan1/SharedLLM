@@ -2261,6 +2261,7 @@ async def proxy_create_note(request: Request):
         "title": body.get("title"),
         "content": body.get("content"),
         "category": body.get("category", "General"),
+        "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
 
@@ -2271,6 +2272,7 @@ async def proxy_read_note(request: Request):
     payload = {
         "action": "read",
         "title": body.get("title"),
+        "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
 
@@ -2282,6 +2284,7 @@ async def proxy_append_note(request: Request):
         "action": "append",
         "title": body.get("title"),
         "content": body.get("content"),
+        "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
 
@@ -2292,6 +2295,7 @@ async def proxy_delete_note(request: Request):
     payload = {
         "action": "delete",
         "title": body.get("title"),
+        "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
 
