@@ -441,11 +441,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         
         # Normalize alternative schemas: { "name": "...", "parameters": {...} } → { "action": "...", "payload": {...} }
         if tool_data:
-            # Handle "tool" or "operation" keys used as "action"
+            # Handle "tool", "operation", or "command" keys used as "action"
             if "tool" in tool_data and "action" not in tool_data:
                 tool_data["action"] = tool_data.pop("tool")
             if "operation" in tool_data and "action" not in tool_data:
                 tool_data["action"] = tool_data.pop("operation")
+            if "command" in tool_data and "action" not in tool_data:
+                tool_data["action"] = tool_data.pop("command")
             
             # Handle standard "name" (OpenAI/Ollama format)
             if "name" in tool_data and "action" not in tool_data:
@@ -464,6 +466,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             log.info(f"[AgentLoop] Normalized Tool Data: {tool_data}")
         
+        # Validation: If we don't have a valid action at this point, we MUST re-prompt.
         if not tool_data or not tool_data.get("action"):
             # Blank/whitespace-only response is a failure — re-prompt
             if not ans or not ans.strip():
@@ -476,6 +479,22 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 log.warning(f"[AgentLoop] Tool data missing 'action' key: {tool_data}")
                 action_log.append(f"ITERATION {iter_num}: Your JSON is missing the 'action' key. Use one of the provided tool names.")
                 continue
+
+            # If it's just yapping without a JSON block
+            log.warning(f"[AgentLoop] No valid tool call found in textual response (iter {iter_num})")
+            
+            if agent_iter > 0 and successful_tool_calls > 0:
+                log.info(f"[AgentLoop] Agent provided textual answer after {successful_tool_calls} successful tool call(s). Terminating loop.")
+                break
+             
+            if agent_iter >= 3:
+                log.error(f"[AgentLoop] No valid tool calls after {agent_iter + 1} iterations. Terminating to prevent runaway.")
+                ans = "ERROR: Agent failed to produce valid tool calls after multiple attempts. Last response: " + (ans[:200] if ans else "empty")
+                break
+                
+            log.info(f"[AgentLoop] Re-prompting for autonomous tool execution (iter {agent_iter + 1})...")
+            action_log.append(f"ITERATION {iter_num}: Your response did not contain a valid JSON tool call. Every mission step MUST be a tool call.")
+            continue
 
             # If the previous tool call resulted in an ERROR, we MUST NOT terminate.
             # Force a retry regardless of other conditions.
