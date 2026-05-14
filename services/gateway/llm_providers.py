@@ -139,9 +139,15 @@ class OpenRouterProvider(BaseLLMProvider):
                 resp = await client.post(self.base_url, json=payload, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
-                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                msg = data.get("choices", [{}])[0].get("message", {})
+                content = msg.get("content", "")
+                reasoning = msg.get("reasoning_content", "")
+                if reasoning:
+                    return f"<think>\n{reasoning}\n</think>\n{content}"
+                return content
 
             # Streaming
+            in_reasoning = False
             async with client.stream("POST", self.base_url, json=payload, headers=headers) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -153,10 +159,30 @@ class OpenRouterProvider(BaseLLMProvider):
                             break
                         try:
                             chunk_json = json.loads(data_str)
-                            content = chunk_json.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                            if content:
-                                full_content += content
-                                await chunk_callback(content)
+                            delta = chunk_json.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            reasoning = delta.get("reasoning_content", "")
+                            
+                            chunk_to_yield = ""
+                            if reasoning:
+                                if not in_reasoning:
+                                    chunk_to_yield += "<think>\n"
+                                    in_reasoning = True
+                                chunk_to_yield += reasoning
+                                
+                            if content is not None and content != "":
+                                if in_reasoning:
+                                    chunk_to_yield += "\n</think>\n"
+                                    in_reasoning = False
+                                chunk_to_yield += content
+                                
+                            if chunk_to_yield:
+                                full_content += chunk_to_yield
+                                await chunk_callback(chunk_to_yield)
                         except Exception as e:
                             log.error(f"Error parsing streaming chunk: {e}")
+                            
+            if in_reasoning:
+                full_content += "\n</think>\n"
+                await chunk_callback("\n</think>\n")
         return full_content
