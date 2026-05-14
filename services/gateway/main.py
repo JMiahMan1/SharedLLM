@@ -515,6 +515,7 @@ async def readiness():
       "storage": f"{STORAGE_SVC}/health",
       "logging": f"{LOGGING_SVC_URL}/health",
       "workspace_runtime": f"{WORKSPACE_RUNTIME_SVC}/health",
+      "control_plane": f"{CONTROL_PLANE_URL}/health",
     }
 
     results = {"status": "READY", "services": {}}
