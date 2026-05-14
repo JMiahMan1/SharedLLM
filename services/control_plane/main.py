@@ -45,6 +45,8 @@ def restart_service(service_name: str):
 def get_service_status(service_name: str, x_internal_secret: str = Header(None)):
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    if not client:
+        raise HTTPException(status_code=500, detail="Docker client not initialized")
     try:
         container = client.containers.get(service_name)
         return {
@@ -61,6 +63,8 @@ def get_service_status(service_name: str, x_internal_secret: str = Header(None))
 def list_containers(x_internal_secret: str = Header(None)):
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    if not client:
+        raise HTTPException(status_code=500, detail="Docker client not initialized")
     try:
         containers = client.containers.list(all=True)
         # Only show sharedllm containers for security
