@@ -140,7 +140,7 @@ def _make_openai_chunk(content: str, model: str, finish_reason: str = None):
 
 # --- Imports from internal modules ---
 try:
-    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, DeploymentRequest, SystemLearningRequest, WorkspaceBootstrapRequest
+    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, ControlPlaneRequest, SystemLearningRequest, WorkspaceBootstrapRequest
     from .intent_engine import engine
     from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
     from .prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
