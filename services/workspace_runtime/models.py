@@ -19,3 +19,5 @@ class Workspace(SQLModel, table=True):
     auto_backup_enabled: bool = Field(default=False)
     webhook_token: Optional[str] = Field(default=None)
     webhook_token_enc: Optional[str] = Field(default=None)
+    quarantined: bool = Field(default=False)
+    last_raven_mission_id: Optional[int] = Field(default=None)

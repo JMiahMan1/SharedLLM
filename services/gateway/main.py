@@ -4,10 +4,9 @@ import logging
 import json
 import asyncio
 import httpx
-import random
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 from fastapi.responses import JSONResponse, StreamingResponse
 import re
 import traceback
@@ -29,10 +28,10 @@ try:
     from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from schemas import ChatRequest, ResolvedCredentials
-    from agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
+    from agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
-        STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
+        STORAGE_SVC, WORKSPACE_RUNTIME_SVC, 
         INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
     )
     from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
@@ -154,10 +153,10 @@ except (ImportError, ValueError):
         from services.gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
         from services.gateway.messaging import InferenceJobQueue, JobStatus
     except ImportError:
-        from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
+        from schemas import StorageListRequest, StorageIndexRequest
         from intent_engine import engine
-        from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-        from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+        from history import update_history, ping_redis
+        from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
         from messaging import InferenceJobQueue, JobStatus
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -2395,7 +2394,7 @@ async def proxy_tags():
             if not isinstance(data, dict):
                 return {"models": []}
             return data
-    except Exception as e:
+    except Exception:
         return JSONResponse({"models": []}, status_code=200)
 
 @app.get("/api/version")
@@ -2507,8 +2506,12 @@ async def git_status_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/git/status", request)
 
 @app.post("/api/workspaces/git/pull")
-async def git_pull_workspace_proxy(request: Request):
+async def git_pull_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/git/pull", request)
+
+@app.post("/api/workspaces/git/revert")
+async def git_revert_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/revert", request)
 
 @app.post("/api/workspaces/tests/pytest")
 async def pytest_workspace_proxy(request: Request):
