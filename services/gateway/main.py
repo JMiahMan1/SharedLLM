@@ -2764,7 +2764,6 @@ async def get_raven_queue(request: Request):
         resp = await client.get(
             f"{IDENTITY_SVC}/api/raven/missions",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
@@ -2784,6 +2783,39 @@ async def restart_service(service_name: str, request: Request):
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
         return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.get("/api/admin/services")
+async def list_services(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{CONTROL_PLANE_URL}/api/containers",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.get("/api/models")
+async def list_models(request: Request):
+    """List available models from the active provider."""
+    settings = await get_llm_settings()
+    provider = await get_provider(settings)
+    
+    # If Ollama, we can hit its /api/tags endpoint
+    if isinstance(provider, OllamaProvider):
+        async with borrow_http_client() as client:
+            resp = await client.get(f"{provider.base_url}/api/tags")
+            if resp.status_code == 200:
+                tags = resp.json().get("models", [])
+                return {"status": "SUCCESS", "models": [m["name"] for m in tags]}
+    
+    # For OpenRouter or others, we might return the config models
+    return {
+        "status": "SUCCESS", 
+        "models": [settings.get("assistant_model"), settings.get("coding_model"), settings.get("librarian_model")],
+        "note": "Active config models returned for this provider."
+    }
 
 @app.post("/api/admin/raven/queue/{id}/execute")
 async def execute_raven_mission(id: int, request: Request):
