@@ -58,36 +58,24 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
 }
 
 SINGLE_TURN_TOOL_GUIDE = """
-Available tool schemas for standard chat include:
-- LightControlRequest: turn lights or switches on/off.
-- MediaPlayRequest: start audio or media playback on a target device.
-- MediaTransportRequest: pause, resume, stop, next, or previous playback.
-- TVCastRequest: cast video content to a display target.
-- ClimateRequest: read temperatures or change HVAC/climate settings.
-- SecurityRequest: inspect or change locks, alarms, and doors.
-- AnnouncementRequest: broadcast a message to household devices using high-fidelity local Kokoro TTS.
-- HAServiceRequest: call a raw Home Assistant domain/service pair.
-- CalendarRequest: create or inspect calendar items.
-- NoteRequest: create or retrieve household notes.
-- TimerRequest: create, cancel, or inspect timers.
-- TalkRequest: send a conversational or TTS message to a device.
-- WebSearchRequest and WebReadRequest: search or read public web pages.
-- DockerLogsRequest and DockerComposeRequest: inspect or operate containers.
-- GitOperationRequest: inspect or mutate git state.
-- ControlPlaneRequest: restart or check status of services. Actions: 'list' or 'restart'.
-  Example List: {"action":"controlplanerequest","payload":{"action":"list"}}
-  Example Restart: {"action":"controlplanerequest","payload":{"action":"restart","service_name":"sharedllm_gateway"}}
-- CapabilityIndexRequest and VolumeInventoryRequest: inspect system capabilities and storage.
-- WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, WorkspaceBootstrapRequest: inspect and modify workspace state.
-- StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest: inspect and manage storage providers.
-- SystemLearningRequest and DiscoverySyncRequest: record learnings and refresh discovered devices.
-- IdentityRequest: manage user profiles, discover new users from Nextcloud/HA, and sync Nextcloud users.
+Available tool schemas:
+- LightControlRequest, MediaPlayRequest, MediaTransportRequest, TVCastRequest: Smart home controls.
+- ClimateRequest, SecurityRequest, HAServiceRequest: Environmental & security controls.
+- AnnouncementRequest: Broadcast high-fidelity local Kokoro TTS messages.
+- CalendarRequest, NoteRequest, TimerRequest, TalkRequest: Personal assistance.
+- WebSearchRequest, WebReadRequest: Search/read public web pages.
+- DockerLogsRequest, DockerComposeRequest, ControlPlaneRequest: Container & service management.
+- GitOperationRequest: Version control (status, add, commit, push, pull, log, diff, sync).
+- CapabilityIndexRequest, VolumeInventoryRequest: System & storage inspection.
+- WorkspaceFileRead/Write/Patch/Lint/Search/Shell/Bootstrap: Workspace & development tasks.
+- StorageFileRead/Write, StorageList/Index: Storage management.
+- SystemLearningRequest, DiscoverySyncRequest, IdentityRequest: System state & identity management.
 
-When a tool is appropriate, output a fenced JSON object with exactly:
+To call a tool, output exactly:
 ```json
 {"action":"SCHEMA_NAME","payload":{...}}
 ```
-Do not say you lack access to tools when the request maps to one of these capabilities.
+Do not say you lack access if the request maps to these capabilities.
 """.strip()
 
 
