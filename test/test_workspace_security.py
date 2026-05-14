@@ -21,7 +21,7 @@ async def test_workspace_path_traversal_blocked():
         resp = await ac.post(
             "http://test/files/write", 
             json=malicious_payload,
-            headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET")}
+            headers={"X-Internal-Secret": "change-me-in-production"}
         )
         
         if resp.status_code == 404:

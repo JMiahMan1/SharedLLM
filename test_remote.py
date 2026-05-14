@@ -1,7 +1,7 @@
 import requests
 import json
 
-url = "http://localhost:11435/api/chat"
+url = "https://jarvis.sumemail.com/api/chat"
 payload = {
     "query": "Execute the StorageIndexRequest tool for the path /Notes",
     "user_id": "jeremiah",
