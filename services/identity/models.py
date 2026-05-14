@@ -135,6 +135,11 @@ DEFAULT_GLOBAL_SETTINGS = [
 
     # --- LOCAL TTS HARDWARE ---
     {"key": "system_default_tts_engine", "value": "kokoro", "description": "Global default local TTS engine (kokoro, piper)"},
-    {"key": "system_default_tts_voice", "value": "af_heart", "description": "Global default voice style for local TTS"}
+    {"key": "system_default_tts_voice", "value": "af_heart", "description": "Global default voice style for local TTS"},
+    
+    # --- GATEWAY & ROUTING ---
+    {"key": "fast_path_threshold", "value": "0.85", "description": "Confidence threshold to skip full intent parsing"},
+    {"key": "ollama_timeout", "value": "600", "description": "Timeout in seconds for local inference calls"},
+    {"key": "openai_timeout", "value": "120", "description": "Timeout in seconds for cloud inference calls"}
 ]
 
