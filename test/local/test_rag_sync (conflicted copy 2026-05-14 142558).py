@@ -7,7 +7,7 @@ import time
 LIVE_TEST_URL = os.getenv("LIVE_TEST_URL")
 GATEWAY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:11435"
 RAG_URL = "http://localhost:8004"
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 @pytest.fixture
 def client():

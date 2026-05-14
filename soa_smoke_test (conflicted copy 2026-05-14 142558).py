@@ -10,7 +10,7 @@ IDENTITY_URL = os.getenv("IDENTITY_URL", "http://identity:8001")
 EXECUTION_URL = os.getenv("EXECUTION_URL", "http://execution:8003")
 RAG_URL = os.getenv("RAG_URL", "http://rag:8004")
 WORKSPACE_RUNTIME_URL = os.getenv("WORKSPACE_RUNTIME_URL", "http://workspace_runtime:8007")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}")

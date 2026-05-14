@@ -183,7 +183,7 @@ RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
 LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://127.0.0.1:8006")
 WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://127.0.0.1:8007")
-CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://127.0.0.1:8008")
+CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://control_plane:8008")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -3026,6 +3026,34 @@ async def update_mission_status(id_or_slug: str, body: Dict[str, Any], request: 
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
         return resp.json()
+
+# --- Docker Control API ---
+@app.get("/api/docker/containers")
+async def proxy_list_containers(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds or not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{CONTROL_PLANE_URL}/api/containers",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/docker/exec/{service_name}")
+async def proxy_docker_exec(service_name: str, body: Dict[str, Any], request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds or not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{CONTROL_PLANE_URL}/api/containers/{service_name}/exec",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 @app.websocket("/api/raven/missions/{id_or_slug}/stream")
 async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):

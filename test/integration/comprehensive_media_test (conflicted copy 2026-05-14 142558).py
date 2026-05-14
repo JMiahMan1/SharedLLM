@@ -43,7 +43,7 @@ from test_helpers import get_ha_state, verify_device_state
 API_URL = os.getenv("API_URL", "http://ai.local:11435")
 REMOTE_HOST = "jeremiah@ai.local"
 if not HA_URL:
-    HA_URL = os.getenv("HA_URL", "https://ha.sumemail.com")
+    HA_URL = os.getenv("HA_URL", "https://localhost:8123")
 if not HA_TOKEN:
     HA_TOKEN = os.getenv("HA_TOKEN", "")
 

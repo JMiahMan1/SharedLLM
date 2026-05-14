@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 from app.settings import HA_ENV_TOKEN as HA_TOKEN, HA_URL
 # If HA_URL not in settings, fallback to env (settings usually has it)
 if not HA_URL:
-    HA_URL = os.getenv("HA_URL", "https://ha.sumemail.com")
+    HA_URL = os.getenv("HA_URL", "https://localhost:8123")
 
 if not HA_TOKEN:
      HA_TOKEN = os.getenv("HA_TOKEN", "")
