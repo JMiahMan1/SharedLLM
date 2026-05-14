@@ -30,32 +30,36 @@ log "========================================="
 
 # --- Step 1: Check what changed ---
 CHANGED_FILES=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || true)
-CODE_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^services/|^docker-compose|^scripts/|^Dockerfile" || true)
 CADDY_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^Caddyfile$" || true)
-NEEDS_REBUILD=false
+INFRA_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^docker-compose|^scripts/|^Dockerfile" || true)
 
-if [ -n "$CODE_CHANGE" ]; then
-    NEEDS_REBUILD=true
-    log "Code or infra changes detected — full rebuild required."
-else
-    log "No infrastructure changes — fast restart only."
+# Identify specific services that changed
+MODIFIED_SERVICES=""
+if [ -n "$CHANGED_FILES" ]; then
+    # Extract service names from paths like services/gateway/...
+    MODIFIED_SERVICES=$(printf '%s\n' "$CHANGED_FILES" | grep "^services/" | cut -d'/' -f2 | sort | uniq || true)
 fi
 
-if [ -n "$CADDY_CHANGE" ]; then
-    log "Caddy configuration change detected."
-fi
+log "Changes detected in: $CHANGED_FILES"
 
 # --- Step 2: Restart or Rebuild ---
-if [ "$NEEDS_REBUILD" = true ]; then
+if [ -n "$INFRA_CHANGE" ]; then
+    log "Infrastructure changes detected — full rebuild required."
     log "Running: $COMPOSE up -d --build"
     $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"
+elif [ -n "$MODIFIED_SERVICES" ]; then
+    log "Service changes detected: $MODIFIED_SERVICES"
+    for SVC in $MODIFIED_SERVICES; do
+        # Map directory name to service name if different (currently they match)
+        log "Rebuilding and restarting: $SVC"
+        $COMPOSE up -d --build "$SVC" 2>&1 | tee -a "$LOG_FILE"
+    done
 else
-    log "Running: $COMPOSE restart"
-    $COMPOSE restart 2>&1 | tee -a "$LOG_FILE"
+    log "No service or infra changes detected."
 fi
 
 if [ -n "$CADDY_CHANGE" ]; then
-    log "Running: $COMPOSE restart caddy"
+    log "Caddy configuration change detected — restarting caddy."
     $COMPOSE restart caddy 2>&1 | tee -a "$LOG_FILE"
 fi
 
