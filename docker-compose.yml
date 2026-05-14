@@ -189,7 +189,7 @@ services:
     group_add:
       - "${DOCKER_GID}"
     security_opt:
-      - label:disable
+      - label=disable
     ports:
       - 8007:8007
     environment:
@@ -226,7 +226,7 @@ services:
     group_add:
       - "${DOCKER_GID}"
     security_opt:
-      - label:disable
+      - label=disable
     environment:
       - REDIS_URL=redis://redis:6379/0
       - EXECUTION_SVC_URL=http://execution:8003
@@ -253,7 +253,7 @@ services:
     group_add:
       - "${DOCKER_GID}"
     security_opt:
-      - label:disable
+      - label=disable
     privileged: true
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
