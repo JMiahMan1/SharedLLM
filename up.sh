@@ -21,7 +21,9 @@ echo "Docker GID: $DOCKER_GID"
 if [ -z "$INTERNAL_SECRET" ]; then
   # Try to read it from .env if it exists locally but wasn't exported
   if [ -f .env ]; then
-    export $(grep -v '^#' .env | xargs)
+    set -a
+    source .env
+    set +a
   fi
 fi
 
