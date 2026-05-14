@@ -5,7 +5,7 @@ import time
 
 # Load secrets from environment (populated by deploy.sh or manual export)
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:11435")
+GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:8080")
 
 MODELS_TO_TEST = [] # Will be populated via /api/models
 
@@ -68,7 +68,6 @@ async def run_benchmark():
 
         for model_id in MODELS_TO_TEST:
             print(f"\n--- Benchmarking Model: {model_id} ---")
-            # ... (rest of loop)
             for task in TASKS:
                 start_time = time.time()
                 try:
@@ -84,13 +83,13 @@ async def run_benchmark():
                     latency = time.time() - start_time
                     
                     if resp.status_code == 200:
-                        log_result(size, task["name"], True, latency)
+                        log_result(model_id, task["name"], True, latency)
                     else:
-                        log_result(size, task["name"], False, latency)
+                        log_result(model_id, task["name"], False, latency)
                         print(f"  Error: {resp.text}")
                 except Exception as e:
                     latency = time.time() - start_time
-                    log_result(size, task["name"], False, latency)
+                    log_result(model_id, task["name"], False, latency)
                     print(f"  Exception: {str(e)}")
 
 if __name__ == "__main__":
