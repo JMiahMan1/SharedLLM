@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle } from 'lucide-react';
+import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type RavenConfig, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
@@ -41,6 +41,15 @@ export default function RavenOpsPanel() {
       toast.success('Mission Dispatched to Raven ROZ');
     },
     onError: (err: any) => toast.error(err.message || 'Failed to dispatch mission'),
+  });
+
+  const killMissionMutation = useMutation({
+    mutationFn: (id: number) => api.killRavenMission(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['raven-missions-admin'] });
+      toast.success('Kill Signal Dispatched');
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to kill mission'),
   });
 
   if (configLoading) {
@@ -199,13 +208,13 @@ export default function RavenOpsPanel() {
 
         {missionsLoading ? (
            <div className="text-slate-500 text-sm italic">Loading active missions...</div>
-        ) : missions.filter(m => m.status === 'running' || m.status === 'queued').length === 0 ? (
+        ) : missions.filter(m => m.status === 'running' || m.status === 'executing' || m.status === 'queued').length === 0 ? (
            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
              No missions are currently running.
            </div>
         ) : (
           <div className="space-y-3">
-            {missions.filter(m => m.status === 'running' || m.status === 'queued').map((mission) => (
+            {missions.filter(m => m.status === 'running' || m.status === 'executing' || m.status === 'queued').map((mission) => (
               <div key={mission.id} className="glass-card p-4 border-l-4 border-l-emerald-500/50">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
@@ -226,12 +235,23 @@ export default function RavenOpsPanel() {
                       <span>Dispatched: {new Date(mission.created_at).toLocaleString()}</span>
                     </p>
                   </div>
-                  <div className="flex-shrink-0">
+                  <div className="flex-shrink-0 flex items-center gap-2">
                      <button
                        onClick={() => setLiveMissionId(mission.id)}
                        className="glass-button bg-blue-500/10 border-blue-500/20 text-blue-300 hover:bg-blue-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
                      >
-                       <Terminal size={12} /> Watch Live
+                       <Terminal size={12} /> Watch
+                     </button>
+                     <button
+                       onClick={() => {
+                         if (confirm(`Are you sure you want to ABORT mission #${mission.id}?`)) {
+                           killMissionMutation.mutate(mission.id);
+                         }
+                       }}
+                       disabled={killMissionMutation.isPending}
+                       className="glass-button bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                     >
+                       <Square size={12} className="fill-red-400/20" /> Stop
                      </button>
                   </div>
                 </div>
