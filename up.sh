@@ -17,5 +17,20 @@ echo "=== SharedLLM Launcher ==="
 echo "User IDs: $PUID:$PGID"
 echo "Docker GID: $DOCKER_GID"
 
+# Pre-flight check: ensure critical environment variables are injected
+if [ -z "$INTERNAL_SECRET" ]; then
+  # Try to read it from .env if it exists locally but wasn't exported
+  if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+  fi
+fi
+
+if [ -z "$INTERNAL_SECRET" ]; then
+  echo "FATAL: INTERNAL_SECRET is not set in the environment!"
+  echo "Please export INTERNAL_SECRET before running up.sh, e.g.:"
+  echo "  export INTERNAL_SECRET='your_secret_here'"
+  exit 1
+fi
+
 # Run Docker Compose
 docker compose "$@"
