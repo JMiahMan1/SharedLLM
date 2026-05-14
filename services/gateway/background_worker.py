@@ -211,7 +211,7 @@ class RavenWorker:
                         query = content.replace("@jarvis", "").strip()
                         log.info(f"[TalkMonitor] Detected @jarvis mention in room {token}: {query}")
                         
-                        await self.job_queue.enqueue_job(
+                        await self.job_queue.push_job(
                             user_id=creds["user"],
                             payload={
                                 "query": query,
