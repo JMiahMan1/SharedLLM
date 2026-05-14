@@ -121,7 +121,7 @@ ALLOWED_TOOLS = {
     "workspaceshellrequest", "storagefilereadrequest", 
     "storagefilewriterequest", "storagelistrequest", "workspacebootstraprequest", 
     "systemlearningrequest", "discoverysyncrequest", "storageindexrequest",
-    "dockercomposerequest", "identityrequest",
+    "dockercomposerequest", "identityrequest", "controlplanerequest", "restart_service",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -578,6 +578,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
                 "storageindexrequest": (STORAGE_SVC, "/index/full"),
                 "identityrequest": (EXECUTION_SVC, "/execute/identity"),
+                "controlplanerequest": (os.getenv("CONTROL_PLANE_URL", "http://control_plane:8008"), "/api/restart"),
+                "restart_service": (os.getenv("CONTROL_PLANE_URL", "http://control_plane:8008"), "/api/restart"),
             }
 
             lookup_action = action.lower().strip() if action else ""
@@ -692,9 +694,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         await _persist_learning(learning_summary)
 
     # --- SUMMARIZATION PHASE ---
-    if successful_tool_calls > 0:
+    # Trigger if we have successful tool calls OR if the model output is purely JSON/messy
+    is_messy = "was was was" in ans or "```json" in ans or (ans.strip().startswith("{") and ans.strip().endswith("}"))
+    if successful_tool_calls > 0 or is_messy:
         # If the last response still looks like a tool call or is very short/messy, force a clean summary
-        if extract_action_json(ans) or len(ans.strip()) < 20 or "was was was" in ans:
+        if extract_action_json(ans) or len(ans.strip()) < 30 or is_messy:
             log.info("[AgentLoop] Finalizing with clean summarization phase...")
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise."},
