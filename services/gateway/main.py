@@ -2873,6 +2873,13 @@ async def execute_raven_mission(id: int, request: Request):
 
 # ---- User Missions Endpoints ----
 from pydantic import BaseModel
+try:
+    from .orchestrator import SINGLE_TURN_TOOL_GUIDE
+    from .messaging import job_queue
+except (ImportError, ValueError):
+    from orchestrator import SINGLE_TURN_TOOL_GUIDE
+    from messaging import job_queue
+
 class UserMissionRequest(BaseModel):
     query: str
     priority: int = 1
@@ -2892,8 +2899,8 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         "mission_type": "user_task",
         "priority": body.priority,
         "proposed_mission": body.query,
-        "coding_model": coding_model,
-        "user_id": creds.get("user_id") # We need to ensure user_id is in creds or we look it up
+        "coding_model": body.coding_model or coding_model,
+        "user_id": creds.get("user_id")
     }
     
     async with borrow_http_client() as client:
@@ -2908,9 +2915,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         mission_data = resp.json()
         
         # Enqueue the job for execution
-        # Use the requested model if provided, otherwise fallback to settings
         target_model = body.coding_model or coding_model
-        
         system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
         system_prompt += SINGLE_TURN_TOOL_GUIDE
         system_prompt += f"\n\nExecute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
