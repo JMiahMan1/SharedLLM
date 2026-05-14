@@ -68,9 +68,9 @@ async def run_mission(client, gateway_url, headers, mission, model):
     return False
 
 async def main():
-    base_url = os.getenv("LIVE_TEST_URL", "https://jarvis.sumemail.com")
+    base_url = os.getenv("LIVE_TEST_URL")
     gateway_url = f"{base_url}/api"
-    internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+    internal_secret = os.getenv("INTERNAL_SECRET")
     headers = {"X-Internal-Secret": internal_secret}
     model = os.getenv("TEST_MODEL", "qwen2.5-coder:7b")
 

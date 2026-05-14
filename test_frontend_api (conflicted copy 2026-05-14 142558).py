@@ -6,7 +6,7 @@ import json
 # Configuration
 SERVER_IP = "ai.local"
 GATEWAY_URL = f"http://{SERVER_IP}:8080" # All frontend calls go here
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 async def test_frontend_config():
     print("--- Testing Frontend: GET /api/config ---")
