@@ -252,7 +252,6 @@ def get_http_client() -> httpx.AsyncClient:
 _stream_redis = None
 
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None) -> Any:
-    global _stream_redis
     full_audit_log = []
     
     async def stream_event(event_type: str, data: str):
