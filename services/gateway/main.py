@@ -1548,11 +1548,16 @@ async def fetch_ha_entities(creds: dict) -> list:
                 engine.update_entity_cache(entities)
                 
                 # 1. Sync to RAG for discovery
-                asyncio.create_task(get_http_client().post(
-                    f"{RAG_SVC}/rag/sync/ha",
-                    json={"entities": entities, "user_id": user_id},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                ))
+                async def _sync_to_rag():
+                    try:
+                        await get_http_client().post(
+                            f"{RAG_SVC}/rag/sync/ha",
+                            json={"entities": entities, "user_id": user_id},
+                            headers={"X-Internal-Secret": INTERNAL_SECRET}
+                        )
+                    except Exception as _e:
+                        log.debug(f"RAG sync fire-and-forget failed (non-critical): {_e}")
+                asyncio.create_task(_sync_to_rag())
 
                 # 2. Auto-assign to user in Identity for RBAC bypass/mapping
                 async def auto_assign():
@@ -2030,7 +2035,7 @@ async def get_chat_job_status(job_id: str):
         result = job["result"]
         # Wrap in expected response format
         if job["payload"].get("is_openai"):
-             return _make_openai_response(result, job["payload"]["model"], "completed")
+            return _make_openai_response(result, job["payload"]["model"], "completed")
         return _make_ollama_response(result, job["payload"]["model"], "completed")
     
     if job["status"] == JobStatus.FAILED:
