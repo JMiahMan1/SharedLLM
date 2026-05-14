@@ -37,7 +37,7 @@ async def run_benchmark():
         print("ERROR: INTERNAL_SECRET is missing.")
         return
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=600.0) as client:
         # 1. Fetch actual models
         try:
             m_resp = await client.get(f"{GATEWAY_URL}/api/models")
