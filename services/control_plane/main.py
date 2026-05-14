@@ -5,10 +5,6 @@ from typing import Optional
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
-import logging
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("control_plane")
-
 app = FastAPI(title="Control Plane Service")
 
 @app.get("/health")
@@ -17,9 +13,7 @@ def health():
 
 # Initialize Docker client
 try:
-    # We use from_env() but ensure DOCKER_HOST is set in compose
     client = docker.from_env()
-    log.info("Docker client initialized successfully.")
 except Exception as e:
     print(f"Warning: Failed to initialize docker client: {e}")
     client = None
