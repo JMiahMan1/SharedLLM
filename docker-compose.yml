@@ -21,14 +21,12 @@ services:
     restart: unless-stopped
     ports:
       - 8001:8001
-    env_file:
-      - .env
     extra_hosts:
       - "ollama-server:192.168.1.204"
       - "ai-server:192.168.2.205"
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - TZ=America/Phoenix
     volumes:
@@ -36,7 +34,6 @@ services:
       - ./services/identity/main.py:/app/main.py:ro
       - ./services/identity/models.py:/app/models.py:ro
       - ./services/identity/seed.py:/app/seed.py:ro
-      - ./.env:/app/.env.legacy:ro
       - /etc/localtime:/etc/localtime:ro
 
   execution:
@@ -44,15 +41,14 @@ services:
     container_name: sharedllm_execution
     restart: unless-stopped
     user: "${PUID}:${PGID}"
-    env_file:
-      - .env
     extra_hosts:
       - "ollama-server:192.168.1.204"
       - "ai-server:192.168.2.205"
     environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - REDIS_URL=redis://redis:6379/0
       - RAG_SVC_URL=http://rag:8004
+      - IDENTITY_SVC_URL=http://identity:8001
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
     group_add:
@@ -72,10 +68,8 @@ services:
     build: ./services/rag
     container_name: sharedllm_rag
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - CHROMA_PERSIST_DIR=/data/chroma_db
       - TZ=America/Phoenix
     ports:
@@ -101,7 +95,7 @@ services:
     working_dir: /app
     environment:
       - RAG_SVC_URL=http://rag:8004
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - PYTHONPATH=/app
     depends_on:
       rag:
@@ -115,13 +109,11 @@ services:
     container_name: sharedllm_gateway
     restart: unless-stopped
     user: "${PUID}:${PGID}"
-    env_file:
-      - .env
     extra_hosts:
       - "ollama-server:192.168.1.204"
       - "ai-server:192.168.2.205"
     environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
@@ -159,7 +151,7 @@ services:
     container_name: sharedllm_logging
     restart: unless-stopped
     environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - TZ=America/Phoenix
     volumes:
       - logging_data:/app/data
@@ -173,7 +165,7 @@ services:
     ports:
       - 8005:8005
     environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - RAG_SVC_URL=http://rag:8004
       - TZ=America/Phoenix
     volumes:
@@ -193,8 +185,8 @@ services:
     ports:
       - 8007:8007
     environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - FERNET_KEY=${FERNET_KEY}
       - IDENTITY_SVC_URL=http://identity:8001
       - STORAGE_SVC_URL=http://storage:8005
@@ -228,9 +220,9 @@ services:
     security_opt:
       - label=disable
     environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - REDIS_URL=redis://redis:6379/0
       - EXECUTION_SVC_URL=http://execution:8003
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
     depends_on:
       - redis
@@ -256,7 +248,7 @@ services:
       - label=disable
     privileged: true
     environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

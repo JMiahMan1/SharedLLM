@@ -9,10 +9,7 @@ import asyncio
 
 log = logging.getLogger("gateway.history")
 
-# Configuration
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+# INTERNAL_SECRET sourced from config.py which enforces fail-secure at gateway startup.
 try:
     from .config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET
 except (ImportError, ValueError):
@@ -85,23 +82,23 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
         
         # We need to call RAG service. Since we are in history.py, we'll use a local client or pass one.
         # For simplicity, we'll create one here or use a shared one.
-        INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
-        RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
-        
+        RAG_SVC_LOCAL = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
+        secret = INTERNAL_SECRET  # from config, fail-secure at startup
+
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(
-                f"{RAG_SVC}/rag/search",
+                f"{RAG_SVC_LOCAL}/rag/search",
                 json=payload,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                headers={"X-Internal-Secret": secret}
             )
             if resp.status_code != 200:
                 return ""
-            
+
             data = resp.json()
             facts = data.get("results", [])
             if not facts:
                 return ""
-            
+
             context = "\n".join([f"- {f['content']}" for f in facts])
             return f"### User Preferences & Facts (Long-term Memory)\n{context}\n"
     except Exception as e:

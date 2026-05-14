@@ -1,5 +1,6 @@
 # services/logging/main.py
 import os
+import sys
 import sqlite3
 import json
 import re
@@ -25,7 +26,14 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 DB_PATH = os.getenv("LOGGING_DB_PATH", "/app/data/logs.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+
+# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    import logging as _boot_log
+    _boot_log.basicConfig(level="CRITICAL")
+    _boot_log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
 MAX_LOG_FIELD_LENGTH = 4000
 SECRET_FIELD_NAMES = {
     "api_key",

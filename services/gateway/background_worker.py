@@ -11,10 +11,10 @@ import os
 from typing import Any, Dict, Optional
 try:
     from .orchestrator import process_full_orchestration
-    from .config import SYSTEM_IDENTITY
+    from .config import SYSTEM_IDENTITY, INTERNAL_SECRET
 except (ImportError, ValueError):
     from orchestrator import process_full_orchestration
-    from config import SYSTEM_IDENTITY
+    from config import SYSTEM_IDENTITY, INTERNAL_SECRET
 
 
 try:
@@ -27,9 +27,9 @@ log = logging.getLogger("gateway.background_worker")
 # Configuration
 CHECK_INTERVAL_SECONDS = int(os.getenv("RAVEN_CHECK_INTERVAL", "300"))
 ERROR_THRESHOLD = int(os.getenv("RAVEN_ERROR_THRESHOLD", "5"))
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+# INTERNAL_SECRET is imported from config (fail-secure at startup)
 EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
-GATEWAY_SVC = "http://localhost:11435" # Gateway port
+GATEWAY_SVC = "http://localhost:11435"  # Gateway port
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 class RavenWorker:
@@ -262,7 +262,7 @@ class RavenWorker:
                                 await client.patch(
                                     f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
                                     json={"status": "executing"},
-                                    headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+                                    headers={"X-Internal-Secret": INTERNAL_SECRET}
                                 )
                         except Exception as patch_e:
                             log.error(f"Failed to update mission {mission_id} to executing: {patch_e}")
@@ -311,7 +311,7 @@ class RavenWorker:
                                 await client.patch(
                                     f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
                                     json={"status": "executing"},
-                                    headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+                                    headers={"X-Internal-Secret": INTERNAL_SECRET}
                                 )
                         except Exception as patch_e:
                             log.error(f"Failed to update mission {mission_id} to executing: {patch_e}")
@@ -335,7 +335,7 @@ class RavenWorker:
                         await client.patch(
                             f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
                             json={"status": "completed", "result": str(ans)},
-                            headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+                            headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} to completed: {patch_e}")
@@ -353,7 +353,7 @@ class RavenWorker:
                         await client.patch(
                             f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
                             json={"status": "failed", "result": str(e)},
-                            headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+                            headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} to failed: {patch_e}")

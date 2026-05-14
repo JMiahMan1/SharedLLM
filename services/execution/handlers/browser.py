@@ -12,7 +12,7 @@ except ImportError:
 
 log = logging.getLogger("execution.browser")
 
-SEARCH_BASE_URL = "https://localhost:8081/search"
+SEARCH_BASE_URL = "https://search.sumemail.com/search"
 
 async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
     """

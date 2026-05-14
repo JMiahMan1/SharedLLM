@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import sys
 import re
 import subprocess
 import hashlib
@@ -31,7 +32,12 @@ except (ImportError, ValueError):
 log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
+
 IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
 STORAGE_SVC_URL = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
 WORKSPACE_REGISTRY_PATH = os.getenv("WORKSPACE_REGISTRY_PATH", "/app/config/workspaces.json")
