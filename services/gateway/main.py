@@ -2433,17 +2433,26 @@ async def global_search(q: str, request: Request):
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
 @app.get("/api/workspaces")
-async def get_workspaces_proxy():
+async def get_workspaces_proxy(request: Request):
     """Proxy to workspace runtime."""
+    creds = await _resolve_identity_from_request(request)
+    params = {}
+    if creds:
+        if creds.get("rag_user"): params["rag_user"] = creds["rag_user"]
+        if creds.get("voice_id"): params["voice_id"] = creds["voice_id"]
+        if creds.get("device_id"): params["device_id"] = creds["device_id"]
+        
     try:
-        resp = await get_http_client().get(
-            f"{WORKSPACE_RUNTIME_SVC}/workspaces",
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return resp.json()
+        async with borrow_http_client() as client:
+            resp = await client.get(
+                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                params=params,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
     except Exception as e:
         log.error(f"Workspaces proxy failed: {e}")
-        return []
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 async def _proxy_workspace_runtime_json(method: str, path: str, request: Request | None = None):
     body = await request.json() if request is not None else None
