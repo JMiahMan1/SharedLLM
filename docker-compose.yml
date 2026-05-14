@@ -54,7 +54,7 @@ services:
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
     group_add:
-      - "${DOCKER_GID}"
+      - "${DOCKER_GID:-999}"
     security_opt:
       - label=disable
     volumes:
@@ -181,7 +181,7 @@ services:
     env_file:
       - .env
     group_add:
-      - "${DOCKER_GID}"
+      - "${DOCKER_GID:-999}"
     security_opt:
       - label=disable
     ports:
@@ -220,7 +220,7 @@ services:
     env_file:
       - .env
     group_add:
-      - "${DOCKER_GID}"
+      - "${DOCKER_GID:-999}"
     security_opt:
       - label=disable
     environment:
@@ -249,7 +249,7 @@ services:
     env_file:
       - .env
     group_add:
-      - "${DOCKER_GID}"
+      - "${DOCKER_GID:-999}"
     security_opt:
       - label=disable
     privileged: true
