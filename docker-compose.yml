@@ -186,6 +186,10 @@ services:
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
     user: "${PUID}:${PGID}"
+    group_add:
+      - "${DOCKER_GID}"
+    security_opt:
+      - label:disable
     ports:
       - 8007:8007
     environment:
@@ -221,6 +225,8 @@ services:
     user: "${PUID}:${PGID}"
     group_add:
       - "${DOCKER_GID}"
+    security_opt:
+      - label:disable
     environment:
       - REDIS_URL=redis://redis:6379/0
       - EXECUTION_SVC_URL=http://execution:8003
@@ -246,6 +252,8 @@ services:
     user: "${PUID}:${PGID}"
     group_add:
       - "${DOCKER_GID}"
+    security_opt:
+      - label:disable
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - DOCKER_HOST=unix:///var/run/docker.sock
