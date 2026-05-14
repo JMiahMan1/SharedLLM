@@ -254,12 +254,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     async def stream_event(event_type: str, data: str):
         if not mission_id: return
         import time
-        full_audit_log.append({"type": event_type, "data": data, "timestamp": time.time()})
+        msg_obj = {"type": event_type, "data": data, "timestamp": time.time()}
+        full_audit_log.append(msg_obj)
         global _stream_redis
         if not _stream_redis:
             _stream_redis = redis.from_url(REDIS_URL, decode_responses=True)
         try:
-            await _stream_redis.publish(f"raven:mission:stream:{mission_id}", json.dumps({"type": event_type, "data": data}))
+            msg_str = json.dumps(msg_obj)
+            await _stream_redis.rpush(f"raven:mission:history:{mission_id}", msg_str)
+            await _stream_redis.expire(f"raven:mission:history:{mission_id}", 86400)
+            await _stream_redis.publish(f"raven:mission:stream:{mission_id}", msg_str)
         except Exception as e:
             log.warning(f"Failed to stream event: {e}")
 
@@ -283,6 +287,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 selected_model = settings.get("ollama_coding_model") or settings.get("coding_model")
             else:
                 selected_model = settings.get("ollama_assistant_model") or settings.get("assistant_model")
+                
+    # Fail fast if config is missing or invalid
+    if not selected_model or selected_model == "auto":
+        error_msg = f"No valid model configured for {active_provider_name}. Please configure it in the UI."
+        await stream_event("result_error", error_msg)
+        return error_msg
 
     log.info(f"[AgentLoop] Active Provider: {active_provider_name} | Model: {selected_model}")
 
