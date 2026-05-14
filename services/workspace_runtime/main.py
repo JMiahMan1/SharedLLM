@@ -2037,7 +2037,7 @@ async def git_pull_webhook(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path: str, remote_path: str, excludes: Optional[List[str]] = None):
+async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path: str, remote_path: str, excludes: Optional[list[str]] = None):
     """
     Background task to mirror a local workspace directory to Nextcloud.
     Resolves credentials via Identity service and calls Storage mirror endpoint.
