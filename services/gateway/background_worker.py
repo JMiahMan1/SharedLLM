@@ -59,9 +59,37 @@ class RavenWorker:
             return
         self.is_running = True
         await self.job_queue.connect()
+        await self._recover_orphaned_missions()
         self._health_task = asyncio.create_task(self._health_loop())
         self._inference_task = asyncio.create_task(self._inference_loop())
         log.info("Raven Background Worker (Health + Inference) started.")
+
+    async def _recover_orphaned_missions(self):
+        """
+        On startup, any mission still in 'executing' status is an orphan —
+        the gateway was killed or restarted mid-run. Mark them failed so the
+        UI unblocks and TIER3_LOCK is not permanently held.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    "http://identity:8001/api/raven/missions",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if resp.status_code != 200:
+                    return
+                missions = resp.json()
+                orphans = [m for m in missions if m.get("status") == "executing"]
+                for mission in orphans:
+                    mid = mission["id"]
+                    await client.patch(
+                        f"http://identity:8001/api/raven/missions/{mid}",
+                        json={"status": "failed", "result": "Mission interrupted: gateway restarted during execution."},
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                    log.warning(f"[RavenWorker] Recovered orphaned mission #{mid} → marked failed")
+        except Exception as e:
+            log.warning(f"[RavenWorker] Orphan recovery failed (non-critical): {e}")
 
     async def stop(self):
         self.is_running = False
