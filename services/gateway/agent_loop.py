@@ -277,7 +277,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     settings = await get_dynamic_llm_settings()
     provider = await get_provider(settings)
     active_provider_name = settings.get("active_llm_provider", "ollama")
-
+ 
     # 2. Resolve Role-Based Model (Coder/Assistant) if selected_model is generic or "auto"
     if selected_model in ["auto", "assistant", "coder"]:
         tech_keywords = ["coder", "fix", "repair", "audit", "mission", "raven", "development", "git", "workspace"]
@@ -390,12 +390,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 })
             ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
 
-            # --- RETRY LOGIC FOR MODEL SWITCHING ---
+            # --- RETRY LOGIC ---
             MAX_INFERENCE_RETRIES = 3
             
             for retry_count in range(MAX_INFERENCE_RETRIES):
                 try:
-                    # Stick to the requested model for all attempts in autonomous missions
+                    # Stick to the requested model for all attempts
                     model_to_use = selected_model
                     dynamic_settings = await get_dynamic_llm_settings()
                     vram_params = await get_vram_safe_params(model_to_use, dynamic_settings)

@@ -189,9 +189,10 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 if not INTERNAL_SECRET:
     log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
     sys.exit(1)
-FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
+# FAST_PATH_THRESHOLD is now fetched dynamically from Identity.
+# Fallback value for startup or error:
+_DEFAULT_FAST_PATH_THRESHOLD = 0.85
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120.0"))
 # ---- Dynamic Model Config ----
 CONFIG = {
     "assistant_model": "",
@@ -1810,6 +1811,14 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     # 3. Semantic Routing (Fast Path Detection)
     intent, confidence = engine.classify(query)
+    
+    # Resolve dynamic threshold from Identity
+    threshold_str = await fetch_global_setting("fast_path_threshold", str(_DEFAULT_FAST_PATH_THRESHOLD))
+    try:
+        engine.FAST_PATH_CONFIDENCE = float(threshold_str)
+    except:
+        engine.FAST_PATH_CONFIDENCE = _DEFAULT_FAST_PATH_THRESHOLD
+
     is_fast_path = engine.is_fast_path(intent, confidence)
     resolved_entity = None
     
