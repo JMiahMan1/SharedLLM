@@ -74,7 +74,9 @@ Available tool schemas for standard chat include:
 - WebSearchRequest and WebReadRequest: search or read public web pages.
 - DockerLogsRequest and DockerComposeRequest: inspect or operate containers.
 - GitOperationRequest: inspect or mutate git state.
-- ControlPlaneRequest: restart or check status of services.
+- ControlPlaneRequest: restart or check status of services. Actions: 'list' or 'restart'.
+  Example List: {"action":"controlplanerequest","payload":{"action":"list"}}
+  Example Restart: {"action":"controlplanerequest","payload":{"action":"restart","service_name":"sharedllm_gateway"}}
 - CapabilityIndexRequest and VolumeInventoryRequest: inspect system capabilities and storage.
 - WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, WorkspaceBootstrapRequest: inspect and modify workspace state.
 - StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest: inspect and manage storage providers.
