@@ -1,6 +1,7 @@
 # services/storage/main.py
 import logging
 import os
+import sys
 import httpx
 import re
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Body, Query
@@ -29,7 +30,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 app = FastAPI(title="Librarian Storage Service")
 
 RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+
+# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
 
 class IndexScanRequest(BaseModel):
     provider: ProviderConfig

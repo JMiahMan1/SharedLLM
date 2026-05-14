@@ -448,7 +448,7 @@ class WorkspaceSyncAction(BaseRequest):
 # ─── Browser / Web Agent ────────────────────────────────────────────────────────
 
 class WebSearchRequest(BaseRequest):
-    """Performs a web search via localhost:8081."""
+    """Performs a web search via search.sumemail.com."""
     user_context: UserContext
     query: str
 

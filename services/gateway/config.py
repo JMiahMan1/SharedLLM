@@ -1,4 +1,5 @@
 import os
+import sys
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
@@ -8,7 +9,14 @@ STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://storage:8005")
 LOGGING_SVC = os.getenv("LOGGING_SVC_URL", "http://logging:8006")
 WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime:8007")
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    import logging as _boot_log
+    _boot_log.basicConfig(level="CRITICAL")
+    _boot_log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
+
 OLLAMA_TIMEOUT = 180.0
 
 # Raven job constraints
