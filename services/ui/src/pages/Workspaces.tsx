@@ -285,6 +285,18 @@ const Workspaces = () => {
                         </div>
                       </div>
                     )}
+                    {ws.excludes && ws.excludes.length > 0 && (
+                      <div className="space-y-1 col-span-2">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Sync Exclusions</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {ws.excludes.map((ex, idx) => (
+                            <span key={idx} className="bg-white/5 border border-white/10 px-1.5 py-0.5 rounded text-[9px] font-bold text-slate-400">
+                              {ex}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {ws.quarantined && (
@@ -492,6 +504,44 @@ const Workspaces = () => {
                 >
                   <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${form.auto_backup_enabled ? 'left-7' : 'left-1'}`} />
                 </button>
+             </div>
+
+             <div className="pt-2 border-t border-white/5">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Sync Exclusions</p>
+                <div className="flex flex-wrap gap-2 mb-3">
+                   {(form.excludes || []).map((ex, idx) => (
+                      <span key={idx} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 text-[10px] font-bold border border-indigo-500/20">
+                         {ex}
+                         <button 
+                            type="button"
+                            onClick={() => setForm({ ...form, excludes: (form.excludes || []).filter((_, i) => i !== idx) })}
+                            className="hover:text-red-400"
+                         >
+                            <Trash2 size={10} />
+                         </button>
+                      </span>
+                   ))}
+                   {(!form.excludes || form.excludes.length === 0) && (
+                      <p className="text-[10px] text-slate-600 italic">No custom exclusions set.</p>
+                   )}
+                </div>
+                <div className="flex gap-2">
+                   <input 
+                      type="text"
+                      placeholder="Add directory to exclude (e.g. .git)"
+                      className="glass-input flex-1 text-[11px] py-2"
+                      onKeyDown={(e) => {
+                         if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const val = e.currentTarget.value.trim();
+                            if (val && !(form.excludes || []).includes(val)) {
+                               setForm({ ...form, excludes: [...(form.excludes || []), val] });
+                               e.currentTarget.value = '';
+                            }
+                         }
+                      }}
+                   />
+                </div>
              </div>
 
              {form.auto_pull_enabled && (

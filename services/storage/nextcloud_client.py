@@ -252,10 +252,19 @@ class NextCloudClient:
             log.error(f"Failed to download {remote_path}: {e}")
             return False
 
-    def upload_directory(self, remote_path: str, local_path: str) -> Dict[str, Any]:
+    def upload_directory(self, remote_path: str, local_path: str, excludes: Optional[List[str]] = None) -> Dict[str, Any]:
         """Recursively upload a local directory to a remote Nextcloud path."""
         import os
         from pathlib import Path
+
+        # Default excludes if none provided
+        if excludes is None:
+            excludes = [
+                "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
+                ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox"
+            ]
+        
+        exclude_set = set(excludes)
         
         local_root = Path(local_path).resolve()
         if not local_root.is_dir():
@@ -269,10 +278,7 @@ class NextCloudClient:
         
         for root, dirs, files in os.walk(local_root):
             # Skip noise directories
-            dirs[:] = [d for d in dirs if d not in {
-                "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
-                ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox"
-            }]
+            dirs[:] = [d for d in dirs if d not in exclude_set]
             
             rel_path = Path(root).relative_to(local_root)
             remote_dir = str(PurePosixPath(remote_root) / rel_path)

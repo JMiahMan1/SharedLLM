@@ -229,7 +229,7 @@ async def mirror_provider_directory(req: ProviderMirrorRequest):
         if not hasattr(provider, "upload_directory"):
              raise HTTPException(status_code=400, detail="Provider does not support directory mirroring")
              
-        result = await run_in_threadpool(provider.upload_directory, req.remote_path, req.local_path)
+        result = await run_in_threadpool(provider.upload_directory, req.remote_path, req.local_path, excludes=req.excludes)
         return {"status": "SUCCESS", "result": result}
     except Exception as e:
         log.error(f"Provider mirror failed: {e}")

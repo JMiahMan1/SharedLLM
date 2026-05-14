@@ -36,6 +36,9 @@ def _migrate_workspace_table():
             conn.execute(text("ALTER TABLE workspace ADD COLUMN host_mount_path VARCHAR"))
         if "container_mount_path" not in columns:
             conn.execute(text("ALTER TABLE workspace ADD COLUMN container_mount_path VARCHAR"))
+        if "excludes" not in columns:
+            # Use TEXT for JSON storage in SQLite
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN excludes TEXT"))
 
 
 def get_session():

@@ -37,6 +37,7 @@ export interface Workspace {
   webhook_token?: string | null;
   quarantined?: boolean;
   last_raven_mission_id?: number | null;
+  excludes?: string[];
 }
 
 type WorkspaceListResponse =

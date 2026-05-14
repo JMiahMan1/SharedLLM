@@ -38,5 +38,5 @@ class NextcloudStorageProvider(StorageProvider):
             path, content, create_parents=create_parents, verify=verify, is_binary=is_binary
         )
 
-    def upload_directory(self, remote_path: str, local_path: str) -> dict[str, Any]:
-        return self.client.upload_directory(remote_path, local_path)
+    def upload_directory(self, remote_path: str, local_path: str, excludes: Optional[list[str]] = None) -> dict[str, Any]:
+        return self.client.upload_directory(remote_path, local_path, excludes=excludes)
