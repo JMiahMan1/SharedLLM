@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+const EMPTY_ARRAY: any[] = [];
 import {
   BellRing,
   Calendar,
