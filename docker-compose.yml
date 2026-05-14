@@ -254,6 +254,7 @@ services:
       - "${DOCKER_GID}"
     security_opt:
       - label:disable
+    privileged: true
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - DOCKER_HOST=unix:///var/run/docker.sock
