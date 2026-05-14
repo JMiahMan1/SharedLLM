@@ -169,7 +169,36 @@ class RavenWorker:
                     async def chunk_callback(chunk: str):
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id  # traceability
-                    ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
+                    
+                    # --- CANCELLABLE ORCHESTRATION ---
+                    orchestration_task = asyncio.create_task(process_full_orchestration(payload, chunk_callback=chunk_callback))
+                    
+                    # Monitor for kill signal
+                    kill_monitor = None
+                    if mission_id:
+                        async def _monitor_kill(mid, task_to_cancel):
+                            import redis.asyncio as redis
+                            r_kill = redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
+                            pubsub = r_kill.pubsub()
+                            await pubsub.subscribe(f"raven:mission:kill:{mid}")
+                            try:
+                                async for message in pubsub.listen():
+                                    if message["type"] == "message" and message["data"] == "KILL":
+                                        log.warning(f"[Worker] KILL SIGNAL RECEIVED for mission {mid}. Cancelling task.")
+                                        task_to_cancel.cancel()
+                                        break
+                            finally:
+                                await pubsub.unsubscribe()
+                                await r_kill.close()
+                        kill_monitor = asyncio.create_task(_monitor_kill(mission_id, orchestration_task))
+
+                    try:
+                        ans = await orchestration_task
+                    except asyncio.CancelledError:
+                        log.warning(f"[Worker] Orchestration for mission {mission_id} was CANCELLED.")
+                        ans = "Mission aborted by user."
+                    finally:
+                        if kill_monitor: kill_monitor.cancel()
             else:
                 log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
                 async with TIER2_SEMAPHORE:
