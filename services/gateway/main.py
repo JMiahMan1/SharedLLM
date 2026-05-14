@@ -2873,6 +2873,7 @@ async def execute_raven_mission(id: int, request: Request):
 
 # ---- User Missions Endpoints ----
 from pydantic import BaseModel
+
 try:
     from .orchestrator import SINGLE_TURN_TOOL_GUIDE
 except (ImportError, ValueError):
@@ -2886,7 +2887,8 @@ class UserMissionRequest(BaseModel):
 @app.post("/api/raven/missions")
 async def create_user_mission(body: UserMissionRequest, request: Request):
     creds = await _resolve_identity_from_request(request)
-    if not creds: raise HTTPException(status_code=401, detail="Unauthorized")
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     
     settings = await get_llm_settings()
     coding_model = settings.get("coding_model") or settings.get("ollama_coding_model")
@@ -2913,14 +2915,8 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         mission_data = resp.json()
         
         # Enqueue the job for execution
-        # Move import inside to break circular dependency
-        try:
-            from .orchestrator import SINGLE_TURN_TOOL_GUIDE
-        except (ImportError, ValueError):
-            from orchestrator import SINGLE_TURN_TOOL_GUIDE
-
         target_model = body.coding_model or coding_model
-        system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
+        system_prompt = "You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
         system_prompt += SINGLE_TURN_TOOL_GUIDE
         system_prompt += f"\n\nExecute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
         
