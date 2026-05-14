@@ -2876,6 +2876,7 @@ from pydantic import BaseModel
 class UserMissionRequest(BaseModel):
     query: str
     priority: int = 1
+    coding_model: Optional[str] = None
 
 @app.post("/api/raven/missions")
 async def create_user_mission(body: UserMissionRequest, request: Request):
@@ -2907,11 +2908,16 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         mission_data = resp.json()
         
         # Enqueue the job for execution
-        system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission. Execute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
+        # Use the requested model if provided, otherwise fallback to settings
+        target_model = body.coding_model or coding_model
+        
+        system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
+        system_prompt += SINGLE_TURN_TOOL_GUIDE
+        system_prompt += f"\n\nExecute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
         
         await job_queue.enqueue_job(creds.get("user_id") or "raven_user", {
             "query": mission_data["proposed_mission"],
-            "model": coding_model,
+            "model": target_model,
             "system": system_prompt,
             "stream": False,
             "creds": creds,
