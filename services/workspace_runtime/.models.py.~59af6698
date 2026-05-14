@@ -23,7 +23,6 @@ class Workspace(SQLModel, table=True):
     webhook_token_enc: Optional[str] = Field(default=None)
     quarantined: bool = Field(default=False)
     last_raven_mission_id: Optional[int] = Field(default=None)
-    excludes: List[str] = Field(default_factory=list, sa_column=Column(JSON))
 
     @property
     def effective_container_path(self) -> str:
