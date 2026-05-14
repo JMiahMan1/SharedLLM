@@ -6,14 +6,13 @@ import httpx
 import re
 import redis.asyncio as redis
 from typing import Optional, Any, Dict, List, Callable, Awaitable
-from fastapi.responses import JSONResponse
 
 try:
     from .history import REDIS_URL
     from .config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
-        STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT,
-        RAVEN_MAX_TOTAL_SECONDS, RAVEN_ITERATION_TIMEOUT,
+        STORAGE_SVC, INTERNAL_SECRET,
+        RAVEN_MAX_TOTAL_SECONDS,
         RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
     )
     from .schemas import ResolvedCredentials
@@ -22,9 +21,7 @@ except (ImportError, ValueError):
     from history import REDIS_URL
     from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
-        STORAGE_SVC, INTERNAL_SECRET, OLLAMA_TIMEOUT,
-        RAVEN_MAX_TOTAL_SECONDS, RAVEN_ITERATION_TIMEOUT,
-        RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
+        STORAGE_SVC, INTERNAL_SECRET, RAVEN_MAX_TOTAL_SECONDS, RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
     )
     from schemas import ResolvedCredentials
     from llm_providers import BaseLLMProvider, OpenRouterProvider
@@ -56,7 +53,8 @@ class OllamaProvider(BaseLLMProvider):
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
                 resp.raise_for_status()
                 raw_text = resp.text.strip()
-                if not raw_text: return ""
+                if not raw_text:
+                    return ""
                 
                 if "\n" in raw_text:
                     lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
@@ -69,8 +67,10 @@ class OllamaProvider(BaseLLMProvider):
                             msg = data.get("message", {})
                             chunk = msg.get("content") or msg.get("thinking") or ""
                             content += chunk
-                            if data.get("done"): break
-                        except json.JSONDecodeError: continue
+                            if data.get("done"):
+                                break
+                        except json.JSONDecodeError:
+                            continue
                     return content
                 
                 try:
@@ -89,7 +89,8 @@ class OllamaProvider(BaseLLMProvider):
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     clean_line = line.strip()
-                    if not clean_line: continue
+                    if not clean_line:
+                        continue
                     try:
                         chunk_json = json.loads(clean_line)
                         if "error" in chunk_json:
@@ -98,7 +99,8 @@ class OllamaProvider(BaseLLMProvider):
                         if content:
                             full_content += content
                             await chunk_callback(content)
-                        if chunk_json.get("done"): break
+                        if chunk_json.get("done"):
+                            break
 
                     except RuntimeError:
                         raise  # Let provider errors propagate to AgentLoop retry logic
@@ -140,7 +142,7 @@ def extract_action_json(text: str) -> dict | None:
     if match:
         try:
             return json.loads(match.group(1))
-        except:
+        except Exception:
             pass
 
     # Priority 2: Outer-most braces (robust fallback)
@@ -150,11 +152,11 @@ def extract_action_json(text: str) -> dict | None:
         candidate = text[first_brace:last_brace+1]
         try:
             return json.loads(candidate)
-        except:
+        except Exception:
             try:
                 cleaned = re.sub(r",\s*([\]}])", r"\1", candidate)
                 return json.loads(cleaned)
-            except:
+            except Exception:
                 pass
     
     return None
@@ -255,7 +257,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     full_audit_log = []
     
     async def stream_event(event_type: str, data: str):
-        if not mission_id: return
+        if not mission_id:
+            return
         import time
         msg_obj = {"type": event_type, "data": data, "timestamp": time.time()}
         full_audit_log.append(msg_obj)
@@ -317,10 +320,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     MAX_TOOL_ITERATIONS = 30
     loop_start = asyncio.get_event_loop().time()
-    agent_messages = ollama_payload.get("messages", [])[:]
+    # agent_messages = ollama_payload.get("messages", [])[:]
     exec_data = None
     ans = ""
-    timed_out = False
     successful_tool_calls = 0  # Track successful tool executions
     
     # --- VRAM-SAFE SCRATCHPAD ---
@@ -335,21 +337,21 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         if elapsed_total > RAVEN_MAX_TOTAL_SECONDS:
             log.error(f"[AgentLoop] HARD TIMEOUT after {elapsed_total:.0f}s at iteration {iter_num}")
             ans = f"ERROR: Raven job exceeded time limit of {RAVEN_MAX_TOTAL_SECONDS}s. Partial result: {ans or 'No output yet'}"
-            timed_out = True
+            # timed_out = True
             break
         
         # --- HARD KILL SWITCH (Redis polling) ---
         if mission_id:
             try:
-                r_kill = await get_stream_redis()
+                # Resolve redis instance for kill-switch check
+                r_kill = redis.from_url(REDIS_URL, decode_responses=True)
                 kill_flag = await r_kill.get(f"raven:mission:kill:{mission_id}")
                 if kill_flag:
-                    log.warning(f"[AgentLoop] KILL SWITCH ACTIVATED for mission {mission_id} at iteration {iter_num}")
-                    await stream_event("system", f"MissionAborted: Kill switch activated by operator at iteration {iter_num}.")
-                    ans = f"MISSION ABORTED: Kill switch activated at iteration {iter_num}. {successful_tool_calls} tool call(s) completed before termination."
-                    break
-            except Exception as kill_err:
-                log.warning(f"[AgentLoop] Kill switch check failed (non-fatal): {kill_err}")
+                    log.warning(f"[AgentLoop] MISSION KILL SIGNAL RECEIVED for {mission_id}. Terminating.")
+                    await stream_event("system", "Mission terminated by user.")
+                    return "MISSION TERMINATED: User requested cancellation via control plane."
+            except Exception as e:
+                log.error(f"[AgentLoop] Error checking mission kill flag: {e}")
         
         await stream_event("system", f"Agent loop iteration {iter_num}/{MAX_TOOL_ITERATIONS} started.")
         log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | total elapsed {elapsed_total:.0f}s")
@@ -390,7 +392,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             # --- RETRY LOGIC FOR MODEL SWITCHING ---
             MAX_INFERENCE_RETRIES = 3
-            inference_success = False
             
             for retry_count in range(MAX_INFERENCE_RETRIES):
                 try:
@@ -415,7 +416,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     if not ans or not ans.strip():
                         log.warning(f"[AgentLoop] Empty output from model on attempt {retry_count + 1}; treating as failure.")
                         raise Exception("Empty model output")
-                    inference_success = True
+                    # inference_success = True
                     break  # Success!
                 except Exception as e:
                     log.warning(f"[AgentLoop] Inference attempt {retry_count + 1} failed: {e}")
@@ -479,7 +480,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # If the previous tool call resulted in an ERROR, we MUST NOT terminate.
             # Force a retry regardless of other conditions.
             if exec_data and exec_data.get("status") == "ERROR":
-                log.warning(f"[AgentLoop] JSON extraction failed following an ERROR. Re-prompting for correction...")
+                log.warning("[AgentLoop] JSON extraction failed following an ERROR. Re-prompting for correction...")
                 action_log.append(f"ITERATION {iter_num}: Failed to parse your JSON after tool error. Ensure you provide a valid JSON block inside ```json ``` tags.")
                 continue
 
@@ -550,7 +551,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "log": "GitOperationRequest",
                 "gitoperationrequest": "GitOperationRequest",
                 "edit_file": "WorkspaceFilePatchRequest",
-                "patch_file": "WorkspaceFilePatchRequest",
                 "file_patch": "WorkspaceFilePatchRequest",
                 "apply_patches": "WorkspaceFilePatchRequest",
                 "workspace_file_read": "WorkspaceFileReadRequest",
@@ -651,7 +651,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         try:
                             error_detail = resp.json().get("detail", "Validation failed")
                             msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'message') instead of 'command' or 'commit_message'."
-                        except:
+                        except Exception:
                             msg = f"SCHEMA ERROR (422): {resp.text}. Check your field names."
                         exec_data = {"status": "ERROR", "message": msg}
                     else:
