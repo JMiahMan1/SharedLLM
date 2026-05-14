@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # Load .env file FIRST
 load_dotenv()
 
-HA_URL = os.getenv("HA_URL", "https://ha.sumemail.com")
+HA_URL = os.getenv("HA_URL", "https://localhost:8123")
 HA_TOKEN = os.getenv("HA_TOKEN", "")
 
 if not HA_TOKEN:

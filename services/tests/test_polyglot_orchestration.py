@@ -3,7 +3,7 @@ import json
 import time
 
 GATEWAY_URL = "http://ai.local:11435"
-INTERNAL_SECRET = "change-me-in-production"
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 def run_coding_task(description, expected_markers, workspace_id="SharedLLM", relative_path=None):
     print(f"\n>>> Task: {description}")

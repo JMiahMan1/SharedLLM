@@ -224,9 +224,9 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         # Ensure we have an author identity for the commit
         env_override = {
             "GIT_AUTHOR_NAME": getattr(user_context, "user", "Raven"),
-            "GIT_AUTHOR_EMAIL": f"{getattr(user_context, 'user', 'raven')}@sumemail.com",
+            "GIT_AUTHOR_EMAIL": f"{getattr(user_context, 'user', 'raven')}@local.host",
             "GIT_COMMITTER_NAME": getattr(user_context, "user", "Raven"),
-            "GIT_COMMITTER_EMAIL": f"{getattr(user_context, 'user', 'raven')}@sumemail.com",
+            "GIT_COMMITTER_EMAIL": f"{getattr(user_context, 'user', 'raven')}@local.host",
         }
         
         r = await _run_git(["commit", "-m", commit_message], env_override=env_override)
