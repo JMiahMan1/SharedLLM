@@ -1,5 +1,6 @@
 # services/gateway/orchestrator.py
 import asyncio
+import re
 import logging
 import httpx
 import os
@@ -131,6 +132,12 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     user_id = job_payload["creds"]["user"]
     creds = ResolvedCredentials(**job_payload["creds"])
     model = job_payload["model"]
+    
+    # 0. Query-based Model Override (e.g. "Raven use model qwen2.5:32b fix...")
+    model_match = re.search(r"(?:use model|with model|run on model)\s+([a-zA-Z0-9.\-_:]+)", query, re.IGNORECASE)
+    if model_match:
+        model = model_match.group(1)
+        log.info(f"[Orchestrator] Dynamic model override detected: {model}")
     
     log.info(f"[Orchestrator] Starting orchestration for query: {query[:50]}...")
     
