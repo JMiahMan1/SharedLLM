@@ -507,7 +507,7 @@ async def execute_index_capabilities():
 @app.get("/execute/tts/voices")
 async def list_tts_voices():
     """List available voices for the active TTS engine."""
-    from .tts import get_tts_engine
+    from tts import get_tts_engine
     engine = get_tts_engine()
     return {"status": "SUCCESS", "voices": engine.list_voices()}
 
@@ -558,7 +558,7 @@ async def execute_announce(req: AnnouncementRequest):
     result = {"ok": False, "error": "No engine selected"}
     
     if req.tts_engine == "kokoro":
-        from .tts import text_to_speech
+        from tts import text_to_speech
         try:
             audio_bytes = await text_to_speech(req.message, storybook=req.storybook)
             if not audio_bytes:
@@ -575,8 +575,8 @@ async def execute_announce(req: AnnouncementRequest):
             })
             
             if req.save_path:
-                from .handlers import storage as storage_handler
-                from .schemas import StorageFileWriteRequest
+                from handlers import storage as storage_handler
+                from schemas import StorageFileWriteRequest
                 await storage_handler.handle_storage_write(StorageFileWriteRequest(
                     user_context=ctx, path=req.save_path, content=audio_bytes
                 ))
