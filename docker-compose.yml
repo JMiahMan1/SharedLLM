@@ -43,7 +43,7 @@ services:
     build: ./services/execution
     container_name: sharedllm_execution
     restart: unless-stopped
-    user: "${PUID:-1000}:${PGID:-1000}"
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     extra_hosts:
@@ -56,7 +56,7 @@ services:
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
     group_add:
-      - "${DOCKER_GID:-980}"
+      - "${DOCKER_GID}"
     security_opt:
       - label=disable
     volumes:
@@ -114,7 +114,7 @@ services:
       dockerfile: services/gateway/Dockerfile
     container_name: sharedllm_gateway
     restart: unless-stopped
-    user: "${PUID:-1000}:${PGID:-1000}"
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     extra_hosts:
@@ -185,7 +185,7 @@ services:
     build: ./services/workspace_runtime
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
-    user: "${PUID:-1000}:${PGID:-1000}"
+    user: "${PUID}:${PGID}"
     ports:
       - 8007:8007
     environment:
@@ -218,6 +218,9 @@ services:
     build: ./services/automation
     container_name: sharedllm_automation
     restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    group_add:
+      - "${DOCKER_GID}"
     environment:
       - REDIS_URL=redis://redis:6379/0
       - EXECUTION_SVC_URL=http://execution:8003
@@ -240,6 +243,9 @@ services:
     build: ./services/control_plane
     container_name: sharedllm_control_plane
     restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    group_add:
+      - "${DOCKER_GID}"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
       - DOCKER_HOST=unix:///var/run/docker.sock
