@@ -2794,7 +2794,10 @@ async def list_services(request: Request):
             f"{CONTROL_PLANE_URL}/api/containers",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        try:
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+        except Exception:
+            return JSONResponse(status_code=resp.status_code, content={"detail": resp.text})
 
 @app.get("/api/models")
 async def list_models(request: Request):
