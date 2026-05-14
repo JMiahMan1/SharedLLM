@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import sys
 import json
 import httpx
 from datetime import datetime
@@ -12,8 +13,13 @@ log = logging.getLogger("automation")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
-SCHEDULER_INTERVAL = 5 # seconds
+
+# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
+SCHEDULER_INTERVAL = 5  # seconds
 
 redis_client = None
 

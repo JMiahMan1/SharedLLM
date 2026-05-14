@@ -1,5 +1,6 @@
 # services/execution/main.py
 import os
+import sys
 import logging
 import asyncio
 import httpx
@@ -63,7 +64,11 @@ except (ImportError, ValueError):
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 log = logging.getLogger("execution")
 
+# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
 IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
 
 async def resolve_internal_user(user_id: str) -> Optional[Dict[str, Any]]:

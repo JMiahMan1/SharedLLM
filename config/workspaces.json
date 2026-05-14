@@ -11,7 +11,8 @@
       "default_branch": "microservices",
       "sync_mode": "local_git_authoritative",
       "auto_pull_enabled": true,
-      "auto_backup_enabled": true
+      "auto_backup_enabled": true,
+      "excludes": ["node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox"]
     },
     {
       "id": "sharedllm_system",
@@ -26,7 +27,8 @@
       "default_branch": "microservices",
       "sync_mode": "local_git_authoritative",
       "auto_pull_enabled": true,
-      "auto_backup_enabled": true
+      "auto_backup_enabled": true,
+      "excludes": ["node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox"]
     }
   ]
 }

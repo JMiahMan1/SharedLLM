@@ -4,6 +4,7 @@ Microservice 1: Identity & Profile Service
 Manages user profiles, device assignments, and secure credential resolution.
 """
 import os
+import sys
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Optional, Any, Dict
@@ -43,7 +44,13 @@ log = logging.getLogger("identity")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
 DATABASE_URL = os.getenv("IDENTITY_DATABASE_URL", "sqlite:////data/identity.db")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+
+# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 
 engine = create_engine(

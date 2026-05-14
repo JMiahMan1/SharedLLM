@@ -4,6 +4,7 @@ Microservice 4: Context & RAG Service
 Manages ChromaDB for vector search and ingestion.
 """
 import os
+import sys
 import logging
 import time
 import hashlib
@@ -24,7 +25,11 @@ except ImportError:
 log = logging.getLogger("rag")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 

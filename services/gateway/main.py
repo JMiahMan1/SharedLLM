@@ -1,5 +1,6 @@
 # services/gateway/main.py
 import os
+import sys
 import logging
 import json
 import asyncio
@@ -183,8 +184,11 @@ RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
 LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://127.0.0.1:8006")
 WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://127.0.0.1:8007")
-CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://control_plane:8008")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://sharedllm_control_plane:8008")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+if not INTERNAL_SECRET:
+    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
+    sys.exit(1)
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120.0"))
