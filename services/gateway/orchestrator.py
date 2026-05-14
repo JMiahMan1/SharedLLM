@@ -58,25 +58,21 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
 }
 
 SINGLE_TURN_TOOL_GUIDE = """
-Available tool schemas:
-- LightControlRequest, MediaPlayRequest, MediaTransportRequest, TVCastRequest: Smart home controls.
-- ClimateRequest, SecurityRequest, HAServiceRequest: Environmental & security controls.
-- AnnouncementRequest: Broadcast high-fidelity local Kokoro TTS messages.
-- CalendarRequest, NoteRequest, TimerRequest, TalkRequest: Personal assistance.
-- WebSearchRequest, WebReadRequest: Search/read public web pages.
-- DockerLogsRequest, DockerComposeRequest, DeploymentRequest, ControlPlaneRequest: Container & service management.
-- GitOperationRequest: Version control (status, add, commit, push, pull, log, diff, sync).
-- CapabilityIndexRequest, VolumeInventoryRequest: System & storage inspection.
-- WorkspaceFileRead/Write/Patch/Lint/Search/Shell/Bootstrap: Workspace & development tasks.
-- StorageFileRead/Write, StorageList/Index: Storage management.
-- SystemLearningRequest, DiscoverySyncRequest, IdentityRequest: System state & identity management.
-
-To call a tool, output exactly:
+You are Raven, an autonomous agent. Execute the mission using JSON tool blocks:
 ```json
-{"action":"SCHEMA_NAME","payload":{...}}
+{"action": "ToolName", "payload": {...}}
 ```
-Do not say you lack access if the request maps to these capabilities.
-""".strip()
+Valid Tools:
+- Git: GitOperationRequest (status, add, commit, push, pull, diff, sync)
+- Docker: DockerLogsRequest, DockerComposeRequest, DeploymentRequest, ControlPlaneRequest
+- File: WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest
+- Storage: StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest
+- System: SystemLearningRequest, DiscoverySyncRequest, IdentityRequest, CapabilityIndexRequest
+- HA: LightControlRequest, MediaPlayRequest, MediaTransportRequest, TVCastRequest, ClimateRequest, SecurityRequest, HAServiceRequest
+- Personal: AnnouncementRequest, CalendarRequest, NoteRequest, TimerRequest, TalkRequest
+
+Rules: One tool per turn. Wait for result before continuing. Finish with a natural language summary when done.
+"""
 
 
 async def get_llm_settings() -> Dict[str, str]:
