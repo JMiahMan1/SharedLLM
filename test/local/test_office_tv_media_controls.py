@@ -11,7 +11,8 @@ if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
 
 HA_URL = os.getenv("HA_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
-GATEWAY_URL = "http://localhost:11435"
+LIVE_TEST_URL = os.getenv("LIVE_TEST_URL")
+GATEWAY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:11435"
 QUEUE_ENTITY_ID = "media_player.office_tv_3"
 
 HA_HEADERS = {

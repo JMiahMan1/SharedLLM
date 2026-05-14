@@ -11,7 +11,8 @@ load_dotenv()
 
 HA_URL = os.getenv("HA_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
-GATEWAY_URL = "http://localhost:11435" # Gateway port in SOA
+LIVE_TEST_URL = os.getenv("LIVE_TEST_URL")
+GATEWAY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:11435" # Gateway port in SOA
 
 # Headers for direct HA verification
 HA_HEADERS = {
