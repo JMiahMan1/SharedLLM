@@ -35,6 +35,16 @@ fi
 
 COMPOSE="docker compose"
 
+# --- Volume Permission Guard ---
+# If running as a non-root user, ensure named volumes are writable by that user.
+if [ "$PUID" != "0" ]; then
+    log "Ensuring volume permissions for user $PUID:$PGID..."
+    VOLUMES=("identity_db" "chroma_data" "logging_data" "workspace_runtime_data" "redis_data")
+    for VOL in "${VOLUMES[@]}"; do
+        docker run --rm -v "$VOL:/data" busybox chown -R "$PUID:$PGID" /data 2>/dev/null || true
+    done
+fi
+
 # Ensure log dir exists
 mkdir -p "$REPO_DIR/data"
 
