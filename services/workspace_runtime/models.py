@@ -6,7 +6,7 @@ class Workspace(SQLModel, table=True):
     id: str = Field(primary_key=True)
     display_name: str
     access_policy: str = Field(default="authenticated")
-    local_path: str  # Legacy: kept for backward compat, maps to container_mount_path
+    local_path: Optional[str] = None  # Legacy: kept for backward compat, maps to container_mount_path
     host_mount_path: Optional[str] = None  # Absolute path on host (e.g. /home/jeremiah/Code/SharedLLM)
     container_mount_path: Optional[str] = None  # Path inside container (e.g. relative to WORKSPACE_RUNTIME_ROOT)
     nextcloud_path: Optional[str] = None

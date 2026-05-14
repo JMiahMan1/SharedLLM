@@ -10,12 +10,14 @@ COPY services/gateway/. .
 COPY docs ./docs
 COPY README.md EXAMPLES.md TESTING.md ./
 
-# --- Privilege Drop: create dedicated sharedllm user (UID/GID 1000) ---
-RUN groupadd -g 1000 sharedllm || true \
-    && useradd -u 1000 -g 1000 -m -s /bin/bash sharedllm || true \
-    && chown -R 1000:1000 /app \
+# --- Privilege Drop: create dedicated sharedllm user ---
+ARG PUID=1000
+ARG PGID=1000
+RUN groupadd -g ${PGID} sharedllm || true \
+    && useradd -u ${PUID} -g ${PGID} -m -s /bin/bash sharedllm || true \
+    && chown -R ${PUID}:${PGID} /app \
     && mkdir -p /home/sharedllm/.cache/huggingface /home/sharedllm/.cache/qdrant \
-    && chown -R 1000:1000 /home/sharedllm
+    && chown -R ${PUID}:${PGID} /home/sharedllm
 ENV HOME=/home/sharedllm
 
 EXPOSE 8002

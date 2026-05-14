@@ -387,9 +387,9 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
             None
         )
         if match is None:
-            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "local_path": lookup_path}
+            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "container_mount_path": lookup_path}
     else:
-        raise HTTPException(status_code=400, detail="workspace_id or local_path/container_mount_path is required")
+        raise HTTPException(status_code=400, detail="workspace_id or container_mount_path is required")
 
     if match is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -407,7 +407,7 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
     # Use container_mount_path if available, fallback to local_path
-    effective_path = str(match.get("container_mount_path") or match["local_path"])
+    effective_path = str(match.get("container_mount_path") or match.get("local_path", ""))
     resolved_path = resolve_safe_path(get_workspace_root(), effective_path)
     if not resolved_path.is_dir():
          raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {effective_path}")
@@ -438,12 +438,13 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
 
     if ref.workspace_id:
         match = next((item for item in registry if item.get("id") == ref.workspace_id), None)
-    elif ref.local_path:
-        match = next((item for item in registry if item.get("local_path") == ref.local_path), None)
+    elif ref.container_mount_path or ref.local_path:
+        lookup_path = ref.container_mount_path or ref.local_path
+        match = next((item for item in registry if (item.get("container_mount_path") or item.get("local_path")) == lookup_path), None)
         if match is None:
-            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "local_path": ref.local_path}
+            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "container_mount_path": lookup_path}
     else:
-        raise HTTPException(status_code=400, detail="workspace_id or local_path is required")
+        raise HTTPException(status_code=400, detail="workspace_id or container_mount_path is required")
 
     if match is None:
         if not ref.create_if_missing:
@@ -454,12 +455,12 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
         if not repo_url:
             raise HTTPException(status_code=400, detail="repo_url is required to create a workspace")
         workspace_id = _derive_workspace_id(ref.workspace_id, resolved_user, repo_url)
-        local_path = str(ref.local_path or _derive_workspace_local_path(workspace_id, resolved_user)).strip()
+        container_mount_path = str(ref.container_mount_path or ref.local_path or _derive_workspace_container_path(workspace_id, resolved_user)).strip()
         match = {
             "id": workspace_id,
             "display_name": str(ref.display_name or workspace_id).strip(),
             "access_policy": "authenticated",
-            "local_path": local_path,
+            "container_mount_path": container_mount_path,
             "repo_url": repo_url,
             "git_remote": str(ref.remote or "origin").strip(),
             "default_branch": str(ref.branch or "main").strip(),
@@ -483,7 +484,8 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
     if owner_user and not is_admin and owner_user != resolved_user:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    resolved_path = resolve_safe_path(get_workspace_root(), str(match["local_path"]), must_exist=False)
+    effective_path = str(match.get("container_mount_path") or match.get("local_path", ""))
+    resolved_path = resolve_safe_path(get_workspace_root(), effective_path, must_exist=False)
     workspace = dict(match)
     workspace["resolved_path"] = str(resolved_path)
     workspace["exists"] = resolved_path.exists()
@@ -517,7 +519,7 @@ def _derive_workspace_id(requested_id: Optional[str], resolved_user: str, repo_u
     return f"{_normalize_workspace_slug(resolved_user)}-{_derive_repo_name(repo_url)}"
 
 
-def _derive_workspace_local_path(workspace_id: str, resolved_user: str) -> str:
+def _derive_workspace_container_path(workspace_id: str, resolved_user: str) -> str:
     return f"users/{_normalize_workspace_slug(resolved_user)}/workspaces/{_normalize_workspace_slug(workspace_id)}"
 
 

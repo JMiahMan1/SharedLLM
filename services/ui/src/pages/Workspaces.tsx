@@ -410,8 +410,8 @@ const Workspaces = () => {
               <Folder size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
               <input 
                 type="text" 
-                value={form.container_mount_path || form.local_path}
-                onChange={(e) => setForm({ ...form, container_mount_path: e.target.value, local_path: e.target.value })}
+                value={form.container_mount_path || form.local_path || ''}
+                onChange={(e) => setForm({ ...form, container_mount_path: e.target.value })}
                 placeholder="your/repository/folder"
                 className="glass-input w-full pl-10"
               />
