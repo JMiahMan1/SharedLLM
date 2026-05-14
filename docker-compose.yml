@@ -40,7 +40,7 @@ services:
     build: ./services/execution
     container_name: sharedllm_execution
     restart: unless-stopped
-    user: "${PUID}:${PGID}"
+    user: "${PUID:-1000}:${PGID:-1000}"
     extra_hosts:
       - "ollama-server:192.168.1.204"
       - "ai-server:192.168.2.205"
@@ -109,7 +109,7 @@ services:
       dockerfile: services/gateway/Dockerfile
     container_name: sharedllm_gateway
     restart: unless-stopped
-    user: "${PUID}:${PGID}"
+    user: "${PUID:-1000}:${PGID:-1000}"
     extra_hosts:
       - "ollama-server:192.168.1.204"
       - "ai-server:192.168.2.205"
@@ -173,7 +173,7 @@ services:
     build: ./services/workspace_runtime
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
-    user: "${PUID}:${PGID}"
+    user: "${PUID:-1000}:${PGID:-1000}"
     group_add:
       - "${DOCKER_GID}"
     security_opt:
@@ -210,7 +210,7 @@ services:
     build: ./services/automation
     container_name: sharedllm_automation
     restart: unless-stopped
-    user: "${PUID}:${PGID}"
+    user: "${PUID:-1000}:${PGID:-1000}"
     group_add:
       - "${DOCKER_GID}"
     security_opt:
@@ -237,7 +237,7 @@ services:
     build: ./services/control_plane
     container_name: sharedllm_control_plane
     restart: unless-stopped
-    user: "${PUID}:${PGID}"
+    user: "${PUID:-1000}:${PGID:-1000}"
     group_add:
       - "${DOCKER_GID}"
     security_opt:
