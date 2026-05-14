@@ -2825,6 +2825,37 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         
         return {"status": "SUCCESS", "mission": mission_data}
 
+@app.post("/api/raven/missions/{id}/kill")
+async def kill_mission(request: Request, id: int):
+    creds = await _resolve_identity_from_request(request)
+    if not creds: raise HTTPException(status_code=401, detail="Unauthorized")
+
+    async with borrow_http_client() as client:
+        # 1. Update status in database
+        resp = await client.patch(
+            f"{IDENTITY_SVC}/api/raven/missions/{id}",
+            json={
+                "status": "failed", 
+                "result": "Aborted by user"
+            },
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail="Failed to update mission status")
+        
+        # 2. Publish kill signal to Redis
+        try:
+            from history import REDIS_URL
+        except (ImportError, ValueError):
+            from .history import REDIS_URL
+        
+        import redis.asyncio as redis
+        r = redis.from_url(REDIS_URL, decode_responses=True)
+        await r.publish(f"raven:mission:kill:{id}", "KILL")
+        await r.close()
+        
+        return {"status": "SUCCESS", "message": f"Mission {id} kill signal sent."}
+
 @app.get("/api/raven/missions")
 async def get_user_missions(request: Request):
     creds = await _resolve_identity_from_request(request)
