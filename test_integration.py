@@ -9,7 +9,7 @@ GATEWAY_URL = f"http://{SERVER_IP}:8080" # Via Caddy
 IDENTITY_URL = f"http://{SERVER_IP}:8001"
 EXECUTION_URL = f"http://{SERVER_IP}:8003"
 RAG_URL = f"http://{SERVER_IP}:8004"
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 async def test_identity_resolution():
     print("--- Testing Identity Resolution ---")

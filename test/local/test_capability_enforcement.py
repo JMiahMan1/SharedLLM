@@ -5,8 +5,8 @@ import pytest
 from typing import List, Dict, Any
 
 # Configuration
-BASE_URL = os.getenv("LIVE_TEST_URL", "https://jarvis.sumemail.com")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+BASE_URL = os.getenv("LIVE_TEST_URL")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 
 # Service URLs (Internal routing via Gateway)

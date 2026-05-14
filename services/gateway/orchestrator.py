@@ -16,7 +16,7 @@ except (ImportError, ValueError):
 
 log = logging.getLogger("gateway.orchestrator")
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
 RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
 IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
@@ -59,20 +59,26 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
 }
 
 SINGLE_TURN_TOOL_GUIDE = """
-You are Raven, an autonomous agent. Execute the mission using JSON tool blocks:
-```json
-{"action": "ToolName", "payload": {...}}
-```
-Valid Tools:
-- Git: GitOperationRequest (status, add, commit, push, pull, diff, sync)
-- Docker: DockerLogsRequest, DockerComposeRequest, DeploymentRequest, ControlPlaneRequest
+# CORE PROTOCOLS
+1. **JSON ONLY**: You MUST output ONLY the JSON block. No preamble, no natural language.
+2. **STRICT SCHEMA**: Your JSON must use lowercase "action" and "payload".
+3. **ONE ACTION**: Only one action per turn.
+
+# VALID TOOLS (MANDATORY NAMES)
+- Git: GitOperationRequest (actions: status, add, commit, push, pull, diff)
+- Docker: DockerLogsRequest, DockerComposeRequest
 - File: WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest
 - Storage: StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest
-- System: SystemLearningRequest, DiscoverySyncRequest, IdentityRequest, CapabilityIndexRequest
-- HA: LightControlRequest, MediaPlayRequest, MediaTransportRequest, TVCastRequest, ClimateRequest, SecurityRequest, HAServiceRequest
-- Personal: AnnouncementRequest, CalendarRequest, NoteRequest, TimerRequest, TalkRequest
 
-Rules: One tool per turn. Wait for result before continuing. Finish with a natural language summary when done.
+# OUTPUT FORMAT (MANDATORY)
+```json
+{
+  "action": "TOOL_NAME",
+  "payload": {
+    "key": "value"
+  }
+}
+```
 """
 
 

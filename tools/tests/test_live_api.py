@@ -2,8 +2,8 @@ import os
 import sys
 import httpx
 
-BASE_URL = os.getenv("LIVE_TEST_URL", "https://jarvis.sumemail.com")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+BASE_URL = os.getenv("LIVE_TEST_URL")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 API_KEY = os.getenv("API_KEY") # Optional: can use Bearer token instead
 
 HEADERS = {}

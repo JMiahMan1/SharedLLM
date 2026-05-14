@@ -13,7 +13,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 log = logging.getLogger("shim_users")
 
 IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 security = HTTPBearer(auto_error=False)
 
 def get_user_creds(username: str = "default") -> Dict[str, str]:

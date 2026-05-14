@@ -3,7 +3,7 @@ import docker
 from fastapi import FastAPI, HTTPException, Header, Depends
 from typing import Optional
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 app = FastAPI(title="Control Plane Service")
 
@@ -97,6 +97,26 @@ def get_container_logs(service_name: str, tail: int = 100, x_internal_secret: st
         container = client.containers.get(service_name)
         logs = container.logs(tail=tail, stdout=True, stderr=True).decode("utf-8")
         return {"name": service_name, "logs": logs}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/containers/{service_name}/exec", dependencies=[Depends(verify_internal_secret)])
+def exec_in_container(service_name: str, body: Dict[str, Any]):
+    if not client:
+        raise HTTPException(status_code=500, detail="Docker client not initialized")
+    try:
+        container = client.containers.get(service_name)
+        command = body.get("command")
+        if not command:
+            raise HTTPException(status_code=400, detail="No command provided")
+        
+        exec_result = container.exec_run(command)
+        return {
+            "exit_code": exec_result.exit_code,
+            "output": exec_result.output.decode("utf-8")
+        }
     except docker.errors.NotFound:
         raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
     except Exception as e:

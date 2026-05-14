@@ -2939,16 +2939,38 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         
         return {"status": "SUCCESS", "mission": mission_data}
 
-@app.post("/api/raven/missions/{id}/kill")
-async def kill_mission(request: Request, id: int):
+@app.get("/api/raven/missions/{id_or_slug}")
+async def get_mission_details(request: Request, id_or_slug: str):
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail="Mission not found")
+        return resp.json()
+
+@app.post("/api/raven/missions/{id_or_slug}/kill")
+async def kill_mission(request: Request, id_or_slug: str):
     creds = await _resolve_identity_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     async with borrow_http_client() as client:
+        # Resolve to real ID
+        m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        if m_resp.status_code != 200:
+            raise HTTPException(status_code=m_resp.status_code, detail="Mission not found")
+        mission_data = m_resp.json()
+        real_id = mission_data["id"]
+
         # 1. Update status in database
         resp = await client.patch(
-            f"{IDENTITY_SVC}/api/raven/missions/{id}",
+            f"{IDENTITY_SVC}/api/raven/missions/{real_id}",
             json={
                 "status": "failed", 
                 "result": "Aborted by user"
@@ -2966,13 +2988,11 @@ async def kill_mission(request: Request, id: int):
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
-        # SET key with 1-hour TTL for poll-based kill (agent_loop.py checks this)
-        await r.set(f"raven:mission:kill:{id}", "KILL", ex=3600)
-        # PUBLISH for event-driven kill (background_worker.py monitors this)
-        await r.publish(f"raven:mission:kill:{id}", "KILL")
+        await r.set(f"raven:mission:kill:{real_id}", "KILL", ex=3600)
+        await r.publish(f"raven:mission:kill:{real_id}", "KILL")
         await r.close()
         
-        return {"status": "SUCCESS", "message": f"Mission {id} kill signal sent."}
+        return {"status": "SUCCESS", "message": f"Mission {real_id} kill signal sent."}
 
 @app.get("/api/raven/missions")
 async def get_user_missions(request: Request):
@@ -2989,9 +3009,35 @@ async def get_user_missions(request: Request):
         missions = [m for m in resp.json() if m["mission_type"] != "admin_fix" or creds.get("is_admin")]
         return JSONResponse(status_code=resp.status_code, content=missions)
 
-@app.websocket("/api/raven/missions/{id}/stream")
-async def raven_mission_stream(websocket: WebSocket, id: int):
+@app.patch("/api/raven/missions/{id_or_slug}")
+async def update_mission_status(id_or_slug: str, body: Dict[str, Any], request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    async with borrow_http_client() as client:
+        resp = await client.patch(
+            f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+@app.websocket("/api/raven/missions/{id_or_slug}/stream")
+async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):
     await websocket.accept()
+    # Resolve to real ID
+    async with borrow_http_client() as client:
+        resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        if resp.status_code != 200:
+            await websocket.send_text(json.dumps({"error": "Mission not found"}))
+            await websocket.close()
+            return
+        mission_data = resp.json()
+        real_id = mission_data["id"]
+
     try:
         try:
             from history import REDIS_URL
@@ -3002,7 +3048,7 @@ async def raven_mission_stream(websocket: WebSocket, id: int):
         r = redis.from_url(REDIS_URL, decode_responses=True)
         
         # 1. Send all existing historical messages first
-        history_key = f"raven:mission:history:{id}"
+        history_key = f"raven:mission:history:{real_id}"
         existing_logs = await r.lrange(history_key, 0, -1)
         for msg in existing_logs:
             try:
@@ -3012,7 +3058,7 @@ async def raven_mission_stream(websocket: WebSocket, id: int):
                 
         # 2. Subscribe to new messages
         pubsub = r.pubsub()
-        channel = f"raven:mission:stream:{id}"
+        channel = f"raven:mission:stream:{real_id}"
         await pubsub.subscribe(channel)
         
         async def reader():

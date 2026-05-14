@@ -10,7 +10,7 @@ async def test_control_plane_integration():
     """
     base_url = os.getenv("LIVE_TEST_URL", "http://127.0.0.1:8002")
     gateway_url = f"{base_url}/api" if base_url != "http://127.0.0.1:8002" else "http://127.0.0.1:8002/api"
-    headers = {"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
+    headers = {"X-Internal-Secret": os.getenv("INTERNAL_SECRET")}
     
     print(f"=== Testing SharedLLM Integration against {base_url} ===\n")
 

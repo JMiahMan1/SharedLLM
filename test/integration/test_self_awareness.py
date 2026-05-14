@@ -6,7 +6,7 @@ import pytest
 
 RAG_SVC_URL = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 GATEWAY_SVC_URL = os.getenv("GATEWAY_SVC_URL", "http://127.0.0.1:11435")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 def test_rag_capability_search():
     """Verify that we can search for capabilities in RAG directly."""
