@@ -42,6 +42,7 @@ class User(SQLModel, table=True):
     
     # Biometric voice profile (stored as a JSON string of embeddings)
     voice_fingerprint: Optional[str] = None
+    preferred_tts_voice: Optional[str] = Field(default="af_heart")
 
     # Relationships
     devices: list["DeviceAssignment"] = Relationship(back_populates="user")
@@ -129,5 +130,10 @@ DEFAULT_GLOBAL_SETTINGS = [
     # --- AUTONOMOUS OPS (RAVEN) ---
     {"key": "raven_suspended", "value": "false", "description": "Suspend autonomous health checks (true/false)"},
     {"key": "raven_scan_interval", "value": "300", "description": "Frequency in seconds to scan container logs"},
-    {"key": "raven_error_threshold", "value": "5", "description": "Number of errors required to trigger an anomaly alert"}
+    {"key": "raven_error_threshold", "value": "5", "description": "Number of errors required to trigger an anomaly alert"},
+
+    # --- LOCAL TTS HARDWARE ---
+    {"key": "system_default_tts_engine", "value": "kokoro", "description": "Global default local TTS engine (kokoro, piper)"},
+    {"key": "system_default_tts_voice", "value": "af_heart", "description": "Global default voice style for local TTS"}
 ]
+

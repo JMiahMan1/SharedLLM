@@ -78,7 +78,8 @@ class OllamaProvider(BaseLLMProvider):
                     if "error" in data:
                         raise RuntimeError(f"Provider error: {data['error']}")
                     msg = data.get("message", {})
-                    return msg.get("content") or msg.get("thinking") or ""
+                    return msg.get("content") or ""
+
                 except json.JSONDecodeError as e:
                     log.error(f"[OllamaProvider-Hardened] Failed to parse JSON: {raw_text[:100]}... Error: {e}")
                     return ""
@@ -93,17 +94,12 @@ class OllamaProvider(BaseLLMProvider):
                         chunk_json = json.loads(clean_line)
                         if "error" in chunk_json:
                             raise RuntimeError(f"Provider error: {chunk_json['error']}")
-                        # Extract both content and thinking (some models route tokens to thinking even with thinking=False)
                         content = chunk_json.get("message", {}).get("content") or ""
-                        thinking = chunk_json.get("message", {}).get("thinking") or ""
                         if content:
                             full_content += content
                             await chunk_callback(content)
-                        elif thinking:
-                            # Fallback: use thinking tokens when content is empty
-                            full_content += thinking
-                            await chunk_callback(thinking)
                         if chunk_json.get("done"): break
+
                     except RuntimeError:
                         raise  # Let provider errors propagate to AgentLoop retry logic
                     except Exception as e:
@@ -307,8 +303,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         "stream": False,
         # Disable extended reasoning/thinking mode for qwen3-style models.
         # Raven needs fast, direct JSON tool calls — not a multi-minute reasoning chain.
-        "options": {"enable_thinking": False},
+        "options": {
+            "enable_thinking": False,
+            "include_reasoning": False,
+            "temperature": 0.0
+        },
     }
+
 
     MAX_TOOL_ITERATIONS = 30
     loop_start = asyncio.get_event_loop().time()

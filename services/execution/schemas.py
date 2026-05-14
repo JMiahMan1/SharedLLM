@@ -139,6 +139,13 @@ class AnnouncementRequest(BaseRequest):
     entity_id: str
     message: str
     volume: Optional[float] = Field(0.6, ge=0.0, le=1.0)
+    tts_engine: Optional[Literal["kokoro", "piper"]] = "kokoro"
+    storybook: bool = False
+    save_path: Optional[str] = Field(None, description="Optional path in Nextcloud to save the announcement audio")
+
+
+
+
 
 
 # ─── TV / SmartPowerSync ────────────────────────────────────────────────────────
@@ -536,3 +543,26 @@ class SystemLearningRequest(BaseRequest):
     topic: str = Field(..., description="Subject of the learning (e.g. 'Fixing 502 error in Gateway')")
     content: str = Field(..., description="Detailed description of the root cause and the fix applied.")
     tags: List[str] = Field(default_factory=list, description="Keywords for retrieval (e.g. ['gateway', 'bugfix'])")
+
+class TTSRequest(BaseRequest):
+    """
+    Converts text to speech using the local Kokoro engine or Edge-TTS.
+    Set storybook=True for multi-speaker narration with dialogue detection.
+    """
+    user_context: UserContext
+    text: str = Field(..., description="The text to convert to speech")
+    voice: Optional[str] = Field("af_heart", description="Voice ID (e.g. af_heart, am_adam, en-US-GuyNeural)")
+    storybook: bool = Field(False, description="Enable multi-speaker narration for stories/dialogue")
+
+class StorageTextToAudioRequest(BaseRequest):
+    """
+    Converts a text file in Nextcloud storage to an audio file (narration).
+    Supports Storybook mode for high-quality multi-speaker output.
+    """
+    user_context: UserContext
+    input_path: str = Field(..., description="Path to the source text file in Nextcloud")
+    output_path: Optional[str] = Field(None, description="Path where the audio file should be saved (default: same name with .wav)")
+    voice: Optional[str] = Field("af_heart", description="Voice ID")
+    storybook: bool = Field(True, description="Enable Storybook mode for better narration")
+
+

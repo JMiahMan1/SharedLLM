@@ -64,6 +64,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/workspace/SharedLLM
       - /home/jeremiah/.ssh:/root/.ssh:ro
+      - kokoro_models:/app/models
 
   rag:
     build: ./services/rag
@@ -238,3 +239,4 @@ volumes:
   qdrant_cache:
   caddy_data:
   caddy_config:
+  kokoro_models:

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal } from 'lucide-react';
+import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal, Volume2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type RavenConfig, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
@@ -50,6 +50,21 @@ export default function RavenOpsPanel() {
       toast.success('Kill Signal Dispatched');
     },
     onError: (err: any) => toast.error(err.message || 'Failed to kill mission'),
+  });
+
+  const { data: voicesRes } = useQuery({
+    queryKey: ['raven-voices'],
+    queryFn: () => api.getRavenVoices(),
+  });
+  const voices = voicesRes?.voices || [];
+
+  const downloadModelsMutation = useMutation({
+    mutationFn: () => api.downloadRavenModels(),
+    onSuccess: (data) => {
+      toast.success('Model provisioning started: ' + data.results.join(', '));
+      queryClient.invalidateQueries({ queryKey: ['raven-voices'] });
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to start download'),
   });
 
   if (configLoading) {
@@ -150,7 +165,62 @@ export default function RavenOpsPanel() {
         </div>
       </div>
 
+      <div className="grid gap-4 md:grid-cols-2 mt-6">
+        <div className="glass-card p-4 border border-white/10">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+            <Volume2 size={12} /> Local TTS Hardware
+          </p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[9px] text-slate-500 uppercase font-black mb-1 block">Default Engine</label>
+                <div className="text-xs text-white font-mono bg-black/20 p-2 rounded border border-white/5 truncate">
+                  {currentConfig.system_default_tts_engine || 'kokoro'}
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] text-slate-500 uppercase font-black mb-1 block">Voice Style</label>
+                <select 
+                  value={currentConfig.system_default_tts_voice}
+                  onChange={(e) => updateConfigMutation.mutate({ system_default_tts_voice: e.target.value })}
+                  className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-blue-500/50"
+                >
+                  {voices.map(v => <option key={v} value={v}>{v}</option>)}
+                  {voices.length === 0 && <option>Loading...</option>}
+                </select>
+              </div>
+            </div>
+            <button 
+              onClick={() => downloadModelsMutation.mutate()}
+              disabled={downloadModelsMutation.isPending}
+              className="w-full py-2 bg-blue-500/10 text-blue-300 border border-blue-500/30 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-500/20 flex items-center justify-center gap-2"
+            >
+              <Clock size={12} className={downloadModelsMutation.isPending ? 'animate-spin' : ''} />
+              {downloadModelsMutation.isPending ? 'Downloading Models...' : 'Provision Kokoro Models (320MB)'}
+            </button>
+          </div>
+        </div>
+
+        <div className="glass-card p-4 border border-white/10 bg-emerald-500/5 flex flex-col justify-between">
+           <div>
+             <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500/60 mb-2 flex items-center gap-2">
+               <ShieldAlert size={12} /> Sentinel Compliance
+             </p>
+             <p className="text-xs text-slate-400">
+               Raven is currently operating in <b>Local-First Mode</b>. 
+               Cloud fallbacks are disabled to ensure total data sovereignty.
+             </p>
+           </div>
+           <div className="mt-4 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+             <p className="text-[9px] text-emerald-300/80 leading-relaxed italic">
+               "Synthesis protocols enforced. Audio is generated on-device using ONNX Runtime."
+             </p>
+           </div>
+        </div>
+      </div>
+
       <div className="mt-8">
+
         <h4 className="flex items-center gap-2 text-sm font-bold text-slate-300 mb-4 uppercase tracking-widest">
           <Activity size={16} className="text-orange-400" />
           Pending Triage Queue

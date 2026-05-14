@@ -67,7 +67,7 @@ Available tool schemas for standard chat include:
 - TVCastRequest: cast video content to a display target.
 - ClimateRequest: read temperatures or change HVAC/climate settings.
 - SecurityRequest: inspect or change locks, alarms, and doors.
-- AnnouncementRequest: speak or broadcast a message to household devices.
+- AnnouncementRequest: broadcast a message to household devices using high-fidelity local Kokoro TTS.
 - HAServiceRequest: call a raw Home Assistant domain/service pair.
 - CalendarRequest: create or inspect calendar items.
 - NoteRequest: create or retrieve household notes.

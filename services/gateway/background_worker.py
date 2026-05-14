@@ -14,8 +14,11 @@ from typing import Any, Dict, Optional
 from datetime import datetime
 try:
     from .orchestrator import process_full_orchestration
+    from .config import SYSTEM_IDENTITY
 except (ImportError, ValueError):
     from orchestrator import process_full_orchestration
+    from config import SYSTEM_IDENTITY
+
 
 try:
     from .messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
@@ -50,7 +53,7 @@ class RavenWorker:
         query = str(payload.get("query", "")).lower()
         if any(signal in query for signal in self._autonomy_signals):
             return True
-        if user_id.lower() in ("raven_admin", "raven"):
+        if user_id.lower() in ("raven_admin", SYSTEM_IDENTITY):
             return True
         return False
 
@@ -305,7 +308,7 @@ class RavenWorker:
 
     async def _get_errors(self, name):
         try:
-            payload = {"user_context": {"user": "raven", "is_admin": True}, "container_name": name, "tail": 100, "filter_level": "ERROR"}
+            payload = {"user_context": {"user": SYSTEM_IDENTITY, "is_admin": True}, "container_name": name, "tail": 100, "filter_level": "ERROR"}
             async with httpx.AsyncClient() as client:
                 resp = await client.post(f"{EXECUTION_SVC}/execute/docker_logs", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=5.0)
                 if resp.status_code == 200:
