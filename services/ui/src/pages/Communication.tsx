@@ -47,6 +47,7 @@ const Communication = () => {
   const [noteTitle, setNoteTitle] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [noteResult, setNoteResult] = useState<ExecutionResponse | null>(null);
+  const [noteStorage, setNoteStorage] = useState<'nextcloud' | 'local'>('nextcloud');
   const [talkTargetUser, setTalkTargetUser] = useState('');
   const [selectedTalkToken, setSelectedTalkToken] = useState('');
   const [talkMessage, setTalkMessage] = useState('');
@@ -171,15 +172,15 @@ const Communication = () => {
   const noteMutation = useMutation({
     mutationFn: async (action: 'create' | 'read' | 'append' | 'delete') => {
       if (action === 'create') {
-        return api.createNote({ title: noteTitle, content: noteContent, category: 'Shared' });
+        return api.createNote({ title: noteTitle, content: noteContent, category: 'Shared', storage: noteStorage });
       }
       if (action === 'read') {
-        return api.readNote(noteTitle);
+        return api.readNote(noteTitle, noteStorage);
       }
       if (action === 'append') {
-        return api.appendNote({ title: noteTitle, content: noteContent });
+        return api.appendNote({ title: noteTitle, content: noteContent, storage: noteStorage });
       }
-      return api.deleteNote(noteTitle);
+      return api.deleteNote(noteTitle, noteStorage);
     },
     onSuccess: (data) => {
       setNoteResult(data);

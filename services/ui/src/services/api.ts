@@ -487,23 +487,23 @@ export const api = {
     return resp.data;
   },
 
-  async createNote(payload: { title: string; content?: string; category?: string }): Promise<ExecutionResponse> {
+  async createNote(payload: { title: string; content?: string; category?: string; storage?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/create', payload);
     return resp.data;
   },
 
-  async readNote(title: string): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/read', { title });
+  async readNote(title: string, storage?: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/read', { title, storage });
     return resp.data;
   },
 
-  async appendNote(payload: { title: string; content: string }): Promise<ExecutionResponse> {
+  async appendNote(payload: { title: string; content: string; storage?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/append', payload);
     return resp.data;
   },
 
-  async deleteNote(title: string): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/delete', { title });
+  async deleteNote(title: string, storage?: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/delete', { title, storage });
     return resp.data;
   },
 
