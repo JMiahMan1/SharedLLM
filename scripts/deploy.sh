@@ -9,6 +9,15 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_FILE="$REPO_DIR/data/deploy.log"
+# Ensure log dir exists
+mkdir -p "$REPO_DIR/data"
+
+log() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+    echo "$msg"
+    echo "$msg" >> "$LOG_FILE"
+}
+
 # Detect IDs for Docker
 export PUID=$(id -u)
 export PGID=$(id -g)
@@ -45,14 +54,7 @@ if [ "$PUID" != "0" ]; then
     done
 fi
 
-# Ensure log dir exists
-mkdir -p "$REPO_DIR/data"
 
-log() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-    echo "$msg"
-    echo "$msg" >> "$LOG_FILE"
-}
 
 cd "$REPO_DIR"
 
