@@ -298,16 +298,20 @@ class RavenWorker:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(f"{EXECUTION_SVC}/execute/docker_containers", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=5.0)
-                if resp.status_code == 200: return resp.json().get("detail", {}).get("containers", [])
-        except: return []
+                if resp.status_code == 200:
+                    return resp.json().get("detail", {}).get("containers", [])
+        except Exception:
+            return []
 
     async def _get_errors(self, name):
         try:
             payload = {"user_context": {"user": "raven", "is_admin": True}, "container_name": name, "tail": 100, "filter_level": "ERROR"}
             async with httpx.AsyncClient() as client:
                 resp = await client.post(f"{EXECUTION_SVC}/execute/docker_logs", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=5.0)
-                if resp.status_code == 200: return resp.json().get("detail", {}).get("lines", [])
-        except: return []
+                if resp.status_code == 200:
+                    return resp.json().get("detail", {}).get("lines", [])
+        except Exception:
+            return []
 
     async def trigger_self_repair(self, problematic, settings):
         coding_model = settings.get("coding_model") or settings.get("ollama_coding_model")

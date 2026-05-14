@@ -2828,7 +2828,8 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
 @app.post("/api/raven/missions/{id}/kill")
 async def kill_mission(request: Request, id: int):
     creds = await _resolve_identity_from_request(request)
-    if not creds: raise HTTPException(status_code=401, detail="Unauthorized")
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     async with borrow_http_client() as client:
         # 1. Update status in database
@@ -2859,7 +2860,8 @@ async def kill_mission(request: Request, id: int):
 @app.get("/api/raven/missions")
 async def get_user_missions(request: Request):
     creds = await _resolve_identity_from_request(request)
-    if not creds: raise HTTPException(status_code=401, detail="Unauthorized")
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     
     # Ideally filter by user_id if we want isolation, for now just proxy it all
     async with borrow_http_client() as client:
