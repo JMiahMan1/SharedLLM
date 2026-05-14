@@ -158,6 +158,10 @@ class GitPullRequest(WorkspaceRef):
     rebase: bool = False
 
 
+class GitRevertRequest(WorkspaceRef):
+    hard: bool = True
+
+
 class GitRebaseRequest(WorkspaceRef):
     upstream: str
     branch: Optional[str] = None
@@ -1858,6 +1862,29 @@ def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_
         "stderr": result["stderr"],
         "branch": branch_name
     }
+
+
+@app.post("/git/revert")
+def git_revert(req: GitRevertRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace_data = _resolve_workspace(req)
+    _require_workspace_capability(workspace_data, "git_write")
+    path = Path(workspace_data["resolved_path"])
+
+    # Perform the git revert (hard reset to previous commit)
+    result = _run_command(path, ["git", "reset", "--hard", "HEAD~1"])
+    if result["returncode"] != 0:
+        return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
+
+    # Clear quarantine status in DB
+    with Session(engine) as session:
+        ws = session.get(Workspace, workspace_data["id"])
+        if ws:
+            ws.quarantined = False
+            session.add(ws)
+            session.commit()
+
+    return {"status": "SUCCESS", "message": "Workspace reverted and quarantine lifted."}
 
 
 @app.post("/git/rebase")
