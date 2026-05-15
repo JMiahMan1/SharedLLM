@@ -35,7 +35,7 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "- **MediaPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"artist or song name\"}` - MUST include BOTH \"entity_id\" AND \"query\"\n"
     "- **MediaStatusRequest**: `{}` (no required fields) - use to check \"what's playing\" or \"what devices are active\"\n"
     "- **MediaStatusRequest with filter**: `{\"area\": \"Office\"}` or `{\"entity_id\": \"media_player.office_tv\"}`\n"
-    "- **ExecutionLogRequest**: `{\"service\": \"announce\", \"keyword\": \"OK\", \"lines\": 50}` - verify task execution, troubleshoot failures. Filter by handler name (announce, media, light, etc.) or keyword (OK, FAILED, error)\n"
+    "- **ExecutionLogRequest**: `{\"lines\": 50}` - verify task execution, troubleshoot failures. Optional: `{\"service\": \"announce\", \"keyword\": \"FAILED\"}` to filter by handler name or keyword. Leave service/keyword empty for all logs\n"
     "\n"
     "### Entity Resolution Rule (CRITICAL)\n"
     "When the user mentions a device by name (e.g., \"Office TV\", \"hall lamp\"), you MUST find the EXACT entity ID from the HA entity context provided above. "
