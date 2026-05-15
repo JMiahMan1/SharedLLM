@@ -1581,14 +1581,26 @@ async def fetch_ha_entities(creds: dict) -> list:
                 # Update IntentEngine cache for fuzzy matching
                 engine.update_entity_cache(entities)
                 
-                # 1. Sync to RAG for discovery
+                # 1. Sync to RAG for discovery (and get orphan list for Redis cleanup)
                 async def _sync_to_rag():
                     try:
-                        await get_http_client().post(
+                        resp = await get_http_client().post(
                             f"{RAG_SVC}/rag/sync/ha",
                             json={"entities": entities, "user_id": user_id},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
+                        if resp.status_code == 200:
+                            result = resp.json()
+                            orphaned = result.get("orphaned_entity_ids", [])
+                            if orphaned:
+                                from ha_state_cache import get_redis
+                                r = get_redis()
+                                for eid in orphaned:
+                                    try:
+                                        r.delete(f"ha:state:{eid}")
+                                    except Exception:
+                                        pass
+                                log.info(f"[ha_sync] Cleaned up {len(orphaned)} orphaned Redis cache entries")
                     except Exception as _e:
                         log.debug(f"RAG sync fire-and-forget failed (non-critical): {_e}")
                 asyncio.create_task(_sync_to_rag())
