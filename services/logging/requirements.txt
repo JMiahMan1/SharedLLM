@@ -2,3 +2,4 @@ fastapi
 uvicorn
 pydantic
 websockets
+redis>=5.0.0
