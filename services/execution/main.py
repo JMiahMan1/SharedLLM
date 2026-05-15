@@ -632,6 +632,18 @@ async def download_tts_voice(voice_type: str = "kokoro-v1.0"):
 async def execute_announce(req: AnnouncementRequest):
     ctx = req.user_context
     target_player = req.entity_id
+    
+    # Entity resolution: if entity_id is missing, resolve from device_name
+    if not target_player and req.device_name:
+        target_player = await ha_client.resolve_entity_by_name(ctx.ha_url, ctx.ha_token, req.device_name, "media_player")
+        if target_player:
+            log.info(f"[announce] Resolved device_name='{req.device_name}' -> entity_id='{target_player}'")
+        else:
+            return _fail(f"Could not find media_player matching '{req.device_name}'. Available devices: check HA entity list.", "announce")
+    
+    if not target_player:
+        return _fail("entity_id or device_name is required for announcements", "announce")
+    
     if not target_player.startswith("media_player."):
         target_player = f"media_player.{target_player}"
 

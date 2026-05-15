@@ -157,7 +157,8 @@ class LogbookRequest(BaseRequest):
 
 class AnnouncementRequest(BaseRequest):
     user_context: UserContext
-    entity_id: str
+    entity_id: Optional[str] = Field(None, description="Exact HA entity ID (e.g., media_player.office_tv_chrome). If omitted, resolved from device_name.")
+    device_name: Optional[str] = Field(None, description="Human-readable device name for entity resolution (e.g., 'Office TV')")
     message: str
     volume: Optional[float] = Field(0.6, ge=0.0, le=1.0)
     tts_engine: Optional[Literal["kokoro", "piper"]] = "kokoro"

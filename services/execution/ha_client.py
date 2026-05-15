@@ -229,3 +229,48 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
             log.error(f"[ha_client] get_areas failed: {e}")
             return {}
     return {}  # Fallback
+
+async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, domain: str = "media_player") -> str | None:
+    """
+    Resolve a human-readable device name to an HA entity_id.
+    Searches all states for entities matching the device_name in their friendly_name or entity_id.
+    """
+    if not ha_url or not device_name:
+        return None
+    
+    states = await get_states(ha_url, ha_token)
+    if not states:
+        return None
+    
+    search = device_name.lower()
+    candidates = []
+    
+    for state in states:
+        entity_id = state.get("entity_id", "")
+        if not entity_id.startswith(f"{domain}."):
+            continue
+        
+        friendly_name = state.get("attributes", {}).get("friendly_name", "").lower()
+        
+        # Score: exact match in friendly_name or entity_id
+        score = 0
+        if search in friendly_name:
+            score += 10
+        if search in entity_id.lower():
+            score += 5
+        # Bonus for word-level matches
+        for word in search.split():
+            if word in friendly_name:
+                score += 3
+            if word in entity_id.lower():
+                score += 2
+        
+        if score > 0:
+            candidates.append((score, entity_id))
+    
+    if not candidates:
+        return None
+    
+    # Return highest scoring candidate
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
