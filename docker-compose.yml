@@ -22,7 +22,7 @@ services:
     ports:
       - 8001:8001
     extra_hosts:
-      - "ollama-server:192.168.2.114"
+      - "ollama-server:192.168.4.179"
       - "ai-server:192.168.2.205"
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
@@ -54,7 +54,7 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "ollama-server:192.168.2.114"
+      - "ollama-server:192.168.4.179"
       - "ai-server:192.168.2.205"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -139,7 +139,7 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "ollama-server:192.168.2.114"
+      - "ollama-server:192.168.4.179"
       - "ai-server:192.168.2.205"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}

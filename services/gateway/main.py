@@ -19,23 +19,33 @@ from pathlib import Path
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 try:
-    from schemas import ChatRequest, ResolvedCredentials
-    from agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
-    from config import (
+    from .schemas import ChatRequest, ResolvedCredentials
+    from .agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
+    from .config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
         STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
         INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
     )
-    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-except (ImportError, ValueError):
-    from schemas import ChatRequest, ResolvedCredentials
-    from agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
-    from config import (
-        OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
-        STORAGE_SVC, WORKSPACE_RUNTIME_SVC, 
-        INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
-    )
-    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+    from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+except ImportError:
+    try:
+        from services.gateway.schemas import ChatRequest, ResolvedCredentials
+        from services.gateway.agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
+        from services.gateway.config import (
+            OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
+            STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
+            INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
+        )
+        from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+    except ImportError:
+        from schemas import ChatRequest, ResolvedCredentials
+        from agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
+        from config import (
+            OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
+            STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
+            INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
+        )
+        from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -141,25 +151,31 @@ def _make_openai_chunk(content: str, model: str, finish_reason: str = None):
 
 # --- Imports from internal modules ---
 try:
-    from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, ControlPlaneRequest, SystemLearningRequest, WorkspaceBootstrapRequest
-    from intent_engine import engine
-    from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-    from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
-    from messaging import InferenceJobQueue, JobStatus
-except (ImportError, ValueError):
+    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, ControlPlaneRequest, SystemLearningRequest, WorkspaceBootstrapRequest
+    from .intent_engine import engine
+    from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
+    from .prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+    from .messaging import InferenceJobQueue, JobStatus
+except ImportError:
     try:
-        from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
+        from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, ControlPlaneRequest, SystemLearningRequest, WorkspaceBootstrapRequest
         from services.gateway.intent_engine import engine
         from services.gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
         from services.gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
         from services.gateway.messaging import InferenceJobQueue, JobStatus
     except ImportError:
-        from schemas import StorageListRequest, StorageIndexRequest
-        from intent_engine import engine
-        from history import update_history, ping_redis
-        from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
-        from messaging import InferenceJobQueue, JobStatus
-from config import REDIS_URL as _REDIS_URL
+        from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, ControlPlaneRequest, SystemLearningRequest, WorkspaceBootstrapRequest
+        from .intent_engine import engine
+        from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
+        from .prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+        from .messaging import InferenceJobQueue, JobStatus
+try:
+    from .config import REDIS_URL as _REDIS_URL
+except ImportError:
+    try:
+        from services.gateway.config import REDIS_URL as _REDIS_URL
+    except ImportError:
+        from config import REDIS_URL as _REDIS_URL
 REDIS_URL = _REDIS_URL
 job_queue = InferenceJobQueue(REDIS_URL)
 
@@ -167,23 +183,37 @@ job_queue = InferenceJobQueue(REDIS_URL)
 
 # --- Ouroboros Worker ---
 try:
-    from background_worker import worker as raven_worker
+    from .background_worker import worker as raven_worker
     log.info("Successfully imported Raven background worker.")
-except ImportError as e:
-    log.warning(f"Could not import background worker directly: {e}. Trying relative import...")
+except ImportError:
     try:
-        from background_worker import worker as raven_worker
+        from services.gateway.background_worker import worker as raven_worker
         log.info("Successfully imported Raven background worker via relative import.")
-    except ImportError as e2:
-        log.error(f"FATAL: Background worker import failed: {e2}")
+    except ImportError:
+        from background_worker import worker as raven_worker
+        log.warning("Imported background worker via bare import (test mode).")
         raven_worker = None
 
 # --- Configuration (from shared config) ---
-from config import (
-    IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
-    LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
-    INTERNAL_SECRET, OLLAMA_URL, CONFIG, FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
-)
+try:
+    from .config import (
+        IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
+        LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
+        INTERNAL_SECRET, OLLAMA_URL, CONFIG, FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
+    )
+except ImportError:
+    try:
+        from services.gateway.config import (
+            IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
+            LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
+            INTERNAL_SECRET, OLLAMA_URL, CONFIG, FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
+        )
+    except ImportError:
+        from config import (
+            IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
+            LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
+            INTERNAL_SECRET, OLLAMA_URL, CONFIG, FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
+        )
 LOGGING_SVC_URL = LOGGING_SVC
 
 # Global Inference Lock (Strategy 8: Singleton Queue)

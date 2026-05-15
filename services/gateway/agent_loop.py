@@ -8,23 +8,36 @@ import redis.asyncio as redis
 from typing import Optional, Any, Dict, List, Callable, Awaitable
 
 try:
-    from history import REDIS_URL
-    from config import (
+    from .history import REDIS_URL
+    from .config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
         STORAGE_SVC, INTERNAL_SECRET,
         RAVEN_MAX_TOTAL_SECONDS,
         RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
     )
-    from schemas import ResolvedCredentials
-    from llm_providers import BaseLLMProvider, OpenRouterProvider
-except (ImportError, ValueError):
-    from history import REDIS_URL
-    from config import (
-        OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
-        STORAGE_SVC, INTERNAL_SECRET, RAVEN_MAX_TOTAL_SECONDS, RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
-    )
-    from schemas import ResolvedCredentials
-    from llm_providers import BaseLLMProvider, OpenRouterProvider
+    from .schemas import ResolvedCredentials
+    from .llm_providers import BaseLLMProvider, OpenRouterProvider
+except ImportError:
+    try:
+        from services.gateway.history import REDIS_URL
+        from services.gateway.config import (
+            OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
+            STORAGE_SVC, INTERNAL_SECRET,
+            RAVEN_MAX_TOTAL_SECONDS,
+            RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
+        )
+        from services.gateway.schemas import ResolvedCredentials
+        from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
+    except ImportError:
+        from history import REDIS_URL
+        from config import (
+            OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
+            STORAGE_SVC, INTERNAL_SECRET,
+            RAVEN_MAX_TOTAL_SECONDS,
+            RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
+        )
+        from schemas import ResolvedCredentials
+        from llm_providers import BaseLLMProvider, OpenRouterProvider
 
 # --- HARDENED OLLAMA PROVIDER ---
 class OllamaProvider(BaseLLMProvider):
