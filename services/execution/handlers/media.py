@@ -1,6 +1,7 @@
 # services/execution/handlers/media.py
 import logging
 import asyncio
+import re
 try:
     import ha_client
     from schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
@@ -10,6 +11,50 @@ except ImportError:
 
 log = logging.getLogger("execution.media")
 
+async def resolve_mass_entity(ctx, original_entity: str) -> str:
+    """
+    Resolve a media_player entity to its Music Assistant variant.
+    Many Cast/AndroidTV devices have both a native media_player and a MASS media_player.
+    Music playback works best through the MASS entity.
+    """
+    all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
+    if not all_states:
+        return original_entity
+    
+    # Extract the device name from the original entity
+    name_part = original_entity.replace("media_player.", "")
+    
+    # Find the friendly_name of the original entity
+    original_friendly = None
+    for state in all_states:
+        if state.get("entity_id") == original_entity:
+            original_friendly = state.get("attributes", {}).get("friendly_name", "")
+            break
+    
+    if not original_friendly:
+        return original_entity
+    
+    search = original_friendly.lower()
+    
+    # Look for a MASS entity with matching friendly name
+    for state in all_states:
+        eid = state.get("entity_id", "")
+        if not eid.startswith("media_player."):
+            continue
+        attrs = state.get("attributes", {})
+        friendly = attrs.get("friendly_name", "").lower()
+        source = attrs.get("source", "").lower()
+        integration = attrs.get("integration", "")
+        
+        # Match by friendly name AND (music_assistant source or integration)
+        if search in friendly and ("music assistant" in source or integration == "music_assistant"):
+            if eid != original_entity:
+                log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid}")
+                return eid
+    
+    return original_entity
+
+
 async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     ctx = req.user_context
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
@@ -17,7 +62,39 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
 
     # Music Assistant library lookup path.
     if req.query:
-        # Try standard media_player.play_media first (works with Cast/AndroidTV)
+        # Resolve to MASS entity if available
+        mass_entity = await resolve_mass_entity(ctx, full_entity_id)
+        
+        # Try music_assistant.play_media first (proper HA integration)
+        media_types = [req.media_content_type or "artist", "track", "playlist", "radio"]
+        seen = set()
+        ordered_types = []
+        for mt in media_types:
+            if mt and mt not in seen:
+                ordered_types.append(mt)
+                seen.add(mt)
+
+        for media_type in ordered_types:
+            result = await ha_client.call_service(
+                ctx.ha_url,
+                ctx.ha_token,
+                "music_assistant",
+                "play_media",
+                mass_entity,
+                {
+                    "media_id": req.query,
+                    "media_type": media_type,
+                    "enqueue": "play" if req.enqueue == "replace" else req.enqueue,
+                },
+            )
+            if result.get("ok"):
+                return ExecutionResult(
+                    status="SUCCESS",
+                    message=f"Music Assistant playback started for '{req.query}' ({media_type}).",
+                    service="media_play",
+                )
+
+        # Fallback: standard media_player.play_media (for URLs/apps)
         result = await ha_client.call_service(
             ctx.ha_url,
             ctx.ha_token,
@@ -39,35 +116,6 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
                 service="media_play",
             )
 
-        # Fallback: try MASS if available
-        fallback_types = [req.media_content_type or "artist", "search", "music"]
-        seen = set()
-        ordered_types = []
-        for media_type in fallback_types:
-            if media_type and media_type not in seen:
-                ordered_types.append(media_type)
-                seen.add(media_type)
-
-        for media_type in ordered_types:
-            result = await ha_client.call_service(
-                ctx.ha_url,
-                ctx.ha_token,
-                "mass",
-                "play_media",
-                full_entity_id,
-                {
-                    "media_id": req.query,
-                    "media_type": media_type,
-                    "enqueue": "play" if req.enqueue == "replace" else req.enqueue,
-                },
-            )
-            if result.get("ok"):
-                return ExecutionResult(
-                    status="SUCCESS",
-                    message=f"Music Assistant playback started for '{req.query}' ({media_type}).",
-                    service="media_play",
-                )
-
         return ExecutionResult(
             status="FAILURE",
             message=f"Playback failed for '{req.query}'.",
@@ -75,7 +123,6 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         )
 
     # --- LEGACY PORT: YouTube Deep Linking ---
-    import re
     url = req.media_content_id or ""
     yt_match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11}).*", url)
     
