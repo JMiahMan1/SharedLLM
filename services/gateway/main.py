@@ -159,7 +159,7 @@ except (ImportError, ValueError):
         from history import update_history, ping_redis
         from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
         from messaging import InferenceJobQueue, JobStatus
-from .config import REDIS_URL as _REDIS_URL
+from config import REDIS_URL as _REDIS_URL
 REDIS_URL = _REDIS_URL
 job_queue = InferenceJobQueue(REDIS_URL)
 
