@@ -48,16 +48,16 @@ else
     pytest services/tests/test_gateway_model_selection.py -s
 
     echo -e "\nRunning Identity and Auth Database Verification..."
-    pytest test/local/test_auth_identity.py -s
+    pytest test/manual/test_auth_identity.py -s
 
     echo -e "\nRunning Hardware and Service State Verification..."
-    pytest test/local/test_hardware_state.py -s
+    pytest test/manual/test_hardware_state.py -s
 
     echo -e "\nRunning Office TV Media Control Verification..."
-    pytest test/local/test_office_tv_media_controls.py -s
+    pytest test/manual/test_office_tv_media_controls.py -s
 
     echo -e "\nRunning RAG Sync Loop Verification..."
-    pytest test/local/test_rag_sync.py -s
+    pytest test/manual/test_rag_sync.py -s
 fi
 
 echo -e "\n=== Tests Complete ==="
