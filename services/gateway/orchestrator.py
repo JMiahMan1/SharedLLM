@@ -243,23 +243,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
     
-    # GBNF Grammar to force Natural Language + JSON format
-    TOOL_GRAMMAR = (
-        'root ::= content | json_block\n'
-        'content ::= [^`]+ | ""\n'
-        'json_block ::= "```json\\n" json_object "\\n```"\n'
-        'json_object ::= "{" ws "\\"action\\"" ws ":" ws string ws "," ws "\\"payload\\"" ws ":" ws json_value ws "}"\n'
-        'json_value ::= json_object | json_array | string | number | "true" | "false" | "null"\n'
-        'json_array ::= "[" ws json_value_arr ws "]" | "[" ws "]"\n'
-        'json_value_arr ::= json_value ws "," ws json_value_arr | json_value\n'
-        'string ::= "\\"" chars "\\"\n'
-        'chars ::= char chars | ""\n'
-        'char ::= [^"\\\\] | "\\\\" ["\\\\/bfnrt]\n'
-        'number ::= "-"? ([0-9] | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [+-]? [0-9]+)?\n'
-        'ws ::= [ \\t\\n\\r]*'
-    )
-    
-    options = {"grammar": TOOL_GRAMMAR, "temperature": 0.0}
+    # No grammar constraint - model produces JSON naturally via system prompt
+    options = {"temperature": 0.0}
 
     # --- RETRY LOGIC FOR MODEL SWITCHING ---
     MAX_INFERENCE_RETRIES = 3
