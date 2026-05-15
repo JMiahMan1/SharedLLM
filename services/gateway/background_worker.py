@@ -10,40 +10,40 @@ import httpx
 import os
 from typing import Any, Dict, Optional
 try:
-    from .orchestrator import process_full_orchestration
-    from .config import SYSTEM_IDENTITY, INTERNAL_SECRET
+    from orchestrator import process_full_orchestration
+    from config import SYSTEM_IDENTITY, INTERNAL_SECRET
 except ImportError:
     try:
+        from .orchestrator import process_full_orchestration
+        from .config import SYSTEM_IDENTITY, INTERNAL_SECRET
+    except ImportError:
         from services.gateway.orchestrator import process_full_orchestration
         from services.gateway.config import SYSTEM_IDENTITY, INTERNAL_SECRET
-    except ImportError:
-        from orchestrator import process_full_orchestration
-        from config import SYSTEM_IDENTITY, INTERNAL_SECRET
 
 
 try:
-    from .messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
+    from messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
 except ImportError:
     try:
-        from services.gateway.messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
+        from .messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
     except ImportError:
-        from messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
+        from services.gateway.messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
 
 log = logging.getLogger("gateway.background_worker")
 
 try:
-    from .config import (
+    from config import (
         INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC, RAVEN_MAX_TOTAL_SECONDS,
         RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, SYSTEM_IDENTITY,
     )
 except ImportError:
     try:
-        from services.gateway.config import (
+        from .config import (
             INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC, RAVEN_MAX_TOTAL_SECONDS,
             RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, SYSTEM_IDENTITY,
         )
     except ImportError:
-        from config import (
+        from services.gateway.config import (
             INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC, RAVEN_MAX_TOTAL_SECONDS,
             RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, SYSTEM_IDENTITY,
         )
