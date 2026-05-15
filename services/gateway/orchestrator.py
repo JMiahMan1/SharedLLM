@@ -340,7 +340,13 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                     if resp.status_code == 200:
-                        return resp.json().get("message", "Action completed successfully.")
+                        result = resp.json()
+                        # For log/inspection tools, include the detail in the response
+                        if action == "executionlogrequest":
+                            logs = result.get("detail", {}).get("logs", "")
+                            if logs:
+                                return f"{result.get('message', '')}\n\n```\n{logs}\n```"
+                        return result.get("message", "Action completed successfully.")
                     else:
                         return f"Tool execution failed ({resp.status_code}): {resp.text}"
             except Exception as e:
