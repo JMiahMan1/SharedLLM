@@ -4,16 +4,11 @@
 if [ -S /var/run/docker.sock ]; then
     DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null)
     if [ -n "$DOCKER_GID" ]; then
-        # Remove existing docker group if it has a different GID
-        EXISTING_GID=$(getent group docker 2>/dev/null | cut -d: -f3)
-        if [ -n "$EXISTING_GID" ] && [ "$EXISTING_GID" != "$DOCKER_GID" ]; then
-            delgroup docker 2>/dev/null || true
-        fi
-        # Create a 'docker' group with the host's GID if it doesn't exist
-        addgroup -g "$DOCKER_GID" docker 2>/dev/null || true
+        # Change the container's docker group GID to match the host's socket GID
+        groupmod -g "$DOCKER_GID" docker 2>/dev/null || true
         # Add the sharedllm user to the docker group
-        addgroup sharedllm docker 2>/dev/null || true
-        echo "[entrypoint] Added sharedllm to docker group (GID=$DOCKER_GID)"
+        adduser sharedllm docker 2>/dev/null || true
+        echo "[entrypoint] Aligned docker group to host GID=$DOCKER_GID"
     fi
 fi
 exec "$@"
