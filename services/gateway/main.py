@@ -341,6 +341,18 @@ async def get_coding_model():
     return settings.get("ollama_coding_model") or settings.get("coding_model")
 
 
+async def get_resident_model() -> Optional[str]:
+    """Check what model is currently in VRAM to avoid unnecessary swaps."""
+    try:
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/ps")
+            if resp.status_code == 200:
+                models = resp.json().get("models", [])
+                if models:
+                    return models[0]["name"]
+    except: pass
+    return None
+
 async def get_librarian_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
@@ -655,9 +667,20 @@ async def contextualize_query(query: str, history: list) -> str:
     try:
         settings = await get_llm_settings()
         provider = await get_provider(settings)
+        
         assistant = await get_assistant_model()
+        coding = await get_coding_model()
+        resident = await get_resident_model()
+        
+        # If the coding model (usually large/slow to swap) is already resident,
+        # use it for rewriting instead of swapping back to the assistant model.
+        model_to_use = assistant
+        if resident == coding:
+            model_to_use = coding
+            log.info(f"[Context] Using resident coding model '{coding}' for rewrite to avoid swap.")
+        
         messages = [{"role": "user", "content": prompt}]
-        rewritten = await provider.generate(assistant, messages, options={"temperature": 0.0})
+        rewritten = await provider.generate(model_to_use, messages, options={"temperature": 0.0})
         if rewritten:
             rewritten = rewritten.strip().strip('"')
             log.info(f"[Context] '{query}' -> '{rewritten}'")

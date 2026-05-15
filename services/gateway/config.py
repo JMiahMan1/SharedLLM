@@ -17,7 +17,7 @@ if not INTERNAL_SECRET:
     _boot_log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
     sys.exit(1)
 
-OLLAMA_TIMEOUT = 180.0
+OLLAMA_TIMEOUT = 600.0
 
 # Raven job constraints
 RAVEN_MAX_TOTAL_SECONDS = int(os.getenv("RAVEN_MAX_TOTAL_SECONDS", "1800"))  # 30 minutes for 35B

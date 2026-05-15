@@ -172,7 +172,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
             from agent_loop import AgentLoop
         # Raven handles autonomous loops
         mission_id = job_payload.get("_mission_id")
-        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id)
+        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context)
     else:
         # Librarian handles standard single-turn inference
         ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback)
@@ -182,21 +182,58 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
 async def _fetch_rag_context(query: str, user_id: str) -> str:
     rag_context = ""
     try:
+        # Prioritize collections based on query intent
+        q = query.lower()
         collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
+        
+        # Adjust priorities: if it looks like a coding/sys task, prioritize capabilities and files
+        if any(token in q for token in ["file", "code", "git", "workspace", "fix", "repair"]):
+            collections = ["system_capabilities", "nextcloud_files", "system_learnings", "ha_entities"]
+        
+        # Context constraints
+        MAX_TOTAL_HITS = 20
+        MAX_HITS_PER_COLL = 8
+        MAX_CHARS_PER_HIT = 2000
+        TOTAL_CHARS_LIMIT = 15000 # Approx 4k tokens
+        
+        total_hits = 0
+        total_chars = 0
+        
         async with httpx.AsyncClient(timeout=10.0) as client:
             for coll in collections:
+                if total_hits >= MAX_TOTAL_HITS or total_chars >= TOTAL_CHARS_LIMIT:
+                    break
+                    
                 resp = await client.post(
                     f"{RAG_SVC}/rag/search",
-                    json={"collection_name": coll, "query": query, "user_id": user_id, "k": 10},
+                    json={"collection_name": coll, "query": query, "user_id": user_id, "k": MAX_HITS_PER_COLL},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if resp.status_code == 200:
                     hits = resp.json().get("results", [])
                     if hits:
-                        rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
+                        coll_added = False
+                        for h in hits:
+                            content = h["content"]
+                            if len(content) > MAX_CHARS_PER_HIT:
+                                content = content[:MAX_CHARS_PER_HIT] + "... [TRUNCATED]"
+                            
+                            if total_chars + len(content) > TOTAL_CHARS_LIMIT:
+                                break
+                            
+                            if not coll_added:
+                                rag_context += f"\n[{coll.upper()}]\n"
+                                coll_added = True
+                                
+                            rag_context += f"- {content}\n"
+                            total_chars += len(content)
+                            total_hits += 1
+                            
+                            if total_hits >= MAX_TOTAL_HITS:
+                                break
     except Exception as e:
         log.error(f"RAG search failed: {e}")
-    return rag_context
+    return rag_context.strip()
 
 async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
     system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"

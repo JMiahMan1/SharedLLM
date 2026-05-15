@@ -28,7 +28,7 @@ except (ImportError, ValueError):
 
 # --- HARDENED OLLAMA PROVIDER ---
 class OllamaProvider(BaseLLMProvider):
-    def __init__(self, base_url: str, timeout: float = 180.0):
+    def __init__(self, base_url: str, timeout: float = 600.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
@@ -253,7 +253,7 @@ def get_http_client() -> httpx.AsyncClient:
 
 _stream_redis = None
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None) -> Any:
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None, rag_context: str = "") -> Any:
     full_audit_log = []
     
     async def stream_event(event_type: str, data: str):
@@ -302,10 +302,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     log.info(f"[AgentLoop] Active Provider: {active_provider_name} | Model: {selected_model}")
 
+    # 3. Enhance system prompt with RAG context
+    enhanced_system = f"{full_system}\n\nRetrieved Context:\n{rag_context}"
+    
     ollama_payload = {
         "model": selected_model,
         "messages": [
-            {"role": "system", "content": full_system}
+            {"role": "system", "content": enhanced_system}
         ] + short_term + [{"role": "user", "content": query}],
         "stream": False,
         # Disable extended reasoning/thinking mode for qwen3-style models.
@@ -373,7 +376,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         try:
             ollama_payload["messages"] = [
-                {"role": "system", "content": full_system},
+                {"role": "system", "content": enhanced_system},
                 {"role": "user", "content": f"MISSION LOCK: {query}\n\nPAST ACTIONS SUMMARY:\n" + "\n".join(action_log)}
             ]
             if exec_data:
