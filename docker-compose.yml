@@ -55,8 +55,6 @@ services:
       - IDENTITY_SVC_URL=http://identity:8001
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
-    group_add:
-      - "${DOCKER_GID:-999}"
     security_opt:
       - label=disable
     volumes:
