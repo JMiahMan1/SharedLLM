@@ -59,6 +59,7 @@ async def call_service(
     service: str,
     entity_id: str,
     service_data: dict | None = None,
+    return_response: bool = False,
 ) -> dict:
     """Call a Home Assistant service and return the response JSON."""
     if not ha_url:
@@ -67,6 +68,8 @@ async def call_service(
     
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     url = f"{ha_url.rstrip('/')}/api/services/{domain}/{service}"
+    if return_response:
+        url += "?return_response"
     payload = {"entity_id": entity_id}
     if service_data:
         payload.update(service_data)
@@ -77,6 +80,8 @@ async def call_service(
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             log.info(f"[ha_client] {domain}.{service} → {entity_id} OK (HTTP {resp.status_code})")
+            if return_response:
+                return {"ok": True, "status_code": resp.status_code, "service_response": resp.json()}
             return {"ok": True, "status_code": resp.status_code}
         except httpx.HTTPStatusError as e:
             log.error(f"[ha_client] HTTP error: {e}")
