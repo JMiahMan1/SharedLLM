@@ -239,6 +239,9 @@ async def _fetch_rag_context(query: str, user_id: str) -> str:
 
 async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
     system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"
+    log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
+    if rag_context:
+        log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
