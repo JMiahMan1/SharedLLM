@@ -9,17 +9,12 @@ except ImportError:
 
 log = logging.getLogger("execution.light")
 
+ACTIVE_STATES = {"on", "playing", "idle", "standby", "home", "cooling", "heating", "drying", "cleaning"}
+INACTIVE_STATES = {"off", "unavailable", "unknown", "not_home"}
+
 async def handle_light(req: LightControlRequest) -> ExecutionResult:
     ctx = req.user_context
     log.info(f"[light] user={ctx.user} entity={req.entity_id} action={req.action}")
-
-    service_data: dict = {}
-    if req.brightness_pct is not None:
-        service_data["brightness_pct"] = req.brightness_pct
-    if req.color_temp is not None:
-        service_data["color_temp"] = req.color_temp
-    if req.rgb_color is not None:
-        service_data["rgb_color"] = list(req.rgb_color)
 
     # Resolve and sanitize entity_id
     full_entity_id = ha_client.sanitize_entity_id("light", req.entity_id)
@@ -34,6 +29,28 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
             message=f"Access Denied: You are not authorized to perform '{req.action}' on {full_entity_id}. Admin privileges required.",
             service="light_control"
         )
+
+    # 2. STATE CHECK — avoid redundant commands
+    if req.action in ("turn_on", "turn_off"):
+        target_state = "on" if req.action == "turn_on" else "off"
+        current = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
+        if current:
+            current_state = current.get("state", "").lower()
+            if current_state == target_state:
+                friendly = current.get("attributes", {}).get("friendly_name", full_entity_id)
+                return ExecutionResult(
+                    status="SUCCESS",
+                    message=f"{friendly} is already {target_state}.",
+                    service="light_control"
+                )
+
+    service_data: dict = {}
+    if req.brightness_pct is not None:
+        service_data["brightness_pct"] = req.brightness_pct
+    if req.color_temp is not None:
+        service_data["color_temp"] = req.color_temp
+    if req.rgb_color is not None:
+        service_data["rgb_color"] = list(req.rgb_color)
 
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,

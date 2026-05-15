@@ -381,6 +381,8 @@ async def purge_collection_endpoint(collection_name: str, payload: dict):
         log.error(f"Purge failed: {e}")
         raise HTTPException(status_code=500, detail="Purge failed")
 
+ACTIVE_STATES = {"on", "playing", "idle", "standby", "home", "cooling", "heating", "drying", "cleaning"}
+
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict, user_id: Optional[str] = None):
     entities = payload.get("entities", [])
@@ -409,7 +411,14 @@ async def sync_ha(payload: dict, user_id: Optional[str] = None):
         attrs = e.get("attributes", {})
         fname = attrs.get("friendly_name", eid)
         area = attrs.get("area_id") or "unassigned area"
-        content = f"Device: {fname} (ID: {eid}) | Area: {area} | Current State: {state}."
+        device_class = attrs.get("device_class", "")
+        supported = attrs.get("supported_features", 0)
+        is_active = state.lower() in ACTIVE_STATES
+        
+        # Store metadata only — state is fetched live from HA at query time
+        content = f"Device: {fname} (ID: {eid}) | Area: {area} | Type: {eid.split('.')[0]}"
+        if device_class:
+            content += f" | Device Class: {device_class}"
         
         cid = f"ha:{eid}"
         created_at = now
@@ -424,8 +433,11 @@ async def sync_ha(payload: dict, user_id: Optional[str] = None):
             "entity_id": eid,
             "friendly_name": fname,
             "area": area,
+            "device_class": device_class,
+            "supported_features": str(supported),
             "user_id": resolved_user,
             "type": "ha_entity",
+            "domain": eid.split(".")[0],
             "updated_at": now,
             "created_at": created_at,
             "indexed_at": now_ts
