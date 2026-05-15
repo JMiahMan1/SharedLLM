@@ -18,8 +18,8 @@ YDL_OPTS = {
     "quiet": True,
     "no_warnings": True,
     "extract_flat": False,
-    "format": "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-    "merge_output_format": "mp4",
+    # Single-file MP4 with h264/aac for maximum Cast/AndroidTV compatibility
+    "format": "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best",
     "socket_timeout": 15,
     "retries": 3,
     "fragment_retries": 3,
@@ -53,27 +53,26 @@ async def search_youtube(query: str) -> str | None:
 
 
 async def get_stream_url(video_url: str) -> str | None:
-    """Extract a direct MP4 stream URL from a video page."""
+    """Extract a direct stream URL from a video page."""
     opts = {**YDL_OPTS, "skip_download": True}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             if not info:
                 return None
-            # Try to find a single-file MP4 format (best for Cast/AndroidTV)
-            formats = info.get("formats", [])
-            for fmt in formats:
-                if (fmt.get("ext") == "mp4" and
-                    fmt.get("vcodec", "").startswith("avc1") and
-                    fmt.get("acodenotnone") and
-                    fmt.get("url")):
-                    log.info(f"[video] Found single-file MP4: {fmt.get('format_id')}")
-                    return fmt["url"]
-            # Fallback: use the best available format URL
-            if info.get("url"):
-                log.info(f"[video] Using direct URL from info dict")
+            # The format selector already picks the best single-file MP4.
+            # yt-dlp puts the resolved URL in the 'url' field of the info dict.
+            if info.get("url") and not info["url"].startswith("http") and "://" not in info["url"]:
+                # This is a protocol-relative or relative URL, skip
+                pass
+            elif info.get("url") and info.get("ext") == "mp4":
+                log.info(f"[video] Found MP4 stream URL")
                 return info["url"]
-            # Last resort: use the webpage URL (Cast can sometimes handle this)
+            # Fallback: use any resolved URL
+            if info.get("url") and info["url"].startswith("http"):
+                log.info(f"[video] Using resolved URL (ext={info.get('ext')})")
+                return info["url"]
+            # Last resort: use the webpage URL
             return info.get("webpage_url") or info.get("original_url") or video_url
     except Exception as e:
         log.error(f"[video] Stream extraction failed: {e}")
