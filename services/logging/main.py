@@ -68,6 +68,11 @@ def init_db():
             context TEXT
         )
     """)
+    # Migration: add user_id column if it doesn't exist (for existing databases)
+    try:
+        conn.execute("ALTER TABLE logs ADD COLUMN user_id TEXT DEFAULT 'system'")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     conn.commit()
     conn.close()
 
