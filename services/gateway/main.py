@@ -329,16 +329,24 @@ async def get_assistant_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
     if active == "openrouter":
-        return settings.get("cloud_assistant_model")
-    return settings.get("ollama_assistant_model") or settings.get("assistant_model")
+        model = settings.get("cloud_assistant_model")
+    else:
+        model = settings.get("ollama_assistant_model") or settings.get("assistant_model")
+    if not model:
+        raise RuntimeError("No assistant model configured. Please set ollama_assistant_model in the UI settings.")
+    return model
 
 
 async def get_coding_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
     if active == "openrouter":
-        return settings.get("cloud_coding_model")
-    return settings.get("ollama_coding_model") or settings.get("coding_model")
+        model = settings.get("cloud_coding_model")
+    else:
+        model = settings.get("ollama_coding_model") or settings.get("coding_model")
+    if not model:
+        raise RuntimeError("No coding model configured. Please set ollama_coding_model in the UI settings.")
+    return model
 
 
 async def get_resident_model() -> Optional[str]:
@@ -357,8 +365,12 @@ async def get_librarian_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
     if active == "openrouter":
-        return settings.get("cloud_librarian_model")
-    return settings.get("ollama_librarian_model") or settings.get("librarian_model")
+        model = settings.get("cloud_librarian_model")
+    else:
+        model = settings.get("ollama_librarian_model") or settings.get("librarian_model")
+    if not model:
+        raise RuntimeError("No librarian model configured. Please set ollama_librarian_model in the UI settings.")
+    return model
 
 async def fetch_autonomous_protocols() -> str:
     """Fetch the latest autonomous protocols from the Identity Service GlobalSettings."""
@@ -1765,7 +1777,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
     explicit_model = str(body.get("model") or "").strip()
-    selected_model = explicit_model or await get_assistant_model()
+
+    try:
+        selected_model = explicit_model or await get_assistant_model()
+    except RuntimeError as e:
+        log.error(f"[ChatHandler] Model configuration error: {e}")
+        err_msg = str(e) + " Please configure models in the UI settings."
+        if is_openai:
+            return _make_openai_response(err_msg, "unknown", "model_config_error")
+        return _make_ollama_response(err_msg, "unknown", "model_config_error")
 
     # 2. Extract Query
     query = body.get("query")
@@ -1783,9 +1803,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     if not explicit_model:
         coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "raven", "audit", "develop", "refactor"]
         if any(k in (query or "").lower() for k in coding_keywords):
-            # Check if specialized coder model is available (hardcoded preference for qwen2.5-coder)
-            selected_model = await get_coding_model()
-            log.info(f"[ChatHandler] Specialized coding task detected. Routing to: {selected_model}")
+            try:
+                selected_model = await get_coding_model()
+                log.info(f"[ChatHandler] Specialized coding task detected. Routing to: {selected_model}")
+            except RuntimeError as e:
+                log.error(f"[ChatHandler] Coding model configuration error: {e}")
+                err_msg = str(e) + " Please configure models in the UI settings."
+                if is_openai:
+                    return _make_openai_response(err_msg, "unknown", "model_config_error")
+                return _make_ollama_response(err_msg, "unknown", "model_config_error")
 
     try:
         creds_data = await resolve_identity(body)
