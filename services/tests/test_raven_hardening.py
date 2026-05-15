@@ -137,7 +137,11 @@ async def test_logging_service_sanitizes_secrets_and_requires_auth(monkeypatch):
     
     mock_redis = AsyncMock()
     mock_redis.pubsub.return_value = AsyncMock()
-    monkeypatch.setattr(logging_main, "get_redis", lambda: mock_redis)
+    
+    async def mock_get_redis():
+        return mock_redis
+    
+    monkeypatch.setattr(logging_main, "get_redis", mock_get_redis)
     
     response = await logging_main.log_event(entry, "test-secret")
     assert response["status"] == "success"
