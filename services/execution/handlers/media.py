@@ -83,11 +83,13 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         )
         
         if search_result.get("ok") and search_result.get("service_response"):
-            resp = search_result["service_response"]
+            # HA wraps the response: {"changed_states": [], "service_response": {actual_results}}
+            raw = search_result["service_response"]
+            resp = raw.get("service_response", raw)
             # Try tracks first, then albums, artists, playlists, radio
             uri = None
             media_type_label = ""
-            for category in ["tracks", "albums", "artists", "playlists", "radios"]:
+            for category in ["tracks", "albums", "artists", "playlists", "radio"]:
                 items = resp.get(category, [])
                 if items:
                     uri = items[0].get("uri")
