@@ -15,10 +15,15 @@ async def handle_get_system_logs(req_data: dict) -> ExecutionResult:
     lines = req_data.get("lines", 50)
     
     try:
-        # We use docker command to get logs of the container
-        # Note: the execution container must have access to docker.sock
-        cmd = ["docker", "logs", "--tail", str(lines), f"sharedllm_{service}"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        if req_data.get("action") == "ls":
+            path = req_data.get("path", "/app")
+            cmd = ["ls", "-la", path]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        else:
+            # We use docker command to get logs of the container
+            # Note: the execution container must have access to docker.sock
+            cmd = ["docker", "logs", "--tail", str(lines), f"sharedllm_{service}"]
+            result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0:
             return ExecutionResult(
