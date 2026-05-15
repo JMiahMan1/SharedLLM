@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')"
 COPY services/gateway/. .
 COPY docs ./docs
-COPY README.md EXAMPLES.md TESTING.md ./
+COPY README.md ./
 
 # --- Privilege Drop: create dedicated sharedllm user ---
 ARG PUID=1000
