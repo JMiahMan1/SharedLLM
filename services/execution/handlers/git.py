@@ -20,8 +20,12 @@ Security:
 import asyncio
 import logging
 import os
+import sys
 import re
 import shlex
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from config import WORKSPACE_ROOT
 from typing import Optional, Dict
 try:
     from schemas import GitOperationRequest, GitExecutionResult
@@ -35,7 +39,6 @@ log = logging.getLogger("execution.git")
 
 # Workspace root is resolved per-request from the workspace registry.
 # Never hardcoded — configured by users in the UI.
-WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "")
 
 # Fix: Mark workspace as safe to avoid 'dubious ownership' errors in Docker
 # We do this once at module load

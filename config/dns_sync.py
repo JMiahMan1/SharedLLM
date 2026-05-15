@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """DNS Sync Sidecar - Polls Identity for DNS mappings and updates dnsmasq."""
 import os
+import sys
 import json
 import time
 import signal
 import subprocess
 from urllib.request import Request, urlopen
 
-IDENTITY_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
-DNS_CONF_PATH = os.getenv("DNS_CONF_PATH", "/etc/dnsmasq.conf")
-POLL_INTERVAL = int(os.getenv("DNS_POLL_INTERVAL", "30"))
-UPSTREAM_DNS = os.getenv("UPSTREAM_DNS", "8.8.8.8,1.1.1.1")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services"))
+from config import (
+    IDENTITY_SVC_URL, INTERNAL_SECRET, DNS_CONF_PATH,
+    DNS_POLL_INTERVAL, UPSTREAM_DNS,
+)
+
+IDENTITY_URL = IDENTITY_SVC_URL
+POLL_INTERVAL = DNS_POLL_INTERVAL
 
 running = True
 

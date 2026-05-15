@@ -24,20 +24,21 @@ except (ImportError, ValueError):
 
 log = logging.getLogger("gateway.background_worker")
 
-# Configuration
-CHECK_INTERVAL_SECONDS = int(os.getenv("RAVEN_CHECK_INTERVAL", "300"))
-ERROR_THRESHOLD = int(os.getenv("RAVEN_ERROR_THRESHOLD", "5"))
-# INTERNAL_SECRET is imported from config (fail-secure at startup)
-EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
-GATEWAY_SVC = "http://localhost:11435"  # Gateway port
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+from .config import (
+    INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAVEN_MAX_TOTAL_SECONDS,
+    RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, SYSTEM_IDENTITY,
+)
+
+CHECK_INTERVAL_SECONDS = RAVEN_CHECK_INTERVAL
+ERROR_THRESHOLD = RAVEN_ERROR_THRESHOLD
+GATEWAY_SVC = "http://localhost:11435"
 
 class RavenWorker:
     def __init__(self):
         self.is_running = False
         self._health_task = None
         self._inference_task = None
-        self.job_queue = InferenceJobQueue(os.getenv("REDIS_URL", "redis://redis:6379/0"))
+        self.job_queue = InferenceJobQueue(REDIS_URL)
         # Autonomous detection signals — must match orchestrator list
         self._autonomy_signals = [
             "raven", "use raven", "audit", "repair", "self repair", "self-heal",
@@ -147,7 +148,7 @@ class RavenWorker:
         """Polls Nextcloud Talk for @jarvis mentions."""
         log.info("Talk Monitor worker started.")
         import redis.asyncio as redis
-        r = redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
+        r = redis.from_url(REDIS_URL, decode_responses=True)
         
         while self.is_running:
             try:
@@ -260,7 +261,7 @@ class RavenWorker:
                         try:
                             async with httpx.AsyncClient(timeout=10.0) as client:
                                 await client.patch(
-                                    f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
+                                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                                     json={"status": "executing"},
                                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                                 )
@@ -279,7 +280,7 @@ class RavenWorker:
                     if mission_id:
                         async def _monitor_kill(mid, task_to_cancel):
                             import redis.asyncio as redis
-                            r_kill = redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
+                            r_kill = redis.from_url(REDIS_URL, decode_responses=True)
                             pubsub = r_kill.pubsub()
                             await pubsub.subscribe(f"raven:mission:kill:{mid}")
                             try:
@@ -309,7 +310,7 @@ class RavenWorker:
                         try:
                             async with httpx.AsyncClient(timeout=10.0) as client:
                                 await client.patch(
-                                    f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
+                                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                                     json={"status": "executing"},
                                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                                 )
@@ -333,7 +334,7 @@ class RavenWorker:
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         await client.patch(
-                            f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
+                            f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                             json={"status": "completed", "result": str(ans)},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
@@ -351,7 +352,7 @@ class RavenWorker:
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         await client.patch(
-                            f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions/{mission_id}",
+                            f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                             json={"status": "failed", "result": str(e)},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
@@ -371,11 +372,16 @@ class RavenWorker:
             creds = payload.get("creds", {})
             user_id = payload.get("user_id")
             
+            device_id = payload.get("device_id")
+            if not device_id:
+                log.warning("Announcement requested without device_id — skipping")
+                return
+
             # Use execution service's announce endpoint
             announce_payload = {
                 "user_context": creds,
                 "message": message,
-                "entity_id": payload.get("device_id") or "media_player.office_tv",
+                "entity_id": device_id,
                 "volume": 0.6
             }
             
@@ -468,7 +474,7 @@ class RavenWorker:
                 # Push to Identity Triage Queue instead of executing immediately
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.post(
-                        f"{os.getenv('IDENTITY_SVC_URL', 'http://identity:8001')}/api/raven/missions",
+                        f"{IDENTITY_SVC}/api/raven/missions",
                         json=mission_payload,
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )

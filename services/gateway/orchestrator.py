@@ -12,16 +12,14 @@ try:
 except (ImportError, ValueError):
     from schemas import ResolvedCredentials
     from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-    from config import WORKSPACE_RUNTIME_SVC
+     from config import WORKSPACE_RUNTIME_SVC, INTERNAL_SECRET, EXECUTION_SVC_URL, RAG_SVC_URL, IDENTITY_SVC_URL, STORAGE_SVC_URL, OLLAMA_URL, CONTROL_PLANE_URL
 
 log = logging.getLogger("gateway.orchestrator")
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
-RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
-IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
-STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://storage:8005")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+EXECUTION_SVC = EXECUTION_SVC_URL
+RAG_SVC = RAG_SVC_URL
+IDENTITY_SVC = IDENTITY_SVC_URL
+STORAGE_SVC = STORAGE_SVC_URL
 
 SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
@@ -105,8 +103,9 @@ async def get_llm_settings() -> Dict[str, str]:
 
 async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
+    from .config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
-    timeout = float(settings.get("ollama_timeout", os.getenv("OLLAMA_TIMEOUT", "600")))
+    timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":
         return OpenRouterProvider(
             api_key=settings.get("llm_cloud_api_key", ""),
@@ -299,11 +298,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             sub_action = payload.get("action", "restart")
             if not service_name:
                 return "Error: service_name is required"
-            CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://control_plane:8008")
+            cp_url = CONTROL_PLANE_URL or "http://control_plane:8008"
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     if sub_action == "restart":
-                        resp = await client.post(f"{CONTROL_PLANE_URL}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                        resp = await client.post(f"{cp_url}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
                     else:
                         resp = await client.get(f"{CONTROL_PLANE_URL}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
                     

@@ -5,6 +5,9 @@ import json
 import re
 import time
 import asyncio
+sys.path.insert(0, os.path.dirname(__file__))
+
+from config import INTERNAL_SECRET, REDIS_URL, LOG_RETENTION_DAYS, LOG_MAX_ENTRIES
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
@@ -54,19 +57,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"status": "ERROR", "message": "Internal Logging Error", "detail": str(exc)}
     )
-
-# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    import logging as _boot_log
-    _boot_log.basicConfig(level="CRITICAL")
-    _boot_log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
-
-# Redis configuration
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
-LOG_MAX_ENTRIES = int(os.getenv("LOG_MAX_ENTRIES", "50000"))
 
 MAX_LOG_FIELD_LENGTH = 4000
 SECRET_FIELD_NAMES = {

@@ -3,8 +3,12 @@ Semantic Router for the Gateway Service.
 Classifies intents rapidly using fastembed to bypass LLMs for known commands.
 """
 import os
+import sys
 import json
 import logging
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from config import FAST_PATH_THRESHOLD, EMBEDDING_MODEL, PHRASEBOOK_PATH
 try:
     import numpy as np
 except ImportError:
@@ -27,20 +31,17 @@ class IntentEngine:
         self.entity_cache: Dict[str, str] = {}
         
         # Update path to local relative path for development, or use ENV
-        self.phrasebook_path = os.getenv(
-            "PHRASEBOOK_PATH", 
-            os.path.join(os.path.dirname(__file__), "data", "phrasebook.json")
-        )
+        self.phrasebook_path = PHRASEBOOK_PATH or os.path.join(os.path.dirname(__file__), "data", "phrasebook.json")
         
         # Pull threshold from ENV so the React Admin UI can dynamically tune it
-        self.FAST_PATH_CONFIDENCE = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
+        self.FAST_PATH_CONFIDENCE = FAST_PATH_THRESHOLD
         self.is_active = False
 
     def load(self):
         # ... (keep existing load logic)
         try:
             from fastembed import TextEmbedding
-            model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+            model_name = EMBEDDING_MODEL
             log.info(f"Loading Semantic Router model: {model_name}")
             
             self.model = TextEmbedding(model_name=model_name)

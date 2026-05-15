@@ -43,15 +43,13 @@ import httpx
 log = logging.getLogger("identity")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-DATABASE_URL = os.getenv("IDENTITY_DATABASE_URL", "sqlite:////data/identity.db")
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
+from config import INTERNAL_SECRET, FERNET_KEY, OLLAMA_URL, IDENTITY_DATABASE_URL
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+DATABASE_URL = IDENTITY_DATABASE_URL
 
 engine = create_engine(
     DATABASE_URL, 
@@ -1022,9 +1020,10 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
             nc_user = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_USER")).first()
             nc_pass = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_PASS")).first()
             
-            url = nc_url.value if nc_url else os.getenv("NEXTCLOUD_URL")
-            user = nc_user.value if nc_user else os.getenv("NEXTCLOUD_USER")
-            password = nc_pass.value if nc_pass else os.getenv("NEXTCLOUD_PASS")
+            from config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+            url = nc_url.value if nc_url else NEXTCLOUD_URL
+            user = nc_user.value if nc_user else NEXTCLOUD_USER
+            password = nc_pass.value if nc_pass else NEXTCLOUD_PASS
         else:
             url = admin.nextcloud_url
             user = admin.nextcloud_user

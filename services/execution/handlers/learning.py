@@ -1,14 +1,16 @@
 # services/execution/handlers/learning.py
 import os
+import sys
 import logging
 import httpx
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from config import RAG_SVC_URL, INTERNAL_SECRET
 from schemas import SystemLearningRequest, ExecutionResult
 
 log = logging.getLogger("execution.learning")
 
-RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
-# INTERNAL_SECRET: no default — execution/main.py fails-secure if unset
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+RAG_SVC = RAG_SVC_URL
 
 async def handle_system_learning(req: SystemLearningRequest) -> ExecutionResult:
     try:

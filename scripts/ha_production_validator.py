@@ -20,10 +20,12 @@ def discover_prod_ip():
                 if "ai-server:" in line:
                     return line.split(":")[1].strip().strip('"').strip("'")
     except: pass
-    return "192.168.2.205" # Fallback
+    return None
 
-PROD_IP = discover_prod_ip()
-EXECUTION_URL = os.getenv("EXECUTION_SVC_URL", f"http://{PROD_IP}:8003")
+PROD_IP = discover_prod_ip() or os.getenv("EXECUTION_EXTERNAL_HOST")
+if not PROD_IP:
+    raise RuntimeError("EXECUTION_EXTERNAL_HOST or docker-compose.yml ai-server IP is required")
+EXECUTION_URL = f"http://{PROD_IP}:8003"
 
 # Common User Context for testing
 USER_CONTEXT = {
