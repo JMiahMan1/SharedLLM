@@ -56,7 +56,7 @@
         reverse_proxy execution:8003
     }
 
-    handle_path /control_plane* {
+    handle_path /control_plane/* {
         reverse_proxy control_plane:8008
     }
 

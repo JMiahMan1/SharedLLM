@@ -157,7 +157,7 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
         return []
         
     import datetime
-    start_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()
+    start_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)).isoformat()
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/history/period/{start_time}"
     params = {"filter_entity_id": entity_id, "no_attributes": ""}
@@ -181,7 +181,7 @@ async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
         return []
         
     import datetime
-    start_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()
+    start_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)).isoformat()
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/logbook/{start_time}"
     params = {"entity": entity_id}
