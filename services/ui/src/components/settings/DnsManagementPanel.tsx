@@ -128,7 +128,7 @@ export default function DnsManagementPanel() {
             value={newIp}
             onChange={(e) => setNewIp(e.target.value)}
             className="glass-input flex-1 text-xs"
-            placeholder="IP address (e.g., 192.168.2.114)"
+            placeholder="IP address (e.g., 192.168.4.179)"
           />
           <button
             onClick={() => {
