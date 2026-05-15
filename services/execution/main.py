@@ -630,8 +630,11 @@ async def execute_announce(req: AnnouncementRequest):
     # 2. Set volume
     await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
     
-    # 3. TTS
+    # 3. TTS & Dispatch
     result = {"ok": False, "error": "No engine selected"}
+    
+    # Check if target is a Roku to use specialized Media Assistant app (ID 782875)
+    is_roku = "roku" in target_player.lower()
     
     if req.tts_engine == "kokoro":
         from tts import text_to_speech
@@ -642,13 +645,26 @@ async def execute_announce(req: AnnouncementRequest):
             
             media_id = f"tts-{uuid4().hex[:8]}"
             TEMP_AUDIO_CACHE[media_id] = audio_bytes
+            # Note: Using host.docker.internal or a resolvable IP is better, but 'execution' works within the docker net.
+            # For HA to reach it, we need the execution service's public/internal IP from the host's perspective.
+            # We'll use the 'media_url' provided to HA.
             media_url = f"http://execution:8003/media/{media_id}"
             
-            log.info(f"[announce] Playing Kokoro URL: {media_url}")
-            result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target_player, {
-                "media_content_id": media_url,
-                "media_content_type": "audio/wav"
-            })
+            if is_roku:
+                # Specialized Roku Media Assistant App (ID 782875)
+                # Parameters: t=a (audio), u=URL
+                log.info(f"[announce] Roku detected. Launching Media Assistant App (782875) with URL: {media_url}")
+                result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target_player, {
+                    "media_content_id": "782875",
+                    "media_content_type": "app",
+                    "extra": {"content_id": media_url, "media_type": "audio/wav"}
+                })
+            else:
+                log.info(f"[announce] Playing Kokoro URL: {media_url}")
+                result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target_player, {
+                    "media_content_id": media_url,
+                    "media_content_type": "audio/wav"
+                })
             
             if req.save_path:
                 from handlers import storage as storage_handler
@@ -660,7 +676,16 @@ async def execute_announce(req: AnnouncementRequest):
             log.error(f"[announce] Kokoro failed: {e}")
             result = {"ok": False, "error": str(e)}
 
-    # Fallback to local Piper if Kokoro failed or wasn't chosen
+    # Fallback / Alternate: Music Assistant (MASS) play_announcement
+    # This is often what users mean by 'Media Assistant' integration in HA
+    if not result.get("ok"):
+        log.info("[announce] Attempting Music Assistant (MASS) announcement...")
+        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "mass", "play_announcement", target_player, {
+            "message": req.message,
+            "use_pre_announcement_signal": True
+        })
+
+    # Last resort: local Piper
     if not result.get("ok"):
         log.info("[announce] Falling back to HA Piper...")
         result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "piper", target_player, {
