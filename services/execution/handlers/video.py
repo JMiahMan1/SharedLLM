@@ -1,7 +1,6 @@
 # services/execution/handlers/video.py
 import logging
 import asyncio
-import os
 import re
 try:
     import yt_dlp
@@ -60,20 +59,18 @@ async def get_stream_url(video_url: str) -> str | None:
             info = ydl.extract_info(video_url, download=False)
             if not info:
                 return None
-            # The format selector already picks the best single-file MP4.
-            # yt-dlp puts the resolved URL in the 'url' field of the info dict.
-            if info.get("url") and not info["url"].startswith("http") and "://" not in info["url"]:
-                # This is a protocol-relative or relative URL, skip
-                pass
-            elif info.get("url") and info.get("ext") == "mp4":
+            url = info.get("url", "")
+            ext = info.get("ext", "")
+            log.info(f"[video] yt-dlp: url={str(url)[:80]}, ext={ext}, format={info.get('format')}")
+            if url and url.startswith("http") and ext == "mp4":
                 log.info(f"[video] Found MP4 stream URL")
-                return info["url"]
-            # Fallback: use any resolved URL
-            if info.get("url") and info["url"].startswith("http"):
-                log.info(f"[video] Using resolved URL (ext={info.get('ext')})")
-                return info["url"]
-            # Last resort: use the webpage URL
-            return info.get("webpage_url") or info.get("original_url") or video_url
+                return url
+            if url and url.startswith("http"):
+                log.info(f"[video] Using resolved URL (ext={ext})")
+                return url
+            fallback = info.get("webpage_url") or info.get("original_url") or video_url
+            log.warning(f"[video] No stream URL found, falling back to {fallback}")
+            return fallback
     except Exception as e:
         log.error(f"[video] Stream extraction failed: {e}")
         return None
@@ -105,10 +102,10 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
         )
 
     # Step 3: Get video title for feedback
-    opts = {**YDL_OPTS, "skip_download": True}
     title = req.query
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        title_opts = {**YDL_OPTS, "skip_download": True}
+        with yt_dlp.YoutubeDL(title_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             title = info.get("title", req.query) if info else req.query
     except:
