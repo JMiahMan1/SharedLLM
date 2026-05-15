@@ -595,7 +595,7 @@ async def get_documentation(
     
     # Whitelist of allowed root-level files (expanded for all UI-referenced docs)
     allowed_root_files = [
-        "EXAMPLES.md", "README.md", "TESTING.md",
+        "README.md",
         "api_reference.md", "integrations.md", "architecture.md",
         "workspace_runtime.md", "autonomous_protocols.md",
         "RAVEN_AUDIT_BLUEPRINT.md", "UI_RAVEN_INTEGRATION_PLAN.md",

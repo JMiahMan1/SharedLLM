@@ -26,6 +26,7 @@ interface MonacoEditorProps {
   wordWrap?: 'on' | 'off';
   fontSize?: number;
   showPreview?: boolean;
+  onEditorMount?: (editor: any) => void;
 }
 
 const LANGUAGE_MAP: Record<EditorLanguage, string> = {
@@ -74,12 +75,14 @@ export const MonacoEditor = ({
   wordWrap = 'on',
   fontSize = 14,
   showPreview = false,
+  onEditorMount,
 }: MonacoEditorProps) => {
   const editorRef = useRef<any>(null);
 
   const handleEditorDidMount = useCallback((editor: any) => {
     editorRef.current = editor;
-  }, []);
+    onEditorMount?.(editor);
+  }, [onEditorMount]);
 
   useEffect(() => {
     if (editorRef.current) {

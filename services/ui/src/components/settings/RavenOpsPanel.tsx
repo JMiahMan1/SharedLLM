@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal, Volume2, Search, Cpu } from 'lucide-react';
+import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal, Volume2, Search, Cpu, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type RavenConfig, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
@@ -117,7 +117,7 @@ export default function RavenOpsPanel() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <div className="glass-card p-4 border border-white/10 flex flex-col justify-between">
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
@@ -159,6 +159,31 @@ export default function RavenOpsPanel() {
             <option value={300}>Every 5 Minutes</option>
             <option value={3600}>Hourly</option>
             <option value={86400}>Daily</option>
+          </select>
+        </div>
+
+        <div className="glass-card p-4 border border-white/10 flex flex-col justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+              <RefreshCw size={12} /> Cleanup Interval
+            </p>
+            <p className="text-sm text-slate-300 mb-4">HA entity sync, orphan pruning, Redis cache refresh.</p>
+          </div>
+          <select
+            value={currentConfig.cleanup_interval_seconds || 300}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              setDraftConfig({ ...draftConfig, cleanup_interval_seconds: val });
+              updateConfigMutation.mutate({ cleanup_interval_seconds: val });
+            }}
+            disabled={updateConfigMutation.isPending}
+            className="glass-input w-full bg-black/30 text-xs"
+          >
+            <option value={60}>Every Minute</option>
+            <option value={300}>Every 5 Minutes</option>
+            <option value={600}>Every 10 Minutes</option>
+            <option value={1800}>Every 30 Minutes</option>
+            <option value={3600}>Hourly</option>
           </select>
         </div>
 
