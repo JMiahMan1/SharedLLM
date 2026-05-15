@@ -3,18 +3,25 @@
 Home Assistant Integration Test Suite
 Tests execution service HA endpoints AND full chat interface against real HA instance.
 Verifies actual state changes and HA logbook entries (no false positives).
+
+Required environment variables:
+    PROD_HOST        - Production server IP (default: 192.168.2.205)
+    INTERNAL_SECRET  - SharedLLM internal secret
+    HA_URL           - Home Assistant URL
+    HA_TOKEN         - Home Assistant long-lived access token
 """
 import json
+import os
 import time
 import httpx
 import sys
 
-PROD_HOST = "192.168.2.205"
-SECRET = "RAVEN_SECURE_2026"
-HA_URL = "https://ha.sumemail.com"
-HA_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhNzg4NzhjNzdlMzM0N2Q0OWQ5NWEyNjE2NmI4ODhmNiIsImlhdCI6MTc2MTk0MDE4MywiZXhwIjoyMDc3MzAwMTgzfQ.y0cxCphUIntpJznahl_k0p-ewIP5n55A7kXq1I5accQ"
+PROD_HOST = os.getenv("PROD_HOST", "192.168.2.205")
+SECRET = os.environ["INTERNAL_SECRET"]
+HA_URL = os.environ["HA_URL"]
+HA_TOKEN = os.environ["HA_TOKEN"]
 EXEC_URL = f"http://{PROD_HOST}:8003"
-GATEWAY_URL = f"http://{PROD_HOST}:11435"
+GATEWAY_URL = f"http://{PROD_HOST}:8080"
 
 USER_CTX = {
     "user": "default",
