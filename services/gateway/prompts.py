@@ -35,6 +35,7 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "- **MediaPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"artist or song name\"}` - MUST include BOTH \"entity_id\" AND \"query\"\n"
     "- **MediaStatusRequest**: `{}` (no required fields) - use to check \"what's playing\" or \"what devices are active\"\n"
     "- **MediaStatusRequest with filter**: `{\"area\": \"Office\"}` or `{\"entity_id\": \"media_player.office_tv\"}`\n"
+    "- **VideoPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"YouTube URL or search query\"}` - plays video via yt-dlp MP4 stream (works on Cast/AndroidTV without YouTube app)\n"
     "- **ExecutionLogRequest**: `{\"lines\": 50}` - verify task execution, troubleshoot failures. Optional: `{\"service\": \"announce\", \"keyword\": \"FAILED\"}` to filter by handler name or keyword. Leave service/keyword empty for all logs\n"
     "\n"
     "### Entity Resolution Rule (CRITICAL)\n"

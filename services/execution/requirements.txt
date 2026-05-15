@@ -20,3 +20,4 @@ html2text
 kokoro-onnx
 onnxruntime
 soundfile
+yt-dlp
