@@ -151,11 +151,15 @@ services:
     restart: unless-stopped
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS:-30}
+      - LOG_MAX_ENTRIES=50000
       - TZ=America/Phoenix
     volumes:
-      - logging_data:/app/data
       - ./services/logging/main.py:/app/main.py:ro
       - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - redis
 
   storage:
     build: ./services/storage

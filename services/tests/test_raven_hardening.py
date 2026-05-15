@@ -3,6 +3,7 @@ import sys
 import os
 import importlib
 from collections import defaultdict
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -111,12 +112,11 @@ async def test_inference_queue_dead_letters_after_max_attempts():
 
 
 @pytest.mark.asyncio
-async def test_logging_service_sanitizes_secrets_and_requires_auth(monkeypatch, tmp_path):
-    monkeypatch.setenv("LOGGING_DB_PATH", str(tmp_path / "logs.db"))
+async def test_logging_service_sanitizes_secrets_and_requires_auth(monkeypatch):
+    monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     logging_main = importlib.import_module("services.logging.main")
-    monkeypatch.setattr(logging_main, "DB_PATH", str(tmp_path / "logs.db"))
     monkeypatch.setattr(logging_main, "INTERNAL_SECRET", "test-secret")
-    logging_main.init_db()
 
     with pytest.raises(HTTPException) as exc_info:
         logging_main._require_internal_secret(None)
@@ -134,15 +134,23 @@ async def test_logging_service_sanitizes_secrets_and_requires_auth(monkeypatch, 
             },
         }
     )
+    
+    mock_redis = AsyncMock()
+    mock_redis.pubsub.return_value = AsyncMock()
+    monkeypatch.setattr(logging_main, "get_redis", lambda: mock_redis)
+    
     response = await logging_main.log_event(entry, "test-secret")
     assert response["status"] == "success"
-
-    rows = await logging_main._fetch_logs(user_id="admin")
-    assert rows[0]["message"].count("[REDACTED]") >= 1
-    context = json.loads(rows[0]["context"])
-    assert context["token"] == "[REDACTED]"
-    assert context["nested"]["nextcloud_pass"] == "[REDACTED]"
-    assert context["details"] == "keep this"
+    
+    # Verify zadd was called with sanitized data
+    zadd_call = mock_redis.zadd.call_args
+    stored_json = list(zadd_call[0][1].keys())[0]
+    stored_data = json.loads(stored_json)
+    
+    assert "[REDACTED]" in stored_data["message"]
+    assert stored_data["context"]["token"] == "[REDACTED]"
+    assert stored_data["context"]["nested"]["nextcloud_pass"] == "[REDACTED]"
+    assert stored_data["context"]["details"] == "keep this"
 
 
 @pytest.mark.asyncio
