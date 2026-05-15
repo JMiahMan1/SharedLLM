@@ -18,7 +18,6 @@ import toast from 'react-hot-toast';
 
 const DOC_ITEMS = [
   { id: 'api_reference', label: 'API Reference', icon: Terminal, file: 'api_reference.md' },
-  { id: 'EXAMPLES', label: 'Intent Examples', icon: Code2, file: 'EXAMPLES.md' },
   { id: 'integrations', label: 'Integration Setup', icon: Layers, file: 'integrations.md' },
   { id: 'architecture', label: 'System Architecture', icon: Cpu, file: 'architecture.md' },
   { id: 'workspace_runtime', label: 'Workspace Runtime', icon: Book, file: 'workspace_runtime.md' },
