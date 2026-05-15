@@ -11,11 +11,10 @@ log = logging.getLogger("gateway.history")
 
 # INTERNAL_SECRET sourced from config.py which enforces fail-secure at gateway startup.
 try:
-    from .config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET
+    from .config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET, REDIS_URL
 except (ImportError, ValueError):
-    from config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET
+    from config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET, REDIS_URL
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 
 def _get_history_key(user: str) -> str:
@@ -81,14 +80,11 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
             "k": 5
         }
         
-        # We need to call RAG service. Since we are in history.py, we'll use a local client or pass one.
-        # For simplicity, we'll create one here or use a shared one.
-        RAG_SVC_LOCAL = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
-        secret = INTERNAL_SECRET  # from config, fail-secure at startup
+        from .config import RAG_SVC, INTERNAL_SECRET
 
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(
-                f"{RAG_SVC_LOCAL}/rag/search",
+                f"{RAG_SVC}/rag/search",
                 json=payload,
                 headers={"X-Internal-Secret": secret}
             )
@@ -115,7 +111,7 @@ async def extract_and_store_user_facts(user_id: str, history: list):
 
     try:
         LIBRARIAN_MODEL = await fetch_librarian_model()
-        OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+        from .config import OLLAMA_URL
 
         # Only look at the last turn
         recent_text = ""

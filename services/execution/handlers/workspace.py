@@ -1,14 +1,16 @@
 # services/execution/handlers/workspace.py
 import os
+import sys
 import logging
 import difflib
 import shlex
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from config import WORKSPACE_ROOT
 from typing import Dict, Any, Optional
 from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceSearchRequest, WorkspaceShellRequest, ExecutionResult
 
 log = logging.getLogger("execution.workspace")
-
-WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", os.path.expanduser("~/workspace"))
 READ_ONLY_SHELL_COMMANDS = {
     "cat", "find", "git", "head", "ls", "pwd", "rg", "sed", "tail", "wc"
 }

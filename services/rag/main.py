@@ -8,6 +8,9 @@ import sys
 import logging
 import time
 import hashlib
+sys.path.insert(0, os.path.dirname(__file__))
+
+from config import INTERNAL_SECRET, CHROMA_PERSIST_DIR, EMBEDDING_MODEL
 from typing import Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
@@ -25,13 +28,7 @@ except ImportError:
 log = logging.getLogger("rag")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
-CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "/data/chroma_db")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+CHROMA_DIR = CHROMA_PERSIST_DIR
 
 # Global clients
 chroma_client = None

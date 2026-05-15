@@ -73,12 +73,11 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 log = logging.getLogger("execution")
 
-# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
-IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from config import INTERNAL_SECRET, IDENTITY_SVC_URL
 
 async def resolve_internal_user(user_id: str) -> Optional[Dict[str, Any]]:
     """Query Identity Service for full user credentials using internal secret."""
@@ -109,9 +108,10 @@ async def require_internal(request: Request, x_internal_secret: str = Header(Non
 async def lifespan(app: FastAPI):
     log.info("Execution Bridge starting up.")
     # Auto-download Kokoro models if missing
-    os.makedirs("/app/models", exist_ok=True)
-    kokoro_path = "/app/models/kokoro-v1.0.onnx"
-    voices_path = "/app/models/voices-v1.0.bin"
+    from config import MODELS_DIR
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    kokoro_path = os.path.join(MODELS_DIR, "kokoro-v1.0.onnx")
+    voices_path = os.path.join(MODELS_DIR, "voices-v1.0.bin")
     if not os.path.exists(kokoro_path) or not os.path.exists(voices_path):
         log.info("Downloading default Kokoro TTS models...")
         import subprocess
@@ -148,7 +148,8 @@ async def global_exception_handler(request, exc):
 # Transient cache for locally-generated media (TTS announcements)
 TEMP_AUDIO_CACHE: Dict[str, bytes] = {}
 # Video files stored on disk (streamed for large files)
-TEMP_VIDEO_DIR = "/tmp/sharedllm_media"
+from config import TEMP_MEDIA_DIR
+TEMP_VIDEO_DIR = TEMP_MEDIA_DIR
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
 @app.get("/media/{media_id}")
@@ -387,7 +388,8 @@ async def execute_docker(req: DockerComposeRequest):
         try:
             # We run this from the workspace root where docker-compose.yml is
             cmd = ["docker-compose", "up", "-d", "--build"] + list(services)
-            compose_dir = os.getenv("COMPOSE_PROJECT_DIR", os.path.expanduser("~/workspace"))
+            from config import COMPOSE_PROJECT_DIR
+            compose_dir = COMPOSE_PROJECT_DIR or os.path.expanduser("~/workspace")
             res = subprocess.run(cmd, capture_output=True, text=True, cwd=compose_dir)
             if res.returncode == 0:
                 return _ok(f"Docker Compose up -d --build successful for {len(services)} services.", {"output": res.stdout})
@@ -465,7 +467,8 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
     Proxies to Gateway internal discovery API.
     """
     # Note: Gateway is usually at http://gateway:11435 in docker
-    GATEWAY_INTERNAL = os.getenv("GATEWAY_INTERNAL_URL", "http://gateway:11435")
+    from config import GATEWAY_INTERNAL_URL
+    GATEWAY_INTERNAL = GATEWAY_INTERNAL_URL or "http://gateway:11435"
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
@@ -487,7 +490,7 @@ async def execute_identity(req: IdentityRequest):
     """
     Proxy identity management requests (list, import, discover) to the Identity service.
     """
-    IDENTITY_SVC = os.getenv("IDENTITY_SVC", "http://identity:8001")
+    IDENTITY_SVC = IDENTITY_SVC_URL
     try:
         action = req.action
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -584,17 +587,13 @@ async def execute_index_capabilities():
     import subprocess
     import sys
     
+    from config import SCRIPTS_DIR
     script_path = os.path.join(os.getcwd(), "scripts", "index_capabilities.py")
     if not os.path.exists(script_path):
         # Fallback for Docker environment
-        fallbacks = [
-            os.path.join(os.path.expanduser("~/workspace"), "scripts/index_capabilities.py"),
-            "/app/scripts/index_capabilities.py"
-        ]
-        for fb in fallbacks:
-            if os.path.exists(fb):
-                script_path = fb
-                break
+        fallback = os.path.join(SCRIPTS_DIR, "index_capabilities.py")
+        if os.path.exists(fallback):
+            script_path = fallback
         
     try:
         log.info(f"Triggering capability indexing: {script_path}")
@@ -704,7 +703,8 @@ async def execute_announce(req: AnnouncementRequest):
             # We'll try to discover the production IP from the environment or docker-compose.
             def get_public_host():
                 # 1. Check if configured in env
-                env_host = os.getenv("EXECUTION_EXTERNAL_HOST")
+                from config import EXECUTION_EXTERNAL_HOST
+                env_host = EXECUTION_EXTERNAL_HOST
                 if env_host: return env_host
                 
                 # 2. Try to find ai-server IP from compose if we are on the same machine
@@ -715,8 +715,8 @@ async def execute_announce(req: AnnouncementRequest):
                                 return line.split(":")[1].strip().strip('"').strip("'")
                 except: pass
                 
-                # 3. Fallback to a common local IP if we are in the .2.x subnet or similar
-                return "192.168.2.205" # Default Production Host
+                # 3. Fail if no host is configured
+                raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
             
             public_host = get_public_host()
             media_url = f"http://{public_host}:8080/media/{media_id}"

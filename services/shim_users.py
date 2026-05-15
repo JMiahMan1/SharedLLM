@@ -4,16 +4,18 @@ Makes a rapid requests.post() to the new Identity Service instead of reading .en
 Ensures downstream monolith files do not break while refactoring.
 """
 import os
+import sys
 import requests
 import logging
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from config import IDENTITY_SVC_URL, INTERNAL_SECRET
 from typing import Dict, Optional
 from fastapi import Security, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 log = logging.getLogger("shim_users")
 
-IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 security = HTTPBearer(auto_error=False)
 
 def get_user_creds(username: str = "default") -> Dict[str, str]:

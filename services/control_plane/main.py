@@ -1,18 +1,15 @@
 import os
 import sys
 import docker
+sys.path.insert(0, os.path.dirname(__file__))
+
+from config import INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, Header, Depends
 from typing import Optional, Dict, Any
 
 import logging
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
-
-# ─── Fail-Secure Config ────────────────────────────────────────────────────────
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
 
 app = FastAPI(title="Control Plane Service")
 

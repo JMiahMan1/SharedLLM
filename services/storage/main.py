@@ -4,6 +4,9 @@ import os
 import sys
 import httpx
 import re
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from config import RAG_SVC_URL, INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Body, Query
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -29,13 +32,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 
 app = FastAPI(title="Librarian Storage Service")
 
-RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
-
-# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
+RAG_SVC = RAG_SVC_URL
 
 class IndexScanRequest(BaseModel):
     provider: ProviderConfig

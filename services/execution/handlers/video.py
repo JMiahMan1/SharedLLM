@@ -5,6 +5,10 @@ import subprocess
 import json
 import re
 import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
 try:
     import ha_client
     from schemas import VideoPlayRequest, ExecutionResult
@@ -15,7 +19,7 @@ except ImportError:
 log = logging.getLogger("execution.video")
 
 # Video files stored on disk (streamed for large files)
-TEMP_VIDEO_DIR = "/tmp/sharedllm_media"
+TEMP_VIDEO_DIR = _TEMP_MEDIA_DIR
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
 
@@ -142,10 +146,10 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
 
     # Step 3: Build the local media URL for HA to stream
     def get_public_host():
-        env_host = os.getenv("EXECUTION_EXTERNAL_HOST")
-        if env_host:
-            return env_host
-        return "192.168.2.205"  # Default Production Host
+        from config import EXECUTION_EXTERNAL_HOST
+        if not EXECUTION_EXTERNAL_HOST:
+            raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set. Cannot build media URL.")
+        return EXECUTION_EXTERNAL_HOST
     
     public_host = get_public_host()
     media_url = f"http://{public_host}:8003/media/{media_id}"

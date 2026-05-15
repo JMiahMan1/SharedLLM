@@ -22,8 +22,11 @@ from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Load legacy .env if available
-if os.path.exists("/app/.env.legacy"):
-    load_dotenv("/app/.env.legacy")
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from config import LEGACY_ENV_PATH
+if os.path.exists(LEGACY_ENV_PATH):
+    load_dotenv(LEGACY_ENV_PATH)
 
 log = logging.getLogger("identity.seed")
 

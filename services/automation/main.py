@@ -7,18 +7,16 @@ import json
 import httpx
 from datetime import datetime
 import redis.asyncio as redis
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from config import REDIS_URL, EXECUTION_SVC_URL, INTERNAL_SECRET
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 log = logging.getLogger("automation")
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
+REDIS_URL = REDIS_URL
+EXECUTION_SVC = EXECUTION_SVC_URL
 
-# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
 SCHEDULER_INTERVAL = 5  # seconds
 
 redis_client = None

@@ -1,13 +1,17 @@
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from config import VOLUME_MANIFEST_PATH, VOLUME_BACKUP_ROOT
 
 log = logging.getLogger("execution.volumes")
 
-DEFAULT_VOLUME_MANIFEST_PATH = os.getenv("VOLUME_MANIFEST_PATH", os.path.join(os.path.expanduser("~/workspace"), "config/volumes.json"))
-DEFAULT_BACKUP_ROOT = os.getenv("VOLUME_BACKUP_ROOT", "/var/backups/sharedllm")
+DEFAULT_VOLUME_MANIFEST_PATH = VOLUME_MANIFEST_PATH or os.path.join(os.path.expanduser("~/workspace"), "config/volumes.json")
+DEFAULT_BACKUP_ROOT = VOLUME_BACKUP_ROOT or "/var/backups/sharedllm"
 
 
 def _get_docker_client():

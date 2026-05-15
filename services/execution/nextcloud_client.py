@@ -1,13 +1,13 @@
 import os
+import sys
 import re
 import urllib.parse
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
 from typing import Any, Optional
 
 import requests
-
-NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
-NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
-NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 
 
 def resolve_credentials(user_context: Any) -> tuple[Optional[str], Optional[str], Optional[str]]:

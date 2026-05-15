@@ -1,7 +1,11 @@
 import logging
+import sys
 import asyncio
 import re
 import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from config import DEFAULT_TTS_VOICE, MODELS_DIR
 from uuid import uuid4
 from typing import Optional, Protocol, List, Dict
 import numpy as np
@@ -16,7 +20,11 @@ class TTSEngine(Protocol):
 
 class KokoroTTSEngine:
     """Local-first TTS using Kokoro-v1.0 (ONNX). Includes Storybook Mode logic."""
-    def __init__(self, model_path: str = "/app/models/kokoro-v1.0.onnx", voices_path: str = "/app/models/voices-v1.0.bin"):
+    def __init__(self, model_path: str = "", voices_path: str = ""):
+        if not model_path:
+            model_path = os.path.join(MODELS_DIR, "kokoro-v1.0.onnx")
+        if not voices_path:
+            voices_path = os.path.join(MODELS_DIR, "voices-v1.0.bin")
         self.model_path = model_path
         self.voices_path = voices_path
         self._kokoro = None
@@ -41,7 +49,7 @@ class KokoroTTSEngine:
         self._ensure_loaded()
         
         if not voice:
-            voice = os.getenv("DEFAULT_TTS_VOICE", "af_heart")
+            voice = DEFAULT_TTS_VOICE or "af_heart"
         
         if storybook:
             return await self._generate_storybook(text, voice)
