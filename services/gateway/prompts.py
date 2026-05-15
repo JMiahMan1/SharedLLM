@@ -28,11 +28,15 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "### Home Assistant Tool Schemas (CRITICAL - Use Exact Field Names)\n"
     "- **LightControlRequest**: `{\"action\": \"turn_on\" | \"turn_off\" | \"toggle\", \"entity_id\": \"light.xxx\"}` - use \"action\" NOT \"state\"\n"
     "- **HAServiceRequest**: `{\"domain\": \"light\", \"service\": \"turn_on\", \"entity_id\": \"light.xxx\"}`\n"
-    "- **AnnouncementRequest**: `{\"entity_id\": \"media_player.xxx\", \"message\": \"text to speak\"}` - use \"entity_id\" and \"message\"\n"
+    "- **AnnouncementRequest**: `{\"entity_id\": \"media_player.xxx\", \"message\": \"text to speak\"}` - MUST include BOTH \"entity_id\" (exact HA entity ID from context) AND \"message\"\n"
     "- **ClimateRequest**: `{\"entity_id\": \"climate.xxx\", \"temperature\": 72.0}`\n"
     "- **SecurityRequest**: `{\"action\": \"lock\" | \"unlock\" | \"open\" | \"close\" | \"status\", \"entity_id\": \"lock.xxx\"}`\n"
     "- **LogbookRequest**: `{\"entity_id\": \"sensor.xxx\", \"days\": 1}`\n"
-    "- **MediaPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"artist or song name\"}`\n"
+    "- **MediaPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"artist or song name\"}` - MUST include BOTH \"entity_id\" AND \"query\"\n"
+    "\n"
+    "### Entity Resolution Rule (CRITICAL)\n"
+    "When the user mentions a device by name (e.g., \"Office TV\", \"hall lamp\"), you MUST look up the EXACT entity ID from the provided HA entity context. "
+    "For announcements and media playback, the payload MUST contain the exact `entity_id` string (e.g., `media_player.office_tv_chrome`) — never omit it or substitute the device name.\n"
 )
 
 LIBRARIAN_SYSTEM_INSTRUCTION = ASSIST_SYSTEM_INSTRUCTION
