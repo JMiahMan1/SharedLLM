@@ -34,14 +34,16 @@ def extract_video_url(query: str) -> str | None:
 
 
 async def search_youtube(query: str) -> str | None:
-    """Search YouTube and return the URL of the top result."""
-    opts = {**YDL_OPTS, "extract_flat": True, "default_search": "ytsearch1"}
+    """Search YouTube and return the webpage URL of the top result."""
+    opts = {**YDL_OPTS, "default_search": "ytsearch1"}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(query, download=False)
-            if info and info.get("entries"):
+            if not info:
+                return None
+            if info.get("entries"):
                 entry = info["entries"][0]
-                url = entry.get("url") or entry.get("webpage_url") or entry.get("original_url")
+                url = entry.get("webpage_url") or entry.get("original_url")
                 if url:
                     log.info(f"[video] YouTube search '{query}' -> {url}")
                     return url
