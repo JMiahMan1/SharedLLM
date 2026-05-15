@@ -5,33 +5,13 @@ import logging
 import httpx
 import os
 from typing import Any, Dict, List, Optional, Callable, Awaitable
-try:
-    from schemas import ResolvedCredentials
-    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-except ImportError:
-    try:
-        from .schemas import ResolvedCredentials
-        from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-    except ImportError:
-        from services.gateway.schemas import ResolvedCredentials
-        from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+from gateway.schemas import ResolvedCredentials
+from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 
-try:
-    from config import (
-        WORKSPACE_RUNTIME_SVC, INTERNAL_SECRET, EXECUTION_SVC_URL, RAG_SVC_URL,
-        IDENTITY_SVC_URL, STORAGE_SVC_URL, OLLAMA_URL, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
-    )
-except ImportError:
-    try:
-        from .config import (
-            WORKSPACE_RUNTIME_SVC, INTERNAL_SECRET, EXECUTION_SVC_URL, RAG_SVC_URL,
-            IDENTITY_SVC_URL, STORAGE_SVC_URL, OLLAMA_URL, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
-        )
-    except ImportError:
-        from services.gateway.config import (
-            WORKSPACE_RUNTIME_SVC, INTERNAL_SECRET, EXECUTION_SVC_URL, RAG_SVC_URL,
-            IDENTITY_SVC_URL, STORAGE_SVC_URL, OLLAMA_URL, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
-        )
+from gateway.config import (
+    WORKSPACE_RUNTIME_SVC, INTERNAL_SECRET, EXECUTION_SVC_URL, RAG_SVC_URL,
+    IDENTITY_SVC_URL, STORAGE_SVC_URL, OLLAMA_URL, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
+)
 
 log = logging.getLogger("gateway.orchestrator")
 

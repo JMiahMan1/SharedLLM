@@ -8,13 +8,7 @@ import json
 import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-try:
-    from config import FAST_PATH_THRESHOLD, EMBEDDING_MODEL, PHRASEBOOK_PATH
-except ImportError:
-    try:
-        from .config import FAST_PATH_THRESHOLD, EMBEDDING_MODEL, PHRASEBOOK_PATH
-    except ImportError:
-        from services.gateway.config import FAST_PATH_THRESHOLD, EMBEDDING_MODEL, PHRASEBOOK_PATH
+from gateway.config import FAST_PATH_THRESHOLD, EMBEDDING_MODEL, PHRASEBOOK_PATH
 try:
     import numpy as np
 except ImportError:
