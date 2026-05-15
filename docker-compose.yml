@@ -39,7 +39,9 @@ services:
   execution:
     build: ./services/execution
     container_name: sharedllm_execution
-    restart: unless-stopped
+    restart: always
+    ports:
+      - 8003:8003
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -244,7 +246,9 @@ services:
   control_plane:
     build: ./services/control_plane
     container_name: sharedllm_control_plane
-    restart: unless-stopped
+    restart: always
+    ports:
+      - 8008:8008
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
