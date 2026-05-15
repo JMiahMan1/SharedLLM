@@ -15,5 +15,10 @@ RUN groupadd -g ${PGID} sharedllm || true \
     && chown -R ${PUID}:${PGID} /home/sharedllm
 ENV HOME=/home/sharedllm
 
+# --- Entrypoint: dynamically resolve docker group GID from socket ---
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8003
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]
