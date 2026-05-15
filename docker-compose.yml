@@ -232,6 +232,14 @@ services:
     depends_on:
       - gateway
 
+  redis:
+    image: redis:7-alpine
+    container_name: sharedllm_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
   control_plane:
     build: ./services/control_plane
     container_name: sharedllm_control_plane
