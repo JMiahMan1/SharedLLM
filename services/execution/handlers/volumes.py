@@ -6,7 +6,7 @@ from typing import Any
 
 log = logging.getLogger("execution.volumes")
 
-DEFAULT_VOLUME_MANIFEST_PATH = os.getenv("VOLUME_MANIFEST_PATH", "/workspace/SharedLLM/config/volumes.json")
+DEFAULT_VOLUME_MANIFEST_PATH = os.getenv("VOLUME_MANIFEST_PATH", os.path.join(os.path.expanduser("~/workspace"), "config/volumes.json"))
 DEFAULT_BACKUP_ROOT = os.getenv("VOLUME_BACKUP_ROOT", "/var/backups/sharedllm")
 
 
