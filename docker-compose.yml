@@ -223,6 +223,66 @@ services:
       - redis
       - execution
 
+  storage:
+    build: ./services/storage
+    container_name: sharedllm_storage
+    restart: unless-stopped
+    ports:
+      - 8005:8005
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - TZ=America/Phoenix
+    volumes:
+      - ./:/workspace/SharedLLM:ro
+      - ./services/storage:/app
+      - ./services/config.py:/app/config.py:ro
+      - /etc/localtime:/etc/localtime:ro
+
+  workspace_runtime:
+    build: ./services/workspace_runtime
+    container_name: sharedllm_workspace_runtime
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    env_file:
+      - .env
+    group_add:
+      - "${DOCKER_GID:-999}"
+    security_opt:
+      - label=disable
+    ports:
+      - 8007:8007
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
+      - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
+      - WORKSPACE_RUNTIME_ROOT=/workspace/SharedLLM
+      - GIT_WEBHOOK_SECRET=${GIT_WEBHOOK_SECRET:-change-me-in-production}
+      - TZ=America/Phoenix
+      - HOME=/home/sharedllm
+    volumes:
+      - ./:/workspace/SharedLLM
+      - ./services/workspace_runtime:/app
+      - ./services/config.py:/app/config.py:ro
+      - workspace_runtime_data:/data
+      - ./config/workspaces.json:/app/config/workspaces.json:ro
+      - /etc/localtime:/etc/localtime:ro
+
   ui:
     build: ./services/ui
     container_name: sharedllm_ui
