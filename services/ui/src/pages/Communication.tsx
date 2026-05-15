@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-
-const EMPTY_ARRAY: any[] = [];
 import {
   BellRing,
   Calendar,
@@ -24,6 +22,8 @@ import type {
   TalkMessage,
   TimerRecord,
 } from '../services/api';
+
+const EMPTY_ARRAY: any[] = [];
 
 const detailList = <T,>(response: ExecutionResponse | undefined, key: string): T[] => {
   const detail = response?.detail as Record<string, unknown> | null | undefined;
