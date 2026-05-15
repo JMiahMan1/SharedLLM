@@ -4,6 +4,7 @@ import asyncio
 import subprocess
 import json
 import re
+import os
 try:
     import ha_client
     from schemas import VideoPlayRequest, ExecutionResult
@@ -12,6 +13,10 @@ except ImportError:
     from schemas import VideoPlayRequest, ExecutionResult
 
 log = logging.getLogger("execution.video")
+
+# Video files stored on disk (streamed for large files)
+TEMP_VIDEO_DIR = "/tmp/sharedllm_media"
+os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
 
 def extract_video_url(query: str) -> str | None:
@@ -32,7 +37,6 @@ async def search_youtube(query: str) -> str | None:
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode == 0 and stdout:
-            # yt-dlp outputs one JSON line per result
             lines = stdout.decode().strip().split("\n")
             for line in lines:
                 try:
@@ -48,13 +52,25 @@ async def search_youtube(query: str) -> str | None:
     return None
 
 
-async def get_stream_url(video_url: str) -> str | None:
-    """Extract a direct stream URL from a video page using yt-dlp CLI."""
+async def download_video(video_url: str) -> tuple[str | None, str | None]:
+    """
+    Download video as MP4 using yt-dlp CLI.
+    Returns (media_id, title) or (None, None) on failure.
+    Files are stored on disk and streamed via /media/{media_id} endpoint.
+    """
+    import uuid
+    
+    media_id = f"vid-{uuid.uuid4().hex[:8]}"
+    tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
+    
     try:
+        # Download best MP4 with h264+aac for Cast/Roku compatibility
         proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--dump-json", "--no-download",
+            "yt-dlp",
             "-f", "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best",
             "--no-playlist",
+            "--merge-output-format", "mp4",
+            "-o", tmp_path,
             video_url,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -62,51 +78,41 @@ async def get_stream_url(video_url: str) -> str | None:
         stdout, stderr = await proc.communicate()
         
         if proc.returncode != 0:
-            log.error(f"[video] yt-dlp failed: {stderr.decode()[:200]}")
-            return None
+            log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
+            return None, None
         
-        if not stdout:
-            log.warning(f"[video] yt-dlp returned no output for {video_url}")
-            return None
+        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+            log.error(f"[video] Download produced empty file")
+            return None, None
         
-        # Parse JSON output
-        info = json.loads(stdout.decode())
-        url = info.get("url", "")
-        ext = info.get("ext", "")
-        log.info(f"[video] yt-dlp CLI: url={str(url)[:80]}, ext={ext}")
+        file_size = os.path.getsize(tmp_path)
+        log.info(f"[video] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
         
-        if url and url.startswith("http") and ext == "mp4":
-            log.info(f"[video] Found MP4 stream URL")
-            return url
-        if url and url.startswith("http"):
-            log.info(f"[video] Using resolved URL (ext={ext})")
-            return url
+        # Get title
+        title = video_url
+        try:
+            info_proc = await asyncio.create_subprocess_exec(
+                "yt-dlp", "--dump-json", "--no-download",
+                "--no-playlist", video_url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            info_out, _ = await info_proc.communicate()
+            if info_out:
+                info = json.loads(info_out.decode())
+                title = info.get("title", video_url)
+        except:
+            pass
         
-        fallback = info.get("webpage_url") or info.get("original_url") or video_url
-        log.warning(f"[video] No stream URL found, falling back to {fallback}")
-        return fallback
+        return media_id, title
+        
     except Exception as e:
-        log.error(f"[video] Stream extraction failed: {e}", exc_info=True)
-        return None
-
-
-async def get_video_title(video_url: str) -> str:
-    """Get video title using yt-dlp CLI."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--dump-json", "--no-download",
-            "--no-playlist",
-            video_url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        if stdout:
-            info = json.loads(stdout.decode())
-            return info.get("title", video_url)
-    except:
-        pass
-    return video_url
+        log.error(f"[video] Download failed: {e}", exc_info=True)
+        try:
+            os.remove(tmp_path)
+        except:
+            pass
+        return None, None
 
 
 async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
@@ -125,17 +131,25 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
                 service="video_play",
             )
 
-    # Step 2: Extract direct stream URL
-    stream_url = await get_stream_url(video_url)
-    if not stream_url:
+    # Step 2: Download the video to disk
+    media_id, title = await download_video(video_url)
+    if not media_id:
         return ExecutionResult(
             status="FAILURE",
-            message=f"Could not extract stream URL from {video_url}.",
+            message=f"Could not download video from {video_url}.",
             service="video_play",
         )
 
-    # Step 3: Get video title for feedback
-    title = await get_video_title(video_url)
+    # Step 3: Build the local media URL for HA to stream
+    def get_public_host():
+        env_host = os.getenv("EXECUTION_EXTERNAL_HOST")
+        if env_host:
+            return env_host
+        return "192.168.2.205"  # Default Production Host
+    
+    public_host = get_public_host()
+    media_url = f"http://{public_host}:8003/media/{media_id}"
+    log.info(f"[video/play] Casting URL: {media_url}")
 
     # Step 4: Power on the device
     state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
@@ -150,7 +164,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
         "media_player", "play_media",
         full_entity_id,
         {
-            "media_content_id": stream_url,
+            "media_content_id": media_url,
             "media_content_type": "video/mp4",
         },
     )
