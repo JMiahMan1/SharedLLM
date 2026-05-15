@@ -1,7 +1,9 @@
 # services/execution/handlers/browser.py
 import logging
-import asyncio
+import os
 import html2text
+import httpx
+from urllib.parse import urlencode
 from playwright.async_api import async_playwright
 from typing import Optional
 
@@ -12,71 +14,144 @@ except ImportError:
 
 log = logging.getLogger("execution.browser")
 
-SEARCH_BASE_URL = "https://search.sumemail.com/search"
+SEARXNG_URL = os.getenv("SEARXNG_URL", os.getenv("WHOOGLE_URL", "https://search.sumemail.com/")).rstrip("/")
+
+DEFAULT_ENGINES = "google,bing,duckduckgo"
+DEFAULT_LANGUAGE = "en"
+DEFAULT_CATEGORY = "general"
+DEFAULT_SAFESAFERCH = 0
 
 async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
     """
-    Performs a web search using the user's SearXNG instance.
+    Performs a web search via SearXNG JSON API with Playwright fallback.
     """
-    log.info(f"[browser/search] query='{req.query}'")
-    
+    log.info(f"[browser/search] query='{req.query}' category='{req.category or DEFAULT_CATEGORY}'")
+
     try:
-        async with async_playwright() as p:
-            # We use a light headless browser as requested.
-            # We try to use the host's Brave if available, but for container portability,
-            # we'll default to the installed chromium in the container.
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            
-            # Construct the SearXNG search URL
-            # Note: format=json might be blocked or require settings, so we'll just scrape the results
-            search_url = f"{SEARCH_BASE_URL}?q={req.query}"
-            await page.goto(search_url, wait_until="networkidle")
-            
-            # Extract result titles, snippets, and URLs
-            # SearXNG results are usually in <article class="result"> or similar
-            results = await page.evaluate("""
-                () => {
-                    const items = Array.from(document.querySelectorAll('article.result, .result'));
-                    return items.slice(0, 8).map(item => {
-                        const titleEl = item.querySelector('h3, h4, .title');
-                        const linkEl = item.querySelector('a');
-                        const snippetEl = item.querySelector('.content, .snippet');
-                        return {
-                            title: titleEl ? titleEl.innerText.trim() : 'No Title',
-                            url: linkEl ? linkEl.href : '',
-                            snippet: snippetEl ? snippetEl.innerText.trim() : ''
-                        };
-                    });
-                }
-            """)
-            
-            await browser.close()
-            
-            if not results:
-                return ExecutionResult(
-                    status="SUCCESS", 
-                    message="Search completed but no results were found.",
-                    service="web_search",
-                    detail={"results": []}
-                )
-            
-            # Format results as a readable list for the LLM
-            formatted_results = "\n\n".join([
-                f"### {r['title']}\nURL: {r['url']}\n{r['snippet']}"
-                for r in results if r['url']
-            ])
-            
-            return ExecutionResult(
-                status="SUCCESS",
-                message=f"Found {len(results)} search results.",
-                service="web_search",
-                detail={"results": results, "formatted_content": formatted_results}
-            )
-            
+        result = await _searxng_json_search(req)
+        if result:
+            return result
     except Exception as e:
-        log.error(f"Web search failed: {e}")
+        log.warning(f"[browser/search] SearXNG JSON API failed, falling back to Playwright: {e}")
+
+    try:
+        return await _playwright_fallback(req)
+    except Exception as e:
+        log.error(f"[browser/search] All search methods failed: {e}")
         return ExecutionResult(status="FAILURE", message=f"Web search failed: {str(e)}", service="web_search")
+
+
+async def _searxng_json_search(req: WebSearchRequest) -> Optional[ExecutionResult]:
+    """Primary path: SearXNG native JSON API."""
+    params = {
+        "q": req.query,
+        "format": "json",
+        "categories": req.category or DEFAULT_CATEGORY,
+        "language": req.language or DEFAULT_LANGUAGE,
+        "safesearch": req.safesearch if req.safesearch is not None else DEFAULT_SAFESAFERCH,
+    }
+    if req.engines:
+        params["engines"] = req.engines
+    else:
+        params["engines"] = DEFAULT_ENGINES
+    if req.time_range:
+        params["time_range"] = req.time_range
+    if req.pageno:
+        params["pageno"] = req.pageno
+
+    search_url = f"{SEARXNG_URL}/search?{urlencode(params)}"
+    log.info(f"[browser/search] SearXNG JSON API: {search_url}")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(search_url)
+        resp.raise_for_status()
+        data = resp.json()
+
+    results = data.get("results", [])
+    if not results:
+        return ExecutionResult(
+            status="SUCCESS",
+            message="Search completed but no results were found.",
+            service="web_search",
+            detail={"results": [], "source": "searxng_json"}
+        )
+
+    structured = []
+    for r in results[:10]:
+        structured.append({
+            "title": r.get("title", "No Title"),
+            "url": r.get("url", ""),
+            "snippet": r.get("content", ""),
+            "engine": r.get("engine", "unknown"),
+            "score": r.get("score", 0),
+        })
+
+    formatted = "\n\n".join([
+        f"### {r['title']}\nURL: {r['url']}\n{r['snippet']}\nSource: {r['engine']}"
+        for r in structured if r['url']
+    ])
+
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Found {len(structured)} search results via SearXNG JSON API.",
+        service="web_search",
+        detail={
+            "results": structured,
+            "formatted_content": formatted,
+            "source": "searxng_json",
+            "total_results": data.get("number_of_results", len(results)),
+        }
+    )
+
+
+async def _playwright_fallback(req: WebSearchRequest) -> ExecutionResult:
+    """Fallback: Playwright DOM scraping when JSON API is unavailable."""
+    log.info(f"[browser/search] Playwright fallback for query='{req.query}'")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+
+        search_url = f"{SEARXNG_URL}/search?q={req.query}"
+        await page.goto(search_url, wait_until="networkidle")
+
+        results = await page.evaluate("""
+            () => {
+                const items = Array.from(document.querySelectorAll('article.result, .result'));
+                return items.slice(0, 8).map(item => {
+                    const titleEl = item.querySelector('h3, h4, .title');
+                    const linkEl = item.querySelector('a');
+                    const snippetEl = item.querySelector('.content, .snippet');
+                    return {
+                        title: titleEl ? titleEl.innerText.trim() : 'No Title',
+                        url: linkEl ? linkEl.href : '',
+                        snippet: snippetEl ? snippetEl.innerText.trim() : ''
+                    };
+                });
+            }
+        """)
+
+        await browser.close()
+
+    if not results:
+        return ExecutionResult(
+            status="SUCCESS",
+            message="Search completed but no results were found.",
+            service="web_search",
+            detail={"results": [], "source": "playwright_fallback"}
+        )
+
+    formatted = "\n\n".join([
+        f"### {r['title']}\nURL: {r['url']}\n{r['snippet']}"
+        for r in results if r['url']
+    ])
+
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Found {len(results)} search results (Playwright fallback).",
+        service="web_search",
+        detail={"results": results, "formatted_content": formatted, "source": "playwright_fallback"}
+    )
 
 async def handle_web_read(req: WebReadRequest) -> ExecutionResult:
     """
