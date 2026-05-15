@@ -56,6 +56,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
     "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
     "storageindexrequest": (STORAGE_SVC, "/index/full"),
+    "logbookrequest": (EXECUTION_SVC, "/execute/ha_logbook"),
 }
 
 SINGLE_TURN_TOOL_GUIDE = """
@@ -69,6 +70,7 @@ SINGLE_TURN_TOOL_GUIDE = """
 - Docker: DockerLogsRequest, DockerComposeRequest
 - File: WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest
 - Storage: StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest
+- Home Assistant: LightControlRequest, MediaPlayRequest, LogbookRequest (for device logs)
 
 # OUTPUT FORMAT (MANDATORY)
 ```json

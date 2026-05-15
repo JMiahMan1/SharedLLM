@@ -26,10 +26,11 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
                 seen.add(media_type)
 
         for media_type in ordered_types:
+            # Standardizing on 'mass' domain as per HA integration specs
             result = await ha_client.call_service(
                 ctx.ha_url,
                 ctx.ha_token,
-                "music_assistant",
+                "mass",
                 "play_media",
                 full_entity_id,
                 {
@@ -68,8 +69,9 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
                 "extra": {"content_id": video_id, "media_type": "live"}
              }
         else:
+             # Standard Cast / Android TV YouTube format
              service_data["media_content_id"] = video_id
-             service_data["media_content_type"] = "youtube"
+             service_data["media_content_type"] = "video/youtube"
     else:
         if req.media_content_id:
             service_data["media_content_id"] = req.media_content_id
