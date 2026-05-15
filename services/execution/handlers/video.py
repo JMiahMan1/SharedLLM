@@ -51,8 +51,12 @@ async def search_youtube(query: str) -> str | None:
     return None
 
 
-async def get_stream_url(video_url: str) -> str | None:
+async def get_stream_url(video_url: str, max_depth: int = 2) -> str | None:
     """Extract a direct stream URL from a video page."""
+    if max_depth <= 0:
+        log.warning(f"[video] Max recursion depth reached for {video_url}")
+        return video_url
+    
     opts = {**YDL_OPTS, "skip_download": True}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -60,26 +64,30 @@ async def get_stream_url(video_url: str) -> str | None:
             if not info:
                 log.warning(f"[video] yt-dlp returned no info for {video_url}")
                 return None
+            
+            etype = info.get("_type", "")
             url = info.get("url", "")
             ext = info.get("ext", "")
-            fmt = info.get("format", "")
-            etype = info.get("_type", "")
-            log.info(f"[video] yt-dlp: type={etype}, url={str(url)[:80]}, ext={ext}, format={fmt}")
-            log.info(f"[video] yt-dlp keys: {list(info.keys())[:20]}")
+            log.info(f"[video] yt-dlp: type={etype}, url={str(url)[:80]}, ext={ext}")
+            
+            # Handle playlist results - extract first entry's webpage URL
+            if etype == "playlist" or info.get("entries"):
+                entries = info.get("entries", [])
+                if entries:
+                    first = entries[0]
+                    entry_url = first.get("webpage_url") or first.get("original_url") or first.get("url")
+                    if entry_url and entry_url.startswith("http"):
+                        log.info(f"[video] Following playlist entry to: {entry_url[:80]}")
+                        return await get_stream_url(entry_url, max_depth - 1)
+            
+            # Single video result
             if url and url.startswith("http") and ext == "mp4":
                 log.info(f"[video] Found MP4 stream URL")
                 return url
             if url and url.startswith("http"):
                 log.info(f"[video] Using resolved URL (ext={ext})")
                 return url
-            # Check entries for playlist/search results
-            entries = info.get("entries", [])
-            if entries:
-                first = entries[0]
-                entry_url = first.get("url") or first.get("webpage_url") or first.get("original_url")
-                if entry_url:
-                    log.info(f"[video] Found URL from entries: {entry_url[:80]}")
-                    return entry_url
+            
             fallback = info.get("webpage_url") or info.get("original_url") or video_url
             log.warning(f"[video] No stream URL found, falling back to {fallback}")
             return fallback
