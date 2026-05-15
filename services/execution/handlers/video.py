@@ -16,7 +16,7 @@ log = logging.getLogger("execution.video")
 
 def extract_video_url(query: str) -> str | None:
     """Check if query is already a direct video URL."""
-    url_pattern = r"https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/|rumble\.com/|vimeo\.com/)"
+    url_pattern = r"https?://(?:www\.)?(?:youtube\.com/watch\?v=[a-zA-Z0-9_-]+|youtu\.be/[a-zA-Z0-9_-]+|youtube\.com/shorts/[a-zA-Z0-9_-]+|rumble\.com/[a-zA-Z0-9_/]+|vimeo\.com/[0-9]+)"
     match = re.search(url_pattern, query)
     return match.group(0) if match else None
 
