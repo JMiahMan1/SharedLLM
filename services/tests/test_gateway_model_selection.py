@@ -12,8 +12,9 @@ os.environ.setdefault("FAST_PATH_THRESHOLD", "0.85")
 os.environ.setdefault("IDENTITY_SVC_URL", "http://identity")
 os.environ.setdefault("EXECUTION_SVC_URL", "http://execution")
 os.environ.setdefault("OLLAMA_URL", "http://ollama")
-os.environ.setdefault("ASSISTANT_MODEL", "qwen3:latest")
+os.environ.setdefault("ASSISTANT_MODEL", "qwen3:8b")
 os.environ.setdefault("CODING_MODEL", "qwen2.5-coder:7b")
+os.environ.setdefault("LIBRARIAN_MODEL", "qwen3:8b")
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request

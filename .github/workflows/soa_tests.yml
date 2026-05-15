@@ -42,14 +42,19 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}/services
         FERNET_KEY: bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=
         INTERNAL_SECRET: test-secret-github-actions
-        ASSISTANT_MODEL: qwen3:latest
+        ASSISTANT_MODEL: qwen3:8b
         CODING_MODEL: qwen2.5-coder:7b
+        LIBRARIAN_MODEL: qwen3:8b
       run: |
         pytest \
-          services/tests/test_identity.py \
           services/tests/test_gateway_model_selection.py \
           services/tests/test_gateway_media_target.py \
           services/tests/test_intent_engine.py \
+          services/tests/test_raven_hardening.py \
+          services/tests/test_raven_routing.py \
+          services/tests/test_raven_timeout_behavior.py \
+          services/tests/test_identity_resolution.py \
+          services/tests/test_execution_handlers.py \
           -m "not local_only and not server_only" \
           --junitxml=pytest-report.xml \
           --cov=services/ \

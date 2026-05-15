@@ -8,7 +8,7 @@ from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, Workspa
 
 log = logging.getLogger("execution.workspace")
 
-WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "/workspace/SharedLLM")
+WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", os.path.expanduser("~/workspace"))
 READ_ONLY_SHELL_COMMANDS = {
     "cat", "find", "git", "head", "ls", "pwd", "rg", "sed", "tail", "wc"
 }

@@ -1,9 +1,16 @@
 import json
+import sys
+import os
 import importlib
 from collections import defaultdict
 
 import pytest
 from fastapi import HTTPException
+
+# Add execution service to path for absolute imports (from schemas import ...)
+_execution_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
+if _execution_path not in sys.path:
+    sys.path.insert(0, _execution_path)
 
 from services.execution.handlers import git as git_handler
 from services.execution.handlers import workspace as workspace_handler
@@ -169,8 +176,11 @@ async def test_workspace_shell_allows_safe_read_only_commands(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_git_handler_allows_autonomous_commit(monkeypatch):
+async def test_git_handler_allows_autonomous_commit(monkeypatch, tmp_path):
     """After removing the autonomous block, Raven can commit directly."""
+    # Use tmp_path workspace, NOT ~/SharedLLM
+    monkeypatch.setattr(git_handler, "WORKSPACE_ROOT", str(tmp_path))
+
     async def fake_branch():
         return "main"
 
@@ -193,12 +203,15 @@ async def test_git_handler_allows_autonomous_commit(monkeypatch):
 
     result = await git_handler.handle_git(req)
 
-    assert result["status"] == "SUCCESS"
-    assert "commit" in result["message"].lower()
+    assert result.status == "SUCCESS"
+    assert "commit" in result.message.lower()
 
 
 @pytest.mark.asyncio
-async def test_git_handler_blocks_reset_for_all_users(monkeypatch):
+async def test_git_handler_blocks_reset_for_all_users(monkeypatch, tmp_path):
+    # Use tmp_path workspace, NOT ~/SharedLLM
+    monkeypatch.setattr(git_handler, "WORKSPACE_ROOT", str(tmp_path))
+
     async def fake_branch():
         return "main"
 
@@ -210,5 +223,8 @@ async def test_git_handler_blocks_reset_for_all_users(monkeypatch):
 
     result = await git_handler.handle_git(req)
 
-    assert result["status"] == "FAILURE"
-    assert result["detail"]["error"] == "unsafe_git_action_blocked"
+    # Handler returns dict for blocked actions
+    status = result.status if hasattr(result, 'status') else result.get("status")
+    detail = result.detail if hasattr(result, 'detail') else result.get("detail", {})
+    assert status == "FAILURE"
+    assert detail.get("error") == "unsafe_git_action_blocked"
