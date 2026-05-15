@@ -57,6 +57,10 @@ async def handle_execution_logs(req_data: dict) -> ExecutionResult:
     service_filter = req_data.get("service")
     keyword = req_data.get("keyword")
     
+    # Ignore hallucinated catch-all values
+    if service_filter and service_filter.lower() in ("all", "any", "*", "none", ""):
+        service_filter = None
+    
     try:
         cmd = ["docker", "logs", "--tail", str(lines), "sharedllm_execution"]
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -79,9 +83,14 @@ async def handle_execution_logs(req_data: dict) -> ExecutionResult:
             log_lines = [line for line in log_lines if keyword.lower() in line.lower()]
         
         if not log_lines:
+            filter_desc = []
+            if service_filter: filter_desc.append(f"service='{service_filter}'")
+            if keyword: filter_desc.append(f"keyword='{keyword}'")
+            msg = "No execution logs found"
+            if filter_desc: msg += f" matching filters ({', '.join(filter_desc)})"
             return ExecutionResult(
                 status="SUCCESS",
-                message=f"No execution logs found matching filters (service='{service_filter}', keyword='{keyword}')",
+                message=msg,
                 service="execution_logs"
             )
         
