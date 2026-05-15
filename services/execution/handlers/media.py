@@ -66,13 +66,14 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         mass_entity = await resolve_mass_entity(ctx, full_entity_id)
         
         # Step 1: Search MASS for the query to get a proper URI
+        # Note: music_assistant.search does NOT require an entity_id
         search_result = await ha_client.call_service(
             ctx.ha_url,
             ctx.ha_token,
             "music_assistant",
             "search",
-            mass_entity,
-            {
+            entity_id="",
+            service_data={
                 "config_entry_id": "01KMKEW7FVVXHQAB89YMYDZNAT",
                 "name": req.query,
                 "media_type": ["track", "artist", "album", "playlist", "radio"],
