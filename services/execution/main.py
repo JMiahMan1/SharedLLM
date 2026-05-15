@@ -11,30 +11,46 @@ from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
 from fastapi.responses import JSONResponse
 import traceback
 try:
-    from . import ha_client
-    from .schemas import (
+    import ha_client
+    from schemas import (
         UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
         CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
-        DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+        DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
         SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
     )
-    from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
-    from .handlers import docker_logs as docker_logs_handler
-    from .handlers import git as git_handler
-    from .handlers import deployment as deployment_handler
-    from .handlers import volumes as volume_handler
-except (ImportError, ValueError):
+    from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
+    from handlers import docker_logs as docker_logs_handler
+    from handlers import git as git_handler
+    from handlers import deployment as deployment_handler
+    from handlers import volumes as volume_handler
+except ImportError:
     try:
+        from . import ha_client
+        from .schemas import (
+            UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+            TVCastRequest, HAServiceRequest, AnnouncementRequest,
+            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
+            WebSearchRequest, WebReadRequest, ExecutionResult,
+            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
+            WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
+        )
+        from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
+        from .handlers import docker_logs as docker_logs_handler
+        from .handlers import git as git_handler
+        from .handlers import deployment as deployment_handler
+        from .handlers import volumes as volume_handler
+    except (ImportError, ValueError):
         from execution import ha_client
         from execution.schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
             SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
         )
@@ -43,22 +59,6 @@ except (ImportError, ValueError):
         from execution.handlers import git as git_handler
         from execution.handlers import deployment as deployment_handler
         from execution.handlers import volumes as volume_handler
-    except ImportError:
-        import ha_client
-        from schemas import (
-            UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-            TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
-            WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
-            WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
-        )
-        from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
-        from handlers import docker_logs as docker_logs_handler
-        from handlers import git as git_handler
-        from handlers import deployment as deployment_handler
-        from handlers import volumes as volume_handler
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
