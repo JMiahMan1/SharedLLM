@@ -19,13 +19,14 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
+        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest
     )
     from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
     from handlers import docker_logs as docker_logs_handler
     from handlers import git as git_handler
     from handlers import deployment as deployment_handler
     from handlers import volumes as volume_handler
+    from handlers import media_status as media_status_handler
 except ImportError:
     try:
         from . import ha_client
@@ -36,13 +37,14 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest
         )
         from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
         from .handlers import docker_logs as docker_logs_handler
         from .handlers import git as git_handler
         from .handlers import deployment as deployment_handler
         from .handlers import volumes as volume_handler
+        from .handlers import media_status as media_status_handler
     except (ImportError, ValueError):
         from execution import ha_client
         from execution.schemas import (
@@ -52,13 +54,14 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
         from execution.handlers import docker_logs as docker_logs_handler
         from execution.handlers import git as git_handler
         from execution.handlers import deployment as deployment_handler
         from execution.handlers import volumes as volume_handler
+        from execution.handlers import media_status as media_status_handler
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -791,6 +794,12 @@ async def execute_ha_logbook(req: LogbookRequest):
         message=f"No logbook entries found for {full_entity_id} in the last {req.days} day(s).",
         service="ha_logbook"
     )
+
+@app.post("/execute/media/status", response_model=ExecutionResult)
+async def execute_media_status(req: MediaStatusRequest):
+    ctx = req.user_context
+    log.info(f"[media/status] user={ctx.user} area={req.area} entity={req.entity_id}")
+    return await media_status_handler.handle_media_status(req)
 
 @app.post("/execute/diagnostics", response_model=ExecutionResult)
 async def execute_diagnostics(req: DiagnosticRequest):

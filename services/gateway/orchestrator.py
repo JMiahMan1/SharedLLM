@@ -27,6 +27,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
     "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
     "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
+    "mediastatusrequest": (EXECUTION_SVC, "/execute/media/status"),
     "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
     "climaterequest": (EXECUTION_SVC, "/execute/climate"),
     "securityrequest": (EXECUTION_SVC, "/execute/security"),
@@ -70,7 +71,7 @@ SINGLE_TURN_TOOL_GUIDE = """
 - Docker: DockerLogsRequest, DockerComposeRequest
 - File: WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest
 - Storage: StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest
-- Home Assistant: LightControlRequest, MediaPlayRequest, LogbookRequest (for device logs)
+- Home Assistant: LightControlRequest, MediaPlayRequest, MediaStatusRequest (for "what's playing"), LogbookRequest (for device logs)
 
 # OUTPUT FORMAT (MANDATORY)
 ```json

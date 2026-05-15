@@ -184,6 +184,15 @@ class TVCastRequest(BaseRequest):
     power_on_wait_ms: int = Field(3000, ge=0, le=15000)
 
 
+# ─── Media Status ───────────────────────────────────────────────────────────────
+
+class MediaStatusRequest(BaseRequest):
+    """Query what is currently playing across media devices."""
+    user_context: UserContext
+    area: Optional[str] = Field(None, description="Filter by area (e.g., 'Office', 'Living Room')")
+    entity_id: Optional[str] = Field(None, description="Specific entity to query")
+
+
 # ─── Personal Data (Calendar / Notes) ──────────────────────────────────────────
 
 class CalendarRequest(BaseRequest):
