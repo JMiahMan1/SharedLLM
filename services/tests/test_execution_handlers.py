@@ -1,12 +1,21 @@
 # services/tests/test_execution_handlers.py
+import sys
+import os
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
+
+# Add execution service to path for absolute imports (from schemas import ...)
+_execution_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
+if _execution_path not in sys.path:
+    sys.path.insert(0, _execution_path)
+
 from services.execution.handlers import light, media, climate, security, talk, volumes
 from services.execution.personal_data import resolve_personal_data_provider
-from services.execution.schemas import (
-    LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-    TVCastRequest, TalkRequest, UserContext, VolumeInventoryRequest
+# Import ALL models from execution schemas via sys.path to ensure class identity matches handler imports
+from schemas import (
+    UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+    TVCastRequest, TalkRequest, VolumeInventoryRequest, SecurityRequest
 )
 
 @pytest.fixture
@@ -15,7 +24,7 @@ def user_ctx():
 
 @pytest.mark.asyncio
 async def test_light_handler_success(user_ctx):
-    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call:
+    with patch("ha_client.call_service", new_callable=AsyncMock) as mock_call:
         mock_call.return_value = {"ok": True}
         
         req = LightControlRequest(user_context=user_ctx, entity_id="light.test", action="turn_on", brightness_pct=50)
@@ -30,7 +39,7 @@ async def test_light_handler_success(user_ctx):
 @pytest.mark.asyncio
 async def test_hyphenated_entity_resolution(user_ctx):
     """Verify that 'piano-lamp' is correctly sanitized to 'light.piano_lamp'."""
-    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call:
+    with patch("ha_client.call_service", new_callable=AsyncMock) as mock_call:
         mock_call.return_value = {"ok": True}
         
         # Test 1: Bare hyphenated name
@@ -50,10 +59,10 @@ async def test_hyphenated_entity_resolution(user_ctx):
         )
 @pytest.mark.asyncio
 async def test_security_status_check(user_ctx):
-    with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
+    with patch("ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
         mock_get_state.return_value = {"state": "open"}
         
-        req = security.SecurityRequest(user_context=user_ctx, entity_id="cover.garage_door", action="status")
+        req = SecurityRequest(user_context=user_ctx, entity_id="cover.garage_door", action="status")
         res = await security.handle_security(req)
         
         assert res.status == "SUCCESS"
@@ -62,7 +71,7 @@ async def test_security_status_check(user_ctx):
 
 @pytest.mark.asyncio
 async def test_media_transport_volume(user_ctx):
-    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call:
+    with patch("ha_client.call_service", new_callable=AsyncMock) as mock_call:
         mock_call.return_value = {"ok": True}
         
         req = MediaTransportRequest(user_context=user_ctx, entity_id="media_player.tv", command="volume_up", volume_level=0.5)
@@ -76,9 +85,11 @@ async def test_media_transport_volume(user_ctx):
 
 @pytest.mark.asyncio
 async def test_climate_handler(user_ctx):
-    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call:
+    with patch("ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("ha_client.authorize_action", return_value=True):
         mock_call.return_value = {"ok": True}
         
+        # Use the handler's own ClimateRequest which imports UserContext from execution schemas
         req = climate.ClimateRequest(user_context=user_ctx, entity_id="climate.nest", temperature=72.5)
         res = await climate.handle_climate(req)
         
@@ -90,8 +101,8 @@ async def test_climate_handler(user_ctx):
 
 @pytest.mark.asyncio
 async def test_tv_cast_macro(user_ctx):
-    with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
-         patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+    with patch("ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
         
         mock_get_state.return_value = {"state": "off"}
