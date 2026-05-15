@@ -94,7 +94,10 @@ def _json_request(payload: dict) -> Request:
         "Edit this file: greeting.py and change one string",
     ],
 )
-async def test_select_model_for_query_uses_coding_model_for_code_requests(query):
+async def test_select_model_for_query_uses_coding_model_for_code_requests(query, monkeypatch):
+    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value="qwen2.5-coder:7b"))
+    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
+    monkeypatch.setattr(gateway_main, "get_librarian_model", AsyncMock(return_value="qwen3:8b"))
     assert await select_model_for_query(query) == "qwen2.5-coder:7b"
 
 
@@ -107,8 +110,11 @@ async def test_select_model_for_query_uses_coding_model_for_code_requests(query)
         "Play some jazz in the kitchen",
     ],
 )
-async def test_select_model_for_query_uses_assistant_model_for_general_requests(query):
-    assert await select_model_for_query(query) == "qwen3:latest"
+async def test_select_model_for_query_uses_assistant_model_for_general_requests(query, monkeypatch):
+    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value="qwen2.5-coder:7b"))
+    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
+    monkeypatch.setattr(gateway_main, "get_librarian_model", AsyncMock(return_value="qwen3:8b"))
+    assert await select_model_for_query(query) == "qwen3:8b"
 
 
 def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
@@ -127,13 +133,16 @@ def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
 async def test_chat_handler_routes_direct_file_edit_requests_to_code_orchestration(monkeypatch):
     monkeypatch.setattr(gateway_main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
     monkeypatch.setattr(gateway_main, "update_history", AsyncMock(return_value=None))
+    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value="qwen2.5-coder:7b"))
+    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
     mock_orchestrate = AsyncMock(return_value=gateway_main._make_ollama_response("orchestrated", "qwen2.5-coder:7b"))
     monkeypatch.setattr(gateway_main, "orchestrate_code_change", mock_orchestrate)
+    monkeypatch.setattr(gateway_main.job_queue, "enqueue_job", AsyncMock(return_value="test-job-id"))
 
     response = await gateway_main.chat_handler(
         _json_request(
             {
-                "query": "Create a pytest file named temp/test_raven_live.py that asserts 2 + 2 == 4. Verify it with pytest.",
+                "query": "Create a pytest file named temp/test_demo.py that asserts 2 + 2 == 4. Verify it with pytest.",
                 "rag_user": "alice",
                 "model": "qwen2.5-coder:7b",
             }
@@ -198,7 +207,9 @@ async def test_workspace_bootstrap_proxy_uses_gateway_route(monkeypatch):
             text="",
         )
 
-    monkeypatch.setattr(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request))
+    mock_client = SimpleNamespace(request=fake_request)
+    monkeypatch.setattr(gateway_main, "_global_http_client", mock_client)
+    monkeypatch.setattr(gateway_main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
 
     response = await gateway_main.bootstrap_workspace_proxy(
         _json_request(
@@ -217,7 +228,7 @@ async def test_workspace_bootstrap_proxy_uses_gateway_route(monkeypatch):
     assert captured["method"] == "POST"
     assert captured["url"].endswith("/workspaces/bootstrap")
     assert captured["json"]["workspace_id"] == "alice-demo"
-    assert captured["headers"]["X-Internal-Secret"] == "test-secret"
+    assert captured["headers"]["X-Internal-Secret"] == gateway_main.INTERNAL_SECRET
 
 
 @pytest.mark.asyncio
@@ -235,7 +246,9 @@ async def test_workspace_pytest_proxy_uses_gateway_route(monkeypatch):
             text="",
         )
 
-    monkeypatch.setattr(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request))
+    mock_client = SimpleNamespace(request=fake_request)
+    monkeypatch.setattr(gateway_main, "_global_http_client", mock_client)
+    monkeypatch.setattr(gateway_main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
 
     response = await gateway_main.pytest_workspace_proxy(
         _json_request(
@@ -253,7 +266,7 @@ async def test_workspace_pytest_proxy_uses_gateway_route(monkeypatch):
     assert captured["method"] == "POST"
     assert captured["url"].endswith("/tests/pytest")
     assert captured["json"]["targets"] == ["tests/test_demo.py"]
-    assert captured["headers"]["X-Internal-Secret"] == "test-secret"
+    assert captured["headers"]["X-Internal-Secret"] == gateway_main.INTERNAL_SECRET
 
 
 @pytest.mark.asyncio
@@ -448,7 +461,7 @@ async def test_single_turn_inference_uses_assist_prompt_with_full_capability_gui
     assert system_message.startswith(ASSIST_SYSTEM_INSTRUCTION)
     assert "System Capability Context:" in system_message
     assert "ClimateRequest" in system_message
-    assert "CapabilityIndexRequest" in system_message
+    assert "ExecutionLogRequest" in system_message
     assert "sensor.upstairs_temperature" in system_message
 
 
