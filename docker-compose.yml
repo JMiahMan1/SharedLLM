@@ -187,6 +187,36 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - TZ=America/Phoenix
     volumes:
+      - ./services/logging/main.py:/app/main.py:ro
+      - ./services/config.py:/app/config.py:ro
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - redis
+
+  automation:
+    build: ./services/automation
+    container_name: sharedllm_automation
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    env_file:
+      - .env
+    group_add:
+      - "${DOCKER_GID:-999}"
+    security_opt:
+      - label=disable
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - REDIS_URL=redis://redis:6379/0
+      - TZ=America/Phoenix
+    volumes:
       - ./services/automation:/app
       - ./services/config.py:/app/config.py:ro
     depends_on:
