@@ -158,8 +158,8 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     # 1. Retrieve Memory
     short_term = [] # Placeholder
     
-    # 2. Context Injection (RAG)
-    rag_context = await _fetch_rag_context(query, user_id)
+    # 2. Context Injection (RAG + live HA state)
+    rag_context = await _fetch_rag_context(query, user_id, creds)
     
     # 3. Autonomous Detection (Raven/Coding/Repair ONLY)
     # Raven runs in Workspaces and handles long-running or coding tasks.
@@ -187,7 +187,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
         
     return ans
 
-async def _fetch_rag_context(query: str, user_id: str) -> str:
+async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedCredentials] = None) -> str:
     rag_context = ""
     try:
         # Prioritize collections based on query intent
@@ -220,6 +220,10 @@ async def _fetch_rag_context(query: str, user_id: str) -> str:
                 if resp.status_code == 200:
                     hits = resp.json().get("results", [])
                     if hits:
+                        # For HA entities, enrich with live state from HA
+                        if coll == "ha_entities" and creds:
+                            hits = await _enrich_entities_with_live_state(hits, creds)
+                        
                         coll_added = False
                         for h in hits:
                             content = h["content"]
@@ -242,6 +246,66 @@ async def _fetch_rag_context(query: str, user_id: str) -> str:
     except Exception as e:
         log.error(f"RAG search failed: {e}")
     return rag_context.strip()
+
+async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredentials) -> list:
+    """Fetch live HA state (Redis-cached) and merge with RAG entity metadata.
+    
+    entity_id is the stable join key between RAG metadata and live state.
+    Even if friendly_name changes in HA, entity_id remains constant.
+    """
+    from ha_state_cache import get_cached_state, cache_all_states, fetch_live_states
+    
+    ha_url = getattr(creds, "ha_url", None)
+    ha_token = getattr(creds, "ha_token", None)
+    if not ha_url or not ha_token:
+        return hits
+    
+    # Collect entity_ids from RAG hits
+    entity_ids = [h.get("entity_id", "") for h in hits if h.get("entity_id")]
+    if not entity_ids:
+        return hits
+    
+    # Try Redis cache first
+    live_states: dict[str, str] = {}
+    cache_misses = []
+    for eid in entity_ids:
+        cached = get_cached_state(eid)
+        if cached is not None:
+            live_states[eid] = cached
+        else:
+            cache_misses.append(eid)
+    
+    # On cache miss, fetch all live states and repopulate cache
+    if cache_misses:
+        entities = await fetch_live_states(EXECUTION_SVC, ha_url, ha_token, INTERNAL_SECRET)
+        for e in entities:
+            eid = e.get("entity_id", "")
+            state = e.get("state", "unknown")
+            if eid:
+                live_states[eid] = state
+    
+    # Merge live state into RAG hits
+    ACTIVE_STATES = {"on", "playing", "idle", "standby", "home", "cooling", "heating", "drying", "cleaning"}
+    
+    for h in hits:
+        eid = h.get("entity_id", "")
+        live_state = live_states.get(eid)
+        if live_state:
+            is_active = live_state.lower() in ACTIVE_STATES
+            h["is_active"] = is_active
+            h["live_state"] = live_state
+            # Rewrite content with live state
+            base = h["content"]
+            if "Current State:" in base:
+                state_label = f"[ACTIVE] {live_state}" if is_active else live_state
+                base = base.replace("Current State:", f"Current State (live): {state_label} |")
+            else:
+                base += f" | Current State (live): {live_state}"
+            h["content"] = base
+    
+    # Sort: active devices first
+    hits = sorted(hits, key=lambda h: not h.get("is_active", False), reverse=True)
+    return hits
 
 async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
     system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"
