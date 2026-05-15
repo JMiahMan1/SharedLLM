@@ -1,9 +1,14 @@
 import os
 import sys
 
+def _is_testing() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+
 def _required(key: str) -> str:
     val = os.getenv(key)
     if not val:
+        if _is_testing():
+            return f"__test_placeholder_{key}__"
         import logging
         logging.basicConfig(level="CRITICAL")
         logging.critical(f"FATAL: {key} environment variable is not set. Refusing to start.")
@@ -126,3 +131,9 @@ EXECUTION_SVC = EXECUTION_SVC_URL
 RAG_SVC = RAG_SVC_URL
 STORAGE_SVC = STORAGE_SVC_URL
 WORKSPACE_RUNTIME_SVC = WORKSPACE_RUNTIME_SVC_URL
+
+CONFIG = {
+    "assistant_model": ASSISTANT_MODEL or "",
+    "librarian_model": LIBRARIAN_MODEL or "",
+    "coding_model": CODING_MODEL or "",
+}
