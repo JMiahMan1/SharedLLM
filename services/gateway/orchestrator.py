@@ -9,16 +9,11 @@ from gateway.schemas import ResolvedCredentials
 from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 
 from gateway.config import (
-    WORKSPACE_RUNTIME_SVC, INTERNAL_SECRET, EXECUTION_SVC_URL, RAG_SVC_URL,
-    IDENTITY_SVC_URL, STORAGE_SVC_URL, OLLAMA_URL, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
+    WORKSPACE_RUNTIME_SVC, INTERNAL_SECRET, EXECUTION_SVC, RAG_SVC,
+    IDENTITY_SVC, STORAGE_SVC, OLLAMA_URL, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
 )
 
 log = logging.getLogger("gateway.orchestrator")
-
-EXECUTION_SVC = EXECUTION_SVC_URL
-RAG_SVC = RAG_SVC_URL
-IDENTITY_SVC = IDENTITY_SVC_URL
-STORAGE_SVC = STORAGE_SVC_URL
 
 SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
