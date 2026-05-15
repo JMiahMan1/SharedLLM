@@ -25,9 +25,9 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
 
     setLogs([{ type: 'system', data: `Initializing connection to Raven Mission #${missionId}...` }]);
     
-    // Replace http/https with ws/wss
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/raven/missions/${missionId}/stream`;
+    const token = localStorage.getItem('jarvis_api_key') || '';
+    const wsUrl = `${protocol}//${window.location.host}/api/raven/missions/${missionId}/stream?token=${encodeURIComponent(token)}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

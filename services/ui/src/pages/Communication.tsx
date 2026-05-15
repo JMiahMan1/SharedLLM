@@ -10,6 +10,7 @@ import {
   Mic,
   MicOff,
   Plus,
+  RefreshCcw,
   Send,
   Trash2,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ import type {
   TalkMessage,
   TimerRecord,
 } from '../services/api';
+import { MonacoEditor } from '../components/editor';
 
 const EMPTY_ARRAY: any[] = [];
 
@@ -48,8 +50,13 @@ const Communication = () => {
   const [announcementVolume, setAnnouncementVolume] = useState(0.6);
   const [noteTitle, setNoteTitle] = useState('');
   const [noteContent, setNoteContent] = useState('');
+  const [noteCategory, setNoteCategory] = useState('Notes');
   const [noteResult, setNoteResult] = useState<ExecutionResponse | null>(null);
   const [noteStorage, setNoteStorage] = useState<'nextcloud' | 'local'>('nextcloud');
+  const [noteDirectories, setNoteDirectories] = useState<string[]>(['Notes']);
+  const [noteList, setNoteList] = useState<Array<{ title: string; path: string; size: number; modified: string }>>([]);
+  const [selectedNote, setSelectedNote] = useState<{ title: string; path: string } | null>(null);
+  const [showNoteSettings, setShowNoteSettings] = useState(false);
   const [talkTargetUser, setTalkTargetUser] = useState('');
   const [selectedTalkToken, setSelectedTalkToken] = useState('');
   const [talkMessage, setTalkMessage] = useState('');
@@ -174,24 +181,57 @@ const Communication = () => {
     onError: (error: Error) => toast.error(error.message || 'Failed to add event'),
   });
 
-  const noteMutation = useMutation({
-    mutationFn: async (action: 'create' | 'read' | 'append' | 'delete') => {
-      if (action === 'create') {
-        return api.createNote({ title: noteTitle, content: noteContent, category: 'Shared', storage: noteStorage });
+  const listNotesMutation = useMutation({
+    mutationFn: (payload: { directories: string[] }) => api.listNotes(payload),
+    onSuccess: (data) => {
+      const notes = (data.detail as { notes?: Array<{ title: string; path: string; size: number; modified: string }> })?.notes || [];
+      setNoteList(notes);
+      toast.success(`Found ${notes.length} notes`);
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to list notes'),
+  });
+
+  const readNoteMutation = useMutation({
+    mutationFn: (payload: { title: string; path: string }) => api.readNote(payload.title, noteStorage, payload.path),
+    onSuccess: (data) => {
+      setNoteContent(data.message || '');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to read note'),
+  });
+
+  const saveNoteMutation = useMutation({
+    mutationFn: (payload: { title: string; content: string; category: string; path?: string }) => {
+      if (payload.path) {
+        return api.appendNote({ title: payload.title, content: payload.content, storage: noteStorage });
       }
-      if (action === 'read') {
-        return api.readNote(noteTitle, noteStorage);
-      }
-      if (action === 'append') {
-        return api.appendNote({ title: noteTitle, content: noteContent, storage: noteStorage });
-      }
-      return api.deleteNote(noteTitle, noteStorage);
+      return api.createNote({ title: payload.title, content: payload.content, category: payload.category, storage: noteStorage });
     },
     onSuccess: (data) => {
-      setNoteResult(data);
-      toast.success('Note action completed');
+      toast.success('Note saved');
+      listNotesMutation.mutate({ directories: noteDirectories });
     },
-    onError: (error: Error) => toast.error(error.message || 'Note action failed'),
+    onError: (error: Error) => toast.error(error.message || 'Failed to save note'),
+  });
+
+  const deleteNoteMutation = useMutation({
+    mutationFn: (payload: { title: string; path: string }) => api.deleteNote(payload.title, noteStorage, payload.path),
+    onSuccess: () => {
+      toast.success('Note deleted');
+      setSelectedNote(null);
+      setNoteContent('');
+      setNoteTitle('');
+      listNotesMutation.mutate({ directories: noteDirectories });
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to delete note'),
+  });
+
+  const syncRagMutation = useMutation({
+    mutationFn: (payload: { directories: string[] }) => api.syncNotesRag(payload),
+    onSuccess: (data) => {
+      const synced = (data.detail as { synced?: Array<{ path: string }> })?.synced || [];
+      toast.success(`Synced ${synced.length} notes to RAG`);
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to sync notes to RAG'),
   });
 
   const openTalkConversationMutation = useMutation({
@@ -658,37 +698,162 @@ const Communication = () => {
         </section>
 
         <section className="glass-panel p-6">
-          <div className="mb-6 flex items-center gap-3">
-            <FileText size={20} className="text-cyan-300" />
-            <div>
-              <h3 className="text-xl font-bold text-white">Notes</h3>
-              <p className="text-sm text-slate-400">Create, read, append, and delete shared notes through Nextcloud.</p>
+          <div className="mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <FileText size={20} className="text-cyan-300" />
+              <div>
+                <h3 className="text-xl font-bold text-white">Notes</h3>
+                <p className="text-sm text-slate-400">Markdown editor with Nextcloud sync and RAG indexing.</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowNoteSettings(!showNoteSettings)}
+                className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest"
+              >
+                Settings
+              </button>
+              <button
+                onClick={() => syncRagMutation.mutate({ directories: noteDirectories })}
+                disabled={syncRagMutation.isPending}
+                className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest"
+              >
+                Sync to RAG
+              </button>
             </div>
           </div>
 
-          <div className="space-y-4">
-            <input
-              type="text"
-              value={noteTitle}
-              onChange={(event) => setNoteTitle(event.target.value)}
-              className="glass-input w-full"
-              placeholder="Note title"
-            />
-            <textarea
-              value={noteContent}
-              onChange={(event) => setNoteContent(event.target.value)}
-              className="glass-input min-h-28 w-full"
-              placeholder="Note content"
-            />
-            <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-              <button onClick={() => noteMutation.mutate('create')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Create</button>
-              <button onClick={() => noteMutation.mutate('read')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Read</button>
-              <button onClick={() => noteMutation.mutate('append')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Append</button>
-              <button onClick={() => noteMutation.mutate('delete')} className="glass-button px-3 py-3 text-[10px] font-black uppercase tracking-widest">Delete</button>
+          {showNoteSettings && (
+            <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="mb-2 text-xs font-black uppercase tracking-widest text-slate-400">Note Directories</p>
+              <p className="mb-3 text-xs text-slate-500">Nextcloud directories to scan for notes (recursive).</p>
+              <div className="space-y-2">
+                {noteDirectories.map((dir, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      value={dir}
+                      onChange={(e) => {
+                        const updated = [...noteDirectories];
+                        updated[i] = e.target.value;
+                        setNoteDirectories(updated);
+                      }}
+                      className="glass-input flex-1"
+                      placeholder="Directory path"
+                    />
+                    <button
+                      onClick={() => setNoteDirectories(noteDirectories.filter((_, j) => j !== i))}
+                      className="glass-button px-2 py-2 text-red-400"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => setNoteDirectories([...noteDirectories, ''])}
+                  className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest"
+                >
+                  <Plus size={14} className="inline mr-1" /> Add Directory
+                </button>
+              </div>
             </div>
-            <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
-              <p className="mb-2 text-xs font-black uppercase tracking-widest text-slate-500">Last Note Response</p>
-              <pre className="whitespace-pre-wrap text-sm text-slate-300">{noteResult?.message || 'Run a note action to see the live response.'}</pre>
+          )}
+
+          <div className="flex gap-4" style={{ height: '600px' }}>
+            <div className="w-64 shrink-0 flex flex-col">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Notes</p>
+                <button
+                  onClick={() => listNotesMutation.mutate({ directories: noteDirectories })}
+                  className="glass-button px-2 py-1 text-[10px]"
+                >
+                  <RefreshCcw size={12} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-1">
+                {noteList.map((note) => (
+                  <button
+                    key={note.path}
+                    onClick={() => {
+                      setSelectedNote(note);
+                      readNoteMutation.mutate({ title: note.title, path: note.path });
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
+                      selectedNote?.path === note.path
+                        ? 'bg-indigo-600/30 text-white'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <p className="truncate font-medium">{note.title}</p>
+                    <p className="text-[10px] text-slate-600 truncate">{note.path}</p>
+                  </button>
+                ))}
+                {!noteList.length && (
+                  <p className="text-xs text-slate-600 p-3">No notes found. Add directories above.</p>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedNote(null);
+                  setNoteContent('');
+                  setNoteTitle('');
+                }}
+                className="glass-button mt-2 px-3 py-2 text-[10px] font-black uppercase tracking-widest"
+              >
+                <Plus size={14} className="inline mr-1" /> New Note
+              </button>
+            </div>
+
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="mb-2 flex items-center gap-2">
+                <input
+                  value={noteTitle}
+                  onChange={(e) => setNoteTitle(e.target.value)}
+                  className="glass-input flex-1"
+                  placeholder="Note title"
+                />
+                <select
+                  value={noteCategory}
+                  onChange={(e) => setNoteCategory(e.target.value)}
+                  className="glass-input"
+                >
+                  <option value="Notes">Notes</option>
+                  {noteDirectories.map((dir) => (
+                    <option key={dir} value={dir}>{dir}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 min-h-0 rounded-xl border border-white/10 overflow-hidden">
+                <MonacoEditor
+                  value={noteContent}
+                  onChange={setNoteContent}
+                  language="markdown"
+                  height="100%"
+                  fontSize={14}
+                />
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => {
+                    if (selectedNote?.path) {
+                      saveNoteMutation.mutate({ title: noteTitle, content: noteContent, path: selectedNote.path, category: noteCategory });
+                    } else {
+                      saveNoteMutation.mutate({ title: noteTitle, content: noteContent, category: noteCategory });
+                    }
+                  }}
+                  disabled={saveNoteMutation.isPending}
+                  className="glass-button px-4 py-2 text-[10px] font-black uppercase tracking-widest"
+                >
+                  Save
+                </button>
+                {selectedNote && (
+                  <button
+                    onClick={() => deleteNoteMutation.mutate({ title: selectedNote.title, path: selectedNote.path })}
+                    className="glass-button px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-400"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </section>

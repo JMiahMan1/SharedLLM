@@ -302,7 +302,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     log.info(f"[AgentLoop] Active Provider: {active_provider_name} | Model: {selected_model}")
 
-    # 3. Enhance system prompt with RAG context
+    # 3. Detect model capabilities (thinking/reasoning support) and configure accordingly
+    model_name_lower = selected_model.lower()
+    is_thinking_capable = any(kw in model_name_lower for kw in ["qwen3", "qwen2.5", "deepseek-r1", "qwq"])
+    
+    # 4. Enhance system prompt with RAG context
     enhanced_system = f"{full_system}\n\nRetrieved Context:\n{rag_context}"
     
     ollama_payload = {
@@ -311,11 +315,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             {"role": "system", "content": enhanced_system}
         ] + short_term + [{"role": "user", "content": query}],
         "stream": False,
-        # Disable extended reasoning/thinking mode for qwen3-style models.
-        # Raven needs fast, direct JSON tool calls — not a multi-minute reasoning chain.
         "options": {
-            "enable_thinking": False,
-            "include_reasoning": False,
+            "enable_thinking": is_thinking_capable,
+            "include_reasoning": is_thinking_capable,
             "temperature": 0.0
         },
     }
@@ -417,7 +419,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         chunk_callback=chunk_logger
                     )
                     
-                    ans = data.get("message", {}).get("content", "Error.")
+                    # Handle thinking-capable models: some models put their entire response
+                    # in the thinking/reasoning block when content is empty.
+                    msg = data.get("message", {})
+                    ans = msg.get("content", "") or msg.get("thinking", "") or msg.get("reasoning", "") or "Error."
                     if not ans or not ans.strip():
                         log.warning(f"[AgentLoop] Empty output from model on attempt {retry_count + 1}; treating as failure.")
                         raise Exception("Empty model output")
