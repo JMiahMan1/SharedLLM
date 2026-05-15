@@ -6,9 +6,9 @@ import httpx
 import os
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 try:
-    from .schemas import ResolvedCredentials
-    from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-    from .config import WORKSPACE_RUNTIME_SVC
+    from schemas import ResolvedCredentials
+    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+    from config import WORKSPACE_RUNTIME_SVC
 except (ImportError, ValueError):
     from schemas import ResolvedCredentials
     from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
@@ -103,7 +103,7 @@ async def get_llm_settings() -> Dict[str, str]:
 
 async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from .config import OLLAMA_TIMEOUT
+    from config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":
@@ -172,7 +172,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     full_system = job_payload.get("system", "")
     if is_autonomous:
         try:
-            from .agent_loop import AgentLoop
+            from agent_loop import AgentLoop
         except (ImportError, ValueError):
             from agent_loop import AgentLoop
         # Raven handles autonomous loops
@@ -281,7 +281,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     # Tool Extraction
     try:
-        from .agent_loop import extract_action_json
+        from agent_loop import extract_action_json
     except (ImportError, ValueError):
         from agent_loop import extract_action_json
 
