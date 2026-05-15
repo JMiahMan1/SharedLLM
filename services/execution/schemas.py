@@ -85,6 +85,10 @@ class ExecutionResult(BaseModel):
     service: str
     detail: Optional[Dict[str, Any]] = None
 
+class GitExecutionResult(ExecutionResult):
+    """Specific result for Git operations."""
+    pass
+
 class DiagnosticRequest(BaseRequest):
     user_context: UserContext
     service: str = "execution"

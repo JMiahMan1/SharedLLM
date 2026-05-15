@@ -23,7 +23,13 @@ import os
 import re
 import shlex
 from typing import Optional, Dict
-from schemas import GitOperationRequest, GitExecutionResult
+try:
+    from schemas import GitOperationRequest, GitExecutionResult
+except ImportError:
+    try:
+        from ..schemas import GitOperationRequest, GitExecutionResult
+    except ImportError:
+        from execution.schemas import GitOperationRequest, GitExecutionResult
 
 log = logging.getLogger("execution.git")
 
