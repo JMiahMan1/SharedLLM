@@ -2927,11 +2927,7 @@ async def execute_raven_mission(id: int, request: Request):
 
 # ---- User Missions Endpoints ----
 from pydantic import BaseModel
-
-try:
-    from orchestrator import SINGLE_TURN_TOOL_GUIDE
-except (ImportError, ValueError):
-    from orchestrator import SINGLE_TURN_TOOL_GUIDE
+from gateway.orchestrator import SINGLE_TURN_TOOL_GUIDE
 
 class UserMissionRequest(BaseModel):
     query: str
