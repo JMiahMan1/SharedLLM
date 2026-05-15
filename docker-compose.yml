@@ -28,6 +28,13 @@ services:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - TZ=America/Phoenix
     volumes:
       - identity_db:/data
@@ -51,9 +58,15 @@ services:
       - "ai-server:192.168.2.205"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - REDIS_URL=redis://redis:6379/0
-      - RAG_SVC_URL=http://rag:8004
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - REDIS_URL=redis://redis:6379/0
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
     security_opt:
@@ -74,6 +87,14 @@ services:
     restart: unless-stopped
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - CHROMA_PERSIST_DIR=/data/chroma_db
       - TZ=America/Phoenix
     ports:
@@ -155,9 +176,15 @@ services:
     restart: unless-stopped
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - REDIS_URL=redis://redis:6379/0
-      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS:-30}
-      - LOG_MAX_ENTRIES=50000
       - TZ=America/Phoenix
     volumes:
       - ./services/logging/main.py:/app/main.py:ro
@@ -174,7 +201,14 @@ services:
       - 8005:8005
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - TZ=America/Phoenix
     volumes:
       - ./:/workspace/SharedLLM:ro
@@ -197,10 +231,15 @@ services:
       - 8007:8007
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
       - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
       - WORKSPACE_RUNTIME_ROOT=/workspace/SharedLLM
       - GIT_WEBHOOK_SECRET=${GIT_WEBHOOK_SECRET:-change-me-in-production}
@@ -270,7 +309,16 @@ services:
     privileged: true
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - DOCKER_HOST=unix:///var/run/docker.sock
+      - TZ=America/Phoenix
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./services/control_plane:/app
