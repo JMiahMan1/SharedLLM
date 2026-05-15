@@ -1,5 +1,5 @@
 # services/storage/providers_impl/nextcloud.py
-from typing import Any
+from typing import Any, Optional
 try:
     from ..providers import StorageProvider
     from ..models import StorageEntry
