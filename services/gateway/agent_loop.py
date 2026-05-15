@@ -220,12 +220,16 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
     active_provider = settings.get("active_llm_provider", "ollama")
-    # Use configurable timeout (default to 600s for Raven-compatible 35B)
     timeout = float(settings.get("ollama_timeout", os.getenv("OLLAMA_TIMEOUT", "600")))
     if active_provider == "openrouter":
         return OpenRouterProvider(
             api_key=settings.get("llm_cloud_api_key", ""),
             base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
+            timeout=timeout
+        )
+    elif active_provider == "llama_server":
+        return OllamaProvider(
+            base_url=settings.get("llama_server_proxy_url", "http://alpaca-proxy:11434"),
             timeout=timeout
         )
     else:
@@ -288,6 +292,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 selected_model = settings.get("cloud_coding_model")
             else:
                 selected_model = settings.get("cloud_assistant_model")
+        elif active_provider_name == "llama_server":
+            if is_technical:
+                selected_model = settings.get("llama_server_coding_model") or settings.get("ollama_coding_model")
+            else:
+                selected_model = settings.get("llama_server_assistant_model") or settings.get("ollama_assistant_model")
         else:
             if is_technical:
                 selected_model = settings.get("ollama_coding_model") or settings.get("coding_model")

@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench } from 'lucide-react';
+import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { HealthStatus, LogEntry, SmokeTestResult, Workspace } from '../services/api';
+import RavenLiveTrace from '../components/settings/RavenLiveTrace';
+
+const MISSION_TEMPLATES = [
+  { label: 'Audit Codebase', query: 'Audit the codebase for lint errors, unused imports, and code quality issues. Fix all findings.' },
+  { label: 'Sync Workspaces', query: 'Check workspace status, pull latest from remote, and report any conflicts.' },
+  { label: 'Convert Files', query: 'Find all PNG images in the Assets workspace and convert them to WebP format.' },
+  { label: 'Check Dependencies', query: 'Review requirements.txt and package.json for outdated or vulnerable dependencies.' },
+];
 
 const JarvisLab = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'logs'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'logs' | 'missions'>('overview');
 
   return (
     <div className="space-y-8 pb-12">
@@ -171,6 +179,7 @@ const TestsPane = () => {
 
 const LogTelemetryStream = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [hideHealthChecks, setHideHealthChecks] = useState(true);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -209,17 +218,41 @@ const LogTelemetryStream = () => {
     };
   }, []);
 
+  const HEALTH_CHECK_PATTERNS = ['/health', '/health/ready', 'health check', 'heartbeat'];
+  const isHealthCheck = (log: LogEntry) => {
+    const msg = (log.message || '').toLowerCase();
+    return HEALTH_CHECK_PATTERNS.some(p => msg.includes(p));
+  };
+
+  const visibleLogs = hideHealthChecks
+    ? logs.filter(log => !isHealthCheck(log))
+    : logs;
+
   return (
     <section className="glass-panel p-6">
-      <div className="mb-6 flex items-center gap-3">
-        <Terminal size={20} className="text-indigo-300" />
-        <div>
-          <h3 className="text-xl font-bold text-white">Live Logs</h3>
-          <p className="text-sm text-slate-400">Streaming websocket telemetry from the logging service.</p>
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Terminal size={20} className="text-indigo-300" />
+          <div>
+            <h3 className="text-xl font-bold text-white">Live Logs</h3>
+            <p className="text-sm text-slate-400">Streaming websocket telemetry from the logging service.</p>
+          </div>
         </div>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={hideHealthChecks}
+            onChange={(e) => setHideHealthChecks(e.target.checked)}
+            className="sr-only peer"
+          />
+          <div className="w-8 h-4 rounded-full bg-slate-700 peer-checked:bg-indigo-600 relative transition-colors">
+            <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform peer-checked:translate-x-4" />
+          </div>
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Hide Health Checks</span>
+        </label>
       </div>
       <div className="space-y-3">
-        {logs.map((log, index) => (
+        {visibleLogs.map((log, index) => (
           <div key={`${log.timestamp}-${index}`} className="glass-card p-4 overflow-hidden">
             <div className="flex items-center justify-between gap-4">
               <p className="font-semibold text-white truncate">{log.service}</p>
@@ -229,9 +262,11 @@ const LogTelemetryStream = () => {
             <p className="mt-2 text-xs text-slate-500">{log.timestamp}</p>
           </div>
         ))}
-        {!logs.length && (
+        {!visibleLogs.length && (
           <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
-            Waiting for live log traffic...
+            {logs.length > 0
+              ? 'All visible logs are health checks. Toggle the filter to see them.'
+              : 'Waiting for live log traffic...'}
           </p>
         )}
       </div>
@@ -241,6 +276,8 @@ const LogTelemetryStream = () => {
 
 const MissionsPane = () => {
   const [missionQuery, setMissionQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
   const { data: missions = [], refetch } = useQuery({
     queryKey: ['user-missions'],
     queryFn: () => api.getUserMissions(),
@@ -257,6 +294,19 @@ const MissionsPane = () => {
     onError: (err: any) => toast.error(err.message || 'Failed to dispatch mission'),
   });
 
+  const killMissionMutation = useMutation({
+    mutationFn: (id: number) => api.killRavenMission(id),
+    onSuccess: () => {
+      toast.success('Kill Signal Dispatched');
+      refetch();
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to kill mission'),
+  });
+
+  const filteredMissions = statusFilter === 'all'
+    ? missions
+    : missions.filter((m: any) => m.status === statusFilter);
+
   return (
     <section className="glass-panel p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
@@ -266,6 +316,22 @@ const MissionsPane = () => {
             Raven Autonomous Missions
           </h3>
           <p className="text-sm text-slate-400 mt-1">Assign long-running background tasks to Raven (e.g., File conversions, analysis).</p>
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Quick Actions</h4>
+        <div className="flex flex-wrap gap-2">
+          {MISSION_TEMPLATES.map(t => (
+            <button
+              key={t.label}
+              onClick={() => setMissionQuery(t.query)}
+              className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-xs text-slate-300 hover:bg-indigo-500/20 hover:border-indigo-500/30 hover:text-indigo-300 transition-colors"
+            >
+              <Zap size={12} className="inline mr-1" />
+              {t.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -295,15 +361,35 @@ const MissionsPane = () => {
         </button>
       </div>
 
+      <div className="flex items-center gap-2 mb-4">
+        <Filter size={14} className="text-slate-500" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Filter:</span>
+        {['all', 'executing', 'completed', 'failed', 'pending'].map(s => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors ${
+              statusFilter === s
+                ? 'bg-indigo-500/30 text-indigo-300'
+                : 'text-slate-500 hover:text-white'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+
       <div className="space-y-4">
-        <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Active & Recent Missions</h4>
-        
-        {missions.length === 0 ? (
+        <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">
+          Active & Recent Missions ({filteredMissions.length})
+        </h4>
+
+        {filteredMissions.length === 0 ? (
           <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
-            No active missions.
+            No missions match the current filter.
           </div>
         ) : (
-          missions.map((mission: any) => (
+          filteredMissions.map((mission: any) => (
             <div key={mission.id} className="glass-card p-4 border-l-4 border-l-indigo-500/50 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0 flex-1">
@@ -317,14 +403,40 @@ const MissionsPane = () => {
                       {mission.status}
                     </span>
                     <span className="text-xs text-slate-400">Mission #{mission.id}</span>
+                    {(mission.status === 'executing' || mission.status === 'running') && (
+                      <span className="text-[10px] text-slate-500 font-mono">Started: {new Date(mission.created_at).toLocaleTimeString()}</span>
+                    )}
                   </div>
                   <p className="text-sm text-white line-clamp-2">{mission.proposed_mission}</p>
                 </div>
+                <div className="flex-shrink-0 flex items-center gap-2">
+                  {(mission.status === 'executing' || mission.status === 'running') && (
+                    <>
+                      <button
+                        onClick={() => setLiveMissionId(mission.id)}
+                        className="glass-button bg-blue-500/10 border-blue-500/20 text-blue-300 hover:bg-blue-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
+                      >
+                        <Eye size={12} /> Watch Live
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Abort mission #${mission.id}?`)) {
+                            killMissionMutation.mutate(mission.id);
+                          }
+                        }}
+                        disabled={killMissionMutation.isPending}
+                        className="glass-button bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
+                      >
+                        Stop
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-              
+
               {(mission.status === 'executing' || mission.progress > 0) && (
                 <div className="w-full bg-black/40 rounded-full h-1.5 overflow-hidden">
-                  <div 
+                  <div
                     className={`h-full rounded-full transition-all duration-500 ${
                       mission.status === 'failed' ? 'bg-red-500' :
                       mission.status === 'completed' ? 'bg-emerald-500' : 'bg-indigo-500'
@@ -333,7 +445,7 @@ const MissionsPane = () => {
                   />
                 </div>
               )}
-              
+
               {mission.result && (
                 <div className="p-3 bg-black/30 rounded-xl border border-white/5 text-xs text-slate-300 font-mono overflow-x-auto whitespace-pre-wrap">
                   {mission.result}
@@ -343,6 +455,12 @@ const MissionsPane = () => {
           ))
         )}
       </div>
+
+      <RavenLiveTrace
+        isOpen={liveMissionId !== null}
+        onClose={() => setLiveMissionId(null)}
+        missionId={liveMissionId}
+      />
     </section>
   );
 };
