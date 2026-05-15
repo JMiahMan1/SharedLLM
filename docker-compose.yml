@@ -34,6 +34,8 @@ services:
       - ./services/identity/main.py:/app/main.py:ro
       - ./services/identity/models.py:/app/models.py:ro
       - ./services/identity/seed.py:/app/seed.py:ro
+      - ./services/identity/crypto.py:/app/crypto.py:ro
+      - ./services/config.py:/app/config.py:ro
       - /etc/localtime:/etc/localtime:ro
 
   execution:
@@ -59,6 +61,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./services/execution:/app
+      - ./services/config.py:/app/config.py:ro
       - ./services/tests:/app/tests
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/workspace/SharedLLM
@@ -82,6 +85,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./services/rag/main.py:/app/main.py
       - ./services/rag/schemas.py:/app/schemas.py
+      - ./services/config.py:/app/config.py:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 10s
@@ -135,12 +139,12 @@ services:
       - ./services/gateway/orchestrator.py:/app/orchestrator.py
       - ./services/gateway/agent_loop.py:/app/agent_loop.py
       - ./services/gateway/llm_providers.py:/app/llm_providers.py
-      - ./services/gateway/config.py:/app/config.py
       - ./services/gateway/messaging.py:/app/messaging.py
       - ./services/gateway/schemas.py:/app/schemas.py
       - ./services/gateway/history.py:/app/history.py
       - ./services/gateway/prompts.py:/app/prompts.py
       - ./services/gateway/intent_engine.py:/app/intent_engine.py
+      - ./services/config.py:/app/config.py:ro
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
@@ -157,6 +161,7 @@ services:
       - TZ=America/Phoenix
     volumes:
       - ./services/logging/main.py:/app/main.py:ro
+      - ./services/config.py:/app/config.py:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
@@ -174,6 +179,7 @@ services:
     volumes:
       - ./:/workspace/SharedLLM:ro
       - ./services/storage:/app
+      - ./services/config.py:/app/config.py:ro
       - /etc/localtime:/etc/localtime:ro
 
   workspace_runtime:
@@ -203,6 +209,7 @@ services:
     volumes:
       - ./:/workspace/SharedLLM
       - ./services/workspace_runtime:/app
+      - ./services/config.py:/app/config.py:ro
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
@@ -231,6 +238,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - EXECUTION_SVC_URL=http://execution:8003
       - TZ=America/Phoenix
+    volumes:
+      - ./services/automation:/app
+      - ./services/config.py:/app/config.py:ro
     depends_on:
       - redis
       - execution
@@ -264,6 +274,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./services/control_plane:/app
+      - ./services/config.py:/app/config.py:ro
 
 volumes:
   identity_db:
