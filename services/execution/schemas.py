@@ -15,40 +15,43 @@ class BaseRequest(BaseModel):
     def handle_common_aliases(cls, data: Any) -> Any:
         """Automatically map common hallucinations to schema-correct fields."""
         if isinstance(data, dict):
+            field_names = set(cls.model_fields.keys()) if hasattr(cls, 'model_fields') else set()
+
             # Map 'command' or 'operation' to 'action' (Common Git hallucination)
-            if "action" not in data:
+            # Only if the schema actually has an 'action' field
+            if "action" not in data and "action" in field_names:
                 if "command" in data:
                     data["action"] = data["command"]
                 elif "operation" in data:
                     data["action"] = data["operation"]
-                elif "message" in data:
-                    data["action"] = data["message"]
-            
+
             # Map 'git_status' to 'status', etc.
             if "action" in data and isinstance(data["action"], str) and data["action"].startswith("git_"):
                 data["action"] = data["action"].replace("git_", "")
 
             # Map 'file_path', 'repository_path', or 'file' to 'path'
-            if "path" not in data:
+            if "path" not in data and "path" in field_names:
                 if "file_path" in data:
                     data["path"] = data["file_path"]
                 elif "repository_path" in data:
                     data["path"] = data["repository_path"]
                 elif "file" in data:
                     data["path"] = data["file"]
-            
+
             # Map 'message' to 'commit_message' or vice-versa
-            if "message" in data and "commit_message" not in data:
-                data["commit_message"] = data["message"]
-            if "commit_message" in data and "message" not in data:
-                data["message"] = data["commit_message"]
+            # Only if the schema has commit_message (Git-related schemas)
+            if "commit_message" in field_names:
+                if "message" in data and "commit_message" not in data:
+                    data["commit_message"] = data["message"]
+                if "commit_message" in data and "message" not in data:
+                    data["message"] = data["commit_message"]
 
             # Map 'limit' to 'limit_lines' and 'offset' to 'offset_lines'
             if "limit" in data and "limit_lines" not in data:
                 data["limit_lines"] = data["limit"]
             if "offset" in data and "offset_lines" not in data:
                 data["offset_lines"] = data["offset"]
-                
+
         return data
 
 class UserContext(BaseModel):
