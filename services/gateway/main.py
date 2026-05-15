@@ -19,14 +19,14 @@ from pathlib import Path
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 try:
-    from .schemas import ChatRequest, ResolvedCredentials
-    from .agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
-    from .config import (
+    from schemas import ChatRequest, ResolvedCredentials
+    from agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
+    from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
         STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
         INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
     )
-    from .llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+    from llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from schemas import ChatRequest, ResolvedCredentials
     from agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
@@ -141,11 +141,11 @@ def _make_openai_chunk(content: str, model: str, finish_reason: str = None):
 
 # --- Imports from internal modules ---
 try:
-    from .schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, ControlPlaneRequest, SystemLearningRequest, WorkspaceBootstrapRequest
-    from .intent_engine import engine
-    from .history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-    from .prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
-    from .messaging import InferenceJobQueue, JobStatus
+    from schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, ControlPlaneRequest, SystemLearningRequest, WorkspaceBootstrapRequest
+    from intent_engine import engine
+    from history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
+    from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+    from messaging import InferenceJobQueue, JobStatus
 except (ImportError, ValueError):
     try:
         from services.gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest
@@ -172,14 +172,14 @@ try:
 except ImportError as e:
     log.warning(f"Could not import background worker directly: {e}. Trying relative import...")
     try:
-        from .background_worker import worker as raven_worker
+        from background_worker import worker as raven_worker
         log.info("Successfully imported Raven background worker via relative import.")
     except ImportError as e2:
         log.error(f"FATAL: Background worker import failed: {e2}")
         raven_worker = None
 
 # --- Configuration (from shared config) ---
-from .config import (
+from config import (
     IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
     LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
     INTERNAL_SECRET, OLLAMA_URL, CONFIG, FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
@@ -224,7 +224,7 @@ async def get_llm_settings() -> Dict[str, str]:
 
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from .config import OLLAMA_TIMEOUT
+    from config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":
@@ -708,7 +708,7 @@ async def select_model_for_query(query: str) -> str:
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     try:
-        from .prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
+        from prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
     except (ImportError, ValueError):
         try:
             from prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
@@ -717,7 +717,7 @@ def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
       try:
-          from .prompts import RAVEN_NARRATOR_PROTOCOL
+          from prompts import RAVEN_NARRATOR_PROTOCOL
           return RAVEN_NARRATOR_PROTOCOL
       except ImportError:
           from prompts import RAVEN_NARRATOR_PROTOCOL
@@ -835,7 +835,7 @@ def is_time_or_date_query(query: str) -> bool:
 
 
 def build_time_or_date_response(query: str) -> str:
-    from .config import TIMEZONE
+    from config import TIMEZONE
     tz_name = TIMEZONE
     try:
         now = datetime.now(ZoneInfo(tz_name))
@@ -2955,7 +2955,7 @@ async def execute_raven_mission(id: int, request: Request):
 from pydantic import BaseModel
 
 try:
-    from .orchestrator import SINGLE_TURN_TOOL_GUIDE
+    from orchestrator import SINGLE_TURN_TOOL_GUIDE
 except (ImportError, ValueError):
     from orchestrator import SINGLE_TURN_TOOL_GUIDE
 
@@ -3066,7 +3066,7 @@ async def kill_mission(request: Request, id_or_slug: str):
         try:
             from history import REDIS_URL
         except (ImportError, ValueError):
-            from .history import REDIS_URL
+            from history import REDIS_URL
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
@@ -3152,7 +3152,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):
         try:
             from history import REDIS_URL
         except (ImportError, ValueError):
-            from .history import REDIS_URL
+            from history import REDIS_URL
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
@@ -3200,7 +3200,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):
 @app.get("/api/config/models")
 async def get_ollama_models():
     """Proxy to Ollama to list available tags."""
-    from .config import OLLAMA_URL as _OLLAMA_URL
+    from config import OLLAMA_URL as _OLLAMA_URL
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{_OLLAMA_URL}/api/tags")
