@@ -391,6 +391,28 @@ export const server = setupServer(
     last_indexed: '2026-05-06T10:00:00Z',
     providers: ['nextcloud']
   })),
+
+  // Raven endpoints
+  http.get('/api/admin/raven/config', () => HttpResponse.json({
+    raven_suspended: false,
+    raven_scan_interval: 300,
+    raven_error_threshold: 5,
+    active_coding_model: 'qwen2.5-coder:7b',
+    system_default_tts_voice: 'af_heart',
+    system_default_tts_engine: 'kokoro',
+  })),
+  http.patch('/api/admin/raven/config', () => HttpResponse.json({ status: 'success' })),
+  http.get('/api/admin/raven/tts/voices', () => HttpResponse.json({ status: 'success', voices: ['af_heart', 'am_adam'] })),
+  http.get('/api/admin/raven/queue', () => HttpResponse.json([])),
+  http.post('/api/admin/raven/queue/:id/execute', () => HttpResponse.json({ status: 'SUCCESS', message: 'Dispatched' })),
+  http.get('/api/raven/missions', () => HttpResponse.json([])),
+  http.post('/api/raven/missions', () => HttpResponse.json({ status: 'SUCCESS', mission: { id: 1, mission_type: 'user_task', status: 'pending', progress: 0, created_at: '2026-05-15T00:00:00Z', proposed_mission: 'test' } })),
+  http.post('/api/raven/missions/:id/kill', () => HttpResponse.json({ status: 'SUCCESS', message: 'Killed' })),
+
+  // Gateway config & models
+  http.get('/api/config', () => HttpResponse.json({ config: { assistant_model: 'qwen3:8b', coding_model: 'qwen2.5-coder:7b', librarian_model: 'qwen3:8b' } })),
+  http.post('/api/config', () => HttpResponse.json({ config: { assistant_model: 'qwen3:8b', coding_model: 'qwen2.5-coder:7b', librarian_model: 'qwen3:8b' } })),
+  http.get('/api/config/models', () => HttpResponse.json({ models: ['qwen3:8b', 'qwen2.5-coder:7b'] })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));

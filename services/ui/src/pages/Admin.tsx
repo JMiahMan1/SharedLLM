@@ -13,6 +13,9 @@ import {
   UserPlus,
   Database,
   Cloud,
+  ShieldAlert,
+  Code2,
+  BarChart3,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -29,6 +32,15 @@ import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import LLMSettings from '../components/settings/LLMSettings';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
+
+type AdminTab = 'users' | 'raven' | 'settings' | 'database';
+
+const tabs: { id: AdminTab; label: string; icon: React.ElementType }[] = [
+  { id: 'users', label: 'Users & Devices', icon: Shield },
+  { id: 'raven', label: 'Raven Ops', icon: ShieldAlert },
+  { id: 'settings', label: 'LLM & Settings', icon: Code2 },
+  { id: 'database', label: 'Database & Audit', icon: BarChart3 },
+];
 
 type UserFormState = {
   username: string;
@@ -92,6 +104,7 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
 
 const Admin = () => {
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<AdminTab>('users');
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
@@ -302,11 +315,11 @@ const Admin = () => {
   };
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="space-y-6 pb-12">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h2 className="text-4xl font-black tracking-tighter text-white uppercase">System Matrix</h2>
-          <p className="mt-2 text-slate-400">Live user administration, device ownership, settings, and audit state.</p>
+          <p className="mt-2 text-slate-400">Admin-only controls for users, Raven, settings, and database.</p>
         </div>
         <div className="flex flex-wrap gap-3">
           <button
@@ -327,205 +340,235 @@ const Admin = () => {
         </div>
       </header>
 
-      <div className="grid gap-6 xl:gap-8 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className="glass-panel p-6 min-w-0 overflow-hidden">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h3 className="flex items-center gap-3 text-xl font-bold text-white">
-                <Shield size={20} className="text-indigo-400" />
-                User Management
-              </h3>
-              <p className="mt-1 text-sm text-slate-400">Create, edit, and remove real identities used by the backend.</p>
-            </div>
-            <HelpTooltip docName="api_reference.md" sectionTitle="Identity Resolution" label="Users" />
-          </div>
-
-          <div className="space-y-3">
-            {users.map((user) => (
-              <div key={user.username} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-3">
-                    <p className="font-semibold text-white">{user.full_name || user.username}</p>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${
-                      user.is_admin ? 'bg-indigo-500/10 text-indigo-300' : 'bg-white/5 text-slate-400'
-                    }`}>
-                      {user.is_admin ? 'Admin' : 'User'}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">@{user.username}</p>
-                  <p className="mt-2 text-[11px] text-slate-500 truncate">
-                    HA: {user.ha_url || 'Not configured'} | Nextcloud: {user.nextcloud_url || 'Not configured'}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openEditUser(user)}
-                    className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
-                    aria-label={`Edit ${user.username}`}
-                  >
-                    <Edit3 size={16} />
-                  </button>
-                  <button
-                    onClick={() => setPasswordModalUser(user.username)}
-                    className="rounded-xl p-2 text-slate-400 transition hover:bg-indigo-500/10 hover:text-indigo-300"
-                    aria-label={`Change password for ${user.username}`}
-                  >
-                    <KeyRound size={16} />
-                  </button>
-                  {!user.is_system_default && (
-                    <button
-                      onClick={() => deleteUserMutation.mutate(user.username)}
-                      className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
-                      aria-label={`Delete ${user.username}`}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="glass-panel p-6 min-w-0 overflow-hidden">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h3 className="flex items-center gap-3 text-xl font-bold text-white">
-                <Search size={20} className="text-emerald-400" />
-                Discovery Import
-              </h3>
-              <p className="mt-1 text-sm text-slate-400">Live Home Assistant and Nextcloud discovery results.</p>
-            </div>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => importNcMutation.mutate()}
-                disabled={importNcMutation.isPending}
-                className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
-                title="Sync users from Nextcloud OCS"
-              >
-                <Cloud size={16} className={importNcMutation.isPending ? 'animate-pulse' : ''} />
-              </button>
-              <button
-                onClick={() => refetchDiscoveredUsers()}
-                className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
-                aria-label="Refresh discovered users"
-              >
-                <RefreshCcw size={16} className={isDiscovering ? 'animate-spin' : ''} />
-              </button>
-            </div>
-          </div>
-
-          <input
-            type="text"
-            value={discoveryFilter}
-            onChange={(event) => setDiscoveryFilter(event.target.value)}
-            placeholder="Filter discovered users"
-            className="glass-input mb-4 w-full"
-          />
-
-          <div className="space-y-3">
-            {filteredDiscoveredUsers.map((user) => (
-              <div key={`${user.source}-${user.username}`} className="glass-card flex items-center justify-between p-4">
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-white truncate">{user.display_name || user.username}</p>
-                  <p className="text-xs text-slate-400 truncate">@{user.username}</p>
-                  <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-500">{user.source}</p>
-                </div>
-                <button
-                  onClick={() => importUserMutation.mutate(user)}
-                  className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest"
-                >
-                  Import
-                </button>
-              </div>
-            ))}
-            {!filteredDiscoveredUsers.length && (
-              <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
-                No undiscovered users matched the current filter.
-              </p>
-            )}
-          </div>
-        </section>
+      {/* Tab Navigation */}
+      <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'bg-purple-600/30 text-white border border-purple-500/30'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Icon size={14} />
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="grid gap-6 xl:gap-8 xl:grid-cols-[0.95fr_1.05fr]">
-        <section className="glass-panel p-6 min-w-0 overflow-hidden">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h3 className="flex items-center gap-3 text-xl font-bold text-white">
-                <Cpu size={20} className="text-orange-300" />
-                Device Assignments
-              </h3>
-              <p className="mt-1 text-sm text-slate-400">Every entry here is live identity-to-device data.</p>
-            </div>
-            <HelpTooltip docName="architecture.md" sectionTitle="Identity Service" label="Device Assignments" />
-          </div>
-
-          <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_220px_auto]">
-            <input
-              type="text"
-              value={deviceId}
-              aria-label="Device ID"
-              onChange={(event) => setDeviceId(event.target.value)}
-              placeholder="Home Assistant entity ID"
-              className="glass-input"
-            />
-            <select
-              value={deviceUsername}
-              aria-label="Device User"
-              onChange={(event) => setDeviceUsername(event.target.value)}
-              className="glass-input bg-black/30"
-            >
-              <option value="">Select user</option>
-              {users.map((user) => (
-                <option key={user.username} value={user.username}>
-                  {user.username}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={() => {
-                if (!deviceId.trim() || !deviceUsername) {
-                  toast.error('Choose a user and a device ID');
-                  return;
-                }
-                assignDeviceMutation.mutate({ username: deviceUsername, device_id: deviceId.trim() });
-              }}
-              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
-            >
-              <Save size={14} />
-              Save Assignment
-            </button>
-          </div>
-
-          <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-2">
-            {devices.map((device) => (
-              <div key={device.device_id} className="glass-card flex items-center justify-between p-4">
-                <div className="min-w-0 flex-1">
-                  <p className="font-mono text-sm text-white truncate">{device.device_id}</p>
-                  <p className="mt-1 text-xs text-slate-400">Assigned to @{device.username}</p>
+      {/* Tab Content */}
+      {activeTab === 'users' && (
+        <div className="space-y-8">
+          <div className="grid gap-6 xl:gap-8 xl:grid-cols-[1.2fr_0.8fr]">
+            <section className="glass-panel p-6 min-w-0 overflow-hidden">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                    <Shield size={20} className="text-indigo-400" />
+                    User Management
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">Create, edit, and remove real identities used by the backend.</p>
                 </div>
-                <button
-                  onClick={() => removeDeviceMutation.mutate(device.device_id)}
-                  className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
-                  aria-label={`Remove ${device.device_id}`}
-                >
-                  <Trash2 size={16} />
-                </button>
+                <HelpTooltip docName="api_reference.md" sectionTitle="Identity Resolution" label="Users" />
               </div>
-            ))}
+
+              <div className="space-y-3">
+                {users.map((user) => (
+                  <div key={user.username} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-3">
+                        <p className="font-semibold text-white">{user.full_name || user.username}</p>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${
+                          user.is_admin ? 'bg-indigo-500/10 text-indigo-300' : 'bg-white/5 text-slate-400'
+                        }`}>
+                          {user.is_admin ? 'Admin' : 'User'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400">@{user.username}</p>
+                      <p className="mt-2 text-[11px] text-slate-500 truncate">
+                        HA: {user.ha_url || 'Not configured'} | Nextcloud: {user.nextcloud_url || 'Not configured'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => openEditUser(user)}
+                        className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+                        aria-label={`Edit ${user.username}`}
+                      >
+                        <Edit3 size={16} />
+                      </button>
+                      <button
+                        onClick={() => setPasswordModalUser(user.username)}
+                        className="rounded-xl p-2 text-slate-400 transition hover:bg-indigo-500/10 hover:text-indigo-300"
+                        aria-label={`Change password for ${user.username}`}
+                      >
+                        <KeyRound size={16} />
+                      </button>
+                      {!user.is_system_default && (
+                        <button
+                          onClick={() => deleteUserMutation.mutate(user.username)}
+                          className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                          aria-label={`Delete ${user.username}`}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="glass-panel p-6 min-w-0 overflow-hidden">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                    <Search size={20} className="text-emerald-400" />
+                    Discovery Import
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">Live Home Assistant and Nextcloud discovery results.</p>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => importNcMutation.mutate()}
+                    disabled={importNcMutation.isPending}
+                    className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+                    title="Sync users from Nextcloud OCS"
+                  >
+                    <Cloud size={16} className={importNcMutation.isPending ? 'animate-pulse' : ''} />
+                  </button>
+                  <button
+                    onClick={() => refetchDiscoveredUsers()}
+                    className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+                    aria-label="Refresh discovered users"
+                  >
+                    <RefreshCcw size={16} className={isDiscovering ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+              </div>
+
+              <input
+                type="text"
+                value={discoveryFilter}
+                onChange={(event) => setDiscoveryFilter(event.target.value)}
+                placeholder="Filter discovered users"
+                className="glass-input mb-4 w-full"
+              />
+
+              <div className="space-y-3">
+                {filteredDiscoveredUsers.map((user) => (
+                  <div key={`${user.source}-${user.username}`} className="glass-card flex items-center justify-between p-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-white truncate">{user.display_name || user.username}</p>
+                      <p className="text-xs text-slate-400 truncate">@{user.username}</p>
+                      <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-500">{user.source}</p>
+                    </div>
+                    <button
+                      onClick={() => importUserMutation.mutate(user)}
+                      className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest"
+                    >
+                      Import
+                    </button>
+                  </div>
+                ))}
+                {!filteredDiscoveredUsers.length && (
+                  <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                    No undiscovered users matched the current filter.
+                  </p>
+                )}
+              </div>
+            </section>
           </div>
+
+          <section className="glass-panel p-6 min-w-0 overflow-hidden">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                  <Cpu size={20} className="text-orange-300" />
+                  Device Assignments
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">Every entry here is live identity-to-device data.</p>
+              </div>
+              <HelpTooltip docName="architecture.md" sectionTitle="Identity Service" label="Device Assignments" />
+            </div>
+
+            <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_220px_auto]">
+              <input
+                type="text"
+                value={deviceId}
+                aria-label="Device ID"
+                onChange={(event) => setDeviceId(event.target.value)}
+                placeholder="Home Assistant entity ID"
+                className="glass-input"
+              />
+              <select
+                value={deviceUsername}
+                aria-label="Device User"
+                onChange={(event) => setDeviceUsername(event.target.value)}
+                className="glass-input bg-black/30"
+              >
+                <option value="">Select user</option>
+                {users.map((user) => (
+                  <option key={user.username} value={user.username}>
+                    {user.username}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  if (!deviceId.trim() || !deviceUsername) {
+                    toast.error('Choose a user and a device ID');
+                    return;
+                  }
+                  assignDeviceMutation.mutate({ username: deviceUsername, device_id: deviceId.trim() });
+                }}
+                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+              >
+                <Save size={14} />
+                Save Assignment
+              </button>
+            </div>
+
+            <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-2">
+              {devices.map((device) => (
+                <div key={device.device_id} className="glass-card flex items-center justify-between p-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-sm text-white truncate">{device.device_id}</p>
+                    <p className="mt-1 text-xs text-slate-400">Assigned to @{device.username}</p>
+                  </div>
+                  <button
+                    onClick={() => removeDeviceMutation.mutate(device.device_id)}
+                    className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                    aria-label={`Remove ${device.device_id}`}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {activeTab === 'raven' && (
+        <section className="glass-panel p-8 border-red-500/20">
+          <RavenOpsPanel />
         </section>
+      )}
 
-        <section className="space-y-8 min-w-0 overflow-hidden">
-          <section className="glass-panel p-8 border-red-500/20">
-            <RavenOpsPanel />
-          </section>
+      {activeTab === 'settings' && (
+        <section className="glass-panel p-8 border-purple-500/20">
+          <LLMSettings />
+        </section>
+      )}
 
-          <section className="glass-panel p-8 border-purple-500/20">
-            <LLMSettings />
-          </section>
-
+      {activeTab === 'database' && (
+        <div className="space-y-8">
           <div className="glass-panel p-6">
             <div className="mb-6 flex items-center justify-between">
               <div>
@@ -671,8 +714,8 @@ const Admin = () => {
               ))}
             </div>
           </div>
-        </section>
-      </div>
+        </div>
+      )}
 
       <Modal
         isOpen={isUserModalOpen}
