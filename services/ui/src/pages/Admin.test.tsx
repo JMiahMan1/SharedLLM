@@ -6,15 +6,15 @@ import { renderWithProviders } from '../test/render';
 vi.stubGlobal('confirm', vi.fn(() => true));
 
 describe('Admin page', () => {
-  it('renders live user, discovery, device, and settings sections', async () => {
+  it('renders tab navigation and default users tab', async () => {
     renderWithProviders(<Admin />);
 
+    expect(await screen.findByText('Users & Devices')).toBeInTheDocument();
+    expect(screen.getByText('Raven Ops')).toBeInTheDocument();
+    expect(screen.getByText('LLM & Settings')).toBeInTheDocument();
+    expect(screen.getByText('Database & Audit')).toBeInTheDocument();
     expect(await screen.findByText('User Management')).toBeInTheDocument();
-    expect(screen.getByText('Discovery Import')).toBeInTheDocument();
-    expect(screen.getByText('Device Assignments')).toBeInTheDocument();
-    expect(screen.getByText('Global Settings')).toBeInTheDocument();
     expect(await screen.findByText('Shared/Default User')).toBeInTheDocument();
-    expect(await screen.findByText('Jeremiah')).toBeInTheDocument();
   });
 
   it('creates a user from the modal and shows it in the list', async () => {
@@ -50,10 +50,35 @@ describe('Admin page', () => {
 
     expect(await screen.findByText('media_player.kitchen_echo')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText('new_setting_key'), { target: { value: 'feature_flag' } });
+    fireEvent.click(screen.getByText('Database & Audit'));
+    fireEvent.change(await screen.findByPlaceholderText('new_setting_key'), { target: { value: 'feature_flag' } });
     fireEvent.change(screen.getByPlaceholderText('value'), { target: { value: 'enabled' } });
     fireEvent.click(screen.getByText('Add'));
 
     expect(await screen.findByDisplayValue('enabled')).toBeInTheDocument();
+  });
+
+  it('shows Raven Ops panel when tab is clicked', async () => {
+    renderWithProviders(<Admin />);
+
+    fireEvent.click(await screen.findByText('Raven Ops'));
+    expect(await screen.findByText('Autonomous Ops (Raven)')).toBeInTheDocument();
+    expect(screen.getByText('Pending Triage Queue')).toBeInTheDocument();
+    expect(screen.getByText('Active Missions Monitor')).toBeInTheDocument();
+  });
+
+  it('shows LLM settings when tab is clicked', async () => {
+    renderWithProviders(<Admin />);
+
+    fireEvent.click(screen.getByText('LLM & Settings'));
+    expect(await screen.findByText('Local Model Mapping')).toBeInTheDocument();
+  });
+
+  it('shows database insights when tab is clicked', async () => {
+    renderWithProviders(<Admin />);
+
+    fireEvent.click(screen.getByText('Database & Audit'));
+    expect(await screen.findByText('Advanced Database Insights')).toBeInTheDocument();
+    expect(screen.getByText('Audit Trail')).toBeInTheDocument();
   });
 });

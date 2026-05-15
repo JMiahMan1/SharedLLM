@@ -1,391 +1,187 @@
 # UI/UX Integration Plan for Raven Stabilization
 
-## Current State Assessment
+## Last Updated: 2026-05-15
 
-### Existing UI Structure (services/ui/)
+## Current State (Completed)
 
+### Architecture
+
+Raven Ops has been fully integrated into the Admin page (`/admin`) with a **tabbed layout** that separates admin concerns:
+
+| Tab | Content | Admin Only |
+|-----|---------|------------|
+| Users & Devices | User CRUD, Discovery Import, Device Assignments | ✅ Yes |
+| Raven Ops | Sentinel control, triage queue, active missions, live trace, audit log | ✅ Yes |
+| LLM & Settings | LLM model config, Global Settings | ✅ Yes |
+| Database & Audit | RAG stats, collection inspection, service log audit trail | ✅ Yes |
+
+### Component Inventory
+
+| Component | Location | Purpose | Status |
+|-----------|----------|---------|--------|
+| `RavenOpsPanel` | `components/settings/RavenOpsPanel.tsx` | Master control panel: suspend/resume, scan frequency, error threshold, TTS config, triage queue, active missions | ✅ Done |
+| `RavenAuditLog` | `components/settings/RavenAuditLog.tsx` | Modal showing historical completed/failed missions with execution logs and results | ✅ Done |
+| `RavenLiveTrace` | `components/settings/RavenLiveTrace.tsx` | WebSocket streaming terminal for live mission telemetry | ✅ Done |
+| `Admin.tsx` | `pages/Admin.tsx` | Tabbed admin layout (Users, Raven, Settings, Database) | ✅ Done |
+
+### Existing Backend Endpoints
+
+| Method | Path | Function | Status |
+|--------|------|----------|--------|
+| GET | `/api/admin/raven/config` | Get Raven config (suspend, interval, threshold) | ✅ Working |
+| PATCH | `/api/admin/raven/config` | Update Raven config | ✅ Working |
+| GET | `/api/admin/raven/tts/voices` | List available TTS voices | ✅ Working |
+| GET | `/api/admin/raven/queue` | Get pending + active missions for triage | ✅ Working |
+| POST | `/api/admin/raven/queue/{id}/execute` | Dispatch pending mission | ✅ Working |
+| GET | `/api/raven/missions` | List all missions (user-facing) | ✅ Working |
+| POST | `/api/raven/missions` | Create user mission | ✅ Working |
+| GET | `/api/raven/missions/{id}` | Get mission detail | ✅ Working |
+| POST | `/api/raven/missions/{id}/kill` | Kill running mission | ✅ Working |
+| PATCH | `/api/raven/missions/{id}` | Update mission | ✅ Working |
+| WS | `/api/raven/missions/{id}/stream` | WebSocket live stream | ✅ Working |
+
+### RavenOpsPanel Capabilities
+
+**Sentinel Control:**
+- Suspend/Resume background worker (`raven_suspended`)
+- Scan frequency: 1min, 5min, hourly, daily
+- Error threshold adjustment
+
+**Local TTS Hardware:**
+- Default engine display (kokoro)
+- Voice style selector
+- Kokoro model provisioning (320MB download)
+
+**Pending Triage Queue:**
+- Lists `admin_fix` missions with `status === 'pending'`
+- Shows target container, error summary, detection timestamp
+- "Run Fix Now" button to dispatch
+
+**Active Missions Monitor:**
+- Shows missions with `status === 'running' | 'executing' | 'queued'`
+- Progress bar, mission type, dispatch timestamp
+- "Watch" button → opens RavenLiveTrace modal
+- "Stop" button → kills mission
+
+**Audit Log Modal:**
+- Lists completed/failed missions sorted by date
+- Click to view execution log (color-coded: reasoning=blue, action=yellow, success=green, error=red)
+- Shows final result payload
+
+**Live Trace Modal:**
+- WebSocket connection to `/api/raven/missions/{id}/stream`
+- Auto-scrolling terminal output
+- Connection status indicator
+- Color-coded log types
+
+### API Service Methods (`services/api.ts`)
+
+```typescript
+// Raven admin endpoints
+getRavenConfig() → RavenConfig
+updateRavenConfig(config) → { status }
+getRavenVoices() → { voices[] }
+downloadRavenModels() → { results[] }
+getAdminRavenQueue() → RavenMission[]
+executeAdminRavenMission(id) → { status, message }
+
+// Raven user endpoints
+getUserMissions() → RavenMission[]
+createUserMission(query, priority) → { status, mission }
+killRavenMission(id) → { status, message }
 ```
-src/
-├── App.tsx                    # Router + global layout
-├── main.tsx                   # Entry point
-├── services/
-│   └── api.ts                 # Axios client (569 lines) — all endpoints
-├── context/
-│   └── AuthContext.tsx        # Auth state
-├── components/
-│   ├── layout/
-│   │   ├── Sidebar.tsx        # Navigation with icon set
-│   │   └── Header.tsx         # User info + theme toggle
-│   ├── ui/
-│   │   ├── Modal.tsx
-│   │   └── HelpTooltip.tsx
-│   └── MarkdownViewer.tsx
-├── pages/
-│   ├── Dashboard.tsx          # Home / device overview
-│   ├── Admin.tsx              # User mgmt, system ops
-│   ├── Identity.tsx           # Identity connections
-│   ├── Communication.tsx      # Notes, calendar, talk
-│   ├── JarvisLab.tsx          ← **Closest to Raven ops**
-│   ├── KnowledgeHub.tsx       # RAG search, docs
-│   ├── Workspaces.tsx         # Git workspace manager
-│   └── Docs.tsx               # Markdown doc viewer
-└── test/                      # Vitest tests
-```
 
-**Technology Stack:**
-- React 19.2 + TypeScript
-- Vite + React Router DOM v7
-- TanStack Query v5 (data fetching & caching)
-- Axios (HTTP client)
-- Tailwind CSS v4 + custom glassmorphism UI
-- Zustand? (no, uses React Query + context)
+### Data Types
 
-**Observability Gap:**  
-The JarvisLab page shows:
-- Health of all services (polling every 5s)
-- Workspace list
-- Smoke/unit test execution buttons
-- Raw log tail via WebSocket (`/api/logs/stream`)
+```typescript
+interface RavenMission {
+  id: number;
+  mission_type: string;        // 'admin_fix' | 'user_task' | 'media_conversion'
+  priority: number;
+  target_container?: string | null;
+  error_summary?: string | null;
+  proposed_mission: string;
+  coding_model?: string | null;
+  status: string;              // 'pending' | 'scheduled' | 'executing' | 'completed' | 'failed' | 'dismissed'
+  progress: number;            // 0-100
+  scheduled_for?: string | null;
+  created_at: string;
+  output_log?: string | null;  // JSON array of log entries or raw string
+  result?: string | null;
+  user_id?: number | null;
+}
 
-**Missing for Raven:**
-- No real-time job queue visibility
-- No per-job progress (iterations, action log)
-- No circuit breaker status per service
-- No inference lock contention metrics
-- No streaming response viewer for Raven's work
-- No job history / audit trail UI
-
----
-
-## UI Refactoring Goals (Modular Architecture)
-
-### Phase 1 — Backend-First (This Sprint)
-Prepare backend endpoints for UI consumption. No frontend rewrite.
-
-**Needed endpoints (new in gateway/main.py):**
-
-1. **Raven Job Status API**
-```
-GET /api/raven/jobs?status=processing&limit=20
-Response: {
-  jobs: [
-    {
-      job_id: string,
-      user_id: string,
-      status: "queued"|"processing"|"completed"|"failed"|"timeout",
-      iteration: 7,
-      created_at: epoch,
-      started_at?: epoch,
-      duration_seconds?: float,
-      last_action: "Step 6: WorkspaceFilePatchRequest -> Updated agent_loop.py",
-      current_task?: string  // what the agent is working on right now
-    }
-  ],
-  queue_depth: { high: 0, normal: 2, low: 0 },
-  inference_lock_held_by?: string | null,
-  circuit_breaker_states: {
-    execution: "closed" | "open" | "half-open",
-    workspace: "...",
-    rag: "...",
-    storage: "...",
-  }
+interface RavenConfig {
+  raven_suspended: boolean;
+  raven_scan_interval: number;   // seconds
+  raven_error_threshold: number;
+  active_coding_model: string | null;
+  system_default_tts_voice: string;
+  system_default_tts_engine: string;
 }
 ```
 
-2. **Raven Job Detail (with streaming chunks)**
-```
-GET /api/raven/jobs/{job_id}
-Response includes:
-  - Full checkpoint data (iteration, action_log, result_summary)
-  - Streaming chunks accumulated so far (if any)
-  - Heartbeat history timestamps
-```
-
-3. **Raven Metrics (Prometheus or JSON)**
-```
-GET /api/raven/metrics
-Returns application-level metrics for dashboard:
-  - jobs_total{status}
-  - jobs_duration_seconds{p50,p95,p99}
-  - inference_lock_wait_seconds
-  - circuit_breaker_failures_total{target}
-  - timeouts_total
-```
-
-4. **Raven Control (admin only)**
-```
-POST /api/raven/jobs/{job_id}/cancel   → moves job to FAILED with "cancelled" error
-POST /api/raven/jobs/{job_id}/replay   → re-queue failed job for retry
-DELETE /api/raven/quarantine            → clear all quarantined files
-```
-
-**Implementation location:** Add to `gateway/main.py` near health endpoints.
-
----
-
-## Phase 2 — Raven Operations Dashboard (new page: `/lab/raven`)
-
-Augment existing JarvisLab with Raven-specific monitoring.
-
-**New sub-tab:** `raven` alongside `overview`, `tests`, `logs`
-
-### Dashboard Sections
-
-#### A) Job Queue Monitor (Top Panel)
-
-A Kanban-style board or table:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ ACTIVE RAVEN JOBS                    QUEUE DEPTH: 3    LOCK: Free (0s wait) │
-├───────────────┬──────────────┬───────────────┬───────────────────────────────┤
-│ Job ID        │ User         │ Iter  │ State   │ Action                      │
-│ abc123        │ jeremiah     │ 7/30  │ Running │ Patching agent_loop.py      │
-│ def456        │ admin        │ 2/30  │ Queued  │ waiting for lock...         │
-│ …             │ …            │ …     │ …       │ …                           │
-└───────────────┴──────────────┴───────┴─────────┴───────────────────────────────┘
-```
-
-**Columns:** Job ID (truncated), User, Iteration (progress), State (badge), Current Action (last tool name).
-
-**Actions (per job):**
-- 🔍 Click row → opens **Job Inspector** modal (full logs, action timeline, result)
-- ⏹ Cancel (admin only)
-- 🔄 Replay (failed jobs)
-
-#### B) Live Agent Trace (Bottom Panel — Collapsible)
-
-Shows **streaming output** of the currently active Raven job in real-time, similar to Tailwind CSS build logs.
-
-```
-[2026-05-11 22:15:42] Job abc123 — Iteration 7/30
-  ▶ Iteration 6: WorkspaceFilePatchRequest → SUCCESS (423ms)
-  ▶ Tool: DockerLogsRequest — fetching logs from sharedllm_gateway...
-  ← LLM: "I see the error. Applying patch to fix timeout logic..."
-  → Payload: {"action":"WorkspaceFilePatchRequest","payload":{...}}
-  ← Response: {"status":"SUCCESS","message":"File patched","sha256":"a1b2..."}
-```
-
-Auto-scroll enabled. Color coding:
-- Blue = agent reasoning
-- Green = tool success
-- Red = tool failure
-- Yellow = warning (timeout, retry)
-
----
-
-### Phase 3 — Workspace File Health & Quarantine Panel
-
-Integrate into Workspaces page:
-
-```
-Workspace: /workspace/SharedLLM
-  ├─ services/gateway/agent_loop.py  [✅ Lint OK] [✅ Tests 12/12]
-  ├─ services/execution/main.py      [⚠ Lint fail: E302]  ← click for details
-  └─ …
-```
-
-Add red badge with count: "Quarantined: 2" → opens quarantine list view with reason and admin override button.
-
----
-
-### Phase 4 — Configuration UI for Raven Settings
-
-Expose new environment flags via Admin page:
-
-```
-[ ] Enable hard timeout (currently 600s)
-[✓] Use streaming inference (reduces VRAM)
-[ ] Enable circuit breakers
-    • Execution: threshold=5, timeout=30s
-    • Workspace: threshold=5, timeout=30s
-    • RAG: threshold=3, timeout=10s
-[ ] Flash attention / GPU optimizations
-```
-
-Editable via toggles → calls `POST /api/settings/bulk` → persisted to Identity DB → live hot-reload in running services.
-
----
-
-## Information Architecture — Component Breakdown
-
-### New Components to Create
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `RavenJobMonitor` | `components/raven/JobMonitor.tsx` | Top-level queue table + refresh |
-| `RavenJobCard` | `components/raven/JobCard.tsx` | Single job row with status badge |
-| `RavenJobInspector` | `components/raven/JobInspector.tsx` | Modal: full timeline, chunks, state |
-| `RavenLiveTrace` | `components/raven/LiveTrace.tsx` | Real-time streaming log viewer |
-| `CircuitBreakerPanel` | `components/raven/CircuitBreakerPanel.tsx` | Health of downstream services |
-| `QuarantinePanel` | `components/raven/QuarantinePanel.tsx` | List of quarantined files + admin actions |
-| `RavenMetricsChart` | `components/raven/MetricsChart.tsx` | Charts: job duration, wait time, timeouts |
-
-### Routing Changes
-
-```tsx
-// App.tsx — add route
-<Route path="/lab/raven" element={<ProtectedRoute requireAdmin={true}><RavenDashboard /></ProtectedRoute>} />
-```
-
-Update JarvisLab tabs to include `raven`:
-
-```tsx
-const tabs = [
-  ['overview', 'Overview'],
-  ['raven', 'Raven Ops'],
-  ['tests', 'Tests'],
-  ['logs', 'Logs'],
-] as const;
-```
-
----
-
-## Data Flow & State Management
-
-**React Query hooks** to encapsulate data fetching:
-
-```typescript
-// hooks/useRavenJobs.ts
-export const useRavenJobs = (status?: string) => {
-  return useQuery({
-    queryKey: ['raven-jobs', status],
-    queryFn: () => api.getRavenJobs(status),
-    refetchInterval: 3000,  // Update every 3s for active jobs
-  });
-};
-
-// hooks/useRavenMetrics.ts
-export const useRavenMetrics = () => {
-  return useQuery({
-    queryKey: ['raven-metrics'],
-    queryFn: () => api.getRavenMetrics(),
-    refetchInterval: 10000, // Slow-refresh
-  });
-};
-```
-
----
-
-## API Extension Plan (gateway/main.py)
-
-Add these routes to `gateway/main.py` near the health endpoints:
-
-```python
-@app.get("/api/raven/jobs")
-async def get_raven_jobs(
-    status: Optional[str] = None,
-    limit: int = 20,
-    x_internal_secret: Optional[str] = Header(default=None),
-):
-    _require_internal_secret(x_internal_secret)
-    # Fetch from Redis: processing + queued lists
-    # Return structured data for UI
-    ...
-
-@app.get("/api/raven/jobs/{job_id}")
-async def get_raven_job_detail(job_id: str, ...):
-    # Return checkpoint + action_log + accumulated chunks
-    ...
-
-@app.get("/api/raven/metrics")
-async def get_raven_metrics(...):
-    # Return dict of counters, gauges, histograms
-    # Could integrate with prometheus_client if desired
-    ...
-
-@app.post("/api/raven/jobs/{job_id}/cancel")
-async def cancel_raven_job(job_id: str, ...):
-    # Mark job as failed, requeue if needed
-    ...
-
-@app.delete("/api/raven/quarantine")
-async def clear_quarantine(workspace_id: Optional[str] = None, ...):
-    # Clear quarantine flags; admin only
-    ...
-```
-
----
-
-## Implementation Sequence (UI)
-
-1. **Week 1:** backend endpoints for job status/metrics (non-blocking, parallel to Slice 1-3 backend work)
-2. **Week 2:** `RavenJobMonitor` + `RavenJobCard` components (basic table)
-3. **Week 2:** `RavenLiveTrace` component — WebSocket or SSE viewer
-4. **Week 3:** `CircuitBreakerPanel` and quarantine UI
-5. **Week 4:** Admin controls and settings UI
-6. **Week 4:** Styling polish + testing + accessibility audit
-
----
-
-## Styling & Theming
-
-The UI uses **glassmorphism** design:
-- Translucent backgrounds: `bg-white/5`, `bg-slate-950`
-- Borders: `border border-white/10`
-- Fonts: `font-mono text-xs` for logs/data
-- Accent colors: `indigo-600` (primary), `emerald-300` (success), `red-300` (error)
-
-New Raven components should use same tokens:
-- Job status badges: 
-  - `bg-blue-500/20 text-blue-300` = processing
-  - `bg-yellow-500/20 text-yellow-300` = queued
-  - `bg-emerald-500/20 text-emerald-300` = completed
-  - `bg-red-500/20 text-red-300` = failed/timeout
-
----
-
-## Testing Strategy
-
-**Unit tests (Vitest):** each component renders without crash, handles loading/error states.
-**Integration tests (Playwright):** 
-- JarvisLab loads Raven tab
-- Live trace updates in real-time
-- Cancel button appears for admin and actually cancels job
-
-Place tests alongside components or in `test/` mirroring structure.
-
----
-
-## Metrics & Alerting Integration
-
-Backend exposes `/api/raven/metrics`. UI charts can use:
-- `recharts` library (already common in React ecosystem) or
-- Simple CSS bar charts to avoid dependency bloat
-
-JarvisLab → Raven tab will display:
-- Job throughput (jobs/hour)
-- Average iteration count
-- Top failing actions (bar chart)
-- Lock contention rate (if >10% of requests wait >30s → highlight in red)
-
----
-
-## Backward Compatibility
-
-All new backend endpoints:
-- Require `X-Internal-Secret` header (same as other admin endpoints)
-- Check `is_admin` from resolved identity when applicable
-- Do not modify existing API responses → no breaking changes
-
----
-
-## Success Metrics
-
-After UI integration:
-- Human operator can determine Raven's status at a glance (<2s)
-- Drilling into a running job reveals exact iteration history
-- Quarantined files visible and clearable without DB access
-- Circuit breaker status visible before troubleshooting
-- Job cancellation reduces wasted resources during runaway
-
----
-
-## Next Steps
-
-1. **Immediate:** Implement backend `/api/raven/jobs` and `/api/raven/metrics` in `gateway/main.py`
-2. **Week 1:** Build `RavenJobMonitor` table in isolation
-3. **Week 1:** Add WebSocket endpoint `/api/raven/jobs/{job_id}/stream` for live traces
-4. **Week 2:** Integrate with existing JarvisLab layout
-5. **Week 2-3:** Iterate on UX with human operator
-6. **Week 4:** Full E2E tests + documentation
+## What's Working
+
+- ✅ RavenOpsPanel fully integrated into Admin page (tabbed layout)
+- ✅ Sentinel suspend/resume toggle
+- ✅ Dynamic scan frequency configuration
+- ✅ Error threshold control
+- ✅ TTS voice selection and model provisioning
+- ✅ Pending triage queue with dispatch control
+- ✅ Active missions monitor with progress bars
+- ✅ Live WebSocket trace for running missions
+- ✅ Audit log modal for historical missions
+- ✅ Kill mission functionality
+- ✅ RBAC: Admin page requires `is_admin`
+- ✅ Sidebar filters admin-only routes for non-admin users
+
+## What's Next (Planned)
+
+### Phase 2 — User-Facing Raven Dashboard
+- Non-admin users should see a simplified view of their own missions
+- No config changes, no dispatch control, no kill capability
+- Read-only mission status and log viewing
+
+### Phase 3 — Workspace Quarantine Integration
+- Quarantine badges in Workspaces.tsx for broken workspaces
+- Rollback button to revert last Raven patch via git history
+
+### Phase 4 — Enhanced Observability
+- Mission duration metrics
+- Top failing actions chart
+- Lock contention rate display
+- Inference queue depth indicator
+
+## Test Coverage
+
+### Backend Tests
+- `services/tests/test_raven_hardening.py` — Queue reclaim, dead letter, secret sanitization, shell blocklist, git safety
+- `services/tests/test_raven_routing.py` — Model/prompt routing for Raven queries
+- `services/tests/test_raven_timeout_behavior.py` — Timeout thresholds, heartbeat scheduling
+- `services/gateway/tests/test_raven_streaming.py` — WebSocket stream endpoint
+- `services/gateway/tests/test_talk_monitor.py` — Talk monitor logic
+
+### Frontend Tests
+- `services/ui/src/pages/Admin.test.tsx` — Admin page rendering, user CRUD, device assignment
+- `services/ui/src/services/api.test.ts` — API service unit tests
+
+### CI Configuration
+- `soa_tests.yml` — Runs Raven tests in GitHub Actions with `qwen3:8b` assistant model, `qwen2.5-coder:7b` coding model
+- `ui-tests.yml` — Runs Vitest tests for UI components
+
+## Workspace Path Configuration
+
+Workspace paths are **never hardcoded**. They are:
+- Configured by users in the UI via workspace settings
+- Resolved per-request from the workspace registry
+- `WORKSPACE_ROOT` defaults to empty string in execution handlers (must be set via env or resolved from workspace config)
+- Tests use `tmp_path` fixtures to isolate workspace operations
+- Live testing uses `~/workspace` on the server (user-owned directory)
+
+## Model Configuration
+
+- **Assistant model:** `qwen3:8b` (tested, stable)
+- **Coding model:** `qwen2.5-coder:7b` (proven for code tasks)
+- **Librarian model:** `qwen3:8b`
+- Models are configurable in the UI under LLM & Settings tab
