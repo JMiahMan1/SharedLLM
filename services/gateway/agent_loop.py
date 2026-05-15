@@ -8,15 +8,15 @@ import redis.asyncio as redis
 from typing import Optional, Any, Dict, List, Callable, Awaitable
 
 try:
-    from .history import REDIS_URL
-    from .config import (
+    from history import REDIS_URL
+    from config import (
         OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
         STORAGE_SVC, INTERNAL_SECRET,
         RAVEN_MAX_TOTAL_SECONDS,
         RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
     )
-    from .schemas import ResolvedCredentials
-    from .llm_providers import BaseLLMProvider, OpenRouterProvider
+    from schemas import ResolvedCredentials
+    from llm_providers import BaseLLMProvider, OpenRouterProvider
 except (ImportError, ValueError):
     from history import REDIS_URL
     from config import (
@@ -219,7 +219,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
 
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from .config import OLLAMA_TIMEOUT
+    from config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":

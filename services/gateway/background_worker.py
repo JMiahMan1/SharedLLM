@@ -10,21 +10,21 @@ import httpx
 import os
 from typing import Any, Dict, Optional
 try:
-    from .orchestrator import process_full_orchestration
-    from .config import SYSTEM_IDENTITY, INTERNAL_SECRET
+    from orchestrator import process_full_orchestration
+    from config import SYSTEM_IDENTITY, INTERNAL_SECRET
 except (ImportError, ValueError):
     from orchestrator import process_full_orchestration
     from config import SYSTEM_IDENTITY, INTERNAL_SECRET
 
 
 try:
-    from .messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
+    from messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
 except (ImportError, ValueError):
     from messaging import InferenceJobQueue, TIER2_SEMAPHORE, TIER3_LOCK
 
 log = logging.getLogger("gateway.background_worker")
 
-from .config import (
+from config import (
     INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAVEN_MAX_TOTAL_SECONDS,
     RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, SYSTEM_IDENTITY,
 )
