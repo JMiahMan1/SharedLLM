@@ -1,8 +1,12 @@
 # services/execution/handlers/note.py
 import logging
-import requests
+import sys
 import os
+import requests
 import xml.etree.ElementTree as ET
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from config import LOCAL_NOTES_ROOT as _LOCAL_NOTES_ROOT
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +20,7 @@ except ImportError:
 log = logging.getLogger("execution.note")
 
 DEFAULT_NOTES_DIRS = ["Notes"]
-LOCAL_NOTES_ROOT = os.getenv("LOCAL_NOTES_ROOT", "/app/data/notes")
+LOCAL_NOTES_ROOT = _LOCAL_NOTES_ROOT or "/app/data/notes"
 
 async def handle_note(req: NoteRequest) -> ExecutionResult:
     storage_mode = getattr(req, "storage", "nextcloud")

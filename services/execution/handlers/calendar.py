@@ -1,7 +1,11 @@
 # services/execution/handlers/calendar.py
 import os
+import sys
 import logging
 import asyncio
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from config import TIMEZONE
 from datetime import datetime, timedelta, date
 from dateutil import tz
 
@@ -14,7 +18,7 @@ except ImportError:
 
 log = logging.getLogger("execution.calendar")
 
-LOCAL_TZ_NAME = os.getenv("TIMEZONE", "America/Phoenix")
+LOCAL_TZ_NAME = TIMEZONE
 
 def _get_local_tz():
     return tz.gettz(LOCAL_TZ_NAME)

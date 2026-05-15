@@ -1,8 +1,12 @@
 # services/execution/handlers/browser.py
 import logging
 import os
+import sys
 import html2text
 import httpx
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from config import SEARXNG_URL as _SEARXNG_URL
 from urllib.parse import urlencode
 from playwright.async_api import async_playwright
 from typing import Optional
@@ -14,7 +18,12 @@ except ImportError:
 
 log = logging.getLogger("execution.browser")
 
-SEARXNG_URL = os.getenv("SEARXNG_URL", os.getenv("WHOOGLE_URL", "https://search.sumemail.com/")).rstrip("/")
+if not _SEARXNG_URL:
+    log.critical("FATAL: SEARXNG_URL environment variable is not set. Refusing to start.")
+    import sys
+    sys.exit(1)
+
+SEARXNG_URL = _SEARXNG_URL.rstrip("/")
 
 DEFAULT_ENGINES = "google,bing,duckduckgo"
 DEFAULT_LANGUAGE = "en"

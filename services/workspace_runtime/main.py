@@ -12,12 +12,19 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
+
+from config import (
+    INTERNAL_SECRET, IDENTITY_SVC_URL, STORAGE_SVC_URL,
+    WORKSPACE_REGISTRY_PATH as _WRP, WORKSPACE_ROOT as _WR,
+    WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS, WORKSPACE_RUNTIME_FILE_READ_LIMIT,
+)
 
 try:
     from .models import Workspace
@@ -32,15 +39,7 @@ except (ImportError, ValueError):
 log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
-
-IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
-STORAGE_SVC_URL = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
-WORKSPACE_REGISTRY_PATH = os.getenv("WORKSPACE_REGISTRY_PATH", "/app/config/workspaces.json")
+WORKSPACE_REGISTRY_PATH = _WRP or "/app/config/workspaces.json"
 _DEFAULT_WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
 
 def get_workspace_root() -> Path:
@@ -62,8 +61,8 @@ def get_workspace_root() -> Path:
     return _DEFAULT_WORKSPACE_ROOT
 
 WORKSPACE_ROOT = get_workspace_root() # Initial value
-DEFAULT_PYTEST_TIMEOUT_SECONDS = int(os.getenv("WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "90"))
-DEFAULT_FILE_READ_LIMIT = int(os.getenv("WORKSPACE_RUNTIME_FILE_READ_LIMIT", "20000"))
+DEFAULT_PYTEST_TIMEOUT_SECONDS = WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS
+DEFAULT_FILE_READ_LIMIT = WORKSPACE_RUNTIME_FILE_READ_LIMIT
 DEFAULT_PROTECTED_BRANCH_PATTERNS = [
     pattern.strip()
     for pattern in os.getenv(
@@ -1957,7 +1956,8 @@ async def git_pull_webhook(
     Automated webhook endpoint for triggering a git pull.
     Expects a secret in the X-Webhook-Secret header or as a 'token' query parameter.
     """
-    webhook_secret = os.getenv("GIT_WEBHOOK_SECRET")
+    from config import GIT_WEBHOOK_SECRET
+    webhook_secret = GIT_WEBHOOK_SECRET
     
     # Resolve workspace using admin context (since it's a system webhook)
     try:

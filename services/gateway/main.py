@@ -159,7 +159,8 @@ except (ImportError, ValueError):
         from history import update_history, ping_redis
         from prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
         from messaging import InferenceJobQueue, JobStatus
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+from .config import REDIS_URL as _REDIS_URL
+REDIS_URL = _REDIS_URL
 job_queue = InferenceJobQueue(REDIS_URL)
 
 # REDIS moved below imports
@@ -177,28 +178,13 @@ except ImportError as e:
         log.error(f"FATAL: Background worker import failed: {e2}")
         raven_worker = None
 
-# --- Configuration ---
-IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
-EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://127.0.0.1:8003")
-RAG_SVC = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
-STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://127.0.0.1:8005")
-LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://127.0.0.1:8006")
-WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://127.0.0.1:8007")
-CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://sharedllm_control_plane:8008")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
-# FAST_PATH_THRESHOLD is now fetched dynamically from Identity.
-# Fallback value for startup or error:
-_DEFAULT_FAST_PATH_THRESHOLD = 0.85
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-# ---- Dynamic Model Config ----
-CONFIG = {
-    "assistant_model": "",
-    "coding_model": "",
-    "librarian_model": ""
-}
+# --- Configuration (from shared config) ---
+from .config import (
+    IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
+    LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
+    INTERNAL_SECRET, OLLAMA_URL, CONFIG, FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
+)
+LOGGING_SVC_URL = LOGGING_SVC
 
 # Global Inference Lock (Strategy 8: Singleton Queue)
 async def fetch_global_setting(key: str, default: str = "") -> str:
@@ -238,9 +224,9 @@ async def get_llm_settings() -> Dict[str, str]:
 
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
+    from .config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
-    import os
-    timeout = float(settings.get("ollama_timeout", os.getenv("OLLAMA_TIMEOUT", "600")))
+    timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":
         return OpenRouterProvider(
             api_key=settings.get("llm_cloud_api_key", ""),
@@ -849,7 +835,8 @@ def is_time_or_date_query(query: str) -> bool:
 
 
 def build_time_or_date_response(query: str) -> str:
-    tz_name = os.getenv("TIMEZONE", "America/Phoenix")
+    from .config import TIMEZONE
+    tz_name = TIMEZONE
     try:
         now = datetime.now(ZoneInfo(tz_name))
     except Exception:
@@ -3213,10 +3200,10 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):
 @app.get("/api/config/models")
 async def get_ollama_models():
     """Proxy to Ollama to list available tags."""
-    OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    from .config import OLLAMA_URL as _OLLAMA_URL
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            resp = await client.get(f"{_OLLAMA_URL}/api/tags")
             if resp.status_code == 200:
                 data = resp.json()
                 models = sorted(list(set(m["name"] for m in data.get("models", []))))

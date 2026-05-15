@@ -1,35 +1,36 @@
-import os
 import sys
+import os
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
-EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
-RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
-STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://storage:8005")
-LOGGING_SVC = os.getenv("LOGGING_SVC_URL", "http://logging:8006")
-WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime:8007")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
-if not INTERNAL_SECRET:
-    import logging as _boot_log
-    _boot_log.basicConfig(level="CRITICAL")
-    _boot_log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
-    sys.exit(1)
+from config import (
+    INTERNAL_SECRET,
+    OLLAMA_URL,
+    IDENTITY_SVC_URL as IDENTITY_SVC,
+    EXECUTION_SVC_URL as EXECUTION_SVC,
+    RAG_SVC_URL as RAG_SVC,
+    STORAGE_SVC_URL as STORAGE_SVC,
+    LOGGING_SVC_URL,
+    WORKSPACE_RUNTIME_SVC_URL as WORKSPACE_RUNTIME_SVC,
+    CONTROL_PLANE_URL,
+    SEARXNG_URL,
+    LLAMA_SERVER_PROXY_URL,
+    ASSISTANT_MODEL,
+    CODING_MODEL,
+    LIBRARIAN_MODEL,
+    RAVEN_MAX_TOTAL_SECONDS,
+    RAVEN_ITERATION_TIMEOUT,
+    RAVEN_HEARTBEAT_INTERVAL,
+    RAVEN_HUNG_THRESHOLD,
+    REDIS_URL,
+    FAST_PATH_THRESHOLD,
+)
 
 OLLAMA_TIMEOUT = 600.0
-
-# Raven job constraints
-RAVEN_MAX_TOTAL_SECONDS = int(os.getenv("RAVEN_MAX_TOTAL_SECONDS", "1800"))  # 30 minutes for 35B
-RAVEN_ITERATION_TIMEOUT = int(os.getenv("RAVEN_ITERATION_TIMEOUT", "600"))  # 10 minutes per iteration
-RAVEN_HEARTBEAT_INTERVAL = int(os.getenv("RAVEN_HEARTBEAT_INTERVAL", "30"))  # seconds
-RAVEN_HUNG_THRESHOLD = int(os.getenv("RAVEN_HUNG_THRESHOLD", "600"))  # seconds
+SYSTEM_IDENTITY = "raven_system"
 
 CONFIG = {
-    "assistant_model": os.getenv("ASSISTANT_MODEL", ""),
-    "librarian_model": os.getenv("LIBRARIAN_MODEL", ""),
-    "coding_model": os.getenv("CODING_MODEL", ""),
+    "assistant_model": ASSISTANT_MODEL or "",
+    "librarian_model": LIBRARIAN_MODEL or "",
+    "coding_model": CODING_MODEL or "",
 }
-
-# System account for autonomous actions
-SYSTEM_IDENTITY = "raven_system"

@@ -1,4 +1,8 @@
 import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from config import WORKSPACE_DATABASE_URL
 from sqlmodel import Session, SQLModel, create_engine
 from sqlalchemy import inspect, text
 try:
@@ -6,7 +10,7 @@ try:
 except (ImportError, ValueError):
     from models import Workspace
 
-DATABASE_URL = os.getenv("WORKSPACE_DATABASE_URL", "sqlite:///./workspace_runtime.db")
+DATABASE_URL = WORKSPACE_DATABASE_URL
 engine = create_engine(
     DATABASE_URL, 
     connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in DATABASE_URL else {}

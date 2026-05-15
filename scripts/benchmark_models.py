@@ -3,7 +3,7 @@ import time
 import json
 import os
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://jeremiah-home-desktop.local:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 PROMPT = """
 Write a Python class 'MultiTenantLock' that uses Redis (redis-py) to implement a distributed lock.
@@ -13,7 +13,7 @@ Ensure it handles timeouts and uses a TTL to prevent deadlocks.
 Provide only the code.
 """
 
-MODELS = ["qwen2.5-coder:7b", "qwen3.5:9b"]
+MODELS = [m.strip() for m in os.getenv("BENCHMARK_MODELS", "qwen3:8b,qwen2.5-coder:7b").split(",") if m.strip()]
 
 async def run_benchmark():
     async with httpx.AsyncClient(timeout=120.0) as client:
