@@ -607,8 +607,15 @@ async def get_documentation(
     base_dir = Path(__file__).parent.parent.parent
     docs_dir = base_dir / "docs"
     
-    # Whitelist of allowed files
-    allowed_root_files = ["EXAMPLES.md", "README.md", "TESTING.md"]
+    # Whitelist of allowed root-level files (expanded for all UI-referenced docs)
+    allowed_root_files = [
+        "EXAMPLES.md", "README.md", "TESTING.md",
+        "api_reference.md", "integrations.md", "architecture.md",
+        "workspace_runtime.md", "autonomous_protocols.md",
+        "RAVEN_AUDIT_BLUEPRINT.md", "UI_RAVEN_INTEGRATION_PLAN.md",
+        "RAVEN_CAPABILITY_GAP_ANALYSIS.md", "DEPLOY_RAVEN_HARDENING_02.md",
+        "raven_ops_implementation.md",
+    ]
     
     # Normalize doc_name
     if not doc_name.endswith(".md"):
@@ -2359,6 +2366,28 @@ async def proxy_delete_note(request: Request):
         "action": "delete",
         "title": body.get("title"),
         "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+
+
+@app.post("/api/communication/notes/list")
+async def proxy_list_notes(request: Request):
+    body = await request.json() if request.method == "POST" else {}
+    payload = {
+        "action": "list",
+        "storage": body.get("storage", "nextcloud"),
+        "directories": body.get("directories"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+
+
+@app.post("/api/communication/notes/sync_rag")
+async def proxy_sync_notes_rag(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "sync_rag",
+        "storage": body.get("storage", "nextcloud"),
+        "directories": body.get("directories"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
 

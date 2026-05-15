@@ -370,7 +370,8 @@ export const api = {
   getLogWebSocket(): WebSocket {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    return new WebSocket(`${protocol}//${host}/api/logs/stream`);
+    const token = localStorage.getItem('jarvis_api_key') || '';
+    return new WebSocket(`${protocol}//${host}/api/logs/stream?token=${encodeURIComponent(token)}`);
   },
 
   async getSettings(): Promise<GlobalSetting[]> {
@@ -498,8 +499,8 @@ export const api = {
     return resp.data;
   },
 
-  async readNote(title: string, storage?: string): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/read', { title, storage });
+  async readNote(title: string, storage?: string, path?: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/read', { title, storage, path });
     return resp.data;
   },
 
@@ -508,8 +509,18 @@ export const api = {
     return resp.data;
   },
 
-  async deleteNote(title: string, storage?: string): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/delete', { title, storage });
+  async deleteNote(title: string, storage?: string, path?: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/delete', { title, storage, path });
+    return resp.data;
+  },
+
+  async listNotes(payload: { storage?: string; directories?: string[] } = {}): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/list', payload);
+    return resp.data;
+  },
+
+  async syncNotesRag(payload: { storage?: string; directories?: string[] } = {}): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/sync_rag', payload);
     return resp.data;
   },
 
