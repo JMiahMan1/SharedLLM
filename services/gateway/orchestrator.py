@@ -58,6 +58,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
     "storageindexrequest": (STORAGE_SVC, "/index/full"),
     "logbookrequest": (EXECUTION_SVC, "/execute/ha_logbook"),
+    "executionlogrequest": (EXECUTION_SVC, "/execute/logs"),
 }
 
 SINGLE_TURN_TOOL_GUIDE = """
@@ -72,6 +73,7 @@ SINGLE_TURN_TOOL_GUIDE = """
 - File: WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest
 - Storage: StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest
 - Home Assistant: LightControlRequest, MediaPlayRequest, MediaStatusRequest (for "what's playing"), LogbookRequest (for device logs)
+- Verification: ExecutionLogRequest (use to verify a task was actually performed - filters by service/keyword)
 
 # OUTPUT FORMAT (MANDATORY)
 ```json
