@@ -25,7 +25,7 @@ except (ImportError, ValueError):
 log = logging.getLogger("gateway.background_worker")
 
 from config import (
-    INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAVEN_MAX_TOTAL_SECONDS,
+    INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC, RAVEN_MAX_TOTAL_SECONDS,
     RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, SYSTEM_IDENTITY,
 )
 
@@ -64,7 +64,8 @@ class RavenWorker:
         self._health_task = asyncio.create_task(self._health_loop())
         self._inference_task = asyncio.create_task(self._inference_loop())
         self._talk_task = asyncio.create_task(self._talk_monitor_loop())
-        log.info("Raven Background Worker (Health + Inference + Talk Monitor) started.")
+        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+        log.info("Raven Background Worker (Health + Inference + Talk Monitor + Cleanup) started.")
 
     async def _recover_orphaned_missions(self):
         """
@@ -489,6 +490,101 @@ class RavenWorker:
         while self.is_running:
             await asyncio.sleep(30)
             await self.job_queue.heartbeat_job(job_id)
+
+    async def _cleanup_loop(self):
+        """Periodic cleanup: HA entity sync, orphaned RAG entries, stale Redis cache keys."""
+        CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "300"))  # Default 5 min
+        log.info(f"Cleanup loop started (interval={CLEANUP_INTERVAL}s).")
+        
+        while self.is_running:
+            try:
+                await self._run_cleanup()
+            except Exception as e:
+                log.error(f"Cleanup loop error: {e}")
+            
+            # Sleep in small increments to allow signal handling
+            for _ in range(CLEANUP_INTERVAL):
+                if not self.is_running:
+                    break
+                await asyncio.sleep(1)
+        
+        log.info("Cleanup loop stopped.")
+
+    async def _run_cleanup(self):
+        """Single cleanup pass: sync HA entities, prune orphans, clean Redis cache."""
+        from ha_state_cache import get_redis
+        
+        # 1. Fetch all users from Identity to sync their HA entities
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if resp.status_code != 200:
+                    return
+                users = resp.json()
+        except Exception as e:
+            log.error(f"Cleanup: failed to fetch users: {e}")
+            return
+        
+        r = get_redis()
+        total_orphaned = 0
+        
+        for user in users:
+            username = user.get("username", "")
+            if not username:
+                continue
+            
+            ha_url = user.get("ha_url")
+            ha_token = user.get("ha_token")
+            if not ha_url or not ha_token:
+                continue
+            
+            try:
+                # Fetch live entities from HA
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(
+                        f"{EXECUTION_SVC}/discovery/entities",
+                        params={"ha_url": ha_url, "ha_token": ha_token},
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    entities = data.get("entities", []) if isinstance(data, dict) else []
+                
+                if not entities:
+                    continue
+                
+                # Sync to RAG (triggers orphan cleanup in RAG collection)
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    sync_resp = await client.post(
+                        f"{RAG_SVC}/rag/sync/ha",
+                        json={"entities": entities, "user_id": username},
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                    if sync_resp.status_code == 200:
+                        result = sync_resp.json()
+                        orphaned = result.get("orphaned_entity_ids", [])
+                        total_orphaned += len(orphaned)
+                        
+                        # Clean up orphaned Redis cache keys
+                        for eid in orphaned:
+                            try:
+                                r.delete(f"ha:state:{eid}")
+                            except Exception:
+                                pass
+                
+                # Update Redis cache with fresh states
+                from ha_state_cache import cache_all_states
+                cache_all_states(entities)
+                
+            except Exception as e:
+                log.error(f"Cleanup: failed for user {username}: {e}")
+        
+        if total_orphaned > 0:
+            log.info(f"Cleanup pass complete: removed {total_orphaned} orphaned entity entries across all users")
 
 # Global instance
 worker = RavenWorker()
