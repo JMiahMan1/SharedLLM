@@ -317,6 +317,23 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 payload = tool_data.get("payload", tool_data)
                 payload["user_context"] = creds.model_dump()
                 
+                # Auto-resolve entity for announcements if LLM omitted entity target
+                if action == "announcementrequest" and not payload.get("entity_id") and not payload.get("device_name"):
+                    # Extract device name from query: look for patterns like "on the X", "to X", "via X"
+                    import re
+                    device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|cast|chrome))", query)
+                    if not device_match:
+                        device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?((?:Office|Living Room|Loft|Bedroom|Kitchen|Bathroom)[A-Za-z\s]*?)(?:\b)", query)
+                    if device_match:
+                        device_name = device_match.group(1).strip()
+                        # Append device type if not already included
+                        if not any(t in device_name.lower() for t in ["tv", "speaker", "display", "cast", "chrome"]):
+                            type_match = re.search(r"(speaker|tv|display|cast|chrome)", query, re.IGNORECASE)
+                            if type_match:
+                                device_name += " " + type_match.group(1)
+                        payload["device_name"] = device_name
+                        log.info(f"[_single_turn_inference] Auto-resolved device_name='{device_name}' from query")
+                
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                     if resp.status_code == 200:
