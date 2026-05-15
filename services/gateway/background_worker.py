@@ -99,7 +99,7 @@ class RavenWorker:
     async def _health_loop(self):
         while self.is_running:
             try:
-                from agent_loop import get_dynamic_llm_settings
+                from gateway.agent_loop import get_dynamic_llm_settings
                 settings = await get_dynamic_llm_settings()
                 
                 is_suspended = settings.get("raven_suspended", "false").lower() == "true"
