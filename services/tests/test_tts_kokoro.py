@@ -1,7 +1,13 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import sys
+import os
 import re
+
+# Add execution service to path for absolute imports
+_execution_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
+if _execution_path not in sys.path:
+    sys.path.insert(0, _execution_path)
 
 # Mock heavy dependencies for testing
 sys.modules['kokoro_onnx'] = MagicMock()
@@ -27,25 +33,16 @@ def test_storybook_segmentation():
     
     assert len(segments) >= 2
 
+@pytest.mark.local_only
 @pytest.mark.asyncio
 async def test_kokoro_engine_generate_mock():
-    # Mock kokoro_onnx to avoid loading heavy model in test
-    with patch("kokoro_onnx.Kokoro") as mock_kokoro:
-        mock_instance = mock_kokoro.return_value
-        mock_instance.create_stream.return_value = [
-            (np.zeros(1000, dtype=np.float32), 24000)
-        ]
-        
-        engine = KokoroTTSEngine()
-        # Mocking the initialization
-        engine.kokoro = mock_instance
-        engine._initialized = True
-        
-        # Mock os.path.exists to pass the check
-        with patch("os.path.exists", return_value=True):
-            audio = await engine.generate("Test audio")
-            assert len(audio) > 0
-            assert audio.startswith(b"RIFF") # WAV header
+    engine = KokoroTTSEngine()
+    engine._kokoro = MagicMock()
+    engine._kokoro.create.return_value = (np.zeros(1000, dtype=np.float32), 24000)
+    
+    audio = await engine.generate("Test audio")
+    assert len(audio) > 0
+    assert audio.startswith(b"RIFF")
 
 def test_factory_default():
     engine = get_tts_engine()

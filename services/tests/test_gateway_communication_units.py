@@ -1,8 +1,18 @@
+import os
 import json
 from unittest.mock import AsyncMock
 
 import pytest
 from starlette.requests import Request
+
+os.environ.setdefault("INTERNAL_SECRET", "test-secret")
+os.environ.setdefault("OLLAMA_URL", "http://ollama")
+os.environ.setdefault("IDENTITY_SVC_URL", "http://identity")
+os.environ.setdefault("EXECUTION_SVC_URL", "http://execution")
+os.environ.setdefault("RAG_SVC_URL", "http://rag")
+os.environ.setdefault("STORAGE_SVC_URL", "http://storage")
+os.environ.setdefault("LOGGING_SVC_URL", "http://logging")
+os.environ.setdefault("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime")
 
 import gateway.main as gateway_main
 
@@ -13,6 +23,7 @@ def _request_with_auth() -> Request:
             "type": "http",
             "method": "POST",
             "path": "/api/communication/talk/messages",
+            "query_string": b"",
             "headers": [(b"authorization", b"Bearer test-token")],
         }
     )
