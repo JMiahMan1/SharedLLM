@@ -1,29 +1,17 @@
 # services/execution/handlers/video.py
 import logging
 import asyncio
+import subprocess
+import json
 import re
 try:
-    import yt_dlp
     import ha_client
     from schemas import VideoPlayRequest, ExecutionResult
 except ImportError:
-    import yt_dlp
     import ha_client
     from schemas import VideoPlayRequest, ExecutionResult
 
 log = logging.getLogger("execution.video")
-
-YDL_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "extract_flat": False,
-    # Single-file MP4 with h264/aac for maximum Cast/AndroidTV compatibility
-    "format": "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best",
-    "socket_timeout": 15,
-    "retries": 3,
-    "fragment_retries": 3,
-    "noplaylist": True,  # Force single video extraction even for playlist URLs
-}
 
 
 def extract_video_url(query: str) -> str | None:
@@ -35,50 +23,90 @@ def extract_video_url(query: str) -> str | None:
 
 async def search_youtube(query: str) -> str | None:
     """Search YouTube and return the webpage URL of the top result."""
-    opts = {**YDL_OPTS, "default_search": "ytsearch1"}
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(query, download=False)
-            if not info:
-                return None
-            if info.get("entries"):
-                entry = info["entries"][0]
-                url = entry.get("webpage_url") or entry.get("original_url")
-                if url:
-                    log.info(f"[video] YouTube search '{query}' -> {url}")
-                    return url
+        proc = await asyncio.create_subprocess_exec(
+            "yt-dlp", "--dump-json", "--no-download",
+            f"ytsearch1:{query}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0 and stdout:
+            # yt-dlp outputs one JSON line per result
+            lines = stdout.decode().strip().split("\n")
+            for line in lines:
+                try:
+                    info = json.loads(line)
+                    if info.get("webpage_url"):
+                        url = info["webpage_url"]
+                        log.info(f"[video] YouTube search '{query}' -> {url}")
+                        return url
+                except json.JSONDecodeError:
+                    continue
     except Exception as e:
         log.error(f"[video] YouTube search failed: {e}")
     return None
 
 
 async def get_stream_url(video_url: str) -> str | None:
-    """Extract a direct stream URL from a video page."""
-    opts = {**YDL_OPTS, "skip_download": True}
+    """Extract a direct stream URL from a video page using yt-dlp CLI."""
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            if not info:
-                log.warning(f"[video] yt-dlp returned no info for {video_url}")
-                return None
-            
-            url = info.get("url", "")
-            ext = info.get("ext", "")
-            log.info(f"[video] yt-dlp: url={str(url)[:80]}, ext={ext}")
-            
-            if url and url.startswith("http") and ext == "mp4":
-                log.info(f"[video] Found MP4 stream URL")
-                return url
-            if url and url.startswith("http"):
-                log.info(f"[video] Using resolved URL (ext={ext})")
-                return url
-            
-            fallback = info.get("webpage_url") or info.get("original_url") or video_url
-            log.warning(f"[video] No stream URL found, falling back to {fallback}")
-            return fallback
+        proc = await asyncio.create_subprocess_exec(
+            "yt-dlp", "--dump-json", "--no-download",
+            "-f", "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best",
+            "--no-playlist",
+            video_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        
+        if proc.returncode != 0:
+            log.error(f"[video] yt-dlp failed: {stderr.decode()[:200]}")
+            return None
+        
+        if not stdout:
+            log.warning(f"[video] yt-dlp returned no output for {video_url}")
+            return None
+        
+        # Parse JSON output
+        info = json.loads(stdout.decode())
+        url = info.get("url", "")
+        ext = info.get("ext", "")
+        log.info(f"[video] yt-dlp CLI: url={str(url)[:80]}, ext={ext}")
+        
+        if url and url.startswith("http") and ext == "mp4":
+            log.info(f"[video] Found MP4 stream URL")
+            return url
+        if url and url.startswith("http"):
+            log.info(f"[video] Using resolved URL (ext={ext})")
+            return url
+        
+        fallback = info.get("webpage_url") or info.get("original_url") or video_url
+        log.warning(f"[video] No stream URL found, falling back to {fallback}")
+        return fallback
     except Exception as e:
         log.error(f"[video] Stream extraction failed: {e}", exc_info=True)
         return None
+
+
+async def get_video_title(video_url: str) -> str:
+    """Get video title using yt-dlp CLI."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "yt-dlp", "--dump-json", "--no-download",
+            "--no-playlist",
+            video_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if stdout:
+            info = json.loads(stdout.decode())
+            return info.get("title", video_url)
+    except:
+        pass
+    return video_url
 
 
 async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
@@ -107,14 +135,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
         )
 
     # Step 3: Get video title for feedback
-    title = req.query
-    try:
-        title_opts = {**YDL_OPTS, "skip_download": True}
-        with yt_dlp.YoutubeDL(title_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            title = info.get("title", req.query) if info else req.query
-    except:
-        pass
+    title = await get_video_title(video_url)
 
     # Step 4: Power on the device
     state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
