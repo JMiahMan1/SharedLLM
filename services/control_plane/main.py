@@ -41,6 +41,10 @@ def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Interna
 def health():
     return {"status": "ok", "service": "control_plane"}
 
+@app.get("/control_plane/health")
+def health_prefixed():
+    return health()
+
 
 # ─── Container Management ──────────────────────────────────────────────────────
 

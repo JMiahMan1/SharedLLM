@@ -356,13 +356,13 @@ async def execute_docker(req: DockerComposeRequest):
     
     if req.action == "up":
         import subprocess
-        log.info(f"[docker] Running docker-compose up -d for services: {services}")
+        log.info(f"[docker] Running docker-compose up -d --build for services: {services}")
         try:
             # We run this from the workspace root where docker-compose.yml is
-            cmd = ["docker-compose", "up", "-d"] + list(services)
+            cmd = ["docker-compose", "up", "-d", "--build"] + list(services)
             res = subprocess.run(cmd, capture_output=True, text=True, cwd="/workspace/SharedLLM")
             if res.returncode == 0:
-                return _ok(f"Docker Compose up -d successful for {len(services)} services.", {"output": res.stdout})
+                return _ok(f"Docker Compose up -d --build successful for {len(services)} services.", {"output": res.stdout})
             else:
                 return _fail(f"Docker Compose up failed (code {res.returncode})", "docker", {"error": res.stderr, "output": res.stdout})
         except Exception as e:
