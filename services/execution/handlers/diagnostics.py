@@ -46,3 +46,57 @@ async def handle_get_system_logs(req_data: dict) -> ExecutionResult:
             )
     except Exception as e:
         return ExecutionResult(status="FAILURE", message=f"Diagnostics error: {e}", service="diagnostics")
+
+
+async def handle_execution_logs(req_data: dict) -> ExecutionResult:
+    """
+    Query Execution service logs with optional filtering by handler/service and keyword.
+    Designed for LLM verification of task execution and troubleshooting.
+    """
+    lines = req_data.get("lines", 100)
+    service_filter = req_data.get("service")
+    keyword = req_data.get("keyword")
+    
+    try:
+        cmd = ["docker", "logs", "--tail", str(lines), "sharedllm_execution"]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"Failed to retrieve execution logs: {result.stderr}",
+                service="execution_logs"
+            )
+        
+        log_lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
+        
+        # Filter by service/handler if specified
+        if service_filter:
+            log_lines = [line for line in log_lines if service_filter.lower() in line.lower()]
+        
+        # Filter by keyword if specified
+        if keyword:
+            log_lines = [line for line in log_lines if keyword.lower() in line.lower()]
+        
+        if not log_lines:
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"No execution logs found matching filters (service='{service_filter}', keyword='{keyword}')",
+                service="execution_logs"
+            )
+        
+        # Build a summary for quick LLM comprehension
+        summary_lines = []
+        for line in log_lines[-50:]:  # Cap at 50 lines for response size
+            summary_lines.append(line)
+        
+        log_text = "\n".join(summary_lines)
+        
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"Retrieved {len(log_lines)} execution log lines",
+            service="execution_logs",
+            detail={"logs": log_text, "total_matches": len(log_lines)}
+        )
+    except Exception as e:
+        return ExecutionResult(status="FAILURE", message=f"Execution log query error: {e}", service="execution_logs")
