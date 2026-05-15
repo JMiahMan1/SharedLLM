@@ -13,6 +13,21 @@ import {
   RefreshCcw,
   Send,
   Trash2,
+  Maximize2,
+  Minimize2,
+  Bold,
+  Italic,
+  List,
+  ListOrdered,
+  Heading1,
+  Heading2,
+  Heading3,
+  Link,
+  Image,
+  Code,
+  Quote,
+  Strikethrough,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -41,6 +56,16 @@ const blobToDataUrl = (blob: Blob) =>
     reader.readAsDataURL(blob);
   });
 
+const ToolbarButton = ({ icon, onClick, label }: { icon: React.ReactNode; onClick: () => void; label: string }) => (
+  <button
+    onClick={onClick}
+    title={label}
+    className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all shrink-0"
+  >
+    {icon}
+  </button>
+);
+
 const Communication = () => {
   const queryClient = useQueryClient();
   const [timerTitle, setTimerTitle] = useState('');
@@ -57,6 +82,7 @@ const Communication = () => {
   const [noteList, setNoteList] = useState<Array<{ title: string; path: string; size: number; modified: string }>>([]);
   const [selectedNote, setSelectedNote] = useState<{ title: string; path: string } | null>(null);
   const [showNoteSettings, setShowNoteSettings] = useState(false);
+  const [showFullscreenNotes, setShowFullscreenNotes] = useState(false);
   const [talkTargetUser, setTalkTargetUser] = useState('');
   const [selectedTalkToken, setSelectedTalkToken] = useState('');
   const [talkMessage, setTalkMessage] = useState('');
@@ -74,6 +100,49 @@ const Communication = () => {
     start: '',
     end: '',
   });
+
+  const editorRef = useRef<{ editor: any } | null>(null);
+
+  const insertMd = (before: string, after: string) => {
+    const editor = editorRef.current?.editor;
+    if (editor) {
+      const selection = editor.getSelection();
+      if (selection && !selection.isEmpty()) {
+        const text = editor.getModel().getValueInRange(selection);
+        editor.executeEdits('md-toolbar', [{
+          range: selection,
+          text: `${before}${text}${after}`,
+          forceMoveMarkers: true,
+        }]);
+      } else {
+        const pos = editor.getPosition();
+        if (pos) {
+          editor.executeEdits('md-toolbar', [{
+            range: { startLineNumber: pos.lineNumber, startColumn: pos.column, endLineNumber: pos.lineNumber, endColumn: pos.column },
+            text: `${before}${after}`,
+            forceMoveMarkers: true,
+          }]);
+          const newCol = pos.column + before.length;
+          editor.setPosition({ lineNumber: pos.lineNumber, column: newCol });
+        }
+      }
+      editor.focus();
+    } else {
+      const textarea = document.querySelector('textarea') as HTMLTextAreaElement | null;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const text = textarea.value;
+        const selected = text.substring(start, end);
+        const newText = text.substring(0, start) + before + selected + after + text.substring(end);
+        textarea.value = newText;
+        setNoteContent(newText);
+        textarea.selectionStart = start + before.length;
+        textarea.selectionEnd = start + before.length + selected.length;
+        textarea.focus();
+      }
+    }
+  };
 
   const { data: timers = EMPTY_ARRAY } = useQuery<TimerRecord[]>({
     queryKey: ['communication-timers'],
@@ -853,10 +922,140 @@ const Communication = () => {
                     Delete
                   </button>
                 )}
+                <button
+                  onClick={() => setShowFullscreenNotes(true)}
+                  className="glass-button px-4 py-2 text-[10px] font-black uppercase tracking-widest ml-auto"
+                >
+                  <Maximize2 size={14} className="inline mr-1" /> Full Screen
+                </button>
               </div>
             </div>
           </div>
         </section>
+
+        {showFullscreenNotes && (
+          <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-slate-900/80 backdrop-blur-sm shrink-0">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <input
+                  value={noteTitle}
+                  onChange={(e) => setNoteTitle(e.target.value)}
+                  className="bg-transparent text-lg font-bold text-white outline-none flex-1 min-w-0 truncate"
+                  placeholder="Note title"
+                />
+                <select
+                  value={noteCategory}
+                  onChange={(e) => setNoteCategory(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white outline-none shrink-0"
+                >
+                  <option value="Notes">Notes</option>
+                  {noteDirectories.map((dir) => (
+                    <option key={dir} value={dir}>{dir}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2 ml-3 shrink-0">
+                <button
+                  onClick={() => {
+                    if (selectedNote?.path) {
+                      saveNoteMutation.mutate({ title: noteTitle, content: noteContent, path: selectedNote.path, category: noteCategory });
+                    } else {
+                      saveNoteMutation.mutate({ title: noteTitle, content: noteContent, category: noteCategory });
+                    }
+                  }}
+                  disabled={saveNoteMutation.isPending}
+                  className="px-4 py-2 bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-indigo-600/40 transition-colors"
+                >
+                  Save
+                </button>
+                {selectedNote && (
+                  <button
+                    onClick={() => deleteNoteMutation.mutate({ title: selectedNote.title, path: selectedNote.path })}
+                    className="px-4 py-2 bg-red-600/20 border border-red-500/30 text-red-400 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-red-600/30 transition-colors"
+                  >
+                    Delete
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowFullscreenNotes(false)}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+                >
+                  <Minimize2 size={20} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 px-4 py-2 border-b border-white/5 bg-slate-900/50 shrink-0 overflow-x-auto">
+              <ToolbarButton icon={<Bold size={16} />} onClick={() => insertMd('**', '**')} label="Bold" />
+              <ToolbarButton icon={<Italic size={16} />} onClick={() => insertMd('*', '*')} label="Italic" />
+              <ToolbarButton icon={<Strikethrough size={16} />} onClick={() => insertMd('~~', '~~')} label="Strikethrough" />
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              <ToolbarButton icon={<Heading1 size={16} />} onClick={() => insertMd('# ', '')} label="Heading 1" />
+              <ToolbarButton icon={<Heading2 size={16} />} onClick={() => insertMd('## ', '')} label="Heading 2" />
+              <ToolbarButton icon={<Heading3 size={16} />} onClick={() => insertMd('### ', '')} label="Heading 3" />
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              <ToolbarButton icon={<List size={16} />} onClick={() => insertMd('- ', '')} label="Bullet List" />
+              <ToolbarButton icon={<ListOrdered size={16} />} onClick={() => insertMd('1. ', '')} label="Numbered List" />
+              <ToolbarButton icon={<Quote size={16} />} onClick={() => insertMd('> ', '')} label="Quote" />
+              <ToolbarButton icon={<Code size={16} />} onClick={() => insertMd('```\n', '\n```')} label="Code Block" />
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              <ToolbarButton icon={<Link size={16} />} onClick={() => insertMd('[', '](url)')} label="Link" />
+              <ToolbarButton icon={<Image size={16} />} onClick={() => insertMd('![alt](', ')')} label="Image" />
+            </div>
+
+            <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+              <div className="hidden md:flex w-64 flex-col border-r border-white/10 bg-slate-900/30 shrink-0">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Notes</p>
+                  <button
+                    onClick={() => listNotesMutation.mutate({ directories: noteDirectories })}
+                    className="p-1 text-slate-500 hover:text-white transition-colors"
+                  >
+                    <RefreshCcw size={12} />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {noteList.map((note) => (
+                    <button
+                      key={note.path}
+                      onClick={() => {
+                        setSelectedNote(note);
+                        readNoteMutation.mutate({ title: note.title, path: note.path });
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs transition-colors border-b border-white/5 ${
+                        selectedNote?.path === note.path
+                          ? 'bg-indigo-600/20 text-white'
+                          : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <p className="truncate font-medium">{note.title}</p>
+                    </button>
+                  ))}
+                  {!noteList.length && (
+                    <p className="text-xs text-slate-600 p-3">No notes found.</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => { setSelectedNote(null); setNoteContent(''); setNoteTitle(''); }}
+                  className="m-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-300 hover:bg-white/10 transition-colors"
+                >
+                  <Plus size={12} className="inline mr-1" /> New Note
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-0">
+                <MonacoEditor
+                  value={noteContent}
+                  onChange={setNoteContent}
+                  language="markdown"
+                  height="100%"
+                  fontSize={14}
+                  onEditorMount={(editor) => { editorRef.current = { editor }; }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
