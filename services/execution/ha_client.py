@@ -57,7 +57,7 @@ async def call_service(
     ha_token: str,
     domain: str,
     service: str,
-    entity_id: str,
+    entity_id: str = "",
     service_data: dict | None = None,
     return_response: bool = False,
 ) -> dict:
@@ -70,16 +70,18 @@ async def call_service(
     url = f"{ha_url.rstrip('/')}/api/services/{domain}/{service}"
     if return_response:
         url += "?return_response"
-    payload = {"entity_id": entity_id}
+    payload: dict = {}
+    if entity_id:
+        payload["entity_id"] = entity_id
     if service_data:
         payload.update(service_data)
         
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
-            log.info(f"HA CALL: {domain}.{service} -> {entity_id} | url={url} | payload={payload}")
+            log.info(f"HA CALL: {domain}.{service} -> {entity_id or '(no target)'} | url={url} | payload={payload}")
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
-            log.info(f"[ha_client] {domain}.{service} → {entity_id} OK (HTTP {resp.status_code})")
+            log.info(f"[ha_client] {domain}.{service} OK (HTTP {resp.status_code})")
             if return_response:
                 return {"ok": True, "status_code": resp.status_code, "service_response": resp.json()}
             return {"ok": True, "status_code": resp.status_code}
