@@ -97,7 +97,7 @@ async def get_llm_settings() -> Dict[str, str]:
 
 async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from config import OLLAMA_TIMEOUT
+    from gateway.config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":
@@ -165,10 +165,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     # 4. Final Inference
     full_system = job_payload.get("system", "")
     if is_autonomous:
-        try:
-            from agent_loop import AgentLoop
-        except (ImportError, ValueError):
-            from agent_loop import AgentLoop
+        from gateway.agent_loop import AgentLoop
         # Raven handles autonomous loops
         mission_id = job_payload.get("_mission_id")
         ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context)
@@ -338,10 +335,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 return f"I encountered an error while trying to generate a response (All retries failed): {e}"
 
     # Tool Extraction
-    try:
-        from agent_loop import extract_action_json
-    except (ImportError, ValueError):
-        from agent_loop import extract_action_json
+    from gateway.agent_loop import extract_action_json
 
     tool_data = extract_action_json(ans)
     if tool_data:

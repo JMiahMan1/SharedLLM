@@ -10,10 +10,7 @@ import asyncio
 log = logging.getLogger("gateway.history")
 
 # INTERNAL_SECRET sourced from config.py which enforces fail-secure at gateway startup.
-try:
-    from config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET, REDIS_URL
-except (ImportError, ValueError):
-    from config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET, REDIS_URL
+from gateway.config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET, REDIS_URL
 
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 
@@ -80,7 +77,7 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
             "k": 5
         }
         
-        from config import RAG_SVC, INTERNAL_SECRET
+        from gateway.config import RAG_SVC, INTERNAL_SECRET
 
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(
@@ -111,7 +108,7 @@ async def extract_and_store_user_facts(user_id: str, history: list):
 
     try:
         LIBRARIAN_MODEL = await fetch_librarian_model()
-        from config import OLLAMA_URL
+        from gateway.config import OLLAMA_URL
 
         # Only look at the last turn
         recent_text = ""

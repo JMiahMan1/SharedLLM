@@ -210,7 +210,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
 
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from config import OLLAMA_TIMEOUT
+    from gateway.config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":

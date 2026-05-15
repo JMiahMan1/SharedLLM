@@ -191,7 +191,7 @@ async def get_llm_settings() -> Dict[str, str]:
 
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from config import OLLAMA_TIMEOUT
+    from gateway.config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":
@@ -473,7 +473,7 @@ async def clear_history_endpoint(request: Request):
         creds_data = await resolve_identity(body)
         user_id = creds_data.get("user", "default")
         
-        from history import _redis, _get_history_key
+        from gateway.history import _redis, _get_history_key
         key = _get_history_key(user_id)
         _redis.delete(key)
         
@@ -669,21 +669,10 @@ async def select_model_for_query(query: str) -> str:
 
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
-    try:
-        from prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
-    except (ImportError, ValueError):
-        try:
-            from prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
-        except ImportError:
-            from gateway.prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL
+    from gateway.prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL, RAVEN_NARRATOR_PROTOCOL
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
-      try:
-          from prompts import RAVEN_NARRATOR_PROTOCOL
-          return RAVEN_NARRATOR_PROTOCOL
-      except ImportError:
-          from prompts import RAVEN_NARRATOR_PROTOCOL
-          return RAVEN_NARRATOR_PROTOCOL
+      return RAVEN_NARRATOR_PROTOCOL
     if any(token in q for token in AUTONOMOUS_SIGNALS):
       if "raven" in q or "self repair" in q or "self-repair" in q:
           return RAVEN_AUTONOMOUS_PROTOCOL
@@ -797,7 +786,7 @@ def is_time_or_date_query(query: str) -> bool:
 
 
 def build_time_or_date_response(query: str) -> str:
-    from config import TIMEZONE
+    from gateway.config import TIMEZONE
     tz_name = TIMEZONE
     try:
         now = datetime.now(ZoneInfo(tz_name))
@@ -3033,10 +3022,7 @@ async def kill_mission(request: Request, id_or_slug: str):
             raise HTTPException(status_code=resp.status_code, detail="Failed to update mission status")
         
         # 2. Publish kill signal to Redis
-        try:
-            from history import REDIS_URL
-        except (ImportError, ValueError):
-            from history import REDIS_URL
+        from gateway.history import REDIS_URL
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
@@ -3119,10 +3105,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):
         real_id = mission_data["id"]
 
     try:
-        try:
-            from history import REDIS_URL
-        except (ImportError, ValueError):
-            from history import REDIS_URL
+        from gateway.history import REDIS_URL
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
@@ -3170,7 +3153,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):
 @app.get("/api/config/models")
 async def get_ollama_models():
     """Proxy to Ollama to list available tags."""
-    from config import OLLAMA_URL as _OLLAMA_URL
+    from gateway.config import OLLAMA_URL as _OLLAMA_URL
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{_OLLAMA_URL}/api/tags")
