@@ -141,14 +141,32 @@ async def global_exception_handler(request, exc):
 
 # Transient cache for locally-generated media (TTS announcements)
 TEMP_AUDIO_CACHE: Dict[str, bytes] = {}
+# Video files stored on disk (streamed for large files)
+TEMP_VIDEO_DIR = "/tmp/sharedllm_media"
+os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
 @app.get("/media/{media_id}")
 async def get_temp_media(media_id: str):
-    """Serves transient audio files for HA playback."""
-    if media_id not in TEMP_AUDIO_CACHE:
-        raise HTTPException(status_code=404, detail="Media expired or not found")
-    from fastapi.responses import Response
-    return Response(content=TEMP_AUDIO_CACHE[media_id], media_type="audio/wav")
+    """Serves transient audio/video files for HA playback."""
+    from fastapi.responses import FileResponse, Response
+    
+    # Check audio cache first
+    if media_id in TEMP_AUDIO_CACHE:
+        return Response(content=TEMP_AUDIO_CACHE[media_id], media_type="audio/wav")
+    
+    # Check video files on disk
+    video_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
+    if os.path.exists(video_path):
+        return FileResponse(
+            video_path,
+            media_type="video/mp4",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-cache",
+            }
+        )
+    
+    raise HTTPException(status_code=404, detail="Media expired or not found")
 
 def _ok(message: str, service: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service=service, detail=detail)
