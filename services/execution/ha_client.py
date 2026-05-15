@@ -157,7 +157,7 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
         return []
         
     import datetime
-    start_time = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
+    start_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/history/period/{start_time}"
     params = {"filter_entity_id": entity_id, "no_attributes": ""}
@@ -173,6 +173,29 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
         except Exception as e:
             log.error(f"[ha_client] get_history({entity_id}) failed: {e}")
             return []
+
+async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1) -> list:
+    """Retrieve logbook entries for a specific entity from HA."""
+    if not ha_url:
+        log.error("[ha_client] ha_url is None or empty. Cannot get logbook.")
+        return []
+        
+    import datetime
+    start_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    url = f"{ha_url.rstrip('/')}/api/logbook/{start_time}"
+    params = {"entity": entity_id}
+    
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            log.info(f"[ha_client] GET {url} | entity={entity_id}")
+            resp = await client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            log.error(f"[ha_client] get_logbook({entity_id}) failed: {e}")
+            return []
+
 async def get_areas(ha_url: str, ha_token: str) -> dict:
     """Retrieve mapping of entity_id to area_name using HA Template API."""
     if not ha_url:

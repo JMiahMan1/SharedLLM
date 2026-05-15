@@ -85,9 +85,10 @@ class ExecutionResult(BaseModel):
     service: str
     detail: Optional[Dict[str, Any]] = None
 
-class GitExecutionResult(ExecutionResult):
-    """Specific result for Git operations."""
-    pass
+class DiagnosticRequest(BaseRequest):
+    user_context: UserContext
+    service: str = "execution"
+    lines: int = 50
 
 
 # ─── Media / Music ──────────────────────────────────────────────────────────────
@@ -138,6 +139,11 @@ class SecurityRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
     action: Literal["lock", "unlock", "open", "close", "status"]
+
+class LogbookRequest(BaseRequest):
+    user_context: UserContext
+    entity_id: str
+    days: int = Field(1, ge=1, le=7)
 
 
 # ─── Announcements ──────────────────────────────────────────────────────────────

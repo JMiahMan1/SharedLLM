@@ -19,9 +19,9 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest
+        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
     )
-    from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
+    from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
     from .handlers import docker_logs as docker_logs_handler
     from .handlers import git as git_handler
     from .handlers import deployment as deployment_handler
@@ -36,9 +36,9 @@ except (ImportError, ValueError):
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
         )
-        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
+        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
         from execution.handlers import docker_logs as docker_logs_handler
         from execution.handlers import git as git_handler
         from execution.handlers import deployment as deployment_handler
@@ -52,9 +52,9 @@ except (ImportError, ValueError):
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest
         )
-        from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning
+        from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
         from handlers import docker_logs as docker_logs_handler
         from handlers import git as git_handler
         from handlers import deployment as deployment_handler
@@ -422,8 +422,8 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
     Trigger a Home Assistant discovery sync into the RAG database.
     Proxies to Gateway internal discovery API.
     """
-    # Note: Gateway is usually at http://gateway:8002 in docker
-    GATEWAY_INTERNAL = os.getenv("GATEWAY_INTERNAL_URL", "http://gateway:8002")
+    # Note: Gateway is usually at http://gateway:11435 in docker
+    GATEWAY_INTERNAL = os.getenv("GATEWAY_INTERNAL_URL", "http://gateway:11435")
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
@@ -647,8 +647,25 @@ async def execute_announce(req: AnnouncementRequest):
             TEMP_AUDIO_CACHE[media_id] = audio_bytes
             # Note: Using host.docker.internal or a resolvable IP is better, but 'execution' works within the docker net.
             # For HA to reach it, we need the execution service's public/internal IP from the host's perspective.
-            # We'll use the 'media_url' provided to HA.
-            media_url = f"http://execution:8003/media/{media_id}"
+            # We'll try to discover the production IP from the environment or docker-compose.
+            def get_public_host():
+                # 1. Check if configured in env
+                env_host = os.getenv("EXECUTION_EXTERNAL_HOST")
+                if env_host: return env_host
+                
+                # 2. Try to find ai-server IP from compose if we are on the same machine
+                try:
+                    with open("docker-compose.yml", "r") as f:
+                        for line in f:
+                            if "ai-server:" in line:
+                                return line.split(":")[1].strip().strip('"').strip("'")
+                except: pass
+                
+                # 3. Fallback to a common local IP if we are in the .2.x subnet or similar
+                return "192.168.2.205" # Default Production Host
+            
+            public_host = get_public_host()
+            media_url = f"http://{public_host}:8080/media/{media_id}"
             
             if is_roku:
                 # Specialized Roku Media Assistant App (ID 782875)
@@ -659,6 +676,9 @@ async def execute_announce(req: AnnouncementRequest):
                     "media_content_type": "app",
                     "extra": {"content_id": media_url, "media_type": "audio/wav"}
                 })
+                # If app launch succeeded, wait a moment for it to buffer
+                if result.get("ok"):
+                    await asyncio.sleep(2.0)
             else:
                 log.info(f"[announce] Playing Kokoro URL: {media_url}")
                 result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target_player, {
@@ -724,3 +744,29 @@ async def discovery_history(ha_url: str, ha_token: str, entity_id: str, days: in
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "execution"}
+
+@app.post("/execute/ha_logbook", response_model=ExecutionResult)
+async def execute_ha_logbook(req: LogbookRequest):
+    ctx = req.user_context
+    full_entity_id = ha_client.sanitize_entity_id("sensor", req.entity_id)
+    log.info(f"[ha_logbook] user={ctx.user} entity={full_entity_id}")
+    
+    entries = await ha_client.get_logbook(ctx.ha_url, ctx.ha_token, full_entity_id, days=req.days)
+    
+    if entries:
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"Retrieved {len(entries)} logbook entries for {full_entity_id}.",
+            service="ha_logbook",
+            detail={"entries": entries}
+        )
+    return ExecutionResult(
+        status="FAILURE",
+        message=f"No logbook entries found for {full_entity_id} in the last {req.days} day(s).",
+        service="ha_logbook"
+    )
+
+@app.post("/execute/diagnostics", response_model=ExecutionResult)
+async def execute_diagnostics(req: DiagnosticRequest):
+    log.info(f"[diagnostics] user={req.user_context.user} service={req.service} lines={req.lines}")
+    return await diagnostics.handle_get_system_logs(req.model_dump())
