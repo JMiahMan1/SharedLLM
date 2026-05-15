@@ -1686,10 +1686,12 @@ async def secure_logging_middleware(request: Request, call_next):
             safe_headers[key] = "[REDACTED]"
             
     log.info(f"REQUEST: {request.method} {request.url} | Headers: {safe_headers}")
+    asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
     
     response = await call_next(request)
     
     log.info(f"RESPONSE: {request.method} {request.url} | Status: {response.status_code}")
+    asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {response.status_code}", {}))
     return response
 
 # --- Core Handlers ---
