@@ -1,3 +1,6 @@
+@pytest.mark.server_only
+import pytest
+
 import pytest
 import httpx
 from fastapi import status

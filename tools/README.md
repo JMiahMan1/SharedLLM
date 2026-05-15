@@ -1,40 +1,35 @@
 # SharedLLM Tools
 
-This directory contains utility scripts for debugging, testing, and managing the
-SharedLLM application.
+Utility scripts for debugging and verifying system functionality.
 
 ## Directory Structure
 
-### `diagnostics/`
+### `debug/`
 
-Scripts to inspect the state of the system, database, and integrations.
+Diagnostic scripts for inspecting system state, network, and integrations.
 
-- `inspect_entity.py`: Dump ChromaDB metadata for a specific entity or search query.
-- `inspect_ma_players.py`: targeted inspection of Music Assistant player attributes.
-- `list_devices_by_group.py`: List all devices in a specific group.
-- `inspect_all_players.py`: Dump all media players found in ChromaDB.
+- `debug_android_off.py` — Debug Android device power state
+- `debug_chroma_group.py` — Inspect ChromaDB metadata by group
+- `debug_remote.py` — Debug remote API connectivity
+- `diagnose_resolution.py` — Diagnose DNS/service resolution issues
+- `list_devices.py` — List discovered devices
+- `scan_remotes.py` — Scan remote endpoints
 
-### `tests/`
+### `verify/`
 
-Scripts to verify system functionality.
+Verification scripts for confirming fixes and system behavior.
 
-- `runner.py`: **primary test entry point**. Orchestrates specific suites or all
-  tests.
-  - Usage: `python -m app.tests.runner [--test MediaTests] [--url http://...]`
-- `test_media_playback.py`: Comprehensive test suite for Media Control
-  (NL queries -> Intent -> Execution).
-- `test_ha_connectivity.py`: Verify connection to Home Assistant API.
-- `test_ma_types.py`: Test specific Music Assistant media types (artist/track/etc).
-- `test_volume.py`: Test volume control INTENT resolution (not execution).
+- `verify_cast_playback.py` — Verify Cast device playback
+- `verify_fireplace.py` — Verify fireplace integration
+- `verify_fix_devices.py` — Verify device routing fixes
+- `verify_ma_cleaning_import.py` — Verify Music Assistant cleaning imports
+- `verify_pause_fix.py` — Verify pause/resume fix
+- `verify_resolution_logic.py` — Verify media resolution logic
+- `verify_robustness.py` — Robustness verification
+- `verify_rumble_cast.py` — Verify Rumble Cast integration
+- `verify_youtube_click.py` — Verify YouTube click-through
 
-### `utils/`
+## Related
 
-Helper scripts for ops and maintenance.
-
-- `deploy_remote.sh`: Deploy code to the remote production server.
-- `fetch_logs.py`: Fetch and filter logs from the remote container.
-- `reset_chroma_db.py`: **DANGER** Wipes and resets the ChromaDB vector store.
-
-### `legacy/`
-
-Old or reference code.
+- `scripts/` — Operational scripts (deploy, benchmark, CI, legacy tests)
+- `test/` — pytest test suites (unit, integration, local hardware tests)
