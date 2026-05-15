@@ -354,12 +354,26 @@ async def execute_docker(req: DockerComposeRequest):
     if not services:
         return _fail("No services or containers specified", "docker")
     
+    if req.action == "up":
+        import subprocess
+        log.info(f"[docker] Running docker-compose up -d for services: {services}")
+        try:
+            # We run this from the workspace root where docker-compose.yml is
+            cmd = ["docker-compose", "up", "-d"] + list(services)
+            res = subprocess.run(cmd, capture_output=True, text=True, cwd="/workspace/SharedLLM")
+            if res.returncode == 0:
+                return _ok(f"Docker Compose up -d successful for {len(services)} services.", {"output": res.stdout})
+            else:
+                return _fail(f"Docker Compose up failed (code {res.returncode})", "docker", {"error": res.stderr, "output": res.stdout})
+        except Exception as e:
+            return _fail(f"Subprocess error during docker-compose up: {e}", "docker")
+
     for svc in services:
         # Ensure prefix
         container_name = svc if svc.startswith("sharedllm_") else f"sharedllm_{svc}"
         mock_req = DeploymentRequest(
             user_context=req.user_context,
-            action=req.action if req.action != "up" else "restart", # 'up' becomes 'restart' for existing
+            action=req.action,
             container_name=container_name
         )
         res = await deployment_handler.handle_deployment(mock_req)
