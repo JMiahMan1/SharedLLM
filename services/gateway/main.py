@@ -2584,8 +2584,8 @@ async def list_storage_files(request: Request, body: StorageListRequest):
                 "password": creds["nextcloud_pass"]
             }
         },
-        "path": body.get("path"),
-        "recursive": body.get("recursive")
+        "path": body.path,
+        "recursive": body.recursive
     }
     
     resp = await get_http_client().post(
@@ -2610,8 +2610,8 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
                 "password": creds["nextcloud_pass"]
             }
         },
-        "path": body.get("path"),
-        "recursive": body.get("recursive")
+        "path": body.path,
+        "recursive": body.recursive
     }
     
     resp = await get_http_client().post(
