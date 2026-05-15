@@ -35,8 +35,19 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "- **MediaPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"artist or song name\"}` - MUST include BOTH \"entity_id\" AND \"query\"\n"
     "\n"
     "### Entity Resolution Rule (CRITICAL)\n"
-    "When the user mentions a device by name (e.g., \"Office TV\", \"hall lamp\"), you MUST look up the EXACT entity ID from the provided HA entity context. "
-    "For announcements and media playback, the payload MUST contain the exact `entity_id` string (e.g., `media_player.office_tv_chrome`) — never omit it or substitute the device name.\n"
+    "When the user mentions a device by name (e.g., \"Office TV\", \"hall lamp\"), you MUST find the EXACT entity ID from the HA entity context provided above. "
+    "Look for the line that says \"Device: [Name] (ID: [entity_id])\" and use that exact entity_id string.\n"
+    "For announcements: if user says \"Office TV\", find the media_player entity with \"Office TV\" in its name (e.g., `media_player.office_tv_chrome`).\n"
+    "NEVER omit the entity_id field. It is ALWAYS required for HA tools.\n"
+    "\n"
+    "### Example Announcement Payload (CORRECT)\n"
+    "```json\n"
+    "{\"action\": \"AnnouncementRequest\", \"payload\": {\"entity_id\": \"media_player.office_tv_chrome\", \"message\": \"hello\"}}\n"
+    "```\n"
+    "### Example Announcement Payload (WRONG - missing entity_id)\n"
+    "```json\n"
+    "{\"action\": \"AnnouncementRequest\", \"payload\": {\"message\": \"hello\"}}  // WRONG: entity_id is REQUIRED\n"
+    "```\n"
 )
 
 LIBRARIAN_SYSTEM_INSTRUCTION = ASSIST_SYSTEM_INSTRUCTION
