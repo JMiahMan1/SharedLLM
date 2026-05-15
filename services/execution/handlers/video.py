@@ -58,21 +58,33 @@ async def get_stream_url(video_url: str) -> str | None:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             if not info:
+                log.warning(f"[video] yt-dlp returned no info for {video_url}")
                 return None
             url = info.get("url", "")
             ext = info.get("ext", "")
-            log.info(f"[video] yt-dlp: url={str(url)[:80]}, ext={ext}, format={info.get('format')}")
+            fmt = info.get("format", "")
+            etype = info.get("_type", "")
+            log.info(f"[video] yt-dlp: type={etype}, url={str(url)[:80]}, ext={ext}, format={fmt}")
+            log.info(f"[video] yt-dlp keys: {list(info.keys())[:20]}")
             if url and url.startswith("http") and ext == "mp4":
                 log.info(f"[video] Found MP4 stream URL")
                 return url
             if url and url.startswith("http"):
                 log.info(f"[video] Using resolved URL (ext={ext})")
                 return url
+            # Check entries for playlist/search results
+            entries = info.get("entries", [])
+            if entries:
+                first = entries[0]
+                entry_url = first.get("url") or first.get("webpage_url") or first.get("original_url")
+                if entry_url:
+                    log.info(f"[video] Found URL from entries: {entry_url[:80]}")
+                    return entry_url
             fallback = info.get("webpage_url") or info.get("original_url") or video_url
             log.warning(f"[video] No stream URL found, falling back to {fallback}")
             return fallback
     except Exception as e:
-        log.error(f"[video] Stream extraction failed: {e}")
+        log.error(f"[video] Stream extraction failed: {e}", exc_info=True)
         return None
 
 
