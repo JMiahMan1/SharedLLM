@@ -283,6 +283,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     if tool_data:
         action = tool_data.get("action", "").lower().strip()
         log.info(f"[_single_turn_inference] Tool call detected: {action}")
+        log.info(f"[_single_turn_inference] Raw LLM output: {ans[:500]}")
+        log.info(f"[_single_turn_inference] Extracted tool_data: {tool_data}")
         
         if action == "controlplanerequest":
             payload = tool_data.get("payload", tool_data)
