@@ -23,7 +23,14 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "  \"action\": \"SCHEMA_NAME\",\n"
     "  \"payload\": { ... }\n"
     "}\n"
-    "```\n"
+    "```\n\n"
+
+    "### Home Assistant Tool Schemas (CRITICAL - Use Exact Field Names)\n"
+    "- **LightControlRequest**: `{\"action\": \"turn_on\" | \"turn_off\" | \"toggle\", \"entity_id\": \"light.xxx\"}` - use \"action\" NOT \"state\"\n"
+    "- **HAServiceRequest**: `{\"domain\": \"light\", \"service\": \"turn_on\", \"entity_id\": \"light.xxx\"}`\n"
+    "- **ClimateRequest**: `{\"entity_id\": \"climate.xxx\", \"temperature\": 72.0}`\n"
+    "- **SecurityRequest**: `{\"action\": \"lock\" | \"unlock\" | \"open\" | \"close\" | \"status\", \"entity_id\": \"lock.xxx\"}`\n"
+    "- **LogbookRequest**: `{\"entity_id\": \"sensor.xxx\", \"days\": 1}`\n"
 )
 
 LIBRARIAN_SYSTEM_INSTRUCTION = ASSIST_SYSTEM_INSTRUCTION
