@@ -218,12 +218,14 @@ class CalendarRequest(BaseRequest):
 
 class NoteRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["create", "append", "read", "delete", "check_off"]
-    title: str
+    action: Literal["create", "append", "read", "delete", "check_off", "list", "sync_rag"]
+    title: Optional[str] = None
     content: Optional[str] = None
     category: Optional[str] = "General"
     item: Optional[str] = None # For check_off
     storage: Optional[Literal["nextcloud", "local"]] = "nextcloud"
+    directories: Optional[list[str]] = None # Custom Nextcloud directories to scan (recursive)
+    path: Optional[str] = None # Specific file path for read/write operations
 
 
 # ─── Timers / Alarms ────────────────────────────────────────────────────────────

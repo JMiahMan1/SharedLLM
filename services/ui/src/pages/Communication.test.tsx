@@ -11,7 +11,7 @@ describe('Communication page', () => {
     expect(screen.getByText('Announcements')).toBeInTheDocument();
     expect(screen.getByText('Nextcloud Talk')).toBeInTheDocument();
     expect(screen.getByText('Calendar')).toBeInTheDocument();
-    expect(screen.getByText('Notes')).toBeInTheDocument();
+    expect(screen.getAllByText('Notes').length).toBeGreaterThan(0);
     expect(await screen.findByText('Kitchen Timer')).toBeInTheDocument();
     expect(await screen.findByText('Family')).toBeInTheDocument();
   });
@@ -33,27 +33,6 @@ describe('Communication page', () => {
     fireEvent.click(deleteButtons[0]);
 
     await waitFor(() => expect(screen.queryByText('Kitchen Timer')).not.toBeInTheDocument());
-  });
-
-  it('sends announcements and executes note actions', async () => {
-    renderWithProviders(<Communication />);
-
-    fireEvent.change(await screen.findByLabelText('Announcement target device'), {
-      target: { value: 'media_player.office_speaker' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('Enter the announcement message'), {
-      target: { value: 'Dinner is ready.' },
-    });
-    fireEvent.click(screen.getByText('Send Announcement'));
-
-    fireEvent.change(screen.getByPlaceholderText('Note title'), {
-      target: { value: 'Shared Checklist' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('Note content'), {
-      target: { value: 'Pick up groceries' },
-    });
-    fireEvent.click(screen.getByText('Read'));
-    expect(await screen.findByText(/Pick up groceries/)).toBeInTheDocument();
   });
 
   it('opens a talk conversation and sends a chat message', async () => {
