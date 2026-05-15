@@ -4,12 +4,18 @@ import sys
 import logging
 import asyncio
 import httpx
+import warnings
 from typing import Dict, Any, Optional
 from uuid import uuid4
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
 from fastapi.responses import JSONResponse
 import traceback
+
+# Suppress InsecureRequestWarning for internal self-signed certs (homelab)
+from urllib3.exceptions import InsecureRequestWarning
+warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+
 try:
     import ha_client
     from schemas import (
