@@ -598,3 +598,14 @@ class StorageTextToAudioRequest(BaseRequest):
     storybook: bool = Field(True, description="Enable Storybook mode for better narration")
 
 
+class ExecutionLogRequest(BaseRequest):
+    """
+    Queries the Execution service logs for recent activity.
+    Use this to verify that a task was performed or troubleshoot failures.
+    """
+    user_context: UserContext
+    service: Optional[str] = Field(None, description="Filter by handler (e.g., 'announce', 'media', 'light', 'ha_client')")
+    lines: int = Field(50, ge=1, le=500, description="Number of recent log lines to retrieve")
+    keyword: Optional[str] = Field(None, description="Filter logs containing this keyword (e.g., 'FAILED', 'OK', 'announce')")
+
+

@@ -19,7 +19,7 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest
+        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest
     )
     from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
     from handlers import docker_logs as docker_logs_handler
@@ -37,7 +37,7 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest
         )
         from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
         from .handlers import docker_logs as docker_logs_handler
@@ -54,7 +54,7 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
         from execution.handlers import docker_logs as docker_logs_handler
@@ -800,6 +800,12 @@ async def execute_media_status(req: MediaStatusRequest):
     ctx = req.user_context
     log.info(f"[media/status] user={ctx.user} area={req.area} entity={req.entity_id}")
     return await media_status_handler.handle_media_status(req)
+
+@app.post("/execute/logs", response_model=ExecutionResult)
+async def execute_execution_logs(req: ExecutionLogRequest):
+    ctx = req.user_context
+    log.info(f"[execution/logs] user={ctx.user} service={req.service} keyword={req.keyword} lines={req.lines}")
+    return await diagnostics.handle_execution_logs(req.model_dump())
 
 @app.post("/execute/diagnostics", response_model=ExecutionResult)
 async def execute_diagnostics(req: DiagnosticRequest):
