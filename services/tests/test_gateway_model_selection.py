@@ -735,15 +735,17 @@ def test_select_system_instruction_for_query_uses_raven_prompt_for_explicit_repa
 
 def test_gateway_top_level_import_loads_prompts():
     gateway_dir = Path(__file__).resolve().parents[1] / "gateway"
+    services_dir = gateway_dir.parent
     env = os.environ.copy()
     env.setdefault("INTERNAL_SECRET", "test-secret")
+    env["PYTHONPATH"] = str(services_dir)
 
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import main; assert hasattr(main, 'ASSIST_SYSTEM_INSTRUCTION'); "
-            "assert main.ASSIST_SYSTEM_INSTRUCTION",
+            "import gateway.main as m; assert hasattr(m, 'ASSIST_SYSTEM_INSTRUCTION'); "
+            "assert m.ASSIST_SYSTEM_INSTRUCTION",
         ],
         cwd=gateway_dir,
         env=env,
