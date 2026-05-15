@@ -1,19 +1,50 @@
 # services/logging/main.py
 import os
 import sys
-import sqlite3
 import json
 import re
-from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException, Header
-from pydantic import BaseModel
+import time
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
-app = FastAPI(title="SOA Logging Service")
-
+import redis.asyncio as redis
+from fastapi import FastAPI, Request, HTTPException, Header, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-import traceback
+from pydantic import BaseModel
 import logging as py_logging
+import traceback
+
+_redis_client: Optional[redis.Redis] = None
+
+async def get_redis() -> redis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    return _redis_client
+
+async def retention_cleanup_task():
+    """Periodically remove logs older than LOG_RETENTION_DAYS."""
+    while True:
+        try:
+            r = await get_redis()
+            cutoff = time.time() - (LOG_RETENTION_DAYS * 86400)
+            removed = await r.zremrangebyscore("logs:entries", 0, cutoff)
+            if removed > 0:
+                py_logging.info(f"[Retention] Purged {removed} logs older than {LOG_RETENTION_DAYS} days")
+        except Exception as e:
+            py_logging.error(f"[Retention] Cleanup error: {e}")
+        await asyncio.sleep(3600)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    py_logging.info(f"[Logging] Redis backend initialized (retention={LOG_RETENTION_DAYS}d, max_entries={LOG_MAX_ENTRIES})")
+    task = asyncio.create_task(retention_cleanup_task())
+    yield
+    task.cancel()
+
+app = FastAPI(title="SOA Logging Service", lifespan=lifespan)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -24,9 +55,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"status": "ERROR", "message": "Internal Logging Error", "detail": str(exc)}
     )
 
-DB_PATH = os.getenv("LOGGING_DB_PATH", "/app/data/logs.db")
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-
 # Fail-Secure: refuse startup if INTERNAL_SECRET is not injected by the host
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 if not INTERNAL_SECRET:
@@ -34,19 +62,16 @@ if not INTERNAL_SECRET:
     _boot_log.basicConfig(level="CRITICAL")
     _boot_log.critical("FATAL: INTERNAL_SECRET environment variable is not set. Refusing to start.")
     sys.exit(1)
+
+# Redis configuration
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
+LOG_MAX_ENTRIES = int(os.getenv("LOG_MAX_ENTRIES", "50000"))
+
 MAX_LOG_FIELD_LENGTH = 4000
 SECRET_FIELD_NAMES = {
-    "api_key",
-    "authorization",
-    "cookie",
-    "github_token",
-    "gitlab_token",
-    "git_token",
-    "ha_token",
-    "nextcloud_pass",
-    "password",
-    "secret",
-    "token",
+    "api_key", "authorization", "cookie", "github_token", "gitlab_token",
+    "git_token", "ha_token", "nextcloud_pass", "password", "secret", "token",
 }
 SECRET_PATTERNS = [
     re.compile(r"Bearer\s+[A-Za-z0-9._\-]+", re.IGNORECASE),
@@ -55,57 +80,24 @@ SECRET_PATTERNS = [
     re.compile(r"\bglpat-[A-Za-z0-9\-_]+\b"),
 ]
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            user_id TEXT DEFAULT 'system',
-            service TEXT,
-            level TEXT,
-            message TEXT,
-            context TEXT
-        )
-    """)
-    # Migration: add user_id column if it doesn't exist (for existing databases)
-    try:
-        conn.execute("ALTER TABLE logs ADD COLUMN user_id TEXT DEFAULT 'system'")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-    conn.commit()
-    conn.close()
+# Redis client (initialized in lifespan)
+_redis_client: Optional[redis.Redis] = None
 
-init_db()
-
-class LogEntry(BaseModel):
-    user_id: str = "system"
-    service: str
-    level: str = "INFO"
-    message: str
-    context: Optional[dict] = None
-
-
-def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
-    if x_internal_secret != INTERNAL_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-
-def _trim_text(value: str) -> str:
-    if len(value) <= MAX_LOG_FIELD_LENGTH:
-        return value
-    return value[:MAX_LOG_FIELD_LENGTH] + "...[TRUNCATED]"
-
+async def get_redis() -> redis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    return _redis_client
 
 def _sanitize_scalar(value: Any) -> Any:
     if not isinstance(value, str):
         return value
-
     sanitized = value
     for pattern in SECRET_PATTERNS:
         sanitized = pattern.sub("[REDACTED]", sanitized)
-    return _trim_text(sanitized)
-
+    if len(sanitized) > MAX_LOG_FIELD_LENGTH:
+        return sanitized[:MAX_LOG_FIELD_LENGTH] + "...[TRUNCATED]"
+    return sanitized
 
 def sanitize_log_payload(value: Any, parent_key: Optional[str] = None) -> Any:
     if isinstance(value, dict):
@@ -117,126 +109,83 @@ def sanitize_log_payload(value: Any, parent_key: Optional[str] = None) -> Any:
             else:
                 sanitized[key] = sanitize_log_payload(inner_value, parent_key=key_lower)
         return sanitized
-
     if isinstance(value, list):
         return [sanitize_log_payload(item, parent_key=parent_key) for item in value]
-
     if isinstance(value, tuple):
         return [sanitize_log_payload(item, parent_key=parent_key) for item in value]
-
     return _sanitize_scalar(value)
 
-async def _fetch_logs(service: Optional[str] = None, user_id: Optional[str] = None, limit: int = 100):
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    query = "SELECT * FROM logs"
-    filters = []
-    params = []
-    
-    if service:
-        filters.append("service = ?")
-        params.append(service)
-    
-    if user_id and user_id != "admin": # Admins see all, others only their own
-        filters.append("user_id = ?")
-        params.append(user_id)
-        
-    if filters:
-        query += " WHERE " + " AND ".join(filters)
-        
-    query += " ORDER BY timestamp DESC LIMIT ?"
-    params.append(limit)
-    
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
+def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 def _resolve_limit(limit: Optional[int], lines: Optional[int], default: int = 100) -> int:
-    """Support both legacy `lines` and current `limit` query params."""
     value = lines if lines is not None else limit
     if value is None:
         return default
     return max(1, min(int(value), 5000))
 
-# Direct service path (used internally)
+class LogEntry(BaseModel):
+    user_id: str = "system"
+    service: str
+    level: str = "INFO"
+    message: str
+    context: Optional[dict] = None
+
+async def _fetch_logs(
+    service: Optional[str] = None,
+    user_id: Optional[str] = None,
+    limit: int = 100,
+):
+    r = await get_redis()
+    cutoff = time.time() - (LOG_RETENTION_DAYS * 86400)
+    
+    # Fetch all entries within retention window (sorted by timestamp desc)
+    entries = await r.zrevrangebyscore("logs:entries", "+inf", cutoff, start=0, num=limit * 10)
+    
+    results = []
+    for entry_json in entries:
+        try:
+            entry = json.loads(entry_json)
+            # Apply filters
+            if service and entry.get("service") != service:
+                continue
+            if user_id and user_id != "admin" and entry.get("user_id") != user_id:
+                continue
+            results.append(entry)
+            if len(results) >= limit:
+                break
+        except json.JSONDecodeError:
+            continue
+    
+    return results
+
 @app.get("/logs")
 async def get_logs(user_id: Optional[str] = None, service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
     return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
-# /api/logs path — Caddy routes /api/logs* directly to logging:8006
 @app.get("/api/logs")
 async def get_logs_api(user_id: Optional[str] = None, service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
     return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
 @app.get("/api/admin/logs")
 async def get_logs_admin_api(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
-    # Admins can see everything
     return await _fetch_logs(service=service, user_id="admin", limit=_resolve_limit(limit, lines))
 
 @app.delete("/api/logs")
 async def clear_logs_api(x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.execute("DELETE FROM logs")
-    conn.commit()
-    conn.close()
+    r = await get_redis()
+    await r.delete("logs:entries")
     return {"status": "success", "message": "Logs cleared"}
 
 @app.delete("/api/admin/logs")
 async def clear_logs_admin_api(x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.execute("DELETE FROM logs")
-    conn.commit()
-    conn.close()
+    r = await get_redis()
+    await r.delete("logs:entries")
     return {"status": "success", "message": "Logs cleared"}
 
-# --- WebSocket Streaming ---
-from fastapi import WebSocket, WebSocketDisconnect
-import asyncio
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception:
-                pass
-
-manager = ConnectionManager()
-
-async def _ws_handler(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            await asyncio.sleep(10)
-            await websocket.send_text(json.dumps({"ping": True}))
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-
-# Caddy routes /api/logs/stream → logging:8006 so we handle it here
-@app.websocket("/api/logs/stream")
-async def websocket_endpoint(websocket: WebSocket):
-    await _ws_handler(websocket)
-
-# Also handle /logs/stream for any direct calls
-@app.websocket("/logs/stream")
-async def websocket_endpoint_direct(websocket: WebSocket):
-    await _ws_handler(websocket)
-
-# Update add_log to broadcast
 @app.post("/log")
 @app.post("/logs")
 @app.post("/api/logs")
@@ -244,32 +193,69 @@ async def log_event(entry: LogEntry, x_internal_secret: Optional[str] = Header(d
     _require_internal_secret(x_internal_secret)
     sanitized_message = sanitize_log_payload(entry.message)
     sanitized_context = sanitize_log_payload(entry.context or {})
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.execute(
-        "INSERT INTO logs (user_id, service, level, message, context) VALUES (?, ?, ?, ?, ?)",
-        (
-            entry.user_id,
-            entry.service,
-            entry.level,
-            sanitized_message,
-            json.dumps(sanitized_context),
-        )
-    )
-    conn.commit()
-    conn.close()
     
-    # Broadcast to websocket clients
+    now = time.time()
     log_dict = {
         "user_id": entry.user_id,
-        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "timestamp": datetime.fromtimestamp(now).strftime('%Y-%m-%d %H:%M:%S'),
         "service": entry.service,
         "level": entry.level,
         "message": sanitized_message,
-        "context": sanitized_context
+        "context": sanitized_context,
+        "_ts": now,
     }
-    await manager.broadcast(json.dumps(log_dict))
+    
+    r = await get_redis()
+    
+    # Store in sorted set (score = timestamp for range queries and retention)
+    await r.zadd("logs:entries", {json.dumps(log_dict): now})
+    
+    # Enforce max entries (trim oldest)
+    await r.zremrangebyrank("logs:entries", 0, -LOG_MAX_ENTRIES - 1)
+    
+    # Broadcast via PubSub for WebSocket streaming
+    broadcast_payload = {k: v for k, v in log_dict.items() if k != "_ts"}
+    await r.publish("logs:stream", json.dumps(broadcast_payload))
     
     return {"status": "success"}
+
+# --- WebSocket Streaming via Redis PubSub ---
+active_ws: List[WebSocket] = []
+
+async def _ws_handler(websocket: WebSocket):
+    await websocket.accept()
+    active_ws.append(websocket)
+    r = await get_redis()
+    pubsub = r.pubsub()
+    await pubsub.subscribe("logs:stream")
+    
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                try:
+                    await websocket.send_text(message["data"])
+                except Exception:
+                    break
+            elif message["type"] == "ping":
+                try:
+                    await websocket.send_text(json.dumps({"ping": True}))
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await pubsub.unsubscribe("logs:stream")
+        await pubsub.close()
+        if websocket in active_ws:
+            active_ws.remove(websocket)
+
+@app.websocket("/api/logs/stream")
+async def websocket_endpoint(websocket: WebSocket):
+    await _ws_handler(websocket)
+
+@app.websocket("/logs/stream")
+async def websocket_endpoint_direct(websocket: WebSocket):
+    await _ws_handler(websocket)
 
 @app.get("/health")
 def health():
