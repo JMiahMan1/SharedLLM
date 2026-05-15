@@ -4,11 +4,10 @@
 if [ -S /var/run/docker.sock ]; then
     DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null)
     if [ -n "$DOCKER_GID" ]; then
-        # Change the container's docker group GID to match the host's socket GID
-        groupmod -g "$DOCKER_GID" docker 2>/dev/null || true
-        # Add the sharedllm user to the docker group
-        adduser sharedllm docker 2>/dev/null || true
-        echo "[entrypoint] Aligned docker group to host GID=$DOCKER_GID"
+        echo "[entrypoint] Docker socket GID=$DOCKER_GID, adding to supplementary groups"
+        # Use setpriv to run the process with the docker group as a supplementary group
+        exec setpriv --reuid=1000 --regid=1000 --groups=1000,"$DOCKER_GID" -- "$@"
     fi
 fi
-exec "$@"
+# Fallback: just drop to the sharedllm user without docker access
+exec setpriv --reuid=1000 --regid=1000 --groups=1000 -- "$@"

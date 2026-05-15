@@ -42,7 +42,6 @@ services:
     restart: always
     ports:
       - 8003:8003
-    user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
     extra_hosts:
