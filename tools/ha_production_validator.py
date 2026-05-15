@@ -23,7 +23,7 @@ def discover_prod_ip():
     return "192.168.2.205" # Fallback
 
 PROD_IP = discover_prod_ip()
-EXECUTION_URL = os.getenv("EXECUTION_SVC_URL", f"http://{PROD_IP}:8080")
+EXECUTION_URL = os.getenv("EXECUTION_SVC_URL", f"http://{PROD_IP}:8003")
 
 # Common User Context for testing
 USER_CONTEXT = {
