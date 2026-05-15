@@ -19,7 +19,7 @@ RUN groupadd -g ${PGID} sharedllm || true \
     && mkdir -p /home/sharedllm/.cache/huggingface /home/sharedllm/.cache/qdrant \
     && chown -R ${PUID}:${PGID} /home/sharedllm
 ENV HOME=/home/sharedllm
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/services
 
 EXPOSE 8002
-CMD ["uvicorn", "services.gateway.main:app", "--host", "0.0.0.0", "--port", "11435"]
+CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "11435"]
