@@ -64,6 +64,10 @@
         reverse_proxy execution:8003
     }
 
+    handle /media* {
+        reverse_proxy execution:8003
+    }
+
     # 3. Route Identity/Auth API traffic
     handle /api/auth* {
         reverse_proxy identity:8001
