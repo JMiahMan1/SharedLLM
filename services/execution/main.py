@@ -19,9 +19,9 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest
+        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest
     )
-    from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
+    from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video
     from handlers import docker_logs as docker_logs_handler
     from handlers import git as git_handler
     from handlers import deployment as deployment_handler
@@ -37,9 +37,9 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest
         )
-        from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
+        from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video
         from .handlers import docker_logs as docker_logs_handler
         from .handlers import git as git_handler
         from .handlers import deployment as deployment_handler
@@ -54,9 +54,9 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest
         )
-        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics
+        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video
         from execution.handlers import docker_logs as docker_logs_handler
         from execution.handlers import git as git_handler
         from execution.handlers import deployment as deployment_handler
@@ -806,6 +806,12 @@ async def execute_execution_logs(req: ExecutionLogRequest):
     ctx = req.user_context
     log.info(f"[execution/logs] user={ctx.user} service={req.service} keyword={req.keyword} lines={req.lines}")
     return await diagnostics.handle_execution_logs(req.model_dump())
+
+@app.post("/execute/video/play", response_model=ExecutionResult)
+async def execute_video_play(req: VideoPlayRequest):
+    ctx = req.user_context
+    log.info(f"[video/play] user={ctx.user} entity={req.entity_id} query='{req.query}'")
+    return await video.handle_video_play(req)
 
 @app.post("/execute/diagnostics", response_model=ExecutionResult)
 async def execute_diagnostics(req: DiagnosticRequest):

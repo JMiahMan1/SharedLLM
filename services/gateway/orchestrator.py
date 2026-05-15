@@ -28,6 +28,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
     "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
     "mediastatusrequest": (EXECUTION_SVC, "/execute/media/status"),
+    "videoplayrequest": (EXECUTION_SVC, "/execute/video/play"),
     "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
     "climaterequest": (EXECUTION_SVC, "/execute/climate"),
     "securityrequest": (EXECUTION_SVC, "/execute/security"),
