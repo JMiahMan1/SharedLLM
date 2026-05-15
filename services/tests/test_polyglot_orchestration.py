@@ -1,10 +1,13 @@
+import os
 import httpx
 import json
 import time
+import pytest
 
 GATEWAY_URL = "http://ai.local:11435"
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
+@pytest.mark.server_only
 def run_coding_task(description, expected_markers, workspace_id="SharedLLM", relative_path=None):
     print(f"\n>>> Task: {description}")
     payload = {
@@ -60,6 +63,7 @@ def run_coding_task(description, expected_markers, workspace_id="SharedLLM", rel
         print(f"RESULT: ERROR - {resp.text}")
         return False
 
+@pytest.mark.server_only
 def test_polyglot():
     ts = int(time.time())
     tasks = [
