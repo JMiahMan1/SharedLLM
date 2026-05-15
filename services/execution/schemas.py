@@ -184,6 +184,18 @@ class TVCastRequest(BaseRequest):
     power_on_wait_ms: int = Field(3000, ge=0, le=15000)
 
 
+# ─── Video Playback (YouTube via yt-dlp) ───────────────────────────────────────
+
+class VideoPlayRequest(BaseRequest):
+    """
+    Plays video on a media player by extracting a direct MP4 stream URL via yt-dlp.
+    Works on Cast, AndroidTV, and any device that supports video/mp4 playback.
+    """
+    user_context: UserContext
+    entity_id: str
+    query: str = Field(..., description="YouTube URL or search query (e.g., 'Brandon Lake live worship')")
+
+
 # ─── Media Status ───────────────────────────────────────────────────────────────
 
 class MediaStatusRequest(BaseRequest):
