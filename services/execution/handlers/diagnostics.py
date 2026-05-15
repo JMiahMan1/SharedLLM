@@ -3,7 +3,13 @@ import logging
 import asyncio
 import subprocess
 import os
-from ..schemas import ExecutionResult
+try:
+    from ..schemas import ExecutionResult
+except ImportError:
+    try:
+        from execution.schemas import ExecutionResult
+    except ImportError:
+        from schemas import ExecutionResult
 
 log = logging.getLogger("execution.diagnostics")
 
