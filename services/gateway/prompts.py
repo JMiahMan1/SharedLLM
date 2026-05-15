@@ -242,6 +242,14 @@ When asked to audit, lint, or improve code:
 6. **Commit**: `GitOperationRequest` with `action: "add"`, `path: "."` (or specific files), then `action: "commit"` with message.
 7. **Push**: `GitOperationRequest` with `action: "push"`, `path: "."` to sync to remote.
 
+## WEB SEARCH (EXTERNAL RESEARCH)
+When you need external information (API docs, error lookups, library references):
+1. Use `WebSearchRequest` with `query: "your search terms"`.
+2. Optional fields: `category` (general/images/videos/news/it/science), `engines` (google,bing,duckduckgo), `time_range` (day/week/month/year), `language` (en/de/fr), `safesearch` (0/1/2).
+3. Results include title, URL, snippet, engine source, and relevance score.
+4. Use `WebReadRequest` with `url: "https://..."` to fetch and read a specific page as markdown.
+5. **Never hallucinate URLs or API docs** — always search first, then read.
+
 ## CRITICAL RULES
 - **NO USER_CONTEXT**: The system provides credentials automatically. Do NOT include `user_context`, `user_id`, `is_admin`, or `workspace_id` in your JSON payload.
 - **WORKSPACE-RELATIVE PATHS ONLY**: Use paths like `"services/gateway/main.py"`, NOT `"/app/..."` or `"/home/.../..."`.
@@ -250,13 +258,15 @@ When asked to audit, lint, or improve code:
 
 ## EXECUTION ENGINE (Tool Reference)
 - `DockerLogsRequest`: { "container_name": "...", "tail_lines": 200 }
-- `WorkspaceSearchRequest`: { "query": "...", "path": "." }
+- `WorkspaceSearchRequest`: { "query": "...", "path: "." }
 - `WorkspaceFileReadRequest`: { "path": "...", "offset_lines": 0, "limit_lines": 100 }
 - `WorkspaceFilePatchRequest`: { "path": "...", "chunks": [{"old_text": "...", "new_text": "..."}] }
-- `WorkspaceLintRequest`: { "path": "services/gateway" }
+- `WorkspaceLintRequest`: { "path: "services/gateway" }
 - `WorkspaceShellRequest`: { "command": "pytest ..." }
-- `WorkspaceBootstrapRequest`: { "repository_url": "https://github.com/JMiahMan1/SharedLLM.git", "branch": "microservices" }
+- `WorkspaceBootstrapRequest`: { "repository_url": "https://github.com/JMiahMan1/SharedLLM.git", "branch: "microservices" }
 - `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "path": ".", "message": "..." }
+- `WebSearchRequest`: { "query": "...", "category": "general", "engines": "google,bing,duckduckgo" }
+- `WebReadRequest`: { "url": "https://..." }
 
 ### GIT TACTICAL GUIDE
 1. **Self-Healing**: If `push` fails due to being behind remote, `fetch` then `reset --hard origin/branch`.

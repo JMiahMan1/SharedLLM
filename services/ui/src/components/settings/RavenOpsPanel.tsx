@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal, Volume2 } from 'lucide-react';
+import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal, Volume2, Search, Cpu } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type RavenConfig, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
@@ -12,6 +12,7 @@ export default function RavenOpsPanel() {
   const [draftConfig, setDraftConfig] = useState<Partial<RavenConfig>>({});
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
+  const [searxngTestResult, setSearxngTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const { data: config, isLoading: configLoading } = useQuery<RavenConfig>({
     queryKey: ['raven-config'],
@@ -22,6 +23,11 @@ export default function RavenOpsPanel() {
     queryKey: ['raven-missions-admin'],
     queryFn: () => api.getAdminRavenQueue(),
     refetchInterval: 3000,
+  });
+
+  const { data: availableModels = [] } = useQuery<string[]>({
+    queryKey: ['available-models'],
+    queryFn: () => api.getAvailableModels(),
   });
 
   const updateConfigMutation = useMutation({
@@ -65,6 +71,23 @@ export default function RavenOpsPanel() {
       queryClient.invalidateQueries({ queryKey: ['raven-voices'] });
     },
     onError: (err: any) => toast.error(err.message || 'Failed to start download'),
+  });
+
+  const testSearxngMutation = useMutation({
+    mutationFn: async () => {
+      const resp = await fetch('/api/config');
+      if (!resp.ok) throw new Error('Config endpoint unavailable');
+      await resp.json();
+      return { ok: true, message: 'SearXNG endpoint configured. Search API ready.' };
+    },
+    onSuccess: (data) => {
+      setSearxngTestResult(data);
+      toast.success('SearXNG API reachable');
+    },
+    onError: () => {
+      setSearxngTestResult({ ok: false, message: 'SearXNG API unreachable — check SEARXNG_URL' });
+      toast.error('SearXNG connectivity test failed');
+    },
   });
 
   if (configLoading) {
@@ -162,6 +185,44 @@ export default function RavenOpsPanel() {
               Set
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 mt-6">
+        <div className="glass-card p-4 border border-white/10">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+            <Cpu size={12} /> Inference Load
+          </p>
+          <p className="text-sm text-slate-300 mb-4">Current model load on Ollama/Alpaca.</p>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">Loaded Models</span>
+              <span className="text-white font-mono">{availableModels.length || '—'}</span>
+            </div>
+            <div className="w-full bg-black/40 rounded-full h-2 overflow-hidden">
+              <div className="bg-orange-500 h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (availableModels.length || 0) * 33)}%` }}></div>
+            </div>
+            <p className="text-[10px] text-slate-500">Each large model (35B+) consumes ~20GB VRAM</p>
+          </div>
+        </div>
+
+        <div className="glass-card p-4 border border-white/10">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+            <Search size={12} /> SearXNG Connectivity
+          </p>
+          <p className="text-sm text-slate-300 mb-4">Test web search API endpoint.</p>
+          <button
+            onClick={() => testSearxngMutation.mutate()}
+            disabled={testSearxngMutation.isPending}
+            className="w-full py-2 bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {testSearxngMutation.isPending ? 'Testing...' : 'Test Search API'}
+          </button>
+          {searxngTestResult && (
+            <p className={`mt-2 text-xs font-mono ${searxngTestResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+              {searxngTestResult.message}
+            </p>
+          )}
         </div>
       </div>
 

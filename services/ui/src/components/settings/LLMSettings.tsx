@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Cpu, 
   Cloud, 
-  Settings2, 
   Save, 
   Zap, 
   Brain, 
@@ -98,6 +97,7 @@ const LLMSettings: React.FC = () => {
             <div className="space-y-3">
               {[
                 { id: 'ollama', label: 'Local (Ollama)', icon: Cpu, desc: 'Privacy-first, low latency local inference.' },
+                { id: 'llama_server', label: 'Local (LLaMA Server)', icon: Cpu, desc: 'GGUF turboquant for 35B+ models with lazy model routing.' },
                 { id: 'openrouter', label: 'Cloud (OpenRouter)', icon: Cloud, desc: 'High-power inference via cloud providers.' }
               ].map(provider => (
                 <button
@@ -136,6 +136,16 @@ const LLMSettings: React.FC = () => {
                 />
               </div>
               <div>
+                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">LLaMA Server Proxy URL</label>
+                <input 
+                  type="text" 
+                  value={getSetting('llama_server_proxy_url')} 
+                  onChange={e => setDrafts({...drafts, llama_server_proxy_url: e.target.value})}
+                  className="glass-input w-full text-xs"
+                  placeholder="http://alpaca-proxy:11434"
+                />
+              </div>
+              <div>
                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Cloud API URL</label>
                 <input 
                   type="text" 
@@ -169,7 +179,7 @@ const LLMSettings: React.FC = () => {
 
         {/* Model Mappings */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Local Models */}
             <div className={`glass-panel p-6 border-white/5 transition-opacity ${activeProvider !== 'ollama' ? 'opacity-50' : 'opacity-100'}`}>
               <div className="flex items-center gap-3 mb-6">
@@ -193,6 +203,38 @@ const LLMSettings: React.FC = () => {
                       className="glass-input w-full text-xs bg-black/40"
                     >
                       <option value="">Select Local Model</option>
+                      {availableModels.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* LLaMA Server Models */}
+            <div className={`glass-panel p-6 border-white/5 transition-opacity ${activeProvider !== 'llama_server' ? 'opacity-50' : 'opacity-100'}`}>
+              <div className="flex items-center gap-3 mb-6">
+                <Cpu size={20} className="text-amber-400" />
+                <h4 className="text-xs font-black uppercase tracking-widest text-white">LLaMA Server GGUF Mapping</h4>
+              </div>
+              <div className="space-y-6">
+                {[
+                  { label: 'Assistant (35B+)', key: 'llama_server_assistant_model', icon: Brain },
+                  { label: 'Coding (35B+)', key: 'llama_server_coding_model', icon: Code },
+                  { label: 'Librarian (35B+)', key: 'llama_server_librarian_model', icon: Library }
+                ].map(role => (
+                  <div key={role.key} className="glass-card p-4 bg-white/5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <role.icon size={14} className="text-slate-500" />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{role.label}</span>
+                    </div>
+                    <select
+                      value={getSetting(role.key)}
+                      onChange={e => setDrafts({...drafts, [role.key]: e.target.value})}
+                      className="glass-input w-full text-xs bg-black/40"
+                    >
+                      <option value="">Select LLaMA Server Model</option>
                       {availableModels.map(m => (
                         <option key={m} value={m}>{m}</option>
                       ))}

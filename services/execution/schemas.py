@@ -485,9 +485,15 @@ class WorkspaceSyncAction(BaseRequest):
 # ─── Browser / Web Agent ────────────────────────────────────────────────────────
 
 class WebSearchRequest(BaseRequest):
-    """Performs a web search via search.sumemail.com."""
+    """Performs a web search via SearXNG JSON API."""
     user_context: UserContext
     query: str
+    category: Optional[str] = Field(None, description="Search category: general, images, videos, news, music, files, it, science, social_media")
+    engines: Optional[str] = Field(None, description="Comma-separated engine list (e.g. 'google,bing,duckduckgo')")
+    time_range: Optional[str] = Field(None, description="Time filter: day, week, month, year")
+    safesearch: Optional[int] = Field(None, ge=0, le=2, description="Safe search level: 0=off, 1=moderate, 2=strict")
+    language: Optional[str] = Field("en", description="Locale code for results (e.g. 'en', 'de', 'fr')")
+    pageno: Optional[int] = Field(None, ge=1, description="Page number for pagination")
 
 class WebReadRequest(BaseRequest):
     """Fetches a URL and returns the content as markdown."""
