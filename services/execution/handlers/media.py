@@ -17,6 +17,29 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
 
     # Music Assistant library lookup path.
     if req.query:
+        # Try standard media_player.play_media first (works with Cast/AndroidTV)
+        result = await ha_client.call_service(
+            ctx.ha_url,
+            ctx.ha_token,
+            "media_player",
+            "play_media",
+            full_entity_id,
+            {
+                "media": {
+                    "media_content_id": req.query,
+                    "media_content_type": req.media_content_type or "music"
+                },
+                "enqueue": "play" if req.enqueue == "replace" else req.enqueue,
+            },
+        )
+        if result.get("ok"):
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"Playback started for '{req.query}'.",
+                service="media_play",
+            )
+
+        # Fallback: try MASS if available
         fallback_types = [req.media_content_type or "artist", "search", "music"]
         seen = set()
         ordered_types = []
@@ -26,7 +49,6 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
                 seen.add(media_type)
 
         for media_type in ordered_types:
-            # Standardizing on 'mass' domain as per HA integration specs
             result = await ha_client.call_service(
                 ctx.ha_url,
                 ctx.ha_token,
@@ -48,7 +70,7 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
 
         return ExecutionResult(
             status="FAILURE",
-            message=f"Music Assistant playback failed for '{req.query}'.",
+            message=f"Playback failed for '{req.query}'.",
             service="media_play",
         )
 
