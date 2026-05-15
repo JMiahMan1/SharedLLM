@@ -271,7 +271,7 @@ const Communication = () => {
   const saveNoteMutation = useMutation({
     mutationFn: (payload: { title: string; content: string; category: string; path?: string }) => {
       if (payload.path) {
-        return api.appendNote({ title: payload.title, content: payload.content, storage: noteStorage });
+        return api.appendNote({ title: payload.title, content: payload.content, path: payload.path, storage: noteStorage });
       }
       return api.createNote({ title: payload.title, content: payload.content, category: payload.category, storage: noteStorage });
     },

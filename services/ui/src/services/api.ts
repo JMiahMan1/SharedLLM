@@ -389,6 +389,26 @@ export const api = {
     return resp.data;
   },
 
+  async getDnsConfig(): Promise<{ dns_mappings: Record<string, string>; dns_upstream: string; dns_poll_interval: number }> {
+    const resp = await apiClient.get('/api/admin/dns');
+    return resp.data;
+  },
+
+  async updateDnsConfig(config: { dns_mappings?: Record<string, string>; dns_upstream?: string; dns_poll_interval?: number }): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/admin/dns/update', config);
+    return resp.data;
+  },
+
+  async registerDnsEntry(hostname: string, ip: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/admin/dns/register', { hostname, ip });
+    return resp.data;
+  },
+
+  async removeDnsEntry(hostname: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.delete(`/api/admin/dns/${hostname}`);
+    return resp.data;
+  },
+
   async testConnection(service: string, config: Record<string, unknown>): Promise<{ status: 'SUCCESS' | 'ERROR'; message?: string }> {
     const resp = await apiClient.post('/api/auth/test-connection', { service, config });
     return resp.data;
@@ -504,7 +524,7 @@ export const api = {
     return resp.data;
   },
 
-  async appendNote(payload: { title: string; content: string; storage?: string }): Promise<ExecutionResponse> {
+  async appendNote(payload: { title: string; content: string; storage?: string; path?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/append', payload);
     return resp.data;
   },

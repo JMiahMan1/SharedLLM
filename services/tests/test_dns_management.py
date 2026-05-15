@@ -6,19 +6,8 @@ import json
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_get_dns_config_returns_mappings():
-    from services.gateway.main import get_dns_config
+    from gateway.main import get_dns_config
     from starlette.requests import Request
-
-    mock_client = AsyncMock()
-    mock_client.get.return_value = AsyncMock(
-        json=lambda: [
-            {"key": "dns_mappings", "value": '{"ollama-server": "192.168.4.179"}'},
-            {"key": "dns_upstream", "value": "8.8.8.8,1.1.1.1"},
-            {"key": "dns_poll_interval", "value": "30"},
-        ]
-    )
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
 
     mock_request = Request({
         "type": "http",
@@ -28,8 +17,15 @@ async def test_get_dns_config_returns_mappings():
         "headers": [],
     })
 
-    with patch("services.gateway.main._resolve_identity_from_request", return_value={"user": "admin", "is_admin": True}), \
-         patch("services.gateway.main.borrow_http_client", return_value=mock_client):
+    with patch("gateway.main.fetch_global_setting", new_callable=AsyncMock) as mock_fetch:
+        async def side_effect(key, default=""):
+            return {
+                "dns_mappings": '{"ollama-server": "192.168.4.179"}',
+                "dns_upstream": "8.8.8.8,1.1.1.1",
+                "dns_poll_interval": "30",
+            }.get(key, default)
+        mock_fetch.side_effect = side_effect
+
         result = await get_dns_config(mock_request)
 
     assert result["dns_mappings"] == {"ollama-server": "192.168.4.179"}
@@ -40,16 +36,8 @@ async def test_get_dns_config_returns_mappings():
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_register_dns_entry_adds_mapping():
-    from services.gateway.main import register_dns_entry
+    from gateway.main import register_dns_entry
     from starlette.requests import Request
-
-    mock_client = AsyncMock()
-    mock_client.get.return_value = AsyncMock(
-        json=lambda: {"key": "dns_mappings", "value": '{"existing": "10.0.0.1"}'}
-    )
-    mock_client.patch.return_value = AsyncMock(status_code=200)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
 
     body = json.dumps({"hostname": "new-host", "ip": "192.168.4.179"}).encode()
 
@@ -64,7 +52,13 @@ async def test_register_dns_entry_adds_mapping():
         "headers": [(b"content-type", b"application/json")],
     }, receive)
 
-    with patch("services.gateway.main.borrow_http_client", return_value=mock_client):
+    mock_client = AsyncMock()
+    mock_client.patch.return_value = AsyncMock(status_code=200)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("gateway.main.fetch_global_setting", new_callable=AsyncMock, return_value='{"existing": "10.0.0.1"}'), \
+         patch("gateway.main.httpx.AsyncClient", return_value=mock_client):
         result = await register_dns_entry(mock_request)
 
     assert result["status"] == "SUCCESS"
@@ -77,16 +71,8 @@ async def test_register_dns_entry_adds_mapping():
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_remove_dns_entry_deletes_mapping():
-    from services.gateway.main import remove_dns_entry
+    from gateway.main import remove_dns_entry
     from starlette.requests import Request
-
-    mock_client = AsyncMock()
-    mock_client.get.return_value = AsyncMock(
-        json=lambda: {"key": "dns_mappings", "value": '{"old-host": "10.0.0.5", "keep": "10.0.0.6"}'}
-    )
-    mock_client.patch.return_value = AsyncMock(status_code=200)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
 
     async def receive():
         return {"type": "http.request", "body": b"", "more_body": False}
@@ -100,8 +86,13 @@ async def test_remove_dns_entry_deletes_mapping():
         "receive": receive,
     })
 
-    with patch("services.gateway.main._resolve_identity_from_request", return_value={"user": "admin", "is_admin": True}), \
-         patch("services.gateway.main.borrow_http_client", return_value=mock_client):
+    mock_client = AsyncMock()
+    mock_client.patch.return_value = AsyncMock(status_code=200)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("gateway.main.fetch_global_setting", new_callable=AsyncMock, return_value='{"old-host": "10.0.0.5", "keep": "10.0.0.6"}'), \
+         patch("gateway.main.httpx.AsyncClient", return_value=mock_client):
         result = await remove_dns_entry("old-host", mock_request)
 
     assert result["status"] == "SUCCESS"

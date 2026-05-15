@@ -2294,6 +2294,7 @@ async def proxy_read_note(request: Request):
     payload = {
         "action": "read",
         "title": body.get("title"),
+        "path": body.get("path"),
         "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
@@ -2306,6 +2307,7 @@ async def proxy_append_note(request: Request):
         "action": "append",
         "title": body.get("title"),
         "content": body.get("content"),
+        "path": body.get("path"),
         "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
@@ -2317,6 +2319,7 @@ async def proxy_delete_note(request: Request):
     payload = {
         "action": "delete",
         "title": body.get("title"),
+        "path": body.get("path"),
         "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
@@ -3207,3 +3210,112 @@ async def update_gateway_config(new_config: dict):
     
     log.info(f"Updated Gateway Config via Identity SVC: {new_config}")
     return {"status": "SUCCESS", "config": new_config}
+
+
+# --- DNS Management Endpoints ---
+@app.get("/api/admin/dns")
+async def get_dns_config(request: Request):
+    """Get full DNS configuration (mappings, upstream, poll interval)."""
+    raw_mappings = await fetch_global_setting("dns_mappings", "{}")
+    upstream = await fetch_global_setting("dns_upstream", "8.8.8.8,1.1.1.1")
+    poll_interval_str = await fetch_global_setting("dns_poll_interval", "30")
+
+    try:
+        dns_mappings = json.loads(raw_mappings)
+    except (json.JSONDecodeError, TypeError):
+        dns_mappings = {}
+
+    try:
+        poll_interval = int(poll_interval_str)
+    except (ValueError, TypeError):
+        poll_interval = 30
+
+    return {
+        "dns_mappings": dns_mappings,
+        "dns_upstream": upstream,
+        "dns_poll_interval": poll_interval,
+    }
+
+
+@app.post("/api/admin/dns/register")
+async def register_dns_entry(request: Request):
+    """Register a new DNS hostname-to-IP mapping."""
+    body = await request.json()
+    hostname = body.get("hostname", "").strip()
+    ip = body.get("ip", "").strip()
+
+    if not hostname or not ip:
+        raise HTTPException(status_code=400, detail="hostname and ip are required")
+
+    raw_mappings = await fetch_global_setting("dns_mappings", "{}")
+    try:
+        dns_mappings = json.loads(raw_mappings)
+    except (json.JSONDecodeError, TypeError):
+        dns_mappings = {}
+
+    dns_mappings[hostname] = ip
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        await client.patch(
+            f"{IDENTITY_SVC}/api/settings/dns_mappings",
+            json={"value": json.dumps(dns_mappings)},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+
+    return {"status": "SUCCESS", "message": f"Registered {hostname} -> {ip}"}
+
+
+@app.delete("/api/admin/dns/{hostname:path}")
+async def remove_dns_entry(hostname: str, request: Request):
+    """Remove a DNS hostname-to-IP mapping."""
+    raw_mappings = await fetch_global_setting("dns_mappings", "{}")
+    try:
+        dns_mappings = json.loads(raw_mappings)
+    except (json.JSONDecodeError, TypeError):
+        dns_mappings = {}
+
+    if hostname not in dns_mappings:
+        raise HTTPException(status_code=404, detail=f"DNS entry '{hostname}' not found")
+
+    del dns_mappings[hostname]
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        await client.patch(
+            f"{IDENTITY_SVC}/api/settings/dns_mappings",
+            json={"value": json.dumps(dns_mappings)},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+
+    return {"status": "SUCCESS", "message": f"Removed {hostname}"}
+
+
+@app.post("/api/admin/dns/update")
+async def update_dns_config(request: Request):
+    """Update DNS configuration (upstream, poll interval, or full mappings)."""
+    body = await request.json()
+
+    if "dns_upstream" in body:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.patch(
+                f"{IDENTITY_SVC}/api/settings/dns_upstream",
+                json={"value": body["dns_upstream"]},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+
+    if "dns_poll_interval" in body:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.patch(
+                f"{IDENTITY_SVC}/api/settings/dns_poll_interval",
+                json={"value": str(body["dns_poll_interval"])},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+
+    if "dns_mappings" in body:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.patch(
+                f"{IDENTITY_SVC}/api/settings/dns_mappings",
+                json={"value": json.dumps(body["dns_mappings"])},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+
+    return {"status": "SUCCESS", "message": "DNS configuration updated"}
