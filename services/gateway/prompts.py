@@ -33,6 +33,8 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "- **SecurityRequest**: `{\"action\": \"lock\" | \"unlock\" | \"open\" | \"close\" | \"status\", \"entity_id\": \"lock.xxx\"}`\n"
     "- **LogbookRequest**: `{\"entity_id\": \"sensor.xxx\", \"days\": 1}`\n"
     "- **MediaPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"artist or song name\"}` - MUST include BOTH \"entity_id\" AND \"query\"\n"
+    "- **MediaStatusRequest**: `{}` (no required fields) - use to check \"what's playing\" or \"what devices are active\"\n"
+    "- **MediaStatusRequest with filter**: `{\"area\": \"Office\"}` or `{\"entity_id\": \"media_player.office_tv\"}`\n"
     "\n"
     "### Entity Resolution Rule (CRITICAL)\n"
     "When the user mentions a device by name (e.g., \"Office TV\", \"hall lamp\"), you MUST find the EXACT entity ID from the HA entity context provided above. "
