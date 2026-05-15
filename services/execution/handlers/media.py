@@ -65,36 +65,57 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         # Resolve to MASS entity if available
         mass_entity = await resolve_mass_entity(ctx, full_entity_id)
         
-        # Try music_assistant.play_media first (proper HA integration)
-        media_types = [req.media_content_type or "artist", "track", "playlist", "radio"]
-        seen = set()
-        ordered_types = []
-        for mt in media_types:
-            if mt and mt not in seen:
-                ordered_types.append(mt)
-                seen.add(mt)
-
-        for media_type in ordered_types:
-            result = await ha_client.call_service(
-                ctx.ha_url,
-                ctx.ha_token,
-                "music_assistant",
-                "play_media",
-                mass_entity,
-                {
-                    "media_id": req.query,
-                    "media_type": media_type,
-                    "enqueue": "play" if req.enqueue == "replace" else req.enqueue,
-                },
-            )
-            if result.get("ok"):
-                return ExecutionResult(
-                    status="SUCCESS",
-                    message=f"Music Assistant playback started for '{req.query}' ({media_type}).",
-                    service="media_play",
+        # Step 1: Search MASS for the query to get a proper URI
+        search_result = await ha_client.call_service(
+            ctx.ha_url,
+            ctx.ha_token,
+            "music_assistant",
+            "search",
+            mass_entity,
+            {
+                "config_entry_id": "01KMKEW7FVVXHQAB89YMYDZNAT",
+                "name": req.query,
+                "media_type": ["track", "artist", "album", "playlist", "radio"],
+                "limit": 5,
+            },
+            return_response=True,
+        )
+        
+        if search_result.get("ok") and search_result.get("service_response"):
+            resp = search_result["service_response"]
+            # Try tracks first, then albums, artists, playlists, radio
+            uri = None
+            media_type_label = ""
+            for category in ["tracks", "albums", "artists", "playlists", "radios"]:
+                items = resp.get(category, [])
+                if items:
+                    uri = items[0].get("uri")
+                    media_type_label = category
+                    break
+            
+            if uri:
+                log.info(f"[media/play] MASS search found: {uri} ({media_type_label})")
+                result = await ha_client.call_service(
+                    ctx.ha_url,
+                    ctx.ha_token,
+                    "music_assistant",
+                    "play_media",
+                    mass_entity,
+                    {
+                        "media_id": uri,
+                        "enqueue": "play" if req.enqueue == "replace" else req.enqueue,
+                    },
                 )
+                if result.get("ok"):
+                    return ExecutionResult(
+                        status="SUCCESS",
+                        message=f"Music Assistant playback started for '{req.query}' ({media_type_label}).",
+                        service="media_play",
+                    )
+            else:
+                log.warning(f"[media/play] MASS search returned no results for '{req.query}'")
 
-        # Fallback: standard media_player.play_media (for URLs/apps)
+        # Fallback: standard media_player.play_media (for URLs/video casting)
         result = await ha_client.call_service(
             ctx.ha_url,
             ctx.ha_token,
