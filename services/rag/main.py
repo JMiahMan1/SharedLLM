@@ -446,12 +446,22 @@ async def sync_ha(payload: dict, user_id: Optional[str] = None):
     if docs:
         try:
             collection.upsert(ids=ids, documents=docs, metadatas=metas)
+            
+            # ── Orphan cleanup: delete entries that no longer exist in HA ──
+            incoming_ids = set(ids)
+            orphaned_ids = existing_ids - incoming_ids
+            # Exclude non-entity entries (sync_status, etc.)
+            orphaned_entities = [oid for oid in orphaned_ids if oid.startswith("ha:")]
+            if orphaned_entities:
+                collection.delete(ids=orphaned_entities)
+                log.info(f"[ha_sync] Removed {len(orphaned_entities)} orphaned entity entries: {orphaned_entities[:5]}...")
+            
             collection.upsert(
                 ids=[f"sync_status:{resolved_user}"],
-                documents=[f"Last HA sync for {resolved_user} at {now}. Total: {len(docs)}, New: {new_count}"],
-                metadatas=[{"type": "sync_status", "user_id": resolved_user, "timestamp": now, "count": len(docs), "new_count": new_count, "indexed_at": now_ts}]
+                documents=[f"Last HA sync for {resolved_user} at {now}. Total: {len(docs)}, New: {new_count}, Removed: {len(orphaned_entities)}"],
+                metadatas=[{"type": "sync_status", "user_id": resolved_user, "timestamp": now, "count": len(docs), "new_count": new_count, "removed_count": len(orphaned_entities), "indexed_at": now_ts}]
             )
-            return {"status": "SUCCESS", "count": len(docs), "new_count": new_count}
+            return {"status": "SUCCESS", "count": len(docs), "new_count": new_count, "removed_count": len(orphaned_entities), "orphaned_entity_ids": orphaned_entities}
         except Exception as e:
             log.error(f"HA Sync failed: {e}")
             raise HTTPException(status_code=500, detail="Sync failed")
