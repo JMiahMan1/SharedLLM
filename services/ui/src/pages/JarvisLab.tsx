@@ -174,6 +174,12 @@ const LogTelemetryStream = () => {
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
+    api.getLogs(50).then((historical) => {
+      setLogs(historical.slice(0, 80));
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
