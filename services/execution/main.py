@@ -381,7 +381,8 @@ async def execute_docker(req: DockerComposeRequest):
         try:
             # We run this from the workspace root where docker-compose.yml is
             cmd = ["docker-compose", "up", "-d", "--build"] + list(services)
-            res = subprocess.run(cmd, capture_output=True, text=True, cwd="/workspace/SharedLLM")
+            compose_dir = os.getenv("COMPOSE_PROJECT_DIR", os.path.expanduser("~/workspace"))
+            res = subprocess.run(cmd, capture_output=True, text=True, cwd=compose_dir)
             if res.returncode == 0:
                 return _ok(f"Docker Compose up -d --build successful for {len(services)} services.", {"output": res.stdout})
             else:
@@ -581,7 +582,7 @@ async def execute_index_capabilities():
     if not os.path.exists(script_path):
         # Fallback for Docker environment
         fallbacks = [
-            "/workspace/SharedLLM/scripts/index_capabilities.py",
+            os.path.join(os.path.expanduser("~/workspace"), "scripts/index_capabilities.py"),
             "/app/scripts/index_capabilities.py"
         ]
         for fb in fallbacks:
@@ -594,7 +595,7 @@ async def execute_index_capabilities():
         # Run the script with current python interpreter and env
         # Ensure PYTHONPATH includes the workspace root for imports
         env = {**os.environ}
-        env["PYTHONPATH"] = f"{os.getcwd()}:/workspace/SharedLLM:/app"
+        env["PYTHONPATH"] = f"{os.getcwd()}:{os.path.expanduser('~/workspace')}:/app"
         
         result = subprocess.run(
             [sys.executable, script_path],

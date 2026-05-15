@@ -33,8 +33,9 @@ except ImportError:
 
 log = logging.getLogger("execution.git")
 
-# The SharedLLM workspace is bind-mounted here from the host.
-WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "/workspace/SharedLLM")
+# Workspace root is resolved per-request from the workspace registry.
+# Never hardcoded — configured by users in the UI.
+WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "")
 
 # Fix: Mark workspace as safe to avoid 'dubious ownership' errors in Docker
 # We do this once at module load
