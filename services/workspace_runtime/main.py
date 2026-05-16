@@ -212,12 +212,51 @@ class GitPullRequest(WorkspaceRef):
 
 
 class GitRevertRequest(WorkspaceRef):
-    hard: bool = True
+    commit: Optional[str] = None
+    hard: bool = False
 
 
 class GitRebaseRequest(WorkspaceRef):
     upstream: str
     branch: Optional[str] = None
+
+
+class GitLogRequest(WorkspaceRef):
+    max_count: int = Field(default=20, ge=1, le=100)
+    ref: Optional[str] = None
+    file_path: Optional[str] = None
+    oneline: bool = False
+
+
+class GitCheckoutRequest(WorkspaceRef):
+    branch: str
+    create: bool = False
+    from_ref: Optional[str] = None
+
+
+class GitStashRequest(WorkspaceRef):
+    action: str = "save"  # save, pop, list, apply, drop
+    message: Optional[str] = None
+    stash_index: int = 0
+
+
+class GitRemoteRequest(WorkspaceRef):
+    action: str = "list"  # list, add, remove, set_url
+    name: Optional[str] = None
+    url: Optional[str] = None
+
+
+class GitShowRequest(WorkspaceRef):
+    ref: str = "HEAD"
+    file_path: Optional[str] = None
+
+
+class FileSearchRequest(WorkspaceRef):
+    query: str
+    relative_path: str = "."
+    case_sensitive: bool = False
+    max_results: int = Field(default=100, ge=1, le=500)
+    file_pattern: Optional[str] = None
 
 
 class ProviderScanRequest(WorkspaceRef):
@@ -1970,10 +2009,21 @@ def git_revert(req: GitRevertRequest, x_internal_secret: Optional[str] = Header(
     _require_workspace_capability(workspace_data, "git_write")
     path = Path(workspace_data["resolved_path"])
 
-    # Perform the git revert (hard reset to previous commit)
-    result = _run_command(path, ["git", "reset", "--hard", "HEAD~1"])
-    if result["returncode"] != 0:
-        return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
+    if req.hard:
+        # Hard reset to HEAD~1 (destructive)
+        result = _run_command(path, ["git", "reset", "--hard", "HEAD~1"])
+        if result["returncode"] != 0:
+            return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
+    elif req.commit:
+        # Proper git revert of a specific commit
+        result = _run_command(path, ["git", "revert", "--no-edit", req.commit])
+        if result["returncode"] != 0:
+            return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
+    else:
+        # Default: revert HEAD (proper revert, not reset)
+        result = _run_command(path, ["git", "revert", "--no-edit", "HEAD"])
+        if result["returncode"] != 0:
+            return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
 
     # Clear quarantine status in DB
     with Session(engine) as session:
@@ -1983,7 +2033,245 @@ def git_revert(req: GitRevertRequest, x_internal_secret: Optional[str] = Header(
             session.add(ws)
             session.commit()
 
-    return {"status": "SUCCESS", "message": "Workspace reverted and quarantine lifted."}
+    return {"status": "SUCCESS", "message": "Git revert completed and quarantine lifted."}
+
+
+@app.post("/git/log")
+def git_log(req: GitLogRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_status")
+    workspace_path = Path(workspace["resolved_path"])
+
+    args = ["git", "log", f"-{req.max_count}"]
+    if req.oneline:
+        args.append("--oneline")
+    else:
+        args.extend(["--pretty=format:%H %an <%ae> %ai %s"])
+    if req.ref:
+        args.append(req.ref)
+    if req.file_path:
+        args.extend(["--", req.file_path])
+
+    result = _run_command(workspace_path, args)
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or "git log failed")
+
+    entries = []
+    for line in result["stdout"].strip().splitlines():
+        if not line.strip():
+            continue
+        if req.oneline:
+            parts = line.split(" ", 1)
+            entries.append({"commit": parts[0], "message": parts[1] if len(parts) > 1 else ""})
+        else:
+            parts = line.split(" ", 3)
+            if len(parts) >= 4:
+                entries.append({
+                    "commit": parts[0],
+                    "author": parts[1],
+                    "date": parts[2],
+                    "message": parts[3],
+                })
+
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "count": len(entries),
+        "entries": entries,
+    }
+
+
+@app.post("/git/checkout")
+def git_checkout(req: GitCheckoutRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+
+    branch_name = _validate_branch_name(req.branch)
+
+    if req.create:
+        args = ["git", "checkout", "-b", branch_name]
+        if req.from_ref:
+            args.append(req.from_ref)
+    else:
+        args = ["git", "checkout", branch_name]
+
+    result = _run_command(workspace_path, args)
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git checkout failed")
+
+    current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "command": result["args"],
+        "branch": branch_name,
+        "current_branch": current_branch["stdout"].strip(),
+    }
+
+
+@app.post("/git/stash")
+def git_stash(req: GitStashRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_write")
+    workspace_path = Path(workspace["resolved_path"])
+
+    if req.action == "save":
+        args = ["git", "stash", "push"]
+        if req.message:
+            args.extend(["-m", req.message])
+    elif req.action == "pop":
+        args = ["git", "stash", "pop"]
+        if req.stash_index > 0:
+            args.append(f"stash@{{{req.stash_index}}}")
+    elif req.action == "apply":
+        args = ["git", "stash", "apply"]
+        if req.stash_index > 0:
+            args.append(f"stash@{{{req.stash_index}}}")
+    elif req.action == "list":
+        args = ["git", "stash", "list"]
+    elif req.action == "drop":
+        args = ["git", "stash", "drop"]
+        if req.stash_index > 0:
+            args.append(f"stash@{{{req.stash_index}}}")
+    elif req.action == "clear":
+        args = ["git", "stash", "clear"]
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown stash action: {req.action}")
+
+    result = _run_command(workspace_path, args)
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or f"git stash {req.action} failed")
+
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "action": req.action,
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+    }
+
+
+@app.post("/git/remote")
+def git_remote(req: GitRemoteRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_status")
+    workspace_path = Path(workspace["resolved_path"])
+
+    if req.action == "list":
+        args = ["git", "remote", "-v"]
+    elif req.action == "add":
+        if not req.name or not req.url:
+            raise HTTPException(status_code=400, detail="name and url are required for add action")
+        args = ["git", "remote", "add", req.name, req.url]
+    elif req.action == "remove":
+        if not req.name:
+            raise HTTPException(status_code=400, detail="name is required for remove action")
+        args = ["git", "remote", "remove", req.name]
+    elif req.action == "set_url":
+        if not req.name or not req.url:
+            raise HTTPException(status_code=400, detail="name and url are required for set_url action")
+        args = ["git", "remote", "set-url", req.name, req.url]
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown remote action: {req.action}")
+
+    result = _run_command(workspace_path, args)
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or f"git remote {req.action} failed")
+
+    remotes = []
+    if req.action == "list":
+        current_name = None
+        for line in result["stdout"].strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                name, url, direction = parts[0], parts[1], parts[2]
+                if name != current_name:
+                    remotes.append({"name": name, "fetch": None, "push": None})
+                    current_name = name
+                if direction == "(fetch)":
+                    remotes[-1]["fetch"] = url
+                elif direction == "(push)":
+                    remotes[-1]["push"] = url
+
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "action": req.action,
+        "remotes": remotes,
+        "stdout": result["stdout"],
+    }
+
+
+@app.post("/git/show")
+def git_show(req: GitShowRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "git_status")
+    workspace_path = Path(workspace["resolved_path"])
+
+    if req.file_path:
+        args = ["git", "show", f"{req.ref}:{req.file_path}"]
+    else:
+        args = ["git", "show", "--stat", req.ref]
+
+    result = _run_command(workspace_path, args)
+    if result["returncode"] != 0:
+        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git show failed")
+
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "ref": req.ref,
+        "file_path": req.file_path,
+        "content": result["stdout"],
+    }
+
+
+@app.post("/files/search")
+def file_search(req: FileSearchRequest, x_internal_secret: Optional[str] = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "file_read")
+    workspace_path = Path(workspace["resolved_path"])
+
+    search_path = resolve_safe_path(req.relative_path, workspace_path, must_exist=True)
+
+    grep_args = ["grep", "-rn"]
+    if not req.case_sensitive:
+        grep_args.append("-i")
+    grep_args.extend(["--", req.query, str(search_path)])
+
+    result = _run_command(workspace_path, grep_args)
+
+    matches = []
+    if result["stdout"].strip():
+        for line in result["stdout"].strip().splitlines()[:req.max_results]:
+            parts = line.split(":", 2)
+            if len(parts) >= 3:
+                file_path = parts[0]
+                try:
+                    line_num = int(parts[1])
+                except ValueError:
+                    line_num = 0
+                content = parts[2]
+                matches.append({
+                    "file": file_path,
+                    "line": line_num,
+                    "content": content,
+                })
+
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "query": req.query,
+        "count": len(matches),
+        "matches": matches,
+    }
 
 
 @app.post("/git/rebase")
