@@ -165,6 +165,7 @@ class IntentEngine:
 
         # 2. Semantic Routing (if active)
         if not self.is_active or not self.model or len(self.intent_embeddings) == 0 or np is None:
+            log.debug(f"[FastPath] Semantic router not active, returning unknown (is_active={self.is_active}, model={self.model is not None}, embeddings={len(self.intent_embeddings) if np is not None else 0}, np={np is not None})")
             return "unknown", 0.0
             
         try:
@@ -181,6 +182,7 @@ class IntentEngine:
             best_score = float(similarities[max_idx])
             best_intent = self.intent_labels[max_idx]
 
+            log.debug(f"[FastPath] Semantic match: intent='{best_intent}' score={best_score:.3f}")
             return best_intent, best_score
             
         except Exception as e:
