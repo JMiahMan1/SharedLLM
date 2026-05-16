@@ -1,6 +1,6 @@
 # services/gateway/schemas.py
 from typing import Optional, Dict, Any, Literal, List
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 class ChatRequest(BaseModel):
     query: str
