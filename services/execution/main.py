@@ -784,7 +784,7 @@ async def execute_announce(req: AnnouncementRequest):
                 raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
             
             public_host = get_public_host()
-            media_url = f"http://{public_host}:8080/media/{media_id}"
+            media_url = f"http://{public_host}:8003/media/{media_id}"
             
             if is_roku:
                 # Specialized Roku Media Assistant App (ID 782875)
