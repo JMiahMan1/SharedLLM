@@ -43,13 +43,17 @@ class ResolvedCredentials(BaseModel):
     nextcloud_pass: Optional[str] = None
     ha_url: Optional[str] = None
     ha_token: Optional[str] = None
+    audiobookshelf_url: Optional[str] = None
+    audiobookshelf_user: Optional[str] = None
+    audiobookshelf_pass: Optional[str] = None
     openai_key: Optional[str] = None
     api_key: Optional[str] = None
     is_admin: bool = False
 
     @field_validator(
-        "github_token", "nextcloud_url", "nextcloud_user", "nextcloud_pass", 
-        "ha_url", "ha_token", "openai_key", mode="before"
+        "github_token", "nextcloud_url", "nextcloud_user", "nextcloud_pass",
+        "ha_url", "ha_token", "audiobookshelf_url", "audiobookshelf_user", "audiobookshelf_pass",
+        "openai_key", mode="before"
     )
     @classmethod
     def coerce_empty_to_none(cls, v: Any) -> Optional[str]:
