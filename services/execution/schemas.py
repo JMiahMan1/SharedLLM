@@ -549,10 +549,11 @@ class DockerLogsRequest(BaseRequest):
 
 class GitOperationRequest(BaseRequest):
     """
-    Performs a Git lifecycle operation on the SharedLLM workspace.
+    Performs a Git lifecycle operation on a workspace.
     push requires is_admin=True in user_context.
     """
     user_context: UserContext
+    workspace_id: Optional[str] = Field(None, description="Workspace ID (uses default if not specified)")
     action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show"]
     path: Optional[str] = Field(".", description="File path for 'add' action")
     commit_message: Optional[str] = Field(None, description="Required for 'commit' action")

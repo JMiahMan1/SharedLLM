@@ -32,6 +32,7 @@ export interface Workspace {
   scope: string;
   capabilities: string[];
   owner_user?: string | null;
+  is_default?: boolean;
   auto_pull_enabled: boolean;
   auto_backup_enabled?: boolean;
   webhook_token?: string | null;

@@ -17,6 +17,7 @@ class Workspace(SQLModel, table=True):
     scope: str = Field(default="user")
     capabilities: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     owner_user: Optional[str] = None  # Tied to Identity service user
+    is_default: bool = Field(default=False)  # Marks this workspace as the default for git/tool operations
     auto_pull_enabled: bool = Field(default=False)
     auto_backup_enabled: bool = Field(default=False)
     webhook_token: Optional[str] = Field(default=None)

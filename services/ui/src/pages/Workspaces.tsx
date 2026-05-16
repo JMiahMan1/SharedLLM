@@ -207,6 +207,11 @@ const Workspaces = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <h3 className="text-xl font-bold text-white truncate">{ws.display_name}</h3>
+                          {ws.is_default && (
+                            <span className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-emerald-500/20">
+                              <Star size={10} /> Default
+                            </span>
+                          )}
                           {ws.owner_user === 'default' && (
                             <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-blue-500/20">
                               <Globe size={10} /> Shared
@@ -223,6 +228,15 @@ const Workspaces = () => {
                     </div>
                     {isAdmin && (
                       <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => {
+                            updateMutation.mutate({ id: ws.id, is_default: !ws.is_default });
+                          }}
+                          className={`p-2 rounded-xl transition-colors ${ws.is_default ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-slate-500 hover:text-emerald-400 hover:bg-white/5'}`}
+                          title={ws.is_default ? 'Unset as default' : 'Set as default'}
+                        >
+                          <Star size={18} />
+                        </button>
                         <button 
                           onClick={() => openEdit(ws)}
                           className="p-2 rounded-xl text-slate-500 hover:text-white hover:bg-white/5 transition-colors"

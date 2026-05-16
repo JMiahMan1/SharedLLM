@@ -106,6 +106,7 @@ class WorkspaceShellRequest(BaseModel):
     command: str
 
 class GitOperationRequest(BaseModel):
+    workspace_id: Optional[str] = Field(None, description="Workspace ID (uses default if not specified)")
     action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show"]
     path: Optional[str] = "."
     message: Optional[str] = None

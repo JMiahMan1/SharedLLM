@@ -544,8 +544,19 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
         repo_url = str(ref.repo_url or "").strip()
         if not repo_url:
             raise HTTPException(status_code=400, detail="repo_url is required to create a workspace")
+        
+        # Determine scope: system workspaces require admin
+        scope = "system" if is_admin and str(ref.scope or "").strip().lower() == "system" else "user"
+        
         workspace_id = _derive_workspace_id(ref.workspace_id, resolved_user, repo_url)
-        container_mount_path = str(ref.container_mount_path or ref.local_path or _derive_workspace_container_path(repo_url)).strip()
+        
+        # Reserved name validation
+        slug = _normalize_workspace_slug(workspace_id)
+        if slug in RESERVED_WORKSPACE_NAMES:
+            raise HTTPException(status_code=400, detail=f"Workspace ID '{workspace_id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
+        
+        owner_user = resolved_user if scope == "user" else "system"
+        container_mount_path = str(ref.container_mount_path or ref.local_path or _derive_workspace_container_path(repo_url, scope, owner_user)).strip()
         match = {
             "id": workspace_id,
             "display_name": str(ref.display_name or workspace_id).strip(),
@@ -555,8 +566,8 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
             "git_remote": str(ref.remote or "origin").strip(),
             "default_branch": str(ref.branch or "main").strip(),
             "sync_mode": "local_git_authoritative",
-            "scope": "user",
-            "owner_user": resolved_user,
+            "scope": scope,
+            "owner_user": owner_user,
         }
         with Session(engine) as session:
             existing = session.get(Workspace, workspace_id)
@@ -594,6 +605,9 @@ def _normalize_workspace_slug(value: str) -> str:
     return cleaned or "workspace"
 
 
+RESERVED_WORKSPACE_NAMES = {"users", "workspaces", "system"}
+
+
 def _derive_repo_name(repo_url: str) -> str:
     parsed = urlparse(repo_url)
     path = parsed.path if parsed.scheme else repo_url
@@ -609,8 +623,17 @@ def _derive_workspace_id(requested_id: Optional[str], resolved_user: str, repo_u
     return f"{_normalize_workspace_slug(resolved_user)}-{_derive_repo_name(repo_url)}"
 
 
-def _derive_workspace_container_path(repo_url: str) -> str:
-    return _derive_repo_name(repo_url)
+def _derive_workspace_container_path(repo_url: str, scope: str = "user", owner_user: Optional[str] = None) -> str:
+    """Derive the container mount path based on scope.
+    
+    System workspaces: system/{repo_name}
+    User workspaces: users/{owner_user}/{repo_name}
+    """
+    repo_name = _derive_repo_name(repo_url)
+    if scope == "system":
+        return f"system/{repo_name}"
+    user_slug = _normalize_workspace_slug(owner_user or "default")
+    return f"users/{user_slug}/{repo_name}"
 
 
 def _workspace_capabilities(workspace: dict[str, Any]) -> list[str]:
@@ -1163,7 +1186,9 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: Optio
     if workspace.get("container_mount_path") is None and workspace.get("local_path") == ".":
         repo_url = str(req.repo_url or workspace.get("repo_url") or "").strip()
         if repo_url:
-            new_path = _derive_workspace_container_path(repo_url)
+            scope = workspace.get("scope", "user")
+            owner_user = workspace.get("owner_user")
+            new_path = _derive_workspace_container_path(repo_url, scope, owner_user)
             workspace["container_mount_path"] = new_path
             effective_path = new_path
             resolved_path = resolve_safe_path(get_workspace_root(), effective_path, must_exist=False)
@@ -1255,6 +1280,16 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: Optio
 @app.post("/workspaces")
 def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
+    
+    # Reserved name validation
+    slug = _normalize_workspace_slug(ws.id)
+    if slug in RESERVED_WORKSPACE_NAMES:
+        raise HTTPException(status_code=400, detail=f"Workspace ID '{ws.id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
+    
+    # Auto-derive container_mount_path if not provided
+    if not ws.container_mount_path and ws.repo_url:
+        ws.container_mount_path = _derive_workspace_container_path(ws.repo_url, ws.scope, ws.owner_user)
+    
     with Session(engine) as session:
         existing = session.get(Workspace, ws.id)
         if existing:
