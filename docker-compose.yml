@@ -16,13 +16,15 @@ services:
       - identity
 
   identity:
-    build: ./services/identity
+    build:
+      context: .
+      dockerfile: services/identity/Dockerfile
     container_name: sharedllm_identity
     restart: unless-stopped
     ports:
       - 8001:8001
     extra_hosts:
-      - "ollama-server:192.168.4.179"
+      - "ollama-server:192.168.2.114"
       - "ai-server:192.168.2.205"
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
@@ -38,15 +40,12 @@ services:
       - TZ=America/Phoenix
     volumes:
       - identity_db:/data
-      - ./services/identity/main.py:/app/main.py:ro
-      - ./services/identity/models.py:/app/models.py:ro
-      - ./services/identity/seed.py:/app/seed.py:ro
-      - ./services/identity/crypto.py:/app/crypto.py:ro
-      - ./services/config.py:/app/config.py:ro
       - /etc/localtime:/etc/localtime:ro
 
   execution:
-    build: ./services/execution
+    build:
+      context: .
+      dockerfile: services/execution/Dockerfile
     container_name: sharedllm_execution
     restart: always
     ports:
@@ -54,7 +53,7 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "ollama-server:192.168.4.179"
+      - "ollama-server:192.168.2.114"
       - "ai-server:192.168.2.205"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -73,16 +72,14 @@ services:
       - label=disable
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ./services/execution:/app
-      - ./services/config.py:/app/config.py:ro
-      - ./services/tests:/app/tests
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./:/workspace/SharedLLM
       - /home/jeremiah/.ssh:/home/sharedllm/.ssh:ro
       - kokoro_models:/app/models
 
   rag:
-    build: ./services/rag
+    build:
+      context: .
+      dockerfile: services/rag/Dockerfile
     container_name: sharedllm_rag
     restart: unless-stopped
     environment:
@@ -104,9 +101,6 @@ services:
       - huggingface_cache:/root/.cache/huggingface
       - qdrant_cache:/root/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
-      - ./services/rag/main.py:/app/main.py
-      - ./services/rag/schemas.py:/app/schemas.py
-      - ./services/config.py:/app/config.py:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 10s
@@ -115,15 +109,14 @@ services:
       start_period: 120s
 
   capabilities-sync:
-    build: ./services/rag
+    build:
+      context: .
+      dockerfile: services/rag/Dockerfile
     container_name: sharedllm_capabilities_sync
-    volumes:
-      - .:/app
     working_dir: /app
     environment:
       - RAG_SVC_URL=http://rag:8004
       - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - PYTHONPATH=/app
     depends_on:
       rag:
         condition: service_healthy
@@ -139,7 +132,7 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "ollama-server:192.168.4.179"
+      - "ollama-server:192.168.2.114"
       - "ai-server:192.168.2.205"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -155,23 +148,14 @@ services:
       - HOME=/home/sharedllm
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
-      - ./services/gateway/main.py:/app/main.py
-      - ./services/gateway/background_worker.py:/app/background_worker.py
-      - ./services/gateway/orchestrator.py:/app/orchestrator.py
-      - ./services/gateway/agent_loop.py:/app/agent_loop.py
-      - ./services/gateway/llm_providers.py:/app/llm_providers.py
-      - ./services/gateway/messaging.py:/app/messaging.py
-      - ./services/gateway/schemas.py:/app/schemas.py
-      - ./services/gateway/history.py:/app/history.py
-      - ./services/gateway/prompts.py:/app/prompts.py
-      - ./services/gateway/intent_engine.py:/app/intent_engine.py
-      - ./services/config.py:/app/config.py:ro
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
 
   logging:
-    build: ./services/logging
+    build:
+      context: .
+      dockerfile: services/logging/Dockerfile
     container_name: sharedllm_logging
     restart: unless-stopped
     environment:
@@ -187,14 +171,14 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - TZ=America/Phoenix
     volumes:
-      - ./services/logging/main.py:/app/main.py:ro
-      - ./services/config.py:/app/config.py:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
 
   automation:
-    build: ./services/automation
+    build:
+      context: .
+      dockerfile: services/automation/Dockerfile
     container_name: sharedllm_automation
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -217,14 +201,15 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - TZ=America/Phoenix
     volumes:
-      - ./services/automation:/app
-      - ./services/config.py:/app/config.py:ro
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
       - execution
 
   storage:
-    build: ./services/storage
+    build:
+      context: .
+      dockerfile: services/storage/Dockerfile
     container_name: sharedllm_storage
     restart: unless-stopped
     ports:
@@ -241,13 +226,12 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - TZ=America/Phoenix
     volumes:
-      - ./:/workspace/SharedLLM:ro
-      - ./services/storage:/app
-      - ./services/config.py:/app/config.py:ro
       - /etc/localtime:/etc/localtime:ro
 
   workspace_runtime:
-    build: ./services/workspace_runtime
+    build:
+      context: .
+      dockerfile: services/workspace_runtime/Dockerfile
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -271,14 +255,12 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
-      - WORKSPACE_RUNTIME_ROOT=/workspace/SharedLLM
+      - WORKSPACE_RUNTIME_ROOT=/workspaces
       - GIT_WEBHOOK_SECRET=${GIT_WEBHOOK_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
     volumes:
-      - ./:/workspace/SharedLLM
-      - ./services/workspace_runtime:/app
-      - ./services/config.py:/app/config.py:ro
+      - ${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}:/workspaces
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
@@ -301,7 +283,9 @@ services:
       - redis_data:/data
 
   control_plane:
-    build: ./services/control_plane
+    build:
+      context: .
+      dockerfile: services/control_plane/Dockerfile
     container_name: sharedllm_control_plane
     restart: always
     ports:
@@ -328,8 +312,7 @@ services:
       - TZ=America/Phoenix
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./services/control_plane:/app
-      - ./services/config.py:/app/config.py:ro
+      - /etc/localtime:/etc/localtime:ro
 
 volumes:
   identity_db:
