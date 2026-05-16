@@ -35,7 +35,7 @@ WORKSPACE_RUNTIME_SVC_URL = _required("WORKSPACE_RUNTIME_SVC_URL")
 # --- Optional external services ---
 CONTROL_PLANE_URL = _optional("CONTROL_PLANE_URL")
 SEARXNG_URL = _optional("SEARXNG_URL") or _optional("WHOOGLE_URL")
-LLAMA_SERVER_PROXY_URL = _optional("LLAMA_SERVER_PROXY_URL", "http://llama-server:11434")
+LLAMA_SERVER_PROXY_URL = _optional("LLAMA_SERVER_PROXY_URL")  # Deprecated: use llm_local_url via identity settings
 
 # --- Integration endpoints ---
 HA_URL = _optional("HA_URL")
