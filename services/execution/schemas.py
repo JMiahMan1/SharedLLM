@@ -641,3 +641,39 @@ class ExecutionLogRequest(BaseRequest):
     keyword: Optional[str] = Field(None, description="Filter logs containing this keyword (e.g., 'FAILED', 'OK', 'announce')")
 
 
+class AudiobookshelfRequest(BaseRequest):
+    """
+    Interacts with Audiobookshelf (ABS) for searching, playing, and tracking audiobooks.
+    """
+    user_context: UserContext
+    action: Literal["search", "play", "resume", "progress", "libraries", "list", "get_book"]
+    query: Optional[str] = Field(None, description="Search query or book title")
+    book_id: Optional[str] = Field(None, description="ABS item ID for play/resume/progress")
+    entity_id: Optional[str] = Field(None, description="Home Assistant media_player entity to play on")
+    library_id: Optional[str] = Field(None, description="ABS library ID to browse")
+    limit: int = Field(10, ge=1, le=50, description="Max results to return")
+
+
+class DocumentBroadcastRequest(BaseRequest):
+    """
+    Reads a document from Nextcloud storage and broadcasts it as TTS
+    to a Home Assistant media_player.
+    """
+    user_context: UserContext
+    input_path: str = Field(..., description="Nextcloud path to the text file")
+    entity_id: str = Field(..., description="HA media_player entity to broadcast to")
+    summary: Optional[str] = Field(None, description="Pre-written summary (uses first 500 chars if omitted)")
+    voice: Optional[str] = Field(None, description="TTS voice ID")
+
+
+class NightModeRequest(BaseRequest):
+    """
+    Activates night mode: turns off lights, sets climate to sleep temperature,
+    and optionally starts sleep sounds or an audiobook.
+    """
+    user_context: UserContext
+    lights: Optional[Any] = Field("all", description="List of light entity_ids or 'all'")
+    climate_entity: Optional[str] = Field(None, description="Climate entity to adjust")
+    sleep_temp: float = Field(68.0, description="Target sleep temperature (F)")
+    media_entity: Optional[str] = Field(None, description="Optional media_player for sleep sounds")
+    media_query: Optional[str] = Field(None, description="Search query for sleep sounds/audiobook")

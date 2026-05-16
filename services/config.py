@@ -83,6 +83,10 @@ VOLUME_MANIFEST_PATH = _optional("VOLUME_MANIFEST_PATH", "/data/volumes.json")
 MASS_CONFIG_ENTRY_ID = _optional("MASS_CONFIG_ENTRY_ID", "")
 VOLUME_BACKUP_ROOT = _optional("VOLUME_BACKUP_ROOT", "/data/backups")
 
+# --- Audiobookshelf (ABS) ---
+ABS_URL = _optional("ABS_URL")
+ABS_API_KEY = _optional("ABS_API_KEY")
+
 # --- DNS ---
 DNS_CONF_PATH = _optional("DNS_CONF_PATH", "/etc/dnsmasq.conf")
 DNS_POLL_INTERVAL = int(_optional("DNS_POLL_INTERVAL", "30"))

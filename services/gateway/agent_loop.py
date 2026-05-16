@@ -115,6 +115,7 @@ ALLOWED_TOOLS = {
     "storagefilewriterequest", "storagelistrequest", "workspacebootstraprequest", 
     "systemlearningrequest", "discoverysyncrequest", "storageindexrequest",
     "dockercomposerequest", "identityrequest", "identitymanagerequest", "controlplanerequest", "restart_service",
+    "audiobookshelfrequest",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -657,6 +658,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "storageindexrequest": (STORAGE_SVC, "/index/full"),
                 "identityrequest": (EXECUTION_SVC, "/execute/identity"),
                 "identitymanagerequest": (EXECUTION_SVC, "/execute/identity/manage"),
+                "audiobookshelfrequest": (EXECUTION_SVC, "/execute/audiobookshelf"),
             }
 
             lookup_action = action.lower().strip() if action else ""
