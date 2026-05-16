@@ -704,6 +704,11 @@ class HAConfigRequest(BaseRequest):
     Inspects Home Assistant integration configurations via WebSocket API.
     Use this to diagnose misconfigured integrations (e.g. wrong Ollama URL,
     incorrect entity IDs, disabled components).
+    
+    NOTE: This tool is primarily for Voice Assistant troubleshooting in HA.
+    It should NOT be used for general chat queries or by OpenWebUI clients.
+    Only use when the user explicitly asks to check HA integration settings
+    or when diagnosing why a HA integration isn't working.
     """
     user_context: UserContext
     action: Literal["list_integrations", "get_integration", "get_entities", "get_config"] = Field(
