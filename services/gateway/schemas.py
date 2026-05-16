@@ -148,3 +148,10 @@ class ContextSearchRequest(BaseModel):
     query: str = Field(..., description="Natural language search query")
     collection_name: str = Field("system_capabilities", description="Target collection: ha_entities, nextcloud_files, system_capabilities, system_learnings")
     k: int = Field(5, description="Number of results to return")
+
+class HAConfigRequest(BaseModel):
+    """Inspect Home Assistant integration configurations via WebSocket API."""
+    action: str = Field("list_integrations", description="Action: list_integrations, get_integration, get_entities, get_config")
+    domain: Optional[str] = Field(None, description="Integration domain (e.g. 'ollama', 'webostv')")
+    entity_domain: Optional[str] = Field(None, description="Entity domain filter (e.g. 'light', 'media_player')")
+    keyword: Optional[str] = Field(None, description="Search keyword to filter results")

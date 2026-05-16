@@ -25,7 +25,7 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-          SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest, LLMInfoRequest
+          SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest
     )
     from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
     from handlers import docker_logs as docker_logs_handler
@@ -33,6 +33,7 @@ try:
     from handlers import deployment as deployment_handler
     from handlers import volumes as volume_handler
     from handlers import media_status as media_status_handler
+    from handlers import ha_config as ha_config_handler
 except ImportError:
     try:
         from . import ha_client
@@ -43,7 +44,7 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, HAConfigRequest
         )
         from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
         from .handlers import docker_logs as docker_logs_handler
@@ -51,6 +52,7 @@ except ImportError:
         from .handlers import deployment as deployment_handler
         from .handlers import volumes as volume_handler
         from .handlers import media_status as media_status_handler
+        from .handlers import ha_config as ha_config_handler
     except (ImportError, ValueError):
         from execution import ha_client
         from execution.schemas import (
@@ -60,7 +62,7 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, HAConfigRequest
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video
         from execution.handlers import docker_logs as docker_logs_handler
@@ -68,6 +70,7 @@ except ImportError:
         from execution.handlers import deployment as deployment_handler
         from execution.handlers import volumes as volume_handler
         from execution.handlers import media_status as media_status_handler
+        from execution.handlers import ha_config as ha_config_handler
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -1122,3 +1125,13 @@ async def execute_composite_night_mode(req):
     ctx = req.user_context
     log.info(f"[composite] night_mode for user={ctx.user}")
     return await composite.handle_night_mode(req)
+
+
+@app.post("/execute/ha_config", response_model=ExecutionResult)
+async def execute_ha_config(req):
+    """Inspect Home Assistant integration configurations via WebSocket API."""
+    ctx = req.user_context
+    action = req.action
+    domain = getattr(req, "domain", None)
+    log.info(f"[ha_config] user={ctx.user} action={action} domain={domain}")
+    return await ha_config_handler.handle_ha_config(req.model_dump())

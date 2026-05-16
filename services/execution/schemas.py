@@ -697,3 +697,19 @@ class NightModeRequest(BaseRequest):
     sleep_temp: float = Field(68.0, description="Target sleep temperature (F)")
     media_entity: Optional[str] = Field(None, description="Optional media_player for sleep sounds")
     media_query: Optional[str] = Field(None, description="Search query for sleep sounds/audiobook")
+
+
+class HAConfigRequest(BaseRequest):
+    """
+    Inspects Home Assistant integration configurations via WebSocket API.
+    Use this to diagnose misconfigured integrations (e.g. wrong Ollama URL,
+    incorrect entity IDs, disabled components).
+    """
+    user_context: UserContext
+    action: Literal["list_integrations", "get_integration", "get_entities", "get_config"] = Field(
+        "list_integrations",
+        description="Action to perform: list all integration domains, get a specific integration's config entries, list entities by domain, or get full HA config"
+    )
+    domain: Optional[str] = Field(None, description="Integration domain to inspect (e.g. 'ollama', 'webostv', 'roborock')")
+    entity_domain: Optional[str] = Field(None, description="Entity domain to filter by (e.g. 'light', 'media_player', 'weather')")
+    keyword: Optional[str] = Field(None, description="Search keyword to filter integrations or entities")

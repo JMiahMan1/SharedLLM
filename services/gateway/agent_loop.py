@@ -816,6 +816,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "audiobookshelfrequest": (EXECUTION_SVC, "/execute/audiobookshelf"),
                 "llminforequest": (EXECUTION_SVC, "/execute/llm/info"),
                 "contextsearchrequest": (RAG_SVC, "/rag/search"),
+                "haconfigrequest": (EXECUTION_SVC, "/execute/ha_config"),
             }
 
             lookup_action = action.lower().strip() if action else ""
