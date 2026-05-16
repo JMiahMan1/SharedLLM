@@ -17,6 +17,49 @@ from gateway.config import (
 from gateway.schemas import ResolvedCredentials
 from gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
 
+CREDENTIAL_PATTERNS = [
+    re.compile(r'(?:api[_-]?key|apikey)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{8,})["\']?', re.IGNORECASE),
+    re.compile(r'(?:token|auth[_-]?token|access[_-]?token)\s*[:=]\s*["\']?([A-Za-z0-9_\-\.]{8,})["\']?', re.IGNORECASE),
+    re.compile(r'(?:password|passwd|pass|secret)\s*[:=]\s*["\']?([^\s"\']{4,})["\']?', re.IGNORECASE),
+    re.compile(r'(?:ha[_-]?token|home[_-]?assistant[_-]?token)\s*[:=]\s*["\']?([A-Za-z0-9_\-\.]{8,})["\']?', re.IGNORECASE),
+    re.compile(r'(?:abs[_-]?api[_-]?key|audiobookshelf[_-]?key)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{8,})["\']?', re.IGNORECASE),
+    re.compile(r'(?:github[_-]?token|gitlab[_-]?token|git[_-]?token)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{8,})["\']?', re.IGNORECASE),
+    re.compile(r'(?:nextcloud[_-]?pass|nc[_-]?pass)\s*[:=]\s*["\']?([^\s"\']{4,})["\']?', re.IGNORECASE),
+    re.compile(r'(?<!\w)token=([A-Za-z0-9_\-\.]{8,})', re.IGNORECASE),
+]
+
+CREDENTIAL_KEYS = {
+    "api_key", "apikey", "token", "auth_token", "access_token",
+    "password", "passwd", "pass", "secret",
+    "ha_token", "home_assistant_token",
+    "abs_api_key", "audiobookshelf_key",
+    "github_token", "gitlab_token", "git_token",
+    "nextcloud_pass", "nc_pass",
+    "abs_url", "audiobookshelf_url",
+}
+
+
+def sanitize_for_llm(obj: Any, depth: int = 0) -> Any:
+    """Recursively sanitize any object to remove credentials before feeding to LLM."""
+    if depth > 10:
+        return "[REDACTED]"
+    if isinstance(obj, str):
+        result = obj
+        for pattern in CREDENTIAL_PATTERNS:
+            result = pattern.sub(lambda m: m.group(0).split(m.group(1))[0] + "[REDACTED]", result)
+        return result
+    if isinstance(obj, dict):
+        sanitized = {}
+        for k, v in obj.items():
+            if k.lower() in CREDENTIAL_KEYS:
+                sanitized[k] = "[REDACTED]"
+            else:
+                sanitized[k] = sanitize_for_llm(v, depth + 1)
+        return sanitized
+    if isinstance(obj, list):
+        return [sanitize_for_llm(item, depth + 1) for item in obj]
+    return obj
+
 # --- HARDENED OLLAMA PROVIDER ---
 class OllamaProvider(BaseLLMProvider):
     def __init__(self, base_url: str, timeout: float = 600.0):
@@ -115,7 +158,7 @@ ALLOWED_TOOLS = {
     "storagefilewriterequest", "storagelistrequest", "workspacebootstraprequest", 
     "systemlearningrequest", "discoverysyncrequest", "storageindexrequest",
     "dockercomposerequest", "identityrequest", "identitymanagerequest", "controlplanerequest", "restart_service",
-    "audiobookshelfrequest",
+    "audiobookshelfrequest", "llminforequest",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -483,6 +526,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         if key in safe_exec_data["detail"] and safe_exec_data["detail"][key] and len(str(safe_exec_data["detail"][key])) > 500:
                             safe_exec_data["detail"][key] = str(safe_exec_data["detail"][key])[:500] + "\n...[TRUNCATED]..."
                 
+                # Sanitize credentials from execution results before feeding to LLM
+                safe_exec_data = sanitize_for_llm(safe_exec_data)
+                
                 # Hard limit on total exec_data size
                 exec_json = json.dumps(safe_exec_data)
                 if len(exec_json) > 2000:
@@ -719,6 +765,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "identityrequest": (EXECUTION_SVC, "/execute/identity"),
                 "identitymanagerequest": (EXECUTION_SVC, "/execute/identity/manage"),
                 "audiobookshelfrequest": (EXECUTION_SVC, "/execute/audiobookshelf"),
+                "llminforequest": (EXECUTION_SVC, "/execute/llm/info"),
             }
 
             lookup_action = action.lower().strip() if action else ""

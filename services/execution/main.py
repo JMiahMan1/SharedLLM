@@ -25,7 +25,7 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest
+          SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest, LLMInfoRequest
     )
     from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
     from handlers import docker_logs as docker_logs_handler
@@ -1047,6 +1047,61 @@ async def execute_video_play(req: VideoPlayRequest):
 async def execute_diagnostics(req: DiagnosticRequest):
     log.info(f"[diagnostics] user={req.user_context.user} service={req.service} lines={req.lines}")
     return await diagnostics.handle_get_system_logs(req.model_dump())
+
+@app.post("/execute/llm/info", response_model=ExecutionResult)
+async def execute_llm_info(req: LLMInfoRequest):
+    """Query Alpaca/Ollama for model and system information."""
+    from config import OLLAMA_URL
+    action = req.action.lower()
+    
+    endpoints = {
+        "list": "/api/tags",
+        "ps": "/api/ps",
+        "version": "/api/version",
+        "show": "/api/show",
+    }
+    
+    if action not in endpoints:
+        return _fail(f"Unknown action: {action}. Valid: {list(endpoints.keys())}", "llm_info")
+    
+    endpoint = endpoints[action]
+    payload = {}
+    if action == "show" and req.model:
+        payload = {"name": req.model}
+    elif action == "show" and not req.model:
+        return _fail("model is required for 'show' action", "llm_info")
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if payload:
+                resp = await client.post(f"{OLLAMA_URL}{endpoint}", json=payload)
+            else:
+                resp = await client.get(f"{OLLAMA_URL}{endpoint}")
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                if action == "list":
+                    models = [m.get("name", "?") for m in data.get("models", [])]
+                    return _ok(f"Available models: {', '.join(models)}", "llm_info", {"models": data.get("models", [])})
+                elif action == "ps":
+                    loaded = [m.get("name", "?") for m in data.get("models", [])]
+                    status = f"Loaded models: {', '.join(loaded) if loaded else 'none'}"
+                    return _ok(status, "llm_info", {"loaded": data.get("models", [])})
+                elif action == "version":
+                    return _ok(f"Version: {data.get('version', '?')}", "llm_info", data)
+                elif action == "show":
+                    details = {
+                        "name": data.get("name", "?"),
+                        "architecture": data.get("details", {}).get("architecture", "?"),
+                        "parameters": data.get("details", {}).get("parameter_size", "?"),
+                        "quantization": data.get("details", {}).get("quantization_level", "?"),
+                        "context_length": data.get("context_length", "?"),
+                    }
+                    return _ok(f"Model: {details['name']} ({details['parameters']}, {details['quantization']})", "llm_info", details)
+            else:
+                return _fail(f"Alpaca returned {resp.status_code}: {resp.text[:200]}", "llm_info")
+    except Exception as e:
+        return _fail(f"Failed to query Alpaca: {e}", "llm_info")
 
 @app.post("/execute/audiobookshelf", response_model=ExecutionResult)
 async def execute_audiobookshelf(req: AudiobookshelfRequest):

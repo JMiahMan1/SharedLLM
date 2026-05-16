@@ -110,6 +110,13 @@ class DiagnosticRequest(BaseRequest):
     lines: int = 50
 
 
+class LLMInfoRequest(BaseRequest):
+    """Query Alpaca/Ollama for model and system information."""
+    user_context: UserContext
+    action: str = Field("list", description="Action: 'list' (available models), 'ps' (loaded models), 'version' (server version), 'show' (model details)")
+    model: Optional[str] = Field(None, description="Model name for 'show' action (e.g., 'qwen3.6-35b-a3b:q4_k_m')")
+
+
 # ─── Media / Music ──────────────────────────────────────────────────────────────
 
 class MediaPlayRequest(BaseRequest):
