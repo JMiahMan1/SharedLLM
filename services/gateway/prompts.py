@@ -32,7 +32,7 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "- **ClimateRequest**: `{\"entity_id\": \"climate.xxx\", \"temperature\": 72.0}`\n"
     "- **SecurityRequest**: `{\"action\": \"lock\" | \"unlock\" | \"open\" | \"close\" | \"status\", \"entity_id\": \"lock.xxx\"}`\n"
     "- **LogbookRequest**: `{\"entity_id\": \"sensor.xxx\", \"days\": 1}`\n"
-    "- **MediaPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"artist or song name\"}` - MUST include BOTH \"entity_id\" AND \"query\"\n"
+    "- **MediaPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"song/album/artist/video/podcast/audiobook name or URL\", \"media_type\": \"music|video|podcast|audiobook|url\"}` - supports all media types. Use `device_name` instead of `entity_id` for human-readable names like 'Office TV'\n"
     "- **MediaStatusRequest**: `{}` (no required fields) - use to check \"what's playing\" or \"what devices are active\"\n"
     "- **MediaStatusRequest with filter**: `{\"area\": \"Office\"}` or `{\"entity_id\": \"media_player.office_tv\"}`\n"
     "- **VideoPlayRequest**: `{\"entity_id\": \"media_player.xxx\", \"query\": \"YouTube URL or search query\"}` - plays video via yt-dlp MP4 stream (works on Cast/AndroidTV without YouTube app)\n"
