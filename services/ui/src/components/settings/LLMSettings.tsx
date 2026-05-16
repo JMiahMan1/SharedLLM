@@ -52,6 +52,9 @@ const LLMSettings: React.FC = () => {
     saveMutation.mutate(drafts);
   };
 
+  const rawProvider = getSetting('active_llm_provider') || 'ollama';
+  const activeProvider = rawProvider === 'llama_server' ? 'ollama' : rawProvider;
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-12 text-slate-500 animate-pulse">
@@ -60,15 +63,6 @@ const LLMSettings: React.FC = () => {
       </div>
     );
   }
-
-  const activeProvider = getSetting('active_llm_provider') || 'ollama';
-  
-  // Auto-migrate legacy llama_server provider to ollama
-  React.useEffect(() => {
-    if (activeProvider === 'llama_server') {
-      setDrafts({ ...drafts, active_llm_provider: 'ollama' });
-    }
-  }, [activeProvider]);
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">

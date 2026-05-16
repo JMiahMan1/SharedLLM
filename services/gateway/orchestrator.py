@@ -1,5 +1,6 @@
 # services/gateway/orchestrator.py
 import asyncio
+import json
 import re
 import logging
 import httpx
@@ -425,6 +426,21 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     tool_data = extract_action_json(ans)
     if tool_data:
+        if "tool" in tool_data and "action" not in tool_data:
+            tool_data["action"] = tool_data.pop("tool")
+        if "operation" in tool_data and "action" not in tool_data:
+            tool_data["action"] = tool_data.pop("operation")
+        if "command" in tool_data and "action" not in tool_data:
+            tool_data["action"] = tool_data.pop("command")
+        if "name" in tool_data and "action" not in tool_data:
+            tool_data["action"] = tool_data.pop("name")
+        if "arguments" in tool_data and "payload" not in tool_data:
+            tool_data["payload"] = tool_data.pop("arguments")
+        if "parameters" in tool_data and "payload" not in tool_data:
+            tool_data["payload"] = tool_data.pop("parameters")
+        if "function" in tool_data and "action" not in tool_data:
+            tool_data["action"] = tool_data["function"].get("name", "")
+            tool_data["payload"] = tool_data["function"].get("arguments", {})
         action = tool_data.get("action", "").lower().strip()
         log.info(f"[_single_turn_inference] Tool call detected: {action}")
         log.info(f"[_single_turn_inference] Raw LLM output: {ans[:500]}")
@@ -494,4 +510,12 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             log.warning(f"[_single_turn_inference] Unsupported tool for single-turn: {action}")
             return f"I found a tool call for '{action}', but it is not supported in the standard path. Please ask Raven to perform this task."
 
+    if ans.strip().startswith("{") and ans.strip().endswith("}"):
+        try:
+            parsed = json.loads(ans)
+            for key in ["response", "answer", "message", "text", "content", "reply"]:
+                if key in parsed and isinstance(parsed[key], str):
+                    return parsed[key]
+        except (json.JSONDecodeError, ValueError):
+            pass
     return ans

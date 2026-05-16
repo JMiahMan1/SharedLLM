@@ -556,7 +556,7 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
             raise HTTPException(status_code=400, detail=f"Workspace ID '{workspace_id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
         
         owner_user = resolved_user if scope == "user" else "system"
-        container_mount_path = str(ref.container_mount_path or ref.local_path or _derive_workspace_container_path(repo_url, scope, owner_user)).strip()
+        container_mount_path = str(ref.container_mount_path or ref.local_path or _derive_workspace_container_path(workspace_id, scope, owner_user)).strip()
         match = {
             "id": workspace_id,
             "display_name": str(ref.display_name or workspace_id).strip(),
@@ -1188,7 +1188,7 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: Optio
         if repo_url:
             scope = workspace.get("scope", "user")
             owner_user = workspace.get("owner_user")
-            new_path = _derive_workspace_container_path(repo_url, scope, owner_user)
+            new_path = _derive_workspace_container_path(workspace["id"], scope, owner_user)
             workspace["container_mount_path"] = new_path
             effective_path = new_path
             resolved_path = resolve_safe_path(get_workspace_root(), effective_path, must_exist=False)
@@ -1288,7 +1288,7 @@ def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(de
     
     # Auto-derive container_mount_path if not provided
     if not ws.container_mount_path and ws.repo_url:
-        ws.container_mount_path = _derive_workspace_container_path(ws.repo_url, ws.scope, ws.owner_user)
+        ws.container_mount_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
     
     with Session(engine) as session:
         existing = session.get(Workspace, ws.id)
