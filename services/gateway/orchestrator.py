@@ -52,6 +52,9 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "storageindexrequest": (STORAGE_SVC, "/index/full"),
     "logbookrequest": (EXECUTION_SVC, "/execute/ha_logbook"),
     "executionlogrequest": (EXECUTION_SVC, "/execute/logs"),
+    "audiobookshelfrequest": (EXECUTION_SVC, "/execute/audiobookshelf"),
+    "documentbroadcastrequest": (EXECUTION_SVC, "/execute/composite/broadcast"),
+    "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
 }
 
 SINGLE_TURN_TOOL_GUIDE = """
