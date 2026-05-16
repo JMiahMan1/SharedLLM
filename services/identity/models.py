@@ -99,7 +99,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "workspace_runtime_root", "value": "/workspaces", "description": "Root folder where workspaces and files will be saved"},
     
     # --- LLM CONFIGURATION (UI MANAGED) ---
-    {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, llama_server, openrouter, openai)"},
+    {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, openrouter, openai)"},
     {"key": "llm_local_url", "value": "http://llama-server:11434", "description": "Base URL for local LLM inference (Ollama, llama.cpp server, or compatible API)"},
     {"key": "llm_local_max_ctx", "value": "4096", "description": "Maximum token context allowed for local inference"},
     {"key": "llm_cloud_api_key", "value": "", "description": "API Key for cloud fallback (OpenRouter, OpenAI, etc.)"},
