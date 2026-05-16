@@ -100,8 +100,11 @@ DEFAULT_GLOBAL_SETTINGS = [
     
     # --- LLM CONFIGURATION (UI MANAGED) ---
     {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, openrouter, openai)"},
-    {"key": "llm_local_url", "value": "http://ollama-server:11434", "description": "Base URL for local inference (e.g., Ollama)"},
+    {"key": "llm_local_url", "value": "http://llama-server:11434", "description": "Base URL for local inference (e.g., Ollama)"},
     {"key": "llm_local_max_ctx", "value": "4096", "description": "Maximum token context allowed for local 8GB VRAM constraint"},
+    {"key": "llama_server_proxy_url", "value": "http://llama-server:11434", "description": "Base URL for llama.cpp server proxy"},
+    {"key": "llama_server_assistant_model", "value": "auto", "description": "Llama server assistant model"},
+    {"key": "llama_server_coding_model", "value": "auto", "description": "Llama server coding model"},
     {"key": "llm_cloud_api_key", "value": "", "description": "API Key for cloud fallback (OpenRouter, OpenAI, etc.)"},
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
     
