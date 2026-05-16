@@ -143,6 +143,8 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     model = job_payload["model"]
     show_thinking = job_payload.get("show_thinking", False)
     
+    log.info(f"[Orchestrator] Job model from payload: '{model}'")
+    
     # 0. Query-based Model Override (e.g. "Raven use model qwen2.5:32b fix...")
     model_match = re.search(r"(?:use model|with model|run on model)\s+([a-zA-Z0-9.\-_:]+)", query, re.IGNORECASE)
     if model_match:

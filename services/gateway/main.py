@@ -287,6 +287,7 @@ async def get_assistant_model():
         model = settings.get("ollama_assistant_model") or settings.get("assistant_model")
     if not model:
         raise RuntimeError("No assistant model configured. Please set ollama_assistant_model in the UI settings.")
+    log.info(f"[get_assistant_model] active_provider={active} resolved_model={model}")
     return model
 
 
@@ -299,6 +300,7 @@ async def get_coding_model():
         model = settings.get("ollama_coding_model") or settings.get("coding_model")
     if not model:
         raise RuntimeError("No coding model configured. Please set ollama_coding_model in the UI settings.")
+    log.info(f"[get_coding_model] active_provider={active} resolved_model={model}")
     return model
 
 
@@ -1741,6 +1743,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     try:
         selected_model = explicit_model or await get_assistant_model()
+        log.info(f"[ChatHandler] Model selection: explicit_model='{explicit_model}' selected_model='{selected_model}'")
     except RuntimeError as e:
         log.error(f"[ChatHandler] Model configuration error: {e}")
         err_msg = str(e) + " Please configure models in the UI settings."
@@ -1765,8 +1768,9 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "raven", "audit", "develop", "refactor"]
         if any(k in (query or "").lower() for k in coding_keywords):
             try:
-                selected_model = await get_coding_model()
-                log.info(f"[ChatHandler] Specialized coding task detected. Routing to: {selected_model}")
+                override_model = await get_coding_model()
+                log.info(f"[ChatHandler] Coding task detected, overriding model from '{selected_model}' to '{override_model}'")
+                selected_model = override_model
             except RuntimeError as e:
                 log.error(f"[ChatHandler] Coding model configuration error: {e}")
                 err_msg = str(e) + " Please configure models in the UI settings."
@@ -1821,6 +1825,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
     # 3. Semantic Routing (Fast Path Detection)
     intent, confidence = engine.classify(query)
+    log.info(f"[FastPath] classify result: intent='{intent}' confidence={confidence:.3f} is_active={engine.is_active} threshold={engine.FAST_PATH_CONFIDENCE}")
     
     # Resolve dynamic threshold from Identity
     threshold_str = await fetch_global_setting("fast_path_threshold", str(_DEFAULT_FAST_PATH_THRESHOLD))
@@ -1830,6 +1835,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         engine.FAST_PATH_CONFIDENCE = _DEFAULT_FAST_PATH_THRESHOLD
 
     is_fast_path = engine.is_fast_path(intent, confidence)
+    log.info(f"[FastPath] is_fast_path={is_fast_path} for intent='{intent}'")
     resolved_entity = None
     
     if is_fast_path:
@@ -1866,8 +1872,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             "turn_off": "/execute/light",
             "play_media": "/execute/media/play",
             "pause_media": "/execute/media/transport",
+            "media_transport": "/execute/media/transport",
             "index_storage": "/index/full",
             "sync_ha": "/health",
+            "ha_status": "/health",
         }
         endpoint = endpoint_map.get(intent)
         if endpoint:
@@ -1893,7 +1901,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     "media_content_type": "artist",
                 }
                 svc_base = EXECUTION_SVC
-            elif intent == "pause_media":
+            elif intent in ["pause_media", "media_transport"]:
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "entity_id": resolved_entity or "auto",

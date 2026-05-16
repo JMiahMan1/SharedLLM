@@ -33,7 +33,10 @@ def test_execute_identity_import():
 
     assert response.status_code == 200
     assert response.json()["status"] == "SUCCESS"
-    assert "Imported 5 users" in response.json()["detail"]["message"]
+    # Handler wraps identity response in detail.data
+    detail = response.json().get("detail", {})
+    data = detail.get("data", {})
+    assert "Imported 5 users" in data.get("message", "")
 
 @respx.mock
 def test_execute_identity_create():
@@ -62,7 +65,10 @@ def test_execute_identity_create():
 
     assert response.status_code == 200
     assert response.json()["status"] == "SUCCESS"
-    assert response.json()["detail"]["username"] == "newuser"
+    # Handler wraps identity response in detail.data
+    detail = response.json().get("detail", {})
+    data = detail.get("data", {})
+    assert data.get("username") == "newuser"
 
 @respx.mock
 def test_execute_identity_error():
