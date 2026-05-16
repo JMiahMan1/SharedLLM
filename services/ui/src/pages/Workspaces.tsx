@@ -56,7 +56,7 @@ const Workspaces = () => {
       if (editingWs) {
         return api.updateWorkspace(editingWs.id, data);
       }
-      return api.createWorkspace(data as any);
+      return api.createWorkspace(data as Partial<Workspace> & { id: string });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspaces'] });

@@ -606,7 +606,7 @@ export const api = {
     return resp.data;
   },
 
-  async getCollectionDocs(collectionName: string, limit: number = 100): Promise<any> {
+  async getCollectionDocs(collectionName: string, limit: number = 100): Promise<Record<string, unknown>[]> {
     const resp = await apiClient.get(`/api/storage/collection/${collectionName}?limit=${limit}`);
     return resp.data;
   },

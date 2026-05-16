@@ -321,6 +321,11 @@ class RavenWorker:
             if talk_token:
                 await self._trigger_talk_callback(payload, str(ans))
 
+            # --- TTS CALLBACK (for voice clients with device_id) ---
+            device_id = payload.get("device_id")
+            if device_id:
+                await self._trigger_tts_callback(payload, str(ans))
+
             mission_id = payload.get("_mission_id")
             if mission_id:
                 try:
