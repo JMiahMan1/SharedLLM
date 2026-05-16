@@ -444,6 +444,11 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                             return "No relevant context found. Try a different query or collection."
                         context_text = "\n".join([f"- {r.get('content', '')}" for r in results])
                         return f"Found {len(results)} relevant results:\n{context_text}"
+                    if action == "haconfigrequest":
+                        detail = result.get("detail", {})
+                        if detail:
+                            return f"{result.get('message', '')}\n\nDetail:\n{json.dumps(detail, indent=2)}"
+                        return result.get("message", "Action completed successfully.")
                     return result.get("message", "Action completed successfully.")
                 else:
                     return f"Tool execution failed ({resp.status_code}): {resp.text}"
