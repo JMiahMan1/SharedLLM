@@ -3,7 +3,7 @@ import os
 import sys
 import logging
 import httpx
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import RAG_SVC_URL, INTERNAL_SECRET
 from schemas import SystemLearningRequest, ExecutionResult

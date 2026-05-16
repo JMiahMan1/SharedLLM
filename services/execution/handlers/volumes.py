@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import VOLUME_MANIFEST_PATH, VOLUME_BACKUP_ROOT
 

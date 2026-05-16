@@ -1,9 +1,12 @@
 import base64
 import json
 import logging
+import sys
+import os
 import urllib.parse
 from typing import Any, Optional
 from uuid import uuid4
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 try:
     from schemas import ExecutionResult, TalkRequest

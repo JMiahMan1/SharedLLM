@@ -21,7 +21,7 @@ try:
     from schemas import (
         UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
-        CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
+        CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
@@ -39,7 +39,7 @@ except ImportError:
         from .schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
+            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
@@ -274,7 +274,12 @@ async def execute_identity(req: IdentityRequest):
             
             if resp.status_code in (200, 201, 204):
                 data = resp.json() if resp.status_code != 204 else {}
-                return _ok(f"Identity action '{action}' successful.", "identity", data)
+                msg = f"Identity action '{action}' successful."
+                if isinstance(data, list):
+                    msg += f" Found {len(data)} results."
+                elif isinstance(data, dict) and "message" in data:
+                    msg = data["message"]
+                return _ok(msg, "identity", {"data": data})
             else:
                 return _fail(f"Identity service returned {resp.status_code}: {resp.text}", "identity")
     except Exception as e:
@@ -485,37 +490,90 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
         return _fail(f"Discovery sync bridge error: {e}", "discovery")
 
 
-@app.post("/execute/identity", response_model=ExecutionResult)
-async def execute_identity(req: IdentityRequest):
+@app.post("/execute/identity/manage", response_model=ExecutionResult)
+async def execute_identity_admin(req: IdentityManageRequest):
     """
-    Proxy identity management requests (list, import, discover) to the Identity service.
+    Extended identity management: user profile updates, device assignments,
+    API key management, and credential rotation.
+    Complements the primary /execute/identity handler which covers basic CRUD.
     """
     IDENTITY_SVC = IDENTITY_SVC_URL
     try:
         action = req.action
+        username = req.username or req.user_context.user
         async with httpx.AsyncClient(timeout=30.0) as client:
-            if action == "import_nextcloud":
-                resp = await client.post(f"{IDENTITY_SVC}/api/auth/import/nextcloud", headers={"X-Internal-Secret": INTERNAL_SECRET})
-            elif action == "list":
-                resp = await client.get(f"{IDENTITY_SVC}/api/users", headers={"X-Internal-Secret": INTERNAL_SECRET})
-            elif action == "discover":
-                resp = await client.get(f"{IDENTITY_SVC}/api/users/discover", headers={"X-Internal-Secret": INTERNAL_SECRET})
+            headers = {"X-Internal-Secret": INTERNAL_SECRET}
+
+            if action == "update_password":
+                resp = await client.post(
+                    f"{IDENTITY_SVC}/api/users/{username}/password",
+                    json={"new_password": req.display_name or ""},
+                    headers=headers,
+                )
+            elif action == "update_user":
+                payload = {}
+                if req.display_name:
+                    payload["display_name"] = req.display_name
+                if req.is_admin is not None:
+                    payload["is_admin"] = req.is_admin
+                resp = await client.patch(
+                    f"{IDENTITY_SVC}/api/users/{username}",
+                    json=payload,
+                    headers=headers,
+                )
+            elif action == "assign_device":
+                resp = await client.post(
+                    f"{IDENTITY_SVC}/api/users/devices",
+                    json={
+                        "user_id": username,
+                        "device_name": req.display_name or "",
+                        "device_type": req.category or "media_player",
+                    },
+                    headers=headers,
+                )
+            elif action == "list_devices":
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users/devices",
+                    params={"user_id": username},
+                    headers=headers,
+                )
+            elif action == "generate_key":
+                resp = await client.post(
+                    f"{IDENTITY_SVC}/api/users/me/keys",
+                    json={"label": req.display_name or "CLI Client"},
+                    headers=headers,
+                )
+            elif action == "revoke_key":
+                resp = await client.delete(
+                    f"{IDENTITY_SVC}/api/users/me/keys/{req.display_name or ''}",
+                    headers=headers,
+                )
+            elif action == "list_keys":
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users/me/keys",
+                    headers=headers,
+                )
+            elif action == "get_profile":
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users/me",
+                    headers=headers,
+                )
             else:
-                return _fail(f"Identity action '{action}' not yet implemented via tool interface.", "identity")
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                msg = f"Identity action '{action}' succeeded."
+                return _fail(f"Identity admin action '{action}' not supported. Use primary /execute/identity for list/create/delete/discover.", "identity_admin")
+
+            if resp.status_code in (200, 201, 204):
+                data = resp.json() if resp.status_code != 204 else {}
+                msg = f"Identity admin action '{action}' succeeded."
                 if isinstance(data, list):
                     msg += f" Found {len(data)} results."
                 elif isinstance(data, dict) and "message" in data:
                     msg = data["message"]
-                return _ok(msg, "identity", {"data": data})
+                return _ok(msg, "identity_admin", {"data": data})
             else:
-                return _fail(f"Identity service returned {resp.status_code}: {resp.text}", "identity")
+                return _fail(f"Identity service returned {resp.status_code}: {resp.text}", "identity_admin")
     except Exception as e:
-        log.error(f"Identity tool error: {e}")
-        return _fail(f"Identity bridge error: {e}", "identity")
+        log.error(f"Identity admin error: {e}")
+        return _fail(f"Identity admin bridge error: {e}", "identity_admin")
 
 
 @app.post("/execute/storage_file_read", response_model=ExecutionResult)

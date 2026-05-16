@@ -4,7 +4,7 @@ import sys
 import logging
 import difflib
 import shlex
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import WORKSPACE_ROOT
 from typing import Dict, Any, Optional

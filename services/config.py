@@ -78,6 +78,9 @@ WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS = int(_optional("WORKSPACE_RUNTIME_PYTE
 
 # --- Volume backup ---
 VOLUME_MANIFEST_PATH = _optional("VOLUME_MANIFEST_PATH", "/data/volumes.json")
+
+# --- Music Assistant (MASS) ---
+MASS_CONFIG_ENTRY_ID = _optional("MASS_CONFIG_ENTRY_ID", "")
 VOLUME_BACKUP_ROOT = _optional("VOLUME_BACKUP_ROOT", "/data/backups")
 
 # --- DNS ---
@@ -137,4 +140,5 @@ CONFIG = {
     "assistant_model": ASSISTANT_MODEL or "",
     "librarian_model": LIBRARIAN_MODEL or "",
     "coding_model": CODING_MODEL or "",
+    "mass_config_entry_id": MASS_CONFIG_ENTRY_ID,
 }

@@ -992,12 +992,14 @@ def update_mission(
 @app.delete("/api/raven/missions/{mission_id_or_slug}")
 def delete_mission(mission_id_or_slug: str, session: Session = Depends(get_session)):
     mission = _resolve_mission(mission_id_or_slug, session)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
     session.delete(mission)
     session.commit()
     return {"status": "SUCCESS"}
 
 @app.delete("/api/raven/missions/{mission_id}")
-def delete_mission(mission_id: int, session: Session = Depends(get_session)):
+def delete_mission_by_id(mission_id: int, session: Session = Depends(get_session)):
     mission = session.exec(select(RavenMission).where(RavenMission.id == mission_id)).first()
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")

@@ -4,7 +4,7 @@ import os
 import sys
 import html2text
 import httpx
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import SEARXNG_URL as _SEARXNG_URL
 from urllib.parse import urlencode
@@ -18,12 +18,14 @@ except ImportError:
 
 log = logging.getLogger("execution.browser")
 
-if not _SEARXNG_URL:
+def _is_testing() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+
+if not _SEARXNG_URL and not _is_testing():
     log.critical("FATAL: SEARXNG_URL environment variable is not set. Refusing to start.")
-    import sys
     sys.exit(1)
 
-SEARXNG_URL = _SEARXNG_URL.rstrip("/")
+SEARXNG_URL = (_SEARXNG_URL or "http://localhost:8080").rstrip("/")
 
 DEFAULT_ENGINES = "google,bing,duckduckgo"
 DEFAULT_LANGUAGE = "en"
