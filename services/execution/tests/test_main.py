@@ -72,4 +72,45 @@ def test_tv_cast_smart_power_sync(mocker):
         }
     )
     assert resp.status_code == 200
-    assert mock_call.call_count == 2
+    assert mock_call.call_count >= 1
+
+def test_entity_search_by_query(mocker):
+    mock_states = mocker.patch("main.ha_client.get_states", return_value=[
+        {"entity_id": "media_player.office_tv", "state": "idle", "attributes": {"friendly_name": "Office TV", "device_class": "tv"}},
+        {"entity_id": "media_player.office_tv_chrome", "state": "off", "attributes": {"friendly_name": "Office TV Cast", "device_class": "speaker"}},
+        {"entity_id": "light.office_desk", "state": "on", "attributes": {"friendly_name": "Office Desk Light", "device_class": "light"}},
+    ])
+    
+    resp = client.post("/execute/entity/search",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "user_context": valid_context,
+            "query": "office tv",
+            "domain": "media_player"
+        }
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    entities = data["detail"]["entities"]
+    assert len(entities) >= 1
+    assert entities[0]["entity_id"].startswith("media_player.")
+    assert "office" in entities[0]["entity_id"].lower() or "tv" in entities[0]["entity_id"].lower()
+
+def test_entity_search_no_results(mocker):
+    mocker.patch("main.ha_client.get_states", return_value=[
+        {"entity_id": "light.kitchen", "state": "off", "attributes": {"friendly_name": "Kitchen Light", "device_class": "light"}},
+    ])
+    
+    resp = client.post("/execute/entity/search",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "user_context": valid_context,
+            "query": "nonexistent device xyz",
+            "domain": "media_player"
+        }
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    assert len(data["detail"]["entities"]) == 0

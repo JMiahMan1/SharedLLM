@@ -220,6 +220,15 @@ class MediaStatusRequest(BaseRequest):
     entity_id: Optional[str] = Field(None, description="Specific entity to query")
 
 
+class EntitySearchRequest(BaseRequest):
+    """Search for Home Assistant entities by name, type, or area when entity_id is unknown."""
+    user_context: UserContext
+    query: str = Field(..., description="Search term (e.g., 'office tv', 'kitchen light', 'bedroom speaker')")
+    domain: Optional[str] = Field(None, description="Filter by domain (e.g., 'media_player', 'light', 'switch')")
+    area: Optional[str] = Field(None, description="Filter by area (e.g., 'Office', 'Kitchen', 'Master Bedroom')")
+    state: Optional[str] = Field(None, description="Filter by state (e.g., 'on', 'off', 'playing', 'idle')")
+
+
 # ─── Personal Data (Calendar / Notes) ──────────────────────────────────────────
 
 class CalendarRequest(BaseRequest):
