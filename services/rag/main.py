@@ -148,17 +148,14 @@ def purge_rag_collection(
     filter: dict = {},
     x_internal_secret: Optional[str] = Header(default=None)
 ):
+    """Purge entries via query parameters (legacy interface)."""
     require_internal(x_internal_secret)
     try:
         user_id = user_id.lower()
         coll = chroma_client.get_collection(name=collection_name, embedding_function=embedding_fn)
-        
-        # Build Chroma filter
         where_filter = {"user_id": user_id}
         if filter:
-            # Simple merge for now, assuming filter keys don't conflict with user_id
             where_filter.update(filter)
-            
         coll.delete(where=where_filter)
         log.info(f"Purged collection {collection_name} for user {user_id} with filter {where_filter}")
         return {"status": "SUCCESS", "message": f"Collection {collection_name} purged for user {user_id}"}

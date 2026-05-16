@@ -4,7 +4,7 @@ import sys
 import logging
 import json
 import uuid
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import REDIS_URL
 from datetime import datetime, timedelta

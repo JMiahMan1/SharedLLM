@@ -114,7 +114,7 @@ ALLOWED_TOOLS = {
     "workspaceshellrequest", "storagefilereadrequest", 
     "storagefilewriterequest", "storagelistrequest", "workspacebootstraprequest", 
     "systemlearningrequest", "discoverysyncrequest", "storageindexrequest",
-    "dockercomposerequest", "identityrequest", "controlplanerequest", "restart_service",
+    "dockercomposerequest", "identityrequest", "identitymanagerequest", "controlplanerequest", "restart_service",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -326,15 +326,62 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     MAX_TOOL_ITERATIONS = 30
     loop_start = asyncio.get_event_loop().time()
-    # agent_messages = ollama_payload.get("messages", [])[:]
     exec_data = None
     ans = ""
-    successful_tool_calls = 0  # Track successful tool executions
-    
+    successful_tool_calls = 0
+
     # --- VRAM-SAFE SCRATCHPAD ---
     action_log = []
 
-    for agent_iter in range(MAX_TOOL_ITERATIONS):
+    # --- CHECKPOINT/RESUME ---
+    start_iteration = 0
+    if mission_id:
+        try:
+            r_cp = redis.from_url(REDIS_URL, decode_responses=True)
+            cp_raw = await r_cp.get(f"raven:checkpoint:{mission_id}")
+            if cp_raw:
+                cp = json.loads(cp_raw)
+                start_iteration = cp.get("iteration", 0)
+                action_log = cp.get("action_log", [])
+                exec_data = cp.get("last_exec_data")
+                successful_tool_calls = cp.get("successful_tool_calls", 0)
+                log.info(f"[AgentLoop] Resuming mission {mission_id} from iteration {start_iteration} (restored {len(action_log)} action log entries)")
+            await r_cp.close()
+        except Exception as e:
+            log.warning(f"[AgentLoop] Failed to load checkpoint for mission {mission_id}: {e}")
+
+    async def _save_checkpoint(iter_num: int) -> None:
+        if not mission_id:
+            return
+        try:
+            r_cp = redis.from_url(REDIS_URL, decode_responses=True)
+            cp_data = {
+                "iteration": iter_num,
+                "action_log": action_log[-20:],
+                "last_exec_data": exec_data,
+                "successful_tool_calls": successful_tool_calls,
+                "updated_at": asyncio.get_event_loop().time(),
+            }
+            await r_cp.setex(
+                f"raven:checkpoint:{mission_id}",
+                RAVEN_MAX_TOTAL_SECONDS + 60,
+                json.dumps(cp_data),
+            )
+            await r_cp.close()
+        except Exception as e:
+            log.warning(f"[AgentLoop] Failed to save checkpoint at iter {iter_num}: {e}")
+
+    async def _clear_checkpoint() -> None:
+        if not mission_id:
+            return
+        try:
+            r_cp = redis.from_url(REDIS_URL, decode_responses=True)
+            await r_cp.delete(f"raven:checkpoint:{mission_id}")
+            await r_cp.close()
+        except Exception as e:
+            log.warning(f"[AgentLoop] Failed to clear checkpoint for mission {mission_id}: {e}")
+
+    for agent_iter in range(start_iteration, MAX_TOOL_ITERATIONS):
         iter_num = agent_iter + 1
         iter_start = asyncio.get_event_loop().time()
         
@@ -343,7 +390,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         if elapsed_total > RAVEN_MAX_TOTAL_SECONDS:
             log.error(f"[AgentLoop] HARD TIMEOUT after {elapsed_total:.0f}s at iteration {iter_num}")
             ans = f"ERROR: Raven job exceeded time limit of {RAVEN_MAX_TOTAL_SECONDS}s. Partial result: {ans or 'No output yet'}"
-            # timed_out = True
+            await _clear_checkpoint()
             break
         
         # --- HARD KILL SWITCH (Redis polling) ---
@@ -355,6 +402,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 if kill_flag:
                     log.warning(f"[AgentLoop] MISSION KILL SIGNAL RECEIVED for {mission_id}. Terminating.")
                     await stream_event("system", "Mission terminated by user.")
+                    await _clear_checkpoint()
                     return "MISSION TERMINATED: User requested cancellation via control plane."
             except Exception as e:
                 log.error(f"[AgentLoop] Error checking mission kill flag: {e}")
@@ -446,6 +494,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             heartbeat_stop.set()
             await hb_task
             log.error(f"[AgentLoop] FATAL: All inference retries failed on iter {agent_iter + 1}: {e}")
+            await _clear_checkpoint()
             return f"SYSTEM ERROR: Inference failed after multiple retries. Detail: {e}. Please check the LLM provider status."
 
         tool_data = extract_action_json(ans)
@@ -501,29 +550,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if agent_iter >= 3:
                 log.error(f"[AgentLoop] No valid tool calls after {agent_iter + 1} iterations. Terminating to prevent runaway.")
                 ans = "ERROR: Agent failed to produce valid tool calls after multiple attempts. Last response: " + (ans[:200] if ans else "empty")
+                await _clear_checkpoint()
                 break
                 
             log.info(f"[AgentLoop] Re-prompting for autonomous tool execution (iter {agent_iter + 1})...")
             action_log.append(f"ITERATION {iter_num}: Your response did not contain a valid JSON tool call. Every mission step MUST be a tool call.")
-            continue
-
-            # If the previous tool call resulted in an ERROR, we MUST NOT terminate.
-            # Force a retry regardless of other conditions.
-            if exec_data and exec_data.get("status") == "ERROR":
-                log.warning("[AgentLoop] JSON extraction failed following an ERROR. Re-prompting for correction...")
-                action_log.append(f"ITERATION {iter_num}: Failed to parse your JSON after tool error. Ensure you provide a valid JSON block inside ```json ``` tags.")
-                continue
-
-            if agent_iter > 0 and successful_tool_calls > 0:
-                log.info(f"[AgentLoop] Agent provided textual answer after {successful_tool_calls} successful tool call(s). Terminating loop.")
-                break
-             
-            if agent_iter >= 3:
-                log.error(f"[AgentLoop] No valid tool calls after {agent_iter + 1} iterations. Terminating to prevent runaway.")
-                ans = "ERROR: Agent failed to produce valid tool calls after multiple attempts. Last response: " + (ans[:200] if ans else "empty")
-                break
-                
-            log.info(f"[AgentLoop] Re-prompting for autonomous tool execution (iter {agent_iter + 1})...")
             continue
 
         action_name = tool_data.get("action", "").lower()
@@ -625,6 +656,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
                 "storageindexrequest": (STORAGE_SVC, "/index/full"),
                 "identityrequest": (EXECUTION_SVC, "/execute/identity"),
+                "identitymanagerequest": (EXECUTION_SVC, "/execute/identity/manage"),
             }
 
             lookup_action = action.lower().strip() if action else ""
@@ -693,6 +725,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     # Track successful tool executions (non-ERROR responses)
                     if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
                         successful_tool_calls += 1
+
+                    # Checkpoint state after successful tool execution
+                    await _save_checkpoint(iter_num)
             else:
                 log.warning(f"[AgentLoop] Unknown action: {action}")
                 exec_data = {"status": "ERROR", "message": f"Unknown action: {action}"}
@@ -765,5 +800,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 )
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to persist output_log for mission {mission_id}: {e}")
+
+    # Clear checkpoint on successful completion
+    await _clear_checkpoint()
 
     return ans

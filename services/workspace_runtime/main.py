@@ -6,6 +6,7 @@ import re
 import subprocess
 import hashlib
 import tempfile
+import time
 import fnmatch
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,13 +16,14 @@ from contextlib import asynccontextmanager
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import httpx
+import redis
 from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from config import (
-    INTERNAL_SECRET, IDENTITY_SVC_URL, STORAGE_SVC_URL,
+    INTERNAL_SECRET, IDENTITY_SVC_URL, STORAGE_SVC_URL, REDIS_URL,
     WORKSPACE_REGISTRY_PATH as _WRP, WORKSPACE_ROOT as _WR,
     WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS, WORKSPACE_RUNTIME_FILE_READ_LIMIT,
 )
@@ -73,6 +75,50 @@ DEFAULT_PROTECTED_BRANCH_PATTERNS = [
 ]
 
 app = FastAPI(title="SharedLLM Workspace Runtime")
+
+# --- Auto-Quarantine Configuration ---
+RAVEN_QUARANTINE_THRESHOLD = int(os.getenv("RAVEN_QUARANTINE_THRESHOLD", "3"))
+RAVEN_QUARANTINE_WINDOW_SECONDS = int(os.getenv("RAVEN_QUARANTINE_WINDOW", "600"))
+
+_redis_client: Optional[redis.Redis] = None
+
+def _get_redis() -> redis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    return _redis_client
+
+def _record_verification_failure(file_path: str) -> int:
+    """Record a lint/pytest failure for a file and return the current count within the window."""
+    r = _get_redis()
+    key = f"workspace:quarantine:{file_path}"
+    now = time.time()
+    cutoff = now - RAVEN_QUARANTINE_WINDOW_SECONDS
+    r.zremrangebyscore(key, 0, cutoff)
+    r.zadd(key, {str(now): now})
+    r.expire(key, RAVEN_QUARANTINE_WINDOW_SECONDS + 60)
+    return r.zcard(key)
+
+def _clear_verification_failures(file_path: str) -> None:
+    """Clear failure history for a file after a successful run."""
+    try:
+        r = _get_redis()
+        r.delete(f"workspace:quarantine:{file_path}")
+    except Exception:
+        pass
+
+def _auto_quarantine_workspace(workspace_id: str, file_path: str, failure_count: int) -> None:
+    """Flag a workspace as quarantined when a file exceeds the failure threshold."""
+    try:
+        with Session(engine) as session:
+            ws = session.get(Workspace, workspace_id)
+            if ws and not ws.quarantined:
+                ws.quarantined = True
+                log.warning(f"[Quarantine] Workspace {workspace_id} auto-quarantined: {file_path} failed {failure_count} times in {RAVEN_QUARANTINE_WINDOW_SECONDS}s")
+                session.add(ws)
+                session.commit()
+    except Exception as e:
+        log.error(f"[Quarantine] Failed to auto-quarantine workspace {workspace_id}: {e}")
 
 
 @app.exception_handler(Exception)
@@ -1433,6 +1479,16 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
+
+    ws_id = workspace.get("id", "")
+    with Session(engine) as session:
+        ws = session.get(Workspace, ws_id)
+        if ws and ws.quarantined:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Workspace '{ws.display_name}' is quarantined after repeated verification failures. Admin review required.",
+            )
+
     workspace_path = Path(workspace["resolved_path"])
     identity = workspace.get("resolved_identity") or {}
     requested_branch = _validate_branch_name(req.branch) if req.branch else ""
@@ -1487,6 +1543,10 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
         lint_result = _run_lint_for_file(workspace_path, lint_target)
         lint_results.append(lint_result)
         if not lint_result["passed"]:
+            failure_count = _record_verification_failure(req.relative_path)
+            log.warning(f"[Quarantine] Lint failed for {req.relative_path} (failure #{failure_count} in window)")
+            if failure_count >= RAVEN_QUARANTINE_THRESHOLD:
+                _auto_quarantine_workspace(ws_id, req.relative_path, failure_count)
             raise HTTPException(
                 status_code=400,
                 detail=f"Lint failed for workflow request on {lint_target}",
@@ -1507,6 +1567,10 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
             x_internal_secret,
         )
         if not pytest_result.get("passed"):
+            failure_count = _record_verification_failure(req.relative_path)
+            log.warning(f"[Quarantine] Pytest failed for {req.relative_path} (failure #{failure_count} in window)")
+            if failure_count >= RAVEN_QUARANTINE_THRESHOLD:
+                _auto_quarantine_workspace(ws_id, req.relative_path, failure_count)
             raise HTTPException(
                 status_code=400,
                 detail=f"Pytest failed for workflow request on {req.relative_path}",
@@ -1570,6 +1634,8 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
         pytest_result=pytest_result,
         push_result=push_result,
     )
+
+    _clear_verification_failures(req.relative_path)
 
     return {
         "status": "SUCCESS",
