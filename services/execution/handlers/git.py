@@ -75,6 +75,7 @@ async def _resolve_workspace_path(workspace_id: Optional[str] = None) -> str:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
                 f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces",
+                params={"rag_user": "system"},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status_code == 200:
