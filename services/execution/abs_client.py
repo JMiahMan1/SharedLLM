@@ -16,11 +16,29 @@ log = logging.getLogger("execution.abs_client")
 _TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 
 
-def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[str]]:
-    """Extract ABS URL and API key from user context or environment fallback."""
-    abs_url = getattr(user_context, "abs_url", None) or os.getenv("ABS_URL")
+def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Extract ABS URL and auth from user context or environment fallback.
+    Returns (abs_url, abs_api_key, username, password).
+    """
+    abs_url = getattr(user_context, "abs_url", None) or os.getenv("ABS_URL") or os.getenv("AUDIOBOOKSHELF_URL")
     abs_key = getattr(user_context, "abs_api_key", None) or os.getenv("ABS_API_KEY")
-    return abs_url, abs_key
+    username = getattr(user_context, "abs_username", None) or os.getenv("AUDIOBOOKSHELF_USER") or os.getenv("ABS_USER")
+    password = getattr(user_context, "abs_password", None) or os.getenv("AUDIOBOOKSHELF_PASS") or os.getenv("ABS_PASS")
+    return abs_url, abs_key, username, password
+
+
+async def abs_login(abs_url: str, username: str, password: str) -> Optional[str]:
+    """Login to ABS with username/password and return API token."""
+    url = f"{abs_url.rstrip('/')}/api/login"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.post(url, json={"username": username, "password": password})
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("user", {}).get("token")
+        except Exception as e:
+            log.error(f"[abs_client] Login failed: {e}")
+            return None
 
 
 async def abs_get(
