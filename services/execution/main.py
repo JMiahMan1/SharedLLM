@@ -1128,7 +1128,7 @@ async def execute_composite_night_mode(req):
 
 
 @app.post("/execute/ha_config", response_model=ExecutionResult)
-async def execute_ha_config(req):
+async def execute_ha_config(req: "HAConfigRequest"):
     """Inspect Home Assistant integration configurations via WebSocket API."""
     ctx = req.user_context
     action = req.action
