@@ -503,7 +503,7 @@ class RavenWorker:
 
     async def _run_cleanup(self):
         """Single cleanup pass: sync HA entities, prune orphans, clean Redis cache."""
-        from ha_state_cache import get_redis
+        from gateway.ha_state_cache import get_redis
         
         # 1. Fetch all users from Identity to sync their HA entities
         try:
@@ -568,7 +568,7 @@ class RavenWorker:
                                 pass
                 
                 # Update Redis cache with fresh states
-                from ha_state_cache import cache_all_states
+                from gateway.ha_state_cache import cache_all_states
                 cache_all_states(entities)
                 
             except Exception as e:

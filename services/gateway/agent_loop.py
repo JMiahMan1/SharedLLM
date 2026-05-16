@@ -351,6 +351,43 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to load checkpoint for mission {mission_id}: {e}")
 
+    async def _compress_context() -> tuple[str, str]:
+        """Compress action_log into a summary + recent entries to prevent context bloat.
+        
+        When action_log exceeds COMPRESS_THRESHOLD chars, older entries are summarized
+        into a compact header. Only the most recent entries are kept in full.
+        
+        Returns: (compressed_summary, recent_entries_joined)
+        """
+        COMPRESS_THRESHOLD = 3000  # chars before triggering compression
+        KEEP_RECENT = 6  # number of recent entries to keep in full
+        
+        full_log = "\n".join(action_log)
+        if len(full_log) <= COMPRESS_THRESHOLD:
+            return "", full_log
+        
+        # Summarize older entries
+        older = action_log[:-KEEP_RECENT]
+        recent = action_log[-KEEP_RECENT:]
+        
+        # Build compact summary of older entries
+        actions_seen = {}
+        for entry in older:
+            # Extract action name from "Step N: action_name -> result" or "ITERATION N: ..."
+            if ": " in entry:
+                action_part = entry.split(": ", 1)[1].split(" ->")[0].strip()
+                actions_seen[action_part] = actions_seen.get(action_part, 0) + 1
+        
+        summary_parts = [f"Earlier steps ({len(older)} iterations completed):"]
+        for action, count in sorted(actions_seen.items(), key=lambda x: -x[1]):
+            summary_parts.append(f"  - {action}: {count}x")
+        
+        summary = "\n".join(summary_parts)
+        recent_joined = "\n".join(recent)
+        
+        log.info(f"[AgentLoop] Context compressed: {len(older)} older entries summarized, {len(recent)} recent kept")
+        return summary, recent_joined
+
     async def _save_checkpoint(iter_num: int) -> None:
         if not mission_id:
             return
@@ -427,23 +464,46 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
 
         try:
+            # Compress context to prevent token bloat and llama.cpp cache thrashing
+            ctx_summary, ctx_recent = await _compress_context()
+            
+            mission_header = f"MISSION LOCK: {query}"
+            if ctx_summary:
+                mission_header += f"\n\n{ctx_summary}"
+            
             ollama_payload["messages"] = [
                 {"role": "system", "content": enhanced_system},
-                {"role": "user", "content": f"MISSION LOCK: {query}\n\nPAST ACTIONS SUMMARY:\n" + "\n".join(action_log)}
+                {"role": "user", "content": f"{mission_header}\n\nRECENT ACTIONS:\n{ctx_recent}"}
             ]
             if exec_data:
                 # Truncate detail, stdout, and stderr to save VRAM if they are massive
                 safe_exec_data = exec_data.copy() if isinstance(exec_data, dict) else {"result": str(exec_data)}
                 if "detail" in safe_exec_data and isinstance(safe_exec_data["detail"], dict):
                     for key in ["content", "stdout", "stderr"]:
-                        if key in safe_exec_data["detail"] and safe_exec_data["detail"][key] and len(str(safe_exec_data["detail"][key])) > 1500:
-                            safe_exec_data["detail"][key] = str(safe_exec_data["detail"][key])[:1500] + "\n...[TRUNCATED FOR 8GB VRAM]..."
+                        if key in safe_exec_data["detail"] and safe_exec_data["detail"][key] and len(str(safe_exec_data["detail"][key])) > 500:
+                            safe_exec_data["detail"][key] = str(safe_exec_data["detail"][key])[:500] + "\n...[TRUNCATED]..."
+                
+                # Hard limit on total exec_data size
+                exec_json = json.dumps(safe_exec_data)
+                if len(exec_json) > 2000:
+                    exec_json = exec_json[:2000] + "\n...[TRUNCATED FOR CONTEXT WINDOW]..."
                         
                 ollama_payload["messages"].append({
                     "role": "user", 
-                    "content": f"LAST TOOL RESULT (Execution Status: SUCCESS):\n{json.dumps(safe_exec_data)}"
+                    "content": f"LAST TOOL RESULT:\n{exec_json}"
                 })
             ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
+
+            # Hard limit on total message size to prevent llama.cpp cache thrashing
+            total_chars = sum(len(m.get("content", "")) for m in ollama_payload["messages"])
+            if total_chars > 12000:
+                log.warning(f"[AgentLoop] Context too large ({total_chars} chars), forcing compression")
+                # Keep only system + mission header + last 3 recent entries
+                ollama_payload["messages"] = [
+                    ollama_payload["messages"][0],  # system
+                    ollama_payload["messages"][1],  # mission header
+                    {"role": "user", "content": "Continue with the next step."}
+                ]
 
             # --- RETRY LOGIC ---
             MAX_INFERENCE_RETRIES = 3

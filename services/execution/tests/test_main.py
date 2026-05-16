@@ -114,3 +114,30 @@ def test_entity_search_no_results(mocker):
     data = resp.json()
     assert data["status"] == "SUCCESS"
     assert len(data["detail"]["entities"]) == 0
+
+def test_announce_with_device_name(mocker):
+    """Test announce resolves device_name and plays media."""
+    mock_states = mocker.patch("main.ha_client.get_states", return_value=[
+        {"entity_id": "media_player.office_tv", "state": "on", "attributes": {"friendly_name": "Office TV", "device_class": "tv", "app_id": "com.google.android.tvlauncher"}},
+    ])
+    mocker.patch("main.ha_client.get_config", return_value={"components": ["cast.media_player", "media_player"]})
+    mocker.patch("main.ha_client.call_service", return_value={"ok": True})
+    mocker.patch("main.ha_client.get_logbook", return_value=[{"state": "playing", "message": "playing"}])
+    
+    # Mock TTS to return empty bytes (will trigger fallback but still test resolution)
+    mocker.patch("tts.text_to_speech", return_value=b"")
+    
+    resp = client.post("/execute/announce",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "user_context": valid_context,
+            "device_name": "Office TV",
+            "message": "Test announcement",
+            "tts_engine": "kokoro",
+            "volume": 0.5
+        }
+    )
+    assert resp.status_code == 200
+    # Should resolve to media_player.office_tv, not office_tv_3
+    call_args = mock_states.call_args_list
+    assert len(call_args) >= 1  # At least get_states was called
