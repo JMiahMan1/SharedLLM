@@ -140,6 +140,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     user_id = job_payload["creds"]["user"]
     creds = ResolvedCredentials(**job_payload["creds"])
     model = job_payload["model"]
+    show_thinking = job_payload.get("show_thinking", False)
     
     # 0. Query-based Model Override (e.g. "Raven use model qwen2.5:32b fix...")
     model_match = re.search(r"(?:use model|with model|run on model)\s+([a-zA-Z0-9.\-_:]+)", query, re.IGNORECASE)
@@ -171,10 +172,10 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
         from gateway.agent_loop import AgentLoop
         # Raven handles autonomous loops
         mission_id = job_payload.get("_mission_id")
-        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context)
+        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking)
     else:
         # Librarian handles standard single-turn inference
-        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback)
+        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking)
         
     return ans
 
@@ -298,7 +299,7 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     hits = sorted(hits, key=lambda h: not h.get("is_active", False), reverse=True)
     return hits
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None, show_thinking: bool = False) -> str:
     system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
@@ -308,7 +309,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     log.info(f"[_single_turn_inference] Executing for model {model}")
     
     # No grammar constraint - model produces JSON naturally via system prompt
-    options = {"temperature": 0.0, "num_predict": 2048}
+    options = {"temperature": 0.0, "num_predict": 2048, "show_thinking": show_thinking}
 
     # --- RETRY LOGIC FOR MODEL SWITCHING ---
     MAX_INFERENCE_RETRIES = 3
