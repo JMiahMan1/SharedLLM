@@ -486,7 +486,6 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                     use_chat=True,
                 )
                 ans = data.get("message", {}).get("content", "")
-                log.info(f"[_single_turn_inference] Raw LLM response length: {len(ans)} chars, preview: {ans[:300]}")
                 break
             except Exception as e:
                 log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
