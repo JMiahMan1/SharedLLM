@@ -3102,7 +3102,18 @@ async def proxy_docker_exec(service_name: str, body: Dict[str, Any], request: Re
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 @app.websocket("/api/raven/missions/{id_or_slug}/stream")
-async def raven_mission_stream(websocket: WebSocket, id_or_slug: str):
+async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str = ""):
+    # Validate auth token
+    if token:
+        async with borrow_http_client() as client:
+            auth_resp = await client.get(
+                f"{IDENTITY_SVC}/api/users/me",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            if auth_resp.status_code != 200:
+                await websocket.close(code=1008, reason="Invalid token")
+                return
+    
     await websocket.accept()
     # Resolve to real ID
     async with borrow_http_client() as client:

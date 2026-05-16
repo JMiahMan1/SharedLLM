@@ -168,9 +168,15 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     autonomy_signals = [
         "raven", "use raven", "audit", "repair", "self repair", "self-heal",
         "self fix", "deploy", "bootstrap", "develop", "fix the app",
-        "fix the service", "fix the codebase", "agentic", "autonomous"
+        "fix the service", "fix the codebase", "agentic", "autonomous",
+        "audit the codebase", "sync workspace", "pull latest", "convert them to",
+        "review requirements", "check dependencies", "report any conflicts",
     ]
+    # Also match queries starting with action verbs
     is_autonomous = any(k in query.lower() for k in autonomy_signals)
+    if not is_autonomous:
+        first_word = query.lower().split()[0] if query.split() else ""
+        is_autonomous = first_word in ("fix", "repair", "audit", "deploy", "convert", "review", "check", "update", "refactor")
     
     # 4. Final Inference
     full_system = job_payload.get("system", "")
