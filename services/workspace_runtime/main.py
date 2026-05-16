@@ -1159,7 +1159,27 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: Optio
     workspace = _resolve_workspace_for_bootstrap(req)
     _require_workspace_capability(workspace, "git_write")
 
-    target_path = Path(workspace["resolved_path"])
+    # Fix legacy workspaces with outdated paths (container_mount_path=None, local_path='.')
+    if workspace.get("container_mount_path") is None and workspace.get("local_path") == ".":
+        repo_url = str(req.repo_url or workspace.get("repo_url") or "").strip()
+        if repo_url:
+            new_path = _derive_workspace_container_path(repo_url)
+            workspace["container_mount_path"] = new_path
+            effective_path = new_path
+            resolved_path = resolve_safe_path(get_workspace_root(), effective_path, must_exist=False)
+            workspace["resolved_path"] = str(resolved_path)
+            with Session(engine) as session:
+                ws = session.exec(select(Workspace).where(Workspace.id == workspace["id"])).first()
+                if ws:
+                    ws.container_mount_path = new_path
+                    session.add(ws)
+                    session.commit()
+            target_path = Path(workspace["resolved_path"])
+        else:
+            target_path = Path(workspace["resolved_path"])
+    else:
+        target_path = Path(workspace["resolved_path"])
+
     parent_path = target_path.parent
     parent_path.mkdir(parents=True, exist_ok=True)
 
