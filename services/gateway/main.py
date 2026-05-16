@@ -1737,6 +1737,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
     explicit_model = str(body.get("model") or "").strip()
+    show_thinking = body.get("show_thinking", False)
 
     try:
         selected_model = explicit_model or await get_assistant_model()
@@ -1922,7 +1923,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         "client": body.get("client"),
         "source": body.get("source"),
         "device_id": body.get("device_id"),
-        "rag_user": body.get("rag_user")
+        "rag_user": body.get("rag_user"),
+        "show_thinking": show_thinking,
     }
     
     job_id = await job_queue.enqueue_job(user_id, job_payload)

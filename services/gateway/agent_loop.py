@@ -38,6 +38,20 @@ CREDENTIAL_KEYS = {
     "abs_url", "audiobookshelf_url",
 }
 
+THINKING_PATTERNS = [
+    re.compile(r'<think>.*?</think>', re.DOTALL),
+    re.compile(r'<think>.*?</think>', re.DOTALL),
+    re.compile(r'<thinking>.*?</thinking>', re.DOTALL),
+]
+
+
+def strip_thinking_blocks(text: str) -> str:
+    """Remove thinking/reasoning blocks from LLM output."""
+    result = text
+    for pattern in THINKING_PATTERNS:
+        result = pattern.sub('', result)
+    return result.strip()
+
 
 def sanitize_for_llm(obj: Any, depth: int = 0) -> Any:
     """Recursively sanitize any object to remove credentials before feeding to LLM."""
@@ -73,11 +87,14 @@ class OllamaProvider(BaseLLMProvider):
         options: Optional[Dict[str, Any]] = None,
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> str:
+        opts = options or {}
+        show_thinking = opts.get("show_thinking", False)
+        
         payload = {
             "model": model,
             "messages": messages,
             "stream": True,  # Hardened: Always stream
-            "options": options or {}
+            "options": opts
         }
 
         full_content = ""
@@ -99,12 +116,25 @@ class OllamaProvider(BaseLLMProvider):
                             if "error" in data:
                                 raise RuntimeError(f"Provider error: {data['error']}")
                             msg = data.get("message", {})
-                            chunk = msg.get("content") or msg.get("thinking") or ""
+                            chunk = msg.get("content") or ""
                             content += chunk
                             if data.get("done"):
                                 break
                         except json.JSONDecodeError:
                             continue
+                    # Only fall back to thinking if content is completely empty
+                    if not content.strip():
+                        for line in lines:
+                            try:
+                                data = json.loads(line)
+                                msg = data.get("message", {})
+                                thinking = msg.get("thinking") or ""
+                                content += thinking
+                            except json.JSONDecodeError:
+                                continue
+                    # Strip thinking blocks unless explicitly requested
+                    if not show_thinking:
+                        content = strip_thinking_blocks(content)
                     return content
                 
                 try:
@@ -112,7 +142,14 @@ class OllamaProvider(BaseLLMProvider):
                     if "error" in data:
                         raise RuntimeError(f"Provider error: {data['error']}")
                     msg = data.get("message", {})
-                    return msg.get("content") or ""
+                    content = msg.get("content") or ""
+                    # Only fall back to thinking if content is completely empty
+                    if not content.strip():
+                        content = msg.get("thinking") or ""
+                    # Strip thinking blocks unless explicitly requested
+                    if not show_thinking:
+                        content = strip_thinking_blocks(content)
+                    return content
 
                 except json.JSONDecodeError as e:
                     log.error(f"[OllamaProvider-Hardened] Failed to parse JSON: {raw_text[:100]}... Error: {e}")
@@ -130,6 +167,9 @@ class OllamaProvider(BaseLLMProvider):
                         if "error" in chunk_json:
                             raise RuntimeError(f"Provider error: {chunk_json['error']}")
                         content = chunk_json.get("message", {}).get("content") or ""
+                        # Only include thinking if explicitly requested
+                        if not content and show_thinking:
+                            content = chunk_json.get("message", {}).get("thinking") or ""
                         if content:
                             full_content += content
                             await chunk_callback(content)
@@ -140,6 +180,9 @@ class OllamaProvider(BaseLLMProvider):
                         raise  # Let provider errors propagate to AgentLoop retry logic
                     except Exception as e:
                         log.error(f"Error parsing streaming chunk: {e} | Raw line: {line!r}")
+        # Strip thinking blocks from final content unless explicitly requested
+        if not show_thinking:
+            full_content = strip_thinking_blocks(full_content)
         return full_content
 
 log = logging.getLogger("gateway.agent_loop")
@@ -293,7 +336,7 @@ def get_http_client() -> httpx.AsyncClient:
 
 _stream_redis = None
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None, rag_context: str = "") -> Any:
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None, rag_context: str = "", show_thinking: bool = False) -> Any:
     full_audit_log = []
     
     async def stream_event(event_type: str, data: str):
@@ -361,8 +404,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         ] + short_term + [{"role": "user", "content": query}],
         "stream": False,
         "options": {
-            "enable_thinking": is_thinking_capable,
-            "include_reasoning": is_thinking_capable,
+            "enable_thinking": is_thinking_capable and show_thinking,
+            "include_reasoning": is_thinking_capable and show_thinking,
+            "show_thinking": show_thinking,
             "temperature": 0.0
         },
     }
