@@ -70,6 +70,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
+      - WORKSPACE_ROOT=/workspaces
     security_opt:
       - label=disable
     volumes:
@@ -77,6 +78,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/jeremiah/.ssh:/home/sharedllm/.ssh:ro
       - kokoro_models:/app/models
+      - ${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}:/workspaces
 
   rag:
     build:

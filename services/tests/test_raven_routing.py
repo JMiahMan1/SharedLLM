@@ -15,10 +15,9 @@ async def test_use_raven_routes_to_raven_prompt_and_coding_model():
         assert prompt == RAVEN_AUTONOMOUS_PROTOCOL
 
 
-def test_general_repair_without_raven_uses_autonomous_developer_prompt():
+def test_general_repair_without_raven_uses_raven_autonomous_prompt():
     prompt = select_system_instruction_for_query("Please fix the app and inspect the logs", "qwen2.5-coder:7b")
-
-    assert prompt == AUTONOMOUS_EVOLUTION_AGENT_PROMPT
+    assert prompt == RAVEN_AUTONOMOUS_PROTOCOL
 
 
 def test_coding_query_still_uses_code_helper_prompt():
