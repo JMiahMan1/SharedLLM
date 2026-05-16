@@ -27,6 +27,10 @@ CREDENTIAL_PATTERNS = [
     re.compile(r'(?:github[_-]?token|gitlab[_-]?token|git[_-]?token)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{8,})["\']?', re.IGNORECASE),
     re.compile(r'(?:nextcloud[_-]?pass|nc[_-]?pass)\s*[:=]\s*["\']?([^\s"\']{4,})["\']?', re.IGNORECASE),
     re.compile(r'(?<!\w)token=([A-Za-z0-9_\-\.]{8,})', re.IGNORECASE),
+    re.compile(r'Bearer\s+([A-Za-z0-9._\-]+)', re.IGNORECASE),
+    re.compile(r'(ghp_[A-Za-z0-9]+)'),
+    re.compile(r'(glpat-[A-Za-z0-9\-_]+)'),
+    re.compile(r'(github_pat_[A-Za-z0-9_]+)'),
 ]
 
 CREDENTIAL_KEYS = {
@@ -61,7 +65,13 @@ def sanitize_for_llm(obj: Any, depth: int = 0) -> Any:
     if isinstance(obj, str):
         result = obj
         for pattern in CREDENTIAL_PATTERNS:
-            result = pattern.sub(lambda m: m.group(0).split(m.group(1))[0] + "[REDACTED]", result)
+            def _redact(m):
+                try:
+                    secret = m.group(1)
+                    return m.group(0).replace(secret, "[REDACTED]")
+                except IndexError:
+                    return "[REDACTED]"
+            result = pattern.sub(_redact, result)
         return result
     if isinstance(obj, dict):
         sanitized = {}
@@ -872,12 +882,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     if resp.status_code == 422:
                         try:
                             error_detail = resp.json().get("detail", "Validation failed")
+                            # Sanitize error detail before exposing to LLM — 422 responses
+                            # echo back the full request payload including credentials
+                            error_detail = sanitize_for_llm(error_detail)
                             msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'message') instead of 'command' or 'commit_message'."
                         except Exception:
                             msg = f"SCHEMA ERROR (422): {resp.text}. Check your field names."
                         exec_data = {"status": "ERROR", "message": msg}
                     else:
                         exec_data = resp.json()
+
+                    # Sanitize execution results before any downstream use
+                    exec_data = sanitize_for_llm(exec_data)
 
                     short_msg = exec_data.get("message", "Success")
                     await stream_event("result_success", short_msg)

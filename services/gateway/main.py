@@ -600,10 +600,13 @@ async def get_documentation(
 # --- Logging Helper ---
 async def emit_log(level: str, message: str, context: dict = None):
     try:
+      from gateway.agent_loop import sanitize_for_llm
+      safe_context = sanitize_for_llm(context) if context else None
+      safe_message = sanitize_for_llm(message) if isinstance(message, str) else message
       async with httpx.AsyncClient() as client:
           await client.post(
             f"{LOGGING_SVC_URL}/log",
-            json={"service": "gateway", "level": level, "message": message, "context": context},
+            json={"service": "gateway", "level": level, "message": safe_message, "context": safe_context},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=1.0
           )
