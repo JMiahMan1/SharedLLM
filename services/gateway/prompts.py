@@ -40,6 +40,7 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "- **LLMInfoRequest**: `{\"action\": \"list|ps|version|show\", \"model\": \"qwen3.6-35b-a3b:q4_k_m\"}` - check what models are available, what's currently loaded, server version, or detailed model info. Use \"show\" with a model name for architecture, parameters, quantization, and context length\n"
     "- **AudiobookshelfRequest**: `{\"action\": \"resume|search|play|progress|list|get_book\", \"query\": \"book title\", \"entity_id\": \"media_player.xxx\"}` - manage audiobooks. Use \"resume\" for latest book, \"search\" to find by title, \"progress\" to check what's in progress. Credentials are injected automatically\n"
     "- **ExecutionLogRequest**: `{\"lines\": 50}` - verify task execution, troubleshoot failures. Optional: `{\"service\": \"announce\", \"keyword\": \"FAILED\"}` to filter by handler name or keyword. Leave service/keyword empty for all logs\n"
+    "- **HAConfigRequest**: `{\"action\": \"list_integrations|get_integration|get_entities|get_config\", \"domain\": \"ollama\", \"entity_domain\": \"light\", \"keyword\": \"...\"}` — inspect Home Assistant integration configurations to diagnose misconfigured integrations (wrong URLs, disabled entities, etc.)\n"
     "\n"
     "### Entity Resolution Rule (CRITICAL)\n"
     "When the user mentions a device by name (e.g., \"Office TV\", \"hall lamp\"), you MUST find the EXACT entity ID from the HA entity context provided above. "
