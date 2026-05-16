@@ -5,6 +5,7 @@ import asyncio
 import httpx
 import re
 import redis.asyncio as redis
+from datetime import datetime
 from typing import Optional, Any, Dict, List, Callable, Awaitable
 
 from gateway.history import REDIS_URL
@@ -394,8 +395,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     model_name_lower = selected_model.lower()
     is_thinking_capable = any(kw in model_name_lower for kw in ["qwen3", "qwen2.5", "deepseek-r1", "qwq"])
     
-    # 4. Enhance system prompt with RAG context
-    enhanced_system = f"{full_system}\n\nRetrieved Context:\n{rag_context}"
+    # 4. Enhance system prompt with current date/time and RAG context
+    now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
+    enhanced_system = f"{full_system}\n\nCurrent Date/Time: {now}\n\nRetrieved Context:\n{rag_context}"
     
     ollama_payload = {
         "model": selected_model,
