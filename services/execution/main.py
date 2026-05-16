@@ -25,7 +25,7 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest
+        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest
     )
     from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
     from handlers import docker_logs as docker_logs_handler
@@ -907,6 +907,79 @@ async def execute_announce(req: AnnouncementRequest):
     if result.get("ok"):
         return _ok(f"Announcement sent successfully to {target_player}.", "announce")
     return _fail(f"Announcement failed: {result.get('error')}", "announce", result)
+
+@app.post("/execute/entity/search", response_model=ExecutionResult)
+async def execute_entity_search(req: EntitySearchRequest):
+    """Search for HA entities by name, domain, area, or state."""
+    ctx = req.user_context
+    ha_url = ctx.ha_url
+    ha_token = ctx.ha_token
+    
+    if not ha_url or not ha_token:
+        from config import HA_URL, HA_TOKEN
+        ha_url = ha_url or HA_URL
+        ha_token = ha_token or HA_TOKEN
+    
+    if not ha_url or not ha_token:
+        return _fail("Home Assistant URL or token not configured.", "entity_search")
+    
+    all_states = await ha_client.get_states(ha_url, ha_token) or []
+    results = []
+    
+    search_terms = req.query.lower().split()
+    
+    for state in all_states:
+        eid = state.get("entity_id", "")
+        attrs = state.get("attributes", {})
+        friendly = attrs.get("friendly_name", "").lower()
+        device_class = attrs.get("device_class", "")
+        area = attrs.get("area_id", "")
+        current_state = state.get("state", "")
+        
+        # Apply filters
+        if req.domain and not eid.startswith(f"{req.domain}."):
+            continue
+        if req.area and req.area.lower() not in area.lower():
+            continue
+        if req.state and req.state.lower() != current_state.lower():
+            continue
+        
+        # Search matching
+        if search_terms:
+            searchable = f"{eid} {friendly} {device_class} {area}".lower()
+            if not any(term in searchable for term in search_terms):
+                continue
+        
+        results.append({
+            "entity_id": eid,
+            "friendly_name": attrs.get("friendly_name", ""),
+            "state": current_state,
+            "domain": eid.split(".")[0] if "." in eid else "",
+            "device_class": device_class,
+            "area_id": area,
+            "app_id": attrs.get("app_id", ""),
+            "supported_features": attrs.get("supported_features", 0),
+        })
+    
+    # Sort by relevance: exact matches first, then partial
+    if search_terms:
+        def relevance_score(r):
+            score = 0
+            searchable = f"{r['entity_id']} {r['friendly_name']}".lower()
+            for term in search_terms:
+                if term in searchable:
+                    score += 1
+                if term == r['friendly_name']:
+                    score += 10
+            return score
+        results.sort(key=relevance_score, reverse=True)
+    
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Found {len(results)} matching entities.",
+        service="entity_search",
+        detail={"entities": results[:20]}
+    )
 
 @app.post("/execute/ha_service", response_model=ExecutionResult)
 async def execute_ha_service(req: HAServiceRequest):
