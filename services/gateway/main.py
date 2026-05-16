@@ -599,7 +599,6 @@ async def get_documentation(
 
 # --- Logging Helper ---
 async def emit_log(level: str, message: str, context: dict = None):
-    print(f"DIAGNOSTIC [{level}] {message} context={context}")
     try:
       async with httpx.AsyncClient() as client:
           await client.post(
@@ -1716,8 +1715,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks: BackgroundTasks = None):
-    print("DEBUG: Chat handler entered!")
-    log.info("DEBUG: Chat handler entered (Logger)!")
+    log.info("Chat handler entered")
     exec_data = None
     client = get_http_client()
     # 1. Resolve Identity
