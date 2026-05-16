@@ -152,6 +152,53 @@ from config import TEMP_MEDIA_DIR
 TEMP_VIDEO_DIR = TEMP_MEDIA_DIR
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
+async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_media_url: str, timeout: int = 10) -> Dict[str, Any]:
+    """Verify that a media player actually started playing the expected content.
+    
+    Returns dict with: verified (bool), state, media_content_id, app_name, detail
+    """
+    import time
+    start = time.time()
+    playing_seen = False
+    
+    while time.time() - start < timeout:
+        state_resp = await ha_client.get_entity_state(ha_url, ha_token, entity_id)
+        if not state_resp:
+            await asyncio.sleep(0.5)
+            continue
+            
+        current_state = state_resp.get("state", "unknown")
+        attrs = state_resp.get("attributes", {})
+        current_media = attrs.get("media_content_id", "")
+        app_name = attrs.get("app_name", attrs.get("app_id", ""))
+        
+        # Check if we see 'playing' state with matching media URL
+        if current_state == "playing" and expected_media_url in str(current_media):
+            playing_seen = True
+            log.info(f"[verify_playback] CONFIRMED playing: {entity_id} -> {current_media[:60]}")
+            # Wait a moment to ensure it's stable, then return success
+            await asyncio.sleep(1)
+            return {
+                "verified": True,
+                "state": current_state,
+                "media_content_id": current_media,
+                "app_name": app_name,
+                "detail": "Playback confirmed via state transition to 'playing'"
+            }
+        
+        await asyncio.sleep(0.5)
+    
+    # Timeout without seeing playing state
+    last_state = state_resp.get("state", "unknown") if state_resp else "unknown"
+    last_media = state_resp.get("attributes", {}).get("media_content_id", "") if state_resp else ""
+    return {
+        "verified": False,
+        "state": last_state,
+        "media_content_id": last_media,
+        "app_name": "",
+        "detail": f"Playback not confirmed within {timeout}s. Last state: {last_state}"
+    }
+
 @app.get("/media/{media_id}")
 async def get_temp_media(media_id: str):
     """Serves transient audio/video files for HA playback."""
@@ -741,18 +788,29 @@ async def execute_announce(req: AnnouncementRequest):
 
     log.info(f"[announce] START user={ctx.user} target={target_player} msg='{req.message}'")
     
-    # 1. Power on
-    await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
-    await asyncio.sleep(1.0)
-
+    # 0. Capture initial state for restoration
+    all_states = await ha_client.get_states(ha_url, ha_token) or []
+    initial_state = None
+    for s in all_states:
+        if s.get("entity_id") == target_player:
+            initial_state = s
+            break
+    
+    was_off = initial_state and initial_state.get("state") in ("off", "unavailable", "standby")
+    log.info(f"[announce] Initial state: {initial_state.get('state') if initial_state else 'unknown'}, was_off={was_off}")
+    
+    # 1. Power on if needed
+    if was_off:
+        log.info(f"[announce] Device was {initial_state.get('state')}, turning on...")
+        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
+        await asyncio.sleep(2.0)
+    
     # 2. Set volume
     await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
     
     # 3. TTS & Dispatch
     result = {"ok": False, "error": "No engine selected"}
-    
-    # Check if target is a Roku to use specialized Media Assistant app (ID 782875)
-    is_roku = "roku" in target_player.lower()
+    media_url = None
     
     if req.tts_engine == "kokoro":
         from tts import text_to_speech
@@ -763,48 +821,28 @@ async def execute_announce(req: AnnouncementRequest):
             
             media_id = f"tts-{uuid4().hex[:8]}"
             TEMP_AUDIO_CACHE[media_id] = audio_bytes
-            # Note: Using host.docker.internal or a resolvable IP is better, but 'execution' works within the docker net.
-            # For HA to reach it, we need the execution service's public/internal IP from the host's perspective.
-            # We'll try to discover the production IP from the environment or docker-compose.
             def get_public_host():
-                # 1. Check if configured in env
                 from config import EXECUTION_EXTERNAL_HOST
                 env_host = EXECUTION_EXTERNAL_HOST
                 if env_host: return env_host
-                
-                # 2. Try to find ai-server IP from compose if we are on the same machine
                 try:
                     with open("docker-compose.yml", "r") as f:
                         for line in f:
                             if "ai-server:" in line:
                                 return line.split(":")[1].strip().strip('"').strip("'")
                 except: pass
-                
-                # 3. Fail if no host is configured
                 raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
             
             public_host = get_public_host()
             media_url = f"http://{public_host}:8003/media/{media_id}"
             
-            if is_roku:
-                # Specialized Roku Media Assistant App (ID 782875)
-                # Parameters: t=a (audio), u=URL
-                log.info(f"[announce] Roku detected. Launching Media Assistant App (782875) with URL: {media_url}")
-                result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", target_player, {
-                    "media_content_id": "782875",
-                    "media_content_type": "app",
-                    "extra": {"content_id": media_url, "media_type": "audio/wav"}
-                })
-                # If app launch succeeded, wait a moment for it to buffer
-                if result.get("ok"):
-                    await asyncio.sleep(2.0)
-            else:
-                log.info(f"[announce] Playing Kokoro URL: {media_url}")
-                # Cast/Android TV requires media_content_type=url
-                result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", target_player, {
-                    "media_content_id": media_url,
-                    "media_content_type": "url"
-                })
+            # Get entity attributes for TV type detection
+            attrs = initial_state.get("attributes", {}) if initial_state else {}
+            initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
+            
+            # Dispatch to TV-specific handler
+            from announce_handlers import dispatch_announce
+            result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume, initial_state_str, attrs)
             
             if req.save_path:
                 from handlers import storage as storage_handler
@@ -816,8 +854,7 @@ async def execute_announce(req: AnnouncementRequest):
             log.error(f"[announce] Kokoro failed: {e}")
             result = {"ok": False, "error": str(e)}
 
-    # Fallback / Alternate: Music Assistant (MASS) play_announcement
-    # This is often what users mean by 'Media Assistant' integration in HA
+    # Fallback: Music Assistant (MASS) play_announcement
     if not result.get("ok"):
         log.info("[announce] Attempting Music Assistant (MASS) announcement...")
         result = await ha_client.call_service(ha_url, ha_token, "mass", "play_announcement", target_player, {
@@ -832,6 +869,36 @@ async def execute_announce(req: AnnouncementRequest):
             "message": req.message
         })
 
+    # 4. Verify playback actually happened
+    if result.get("ok") and media_url:
+        log.info(f"[announce] Verifying playback on {target_player}...")
+        verification = await verify_playback(ha_url, ha_token, target_player, media_url, timeout=15)
+        if verification["verified"]:
+            log.info(f"[announce] Playback VERIFIED: {verification['detail']}")
+        else:
+            log.warning(f"[announce] Playback NOT verified: {verification['detail']}")
+            result = {"ok": False, "error": f"Playback not confirmed: {verification['detail']}", "verification": verification}
+    
+    # 5. Wait for playback to complete (state returns to idle)
+    if result.get("ok"):
+        log.info(f"[announce] Waiting for playback to complete...")
+        for _ in range(20):
+            await asyncio.sleep(1)
+            states = await ha_client.get_states(ha_url, ha_token) or []
+            for s in states:
+                if s.get("entity_id") == target_player:
+                    if s.get("state") in ("idle", "off", "unavailable"):
+                        log.info(f"[announce] Playback complete, state={s.get('state')}")
+                        break
+            else:
+                continue
+            break
+    
+    # 6. Restore initial state if device was off
+    if was_off and result.get("ok"):
+        log.info(f"[announce] Restoring device to previous state (turning off)...")
+        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_off", target_player, {})
+        await asyncio.sleep(1)
 
     if result.get("ok"):
         return _ok(f"Announcement sent successfully to {target_player}.", "announce")
