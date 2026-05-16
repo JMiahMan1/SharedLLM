@@ -308,7 +308,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     log.info(f"[_single_turn_inference] Executing for model {model}")
     
     # No grammar constraint - model produces JSON naturally via system prompt
-    options = {"temperature": 0.0}
+    options = {"temperature": 0.0, "num_predict": 2048}
 
     # --- RETRY LOGIC FOR MODEL SWITCHING ---
     MAX_INFERENCE_RETRIES = 3

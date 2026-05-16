@@ -647,7 +647,7 @@ async def contextualize_query(query: str, history: list) -> str:
             log.info(f"[Context] Using resident coding model '{coding}' for rewrite to avoid swap.")
         
         messages = [{"role": "user", "content": prompt}]
-        rewritten = await provider.generate(model_to_use, messages, options={"temperature": 0.0})
+        rewritten = await provider.generate(model_to_use, messages, options={"temperature": 0.0, "num_predict": 256})
         if rewritten:
             rewritten = rewritten.strip().strip('"')
             log.info(f"[Context] '{query}' -> '{rewritten}'")
@@ -1074,6 +1074,7 @@ async def generate_workspace_readme_via_coding_model(
         {"role": "user", "content": prompt},
       ],
       "stream": False,
+      "options": {"num_predict": 4096},
     }
     data = await execute_inference(payload)
     generated = ""
@@ -1694,7 +1695,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
             "model": assistant,
             "messages": [{"role": "user", "content": proposal_prompt}],
             "stream": False,
-            "options": vram_params
+            "options": {**vram_params, "num_predict": 512}
         }
         log.info(f"[ShadowExecution] Requesting proposal from {assistant} (Timeout: {OLLAMA_TIMEOUT}s)")
         start_t = asyncio.get_event_loop().time()
