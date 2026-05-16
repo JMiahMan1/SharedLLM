@@ -306,6 +306,7 @@ When you need external information (API docs, error lookups, library references)
 - `WebSearchRequest`: { "query": "...", "category": "general", "engines": "google,bing,duckduckgo" }
 - `WebReadRequest`: { "url": "https://..." }
 - `ContextSearchRequest`: { "query": "...", "collection_name": "ha_entities|nextcloud_files|system_capabilities|system_learnings", "k": 5 }
+- `HAConfigRequest`: { "action": "list_integrations|get_integration|get_entities|get_config", "domain": "ollama", "entity_domain": "light", "keyword": "..." } — inspect HA integration configs via WebSocket to diagnose misconfigured integrations
 
 ### GIT TACTICAL GUIDE
 1. **Self-Healing**: If `push` fails due to being behind remote, `fetch` then `reset --hard origin/branch`.
