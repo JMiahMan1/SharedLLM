@@ -1,7 +1,9 @@
 # services/execution/handlers/storage.py
 import logging
+import sys
+import os
 import requests
-from typing import Dict, Any
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from schemas import StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest, ExecutionResult
 from tts import text_to_speech
 from nextcloud_client import resolve_credentials, webdav_url

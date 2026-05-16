@@ -2,12 +2,17 @@
 import logging
 import asyncio
 import re
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     import ha_client
     from schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
+    from config import MASS_CONFIG_ENTRY_ID
 except ImportError:
     import ha_client
     from schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
+    from config import MASS_CONFIG_ENTRY_ID
 
 log = logging.getLogger("execution.media")
 
@@ -74,7 +79,7 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
             "search",
             entity_id="",
             service_data={
-                "config_entry_id": "01KMKEW7FVVXHQAB89YMYDZNAT",
+                "config_entry_id": MASS_CONFIG_ENTRY_ID,
                 "name": req.query,
                 "media_type": ["track", "artist", "album", "playlist", "radio"],
                 "limit": 5,

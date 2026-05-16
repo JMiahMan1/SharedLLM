@@ -2,7 +2,9 @@
 import logging
 import asyncio
 import subprocess
+import sys
 import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     from ..schemas import ExecutionResult
 except ImportError:

@@ -81,6 +81,18 @@ class IdentityRequest(BaseRequest):
     role: Optional[str] = None
     is_admin: bool = False
 
+class IdentityManageRequest(BaseRequest):
+    """
+    Extended identity management: user profile updates, device assignments,
+    API key management, and credential rotation.
+    """
+    user_context: UserContext
+    action: Literal["update_password", "update_user", "assign_device", "list_devices", "generate_key", "revoke_key", "list_keys", "get_profile"]
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    category: Optional[str] = None
+    is_admin: Optional[bool] = None
+
 class ExecutionResult(BaseModel):
     model_config = {"extra": "ignore"}
     status: Literal["SUCCESS", "FAILURE", "PARTIAL"]

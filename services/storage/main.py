@@ -46,11 +46,41 @@ def health():
 @app.get("/status")
 async def get_storage_status():
     """Retrieves the current indexing status and file counts."""
-    # This is a placeholder that could be expanded to query RAG for counts
+    from storage.indexer import is_indexer_paused, CheckpointManager
+
+    indexer_state = "PAUSED" if is_indexer_paused() else "IDLE"
+
+    rag_stats = {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{RAG_SVC}/rag/stats",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if resp.status_code == 200:
+                rag_data = resp.json()
+                rag_stats = {
+                    "total_chunks": rag_data.get("total_chunks", 0),
+                    "total_documents": rag_data.get("total_documents", 0),
+                    "last_indexed": rag_data.get("last_indexed"),
+                    "breakdown": rag_data.get("breakdown", {}),
+                }
+    except Exception as e:
+        log.warning(f"Failed to fetch RAG stats for storage status: {e}")
+
+    checkpoint_count = 0
+    try:
+        cp = CheckpointManager()
+        checkpoint_count = len(cp.data)
+    except Exception:
+        pass
+
     return {
         "status": "SUCCESS",
-        "indexer": "IDLE",
-        "message": "Storage system healthy. Ready for discovery."
+        "indexer": indexer_state,
+        "checkpointed_files": checkpoint_count,
+        "rag_index": rag_stats,
+        "message": "Storage system healthy. Ready for discovery." if indexer_state == "IDLE" else "Indexing paused."
     }
 
 @app.post("/index/full", status_code=202)
