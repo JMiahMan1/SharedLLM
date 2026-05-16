@@ -718,9 +718,16 @@ async def execute_announce(req: AnnouncementRequest):
     ctx = req.user_context
     target_player = req.entity_id
     
+    # Fallback to env vars if user context doesn't have HA credentials
+    from config import HA_URL, HA_TOKEN
+    ha_url = ctx.ha_url or HA_URL
+    ha_token = ctx.ha_token or HA_TOKEN
+    if not ha_url or not ha_token:
+        return _fail("Home Assistant URL or token not configured (check user identity or HA_URL/HA_TOKEN env vars).", "announce")
+    
     # Entity resolution: if entity_id is missing, resolve from device_name
     if not target_player and req.device_name:
-        target_player = await ha_client.resolve_entity_by_name(ctx.ha_url, ctx.ha_token, req.device_name, "media_player")
+        target_player = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player")
         if target_player:
             log.info(f"[announce] Resolved device_name='{req.device_name}' -> entity_id='{target_player}'")
         else:
@@ -735,11 +742,11 @@ async def execute_announce(req: AnnouncementRequest):
     log.info(f"[announce] START user={ctx.user} target={target_player} msg='{req.message}'")
     
     # 1. Power on
-    await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", target_player, {})
+    await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
     await asyncio.sleep(1.0)
 
     # 2. Set volume
-    await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
+    await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
     
     # 3. TTS & Dispatch
     result = {"ok": False, "error": "No engine selected"}
@@ -783,7 +790,7 @@ async def execute_announce(req: AnnouncementRequest):
                 # Specialized Roku Media Assistant App (ID 782875)
                 # Parameters: t=a (audio), u=URL
                 log.info(f"[announce] Roku detected. Launching Media Assistant App (782875) with URL: {media_url}")
-                result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target_player, {
+                result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", target_player, {
                     "media_content_id": "782875",
                     "media_content_type": "app",
                     "extra": {"content_id": media_url, "media_type": "audio/wav"}
@@ -793,9 +800,10 @@ async def execute_announce(req: AnnouncementRequest):
                     await asyncio.sleep(2.0)
             else:
                 log.info(f"[announce] Playing Kokoro URL: {media_url}")
-                result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target_player, {
+                # Cast/Android TV requires media_content_type=url
+                result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", target_player, {
                     "media_content_id": media_url,
-                    "media_content_type": "audio/wav"
+                    "media_content_type": "url"
                 })
             
             if req.save_path:
@@ -812,7 +820,7 @@ async def execute_announce(req: AnnouncementRequest):
     # This is often what users mean by 'Media Assistant' integration in HA
     if not result.get("ok"):
         log.info("[announce] Attempting Music Assistant (MASS) announcement...")
-        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "mass", "play_announcement", target_player, {
+        result = await ha_client.call_service(ha_url, ha_token, "mass", "play_announcement", target_player, {
             "message": req.message,
             "use_pre_announcement_signal": True
         })
@@ -820,7 +828,7 @@ async def execute_announce(req: AnnouncementRequest):
     # Last resort: local Piper
     if not result.get("ok"):
         log.info("[announce] Falling back to HA Piper...")
-        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "tts", "piper", target_player, {
+        result = await ha_client.call_service(ha_url, ha_token, "tts", "piper", target_player, {
             "message": req.message
         })
 
