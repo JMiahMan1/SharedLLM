@@ -142,3 +142,9 @@ class WorkspaceBootstrapRequest(BaseModel):
     repo_url: Optional[str] = None
     branch: Optional[str] = None
     create_if_missing: bool = True
+
+class ContextSearchRequest(BaseModel):
+    """Search RAG collections for context when initial retrieval is insufficient."""
+    query: str = Field(..., description="Natural language search query")
+    collection_name: str = Field("system_capabilities", description="Target collection: ha_entities, nextcloud_files, system_capabilities, system_learnings")
+    k: int = Field(5, description="Number of results to return")

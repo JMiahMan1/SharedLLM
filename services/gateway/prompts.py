@@ -292,6 +292,7 @@ When you need external information (API docs, error lookups, library references)
 - **WORKSPACE-RELATIVE PATHS ONLY**: Use paths like `"services/gateway/main.py"`, NOT `"/app/..."` or `"/home/.../..."`.
 - **NO HALLUCINATED URLS**: Do not invent GitHub URLs. Use the repository already configured in the workspace.
 - **SURGICAL PATCHES**: For existing files, ALWAYS use `WorkspaceFilePatchRequest` with `chunks`. Only use `WorkspaceFileWriteRequest` for brand new files.
+- **CONTEXT FALLBACK**: If the retrieved context above does not contain the information you need, use `ContextSearchRequest` to search for it. Specify `collection_name` (ha_entities, nextcloud_files, system_capabilities, system_learnings) and your `query`. This is your primary tool for discovering missing context.
 
 ## EXECUTION ENGINE (Tool Reference)
 - `DockerLogsRequest`: { "container_name": "...", "tail_lines": 200 }
@@ -304,6 +305,7 @@ When you need external information (API docs, error lookups, library references)
 - `GitOperationRequest`: { "action": "status|diff|add|commit|push|pull|fetch|reset|branch|checkout|clean|show", "path": ".", "message": "..." }
 - `WebSearchRequest`: { "query": "...", "category": "general", "engines": "google,bing,duckduckgo" }
 - `WebReadRequest`: { "url": "https://..." }
+- `ContextSearchRequest`: { "query": "...", "collection_name": "ha_entities|nextcloud_files|system_capabilities|system_learnings", "k": 5 }
 
 ### GIT TACTICAL GUIDE
 1. **Self-Healing**: If `push` fails due to being behind remote, `fetch` then `reset --hard origin/branch`.
