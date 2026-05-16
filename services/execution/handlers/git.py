@@ -1,7 +1,7 @@
 # services/execution/handlers/git.py
 """
 GitHandler — Allows the Ouroboros autonomous loop to perform Git lifecycle
-operations on the SharedLLM workspace mounted at /workspace/SharedLLM.
+operations on workspaces.
 
 Supported actions:
     status   — git status (porcelain + branch)
@@ -14,7 +14,7 @@ Supported actions:
 
 Security:
     - push requires is_admin=True in UserContext.
-    - All operations are confined to WORKSPACE_ROOT.
+    - All operations are confined to the resolved workspace path.
     - No shell injection: args are passed as a list to subprocess.
 """
 import asyncio
@@ -25,7 +25,7 @@ import re
 import shlex
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import WORKSPACE_ROOT
+from config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
 from typing import Optional, Dict
 try:
     from schemas import GitOperationRequest, GitExecutionResult
@@ -37,13 +37,71 @@ except ImportError:
 
 log = logging.getLogger("execution.git")
 
-# Workspace root is resolved per-request from the workspace registry.
-# Never hardcoded — configured by users in the UI.
-
-# Fix: Mark workspace as safe to avoid 'dubious ownership' errors in Docker
-# We do this once at module load
+# Fix: Mark workspace root as safe to avoid 'dubious ownership' errors in Docker
 os.system(f"git config --global --add safe.directory {WORKSPACE_ROOT}")
-log.info(f"Marked {WORKSPACE_ROOT} as safe.directory")
+os.system(f"git config --global --add safe.directory '{WORKSPACE_ROOT}/*'")
+log.info(f"Marked {WORKSPACE_ROOT} and subdirectories as safe.directory")
+
+
+async def _resolve_workspace_path(workspace_id: Optional[str] = None) -> str:
+    """Resolve workspace path from workspace_runtime service.
+    
+    Priority:
+    1. Explicit workspace_id
+    2. Workspace marked as is_default=True
+    3. First available workspace with git capabilities
+    4. Fallback to WORKSPACE_ROOT
+    """
+    import httpx
+    
+    # Try to resolve specific workspace
+    if workspace_id:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces/resolve",
+                    json={"workspace_id": workspace_id, "user_context": {"user": "system", "is_admin": True}},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("status") == "SUCCESS":
+                        return data["workspace"]["resolved_path"]
+        except Exception as e:
+            log.warning(f"Failed to resolve workspace {workspace_id}: {e}")
+    
+    # Fallback: list workspaces and find default or first available
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                workspaces = resp.json()
+                
+                # First try to find the default workspace
+                for ws in workspaces:
+                    if ws.get("is_default") and ws.get("resolved_path"):
+                        log.info(f"Using default workspace: {ws.get('id')} -> {ws['resolved_path']}")
+                        return ws["resolved_path"]
+                
+                # Then try first workspace with git capabilities
+                for ws in workspaces:
+                    if ws.get("resolved_path") and "git_status" in ws.get("capabilities", []):
+                        log.info(f"Using first git-capable workspace: {ws.get('id')} -> {ws['resolved_path']}")
+                        return ws["resolved_path"]
+                
+                # Last resort: first workspace with any resolved path
+                for ws in workspaces:
+                    if ws.get("resolved_path"):
+                        log.info(f"Using first available workspace: {ws.get('id')} -> {ws['resolved_path']}")
+                        return ws["resolved_path"]
+    except Exception as e:
+        log.warning(f"Failed to list workspaces: {e}")
+    
+    log.warning(f"No workspace found, falling back to WORKSPACE_ROOT: {WORKSPACE_ROOT}")
+    return WORKSPACE_ROOT
 
 
 async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dict = None) -> dict:
@@ -91,8 +149,8 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
         return {"returncode": -1, "stdout": "", "stderr": str(e)}
 
 
-async def _get_remote_url(remote_name: str = "origin") -> str:
-    r = await _run_git(["remote", "get-url", remote_name])
+async def _get_remote_url(remote_name: str = "origin", cwd: str = WORKSPACE_ROOT) -> str:
+    r = await _run_git(["remote", "get-url", remote_name], cwd=cwd)
     return r["stdout"].strip()
 
 
@@ -116,8 +174,8 @@ def _fail(action: str, detail: dict) -> GitExecutionResult:
     return GitExecutionResult(status="FAILURE", message=msg, service="git", detail=detail)
 
 
-async def _get_current_branch() -> str:
-    r = await _run_git(["branch", "--show-current"])
+async def _get_current_branch(cwd: str = WORKSPACE_ROOT) -> str:
+    r = await _run_git(["branch", "--show-current"], cwd=cwd)
     return r["stdout"].strip() or "main"
 
 
@@ -132,14 +190,20 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         branch: str           — branch name for pull/push (default 'microservices')
         log_count: int        — number of commits for 'log' (default 10)
         user_context          — must have is_admin=True for push
+        workspace_id: Optional[str] — workspace to operate on (uses default if not specified)
     """
+    # Resolve workspace path first
+    workspace_id = getattr(req, "workspace_id", None)
+    workspace_path = await _resolve_workspace_path(workspace_id)
+    log.info(f"[Git] Resolved workspace path: {workspace_path} (workspace_id={workspace_id})")
+    
     action: str = req.action.lower().strip()
     path: str = getattr(req, "path", ".") or "."
     # Support both 'message' and 'commit_message' to align with varying schemas
     commit_message: Optional[str] = getattr(req, "message", None) or getattr(req, "commit_message", None)
     
     # Dynamic Branch Detection: Default to current branch if not explicitly set or if 'main' hallucination on 'microservices' repo
-    current_branch = await _get_current_branch()
+    current_branch = await _get_current_branch(cwd=workspace_path)
     branch: str = getattr(req, "branch", None) or current_branch
     
     # Hardened Pivot: If we are on microservices but agent says main, it is likely a hallucination
@@ -160,7 +224,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         }
 
     if action == "status":
-        r = await _run_git(["status", "--porcelain", "--branch"])
+        r = await _run_git(["status", "--porcelain", "--branch"], cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("status", r)
         lines = r["stdout"].splitlines()
@@ -180,7 +244,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         elif path and path != ".":
             diff_args.append(path)
             
-        r = await _run_git(diff_args)
+        r = await _run_git(diff_args, cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("diff", r)
         return _ok("diff", r)
@@ -190,7 +254,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         args = ["branch"]
         if path and path != ".":
             args.append(path)
-        r = await _run_git(args)
+        r = await _run_git(args, cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("branch", r)
         return _ok("branch", r)
@@ -199,7 +263,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         # Switch branch
         if not path or path == ".":
             return _fail("checkout", {"error": "branch name required in 'path' field"})
-        r = await _run_git(["checkout", path])
+        r = await _run_git(["checkout", path], cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("checkout", r)
         return _ok("checkout", r)
@@ -209,7 +273,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         args = ["show", "--summary"]
         if path and path != ".":
             args = ["show", path]
-        r = await _run_git(args)
+        r = await _run_git(args, cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("show", r)
         return _ok("show", r)
@@ -217,7 +281,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     elif action == "add":
         # Support multi-path staging if path contains spaces or is a list (though schema says str)
         paths = shlex.split(path) if path else ["."]
-        r = await _run_git(["add"] + paths)
+        r = await _run_git(["add"] + paths, cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("add", r)
         return _ok("add", {"added_paths": paths, **r})
@@ -239,7 +303,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             "GIT_COMMITTER_EMAIL": f"{getattr(user_context, 'user', 'raven')}@local.host",
         }
         
-        r = await _run_git(["commit", "-m", commit_message], env_override=env_override)
+        r = await _run_git(["commit", "-m", commit_message], cwd=workspace_path, env_override=env_override)
         if r["returncode"] != 0:
             return _fail("commit", r)
         return _ok("commit", {"commit_message": commit_message, **r})
@@ -254,7 +318,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             }
         
         # Resolve remote URL for token injection
-        remote_url = await _get_remote_url("origin")
+        remote_url = await _get_remote_url("origin", cwd=workspace_path)
         
         # Determine the appropriate token for this host
         token = None
@@ -278,9 +342,9 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             from urllib.parse import urlparse
             parsed = urlparse(remote_url)
             auth_url = f"https://{token}@{parsed.hostname}{parsed.path}"
-            r = await _run_git([action, auth_url, branch])
+            r = await _run_git([action, auth_url, branch], cwd=workspace_path)
         else:
-            r = await _run_git([action, "origin", branch])
+            r = await _run_git([action, "origin", branch], cwd=workspace_path)
             
         if r["returncode"] != 0:
             return _fail(action, r)
@@ -288,23 +352,23 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
 
     elif action == "fetch":
         # Fetch supports token injection too
-        remote_url = await _get_remote_url("origin")
+        remote_url = await _get_remote_url("origin", cwd=workspace_path)
         token = getattr(user_context, "github_token", None) or getattr(user_context, "git_token", None)
         
         if token and remote_url.startswith("https://"):
             from urllib.parse import urlparse
             parsed = urlparse(remote_url)
             auth_url = f"https://{token}@{parsed.hostname}{parsed.path}"
-            r = await _run_git(["fetch", auth_url, branch])
+            r = await _run_git(["fetch", auth_url, branch], cwd=workspace_path)
         else:
-            r = await _run_git(["fetch", "origin", branch])
+            r = await _run_git(["fetch", "origin", branch], cwd=workspace_path)
             
         if r["returncode"] != 0:
             return _fail("fetch", r)
         return _ok("fetch", r)
 
     elif action == "log":
-        r = await _run_git(["log", f"--oneline", f"-{log_count}"])
+        r = await _run_git(["log", f"--oneline", f"-{log_count}"], cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("log", r)
         return _ok("log", {"commits": r["stdout"].splitlines(), **r})
