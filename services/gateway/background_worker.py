@@ -34,7 +34,9 @@ class RavenWorker:
         self._autonomy_signals = [
             "raven", "use raven", "audit", "repair", "self repair", "self-heal",
             "self fix", "deploy", "bootstrap", "develop", "fix the app",
-            "fix the service", "fix the codebase", "agentic", "autonomous"
+            "fix the service", "fix the codebase", "agentic", "autonomous",
+            "audit the codebase", "sync workspace", "pull latest", "convert them to",
+            "review requirements", "check dependencies", "report any conflicts",
         ]
 
     def _is_autonomous_job(self, payload: Dict[str, Any], user_id: str) -> bool:
