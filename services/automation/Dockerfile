@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 WORKDIR /app
-COPY requirements.txt .
+COPY services/automation/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+COPY services/automation/ ./
+COPY services/config.py ./config.py
 CMD ["python", "main.py"]

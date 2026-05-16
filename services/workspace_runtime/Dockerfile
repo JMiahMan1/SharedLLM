@@ -16,20 +16,10 @@ RUN apt-get update && apt-get install -y \
     yamllint \
     shellcheck \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
+COPY services/workspace_runtime/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir flake8 black mypy
-COPY . .
-
-# --- Privilege Drop: create dedicated sharedllm user ---
-ARG PUID=1000
-ARG PGID=1000
-RUN groupadd -g ${PGID} sharedllm || true \
-    && useradd -u ${PUID} -g ${PGID} -m -s /bin/bash sharedllm || true \
-    && chown -R ${PUID}:${PGID} /app \
-    && mkdir -p /home/sharedllm/.cache /home/sharedllm/.config \
-    && chown -R ${PUID}:${PGID} /home/sharedllm
-ENV HOME=/home/sharedllm
-
+COPY services/workspace_runtime/ ./
+COPY services/config.py ./config.py
 EXPOSE 8007
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8007"]
