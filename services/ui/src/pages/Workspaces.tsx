@@ -15,7 +15,8 @@ import {
   ShieldCheck,
   ShieldAlert,
   RotateCcw,
-  AlertTriangle
+  AlertTriangle,
+  Star
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type Workspace } from '../services/api';
@@ -230,7 +231,7 @@ const Workspaces = () => {
                       <div className="flex items-center gap-2">
                         <button 
                           onClick={() => {
-                            updateMutation.mutate({ id: ws.id, is_default: !ws.is_default });
+                            saveMutation.mutate({ id: ws.id, is_default: !ws.is_default });
                           }}
                           className={`p-2 rounded-xl transition-colors ${ws.is_default ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-slate-500 hover:text-emerald-400 hover:bg-white/5'}`}
                           title={ws.is_default ? 'Unset as default' : 'Set as default'}
