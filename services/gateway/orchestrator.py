@@ -58,6 +58,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "documentbroadcastrequest": (EXECUTION_SVC, "/execute/composite/broadcast"),
     "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
     "contextsearchrequest": (RAG_SVC, "/rag/search"),
+    "haconfigrequest": (EXECUTION_SVC, "/execute/ha_config"),
     "contextsearchrequest": (RAG_SVC, "/rag/search"),
 }
 
