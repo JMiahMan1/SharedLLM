@@ -796,6 +796,10 @@ async def execute_announce(req: AnnouncementRequest):
             initial_state = s
             break
     
+    # Get loaded components for device type detection
+    config = await ha_client.get_config(ha_url, ha_token) or {}
+    loaded_components = set(config.get("components", []))
+    
     was_off = initial_state and initial_state.get("state") in ("off", "unavailable", "standby")
     log.info(f"[announce] Initial state: {initial_state.get('state') if initial_state else 'unknown'}, was_off={was_off}")
     
@@ -842,7 +846,7 @@ async def execute_announce(req: AnnouncementRequest):
             
             # Dispatch to TV-specific handler
             from announce_handlers import dispatch_announce
-            result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume, initial_state_str, attrs)
+            result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume, initial_state_str, attrs, loaded_components)
             
             if req.save_path:
                 from handlers import storage as storage_handler
