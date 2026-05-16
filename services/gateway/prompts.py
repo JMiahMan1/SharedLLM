@@ -40,7 +40,7 @@ ASSIST_SYSTEM_INSTRUCTION = (
     "- **LLMInfoRequest**: `{\"action\": \"list|ps|version|show\", \"model\": \"qwen3.6-35b-a3b:q4_k_m\"}` - check what models are available, what's currently loaded, server version, or detailed model info. Use \"show\" with a model name for architecture, parameters, quantization, and context length\n"
     "- **AudiobookshelfRequest**: `{\"action\": \"resume|search|play|progress|list|get_book\", \"query\": \"book title\", \"entity_id\": \"media_player.xxx\"}` - manage audiobooks. Use \"resume\" for latest book, \"search\" to find by title, \"progress\" to check what's in progress. Credentials are injected automatically\n"
     "- **ExecutionLogRequest**: `{\"lines\": 50}` - verify task execution, troubleshoot failures. Optional: `{\"service\": \"announce\", \"keyword\": \"FAILED\"}` to filter by handler name or keyword. Leave service/keyword empty for all logs\n"
-    "- **HAConfigRequest**: `{\"action\": \"list_integrations|get_integration|get_entities|get_config\", \"domain\": \"ollama\", \"entity_domain\": \"light\", \"keyword\": \"...\"}` — inspect Home Assistant integration configurations to diagnose misconfigured integrations (wrong URLs, disabled entities, etc.)\n"
+    "- **HAConfigRequest**: `{\"action\": \"list_integrations|get_integration|get_entities|get_config\", \"domain\": \"ollama\", \"entity_domain\": \"light\", \"keyword\": \"...\"}` — [HA TROUBLESHOOTING ONLY] Inspect Home Assistant integration configurations to diagnose misconfigured integrations (wrong URLs, disabled entities, etc.). Use ONLY when the user explicitly asks to check HA integration settings or when diagnosing why a HA integration isn't working. NOT for general chat queries.\n"
     "\n"
     "### Entity Resolution Rule (CRITICAL)\n"
     "When the user mentions a device by name (e.g., \"Office TV\", \"hall lamp\"), you MUST find the EXACT entity ID from the HA entity context provided above. "
@@ -307,7 +307,7 @@ When you need external information (API docs, error lookups, library references)
 - `WebSearchRequest`: { "query": "...", "category": "general", "engines": "google,bing,duckduckgo" }
 - `WebReadRequest`: { "url": "https://..." }
 - `ContextSearchRequest`: { "query": "...", "collection_name": "ha_entities|nextcloud_files|system_capabilities|system_learnings", "k": 5 }
-- `HAConfigRequest`: { "action": "list_integrations|get_integration|get_entities|get_config", "domain": "ollama", "entity_domain": "light", "keyword": "..." } — inspect HA integration configs via WebSocket to diagnose misconfigured integrations
+- `HAConfigRequest`: { "action": "list_integrations|get_integration|get_entities|get_config", "domain": "ollama", "entity_domain": "light", "keyword": "..." } — [HA TROUBLESHOOTING ONLY] Inspect Home Assistant integration configurations to diagnose misconfigured integrations. Use ONLY when the user explicitly asks to check HA integration settings. NOT for general chat queries.
 
 ### GIT TACTICAL GUIDE
 1. **Self-Healing**: If `push` fails due to being behind remote, `fetch` then `reset --hard origin/branch`.

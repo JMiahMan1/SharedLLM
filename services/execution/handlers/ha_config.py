@@ -94,7 +94,6 @@ async def handle_ha_config(req_data: dict) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message=f"WebSocket error: {resp.get('error')}", service="ha_config")
 
             entries = resp.get("result", [])
-            # Filter by keyword if provided
             if keyword:
                 kw = keyword.lower()
                 entries = [e for e in entries if kw in e.get("domain", "").lower() or kw in e.get("title", "").lower()]
@@ -107,6 +106,8 @@ async def handle_ha_config(req_data: dict) -> ExecutionResult:
                     "state": e.get("state"),
                     "entry_id": e.get("entry_id"),
                     "supports_reconfigure": e.get("supports_reconfigure"),
+                    "subentry_types": e.get("supported_subentry_types", {}),
+                    "num_subentries": e.get("num_subentries", 0),
                 })
 
             return ExecutionResult(
@@ -129,11 +130,29 @@ async def handle_ha_config(req_data: dict) -> ExecutionResult:
             if not matching:
                 return ExecutionResult(status="SUCCESS", message=f"No integrations found for domain '{domain}'", service="ha_config")
 
+            # Note: HA WebSocket API does not expose the actual 'data' field for security reasons.
+            # The 'title' often contains the configured URL/server address.
+            # To change settings, use the HA UI Settings -> Devices & Services -> [Integration] -> Configure.
+            result_entries = []
+            for e in matching:
+                result_entries.append({
+                    "entry_id": e.get("entry_id"),
+                    "title": e.get("title"),
+                    "state": e.get("state"),
+                    "source": e.get("source"),
+                    "supports_reconfigure": e.get("supports_reconfigure"),
+                    "supported_subentry_types": e.get("supported_subentry_types", {}),
+                    "num_subentries": e.get("num_subentries", 0),
+                    "disabled_by": e.get("disabled_by"),
+                    "reason": e.get("reason"),
+                    "note": "HA does not expose actual config data via API. Use HA UI to modify settings.",
+                })
+
             return ExecutionResult(
                 status="SUCCESS",
-                message=f"Found {len(matching)} entry(ies) for '{domain}'",
+                message=f"Found {len(result_entries)} entry(ies) for '{domain}'",
                 service="ha_config",
-                detail={"entries": matching}
+                detail={"entries": result_entries}
             )
 
         elif action == "get_entities":
@@ -166,14 +185,12 @@ async def handle_ha_config(req_data: dict) -> ExecutionResult:
             )
 
         elif action == "get_config":
-            # Use REST API for full config dump
             async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
                 resp = await client.get(f"{ha_url}/api/config", headers={"Authorization": f"Bearer {ha_token}"})
                 if resp.status_code != 200:
                     return ExecutionResult(status="FAILURE", message=f"REST API error: {resp.status_code} {resp.text}", service="ha_config")
 
                 config = resp.json()
-                # Extract key info
                 summary = {
                     "ha_version": config.get("version"),
                     "location_name": config.get("location_name"),
