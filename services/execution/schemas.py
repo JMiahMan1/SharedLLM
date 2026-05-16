@@ -113,13 +113,16 @@ class DiagnosticRequest(BaseRequest):
 # ─── Media / Music ──────────────────────────────────────────────────────────────
 
 class MediaPlayRequest(BaseRequest):
+    """Unified media play request supporting all content types and devices."""
     user_context: UserContext
-    entity_id: str = Field(..., description="HA media_player entity ID")
-    media_content_id: Optional[str] = None
-    media_content_type: Optional[str] = "music"
-    # Music Assistant fields
-    query: Optional[str] = None
-    enqueue: Optional[Literal["add", "next", "replace"]] = "replace"
+    entity_id: Optional[str] = Field(None, description="HA media_player entity ID (optional if device_name provided)")
+    device_name: Optional[str] = Field(None, description="Human-readable device name (e.g., 'Office TV', 'Master Bedroom speaker')")
+    query: Optional[str] = Field(None, description="Search query: song/album/artist name, video title, podcast name, audiobook title, or URL")
+    media_type: Optional[str] = Field(None, description="Content type: 'music', 'video', 'podcast', 'audiobook', 'radio', 'url', 'announcement'")
+    media_content_id: Optional[str] = Field(None, description="Direct URL or media ID (bypasses search)")
+    media_content_type: Optional[str] = Field(None, description="HA media_content_type hint (e.g., 'music', 'video', 'url', 'audio/wav')")
+    enqueue: Optional[Literal["add", "next", "replace"]] = Field("replace", description="Queue behavior for Music Assistant")
+    volume: Optional[float] = Field(None, ge=0.0, le=1.0, description="Set volume before playback")
 
 
 class MediaTransportRequest(BaseRequest):

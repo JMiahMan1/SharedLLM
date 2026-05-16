@@ -1,7 +1,7 @@
 """TV-specific announcement handlers for different smart TV platforms."""
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 
 log = logging.getLogger("execution.announce")
 
@@ -13,35 +13,71 @@ SUPPORT_TURN_OFF = 256
 SUPPORT_VOLUME_SET = 4
 SUPPORT_BROWSE_MEDIA = 131072
 
-def detect_tv_type(entity_id: str, state: str, attributes: dict) -> str:
-    """Detect TV platform type using multiple context clues.
+# Cast receiver app IDs
+CAST_APP_IDS = {"cc1ad845", "9ac10326", "4475d545", "e8c61a77", "53c9a77e"}
+
+# Android TV package prefixes
+ANDROID_PACKAGE_PREFIXES = ("com.google.android.", "com.google.tv.", "com.android.", "com.sonymobile.android.")
+
+# Android TV app_id indicators
+ANDROID_INDICATORS = ("mediashell", "backdrop", "tvlauncher", "android.tv", "atv", "chromecast")
+
+# Roku-specific source names
+ROKU_SOURCES = {"home", "roku media player", "the roku channel", "roku tv intro"}
+
+# Common streaming apps (present on many platforms, but Roku has them as sources)
+STREAMING_APPS = {"netflix", "hulu", "disney plus", "prime video", "youtube", "youtube tv", "peacock tv", "paramount plus", "tubi", "fandango at home"}
+
+# Known manufacturer/model patterns in entity_id or attributes
+MANUFACTURER_PATTERNS = {
+    "lg": "webos",
+    "webos": "webos",
+    "samsung": "samsung",
+    "tizen": "samsung",
+    "sony": "bravia",
+    "bravia": "bravia",
+    "roku": "roku",
+    "hisense": "android_tv",
+    "philips": "android_tv",
+    "sharp": "roku",
+    "tcl": "roku",
+    "vizio": "generic_tv",
+    "panasonic": "generic_tv",
+    "toshiba": "generic_tv",
+}
+
+def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_components: Optional[Set[str]] = None) -> str:
+    """Detect TV platform type using multiple context clues in priority order.
     
-    Uses entity_id patterns, app_id, device_class, supported_features,
-    source_list content, and state to determine the platform.
+    Uses:
+    1. entity_id patterns (integration naming conventions)
+    2. app_id (Cast receiver IDs, Android packages, etc.)
+    3. device_class (tv, speaker, receiver)
+    4. supported_features (bitmask of capabilities)
+    5. source_list content (Roku apps, TV inputs)
+    6. loaded_components (HA integration list)
     """
     eid = entity_id.lower()
     app_id = (attributes.get("app_id") or "").lower()
     device_class = (attributes.get("device_class") or "").lower()
     supported_features = attributes.get("supported_features", 0)
-    source_list = [s.lower() for s in (attributes.get("source_list") or [])]
+    source_list = [s.lower().strip() for s in (attributes.get("source_list") or [])]
     
-    # 1. Cast devices: app_id matches Cast receiver IDs, or entity contains 'chrome'/'cast'
-    cast_app_ids = {"cc1ad845", "9ac10326", "4475d545"}  # Default Media Receiver, YouTube, etc.
-    if "chrome" in eid or "_cast" in eid or app_id in cast_app_ids:
+    # 1. Cast devices: entity contains 'chrome'/'cast', or app_id matches known Cast receivers
+    if "chrome" in eid or "_cast" in eid or app_id in CAST_APP_IDS:
         return "cast"
     
-    # 2. Roku: entity contains 'roku', or source_list has Roku-specific apps
-    roku_apps = {"netflix", "hulu", "roku media player", "the roku channel", "home", "live tv"}
-    has_roku_sources = bool(roku_apps & set(source_list))
-    if "roku" in eid or has_roku_sources:
+    # 2. Roku: entity contains 'roku', OR source_list has Roku-specific entries
+    has_roku_sources = bool(ROKU_SOURCES & set(source_list))
+    # Roku typically has many streaming apps as sources
+    has_many_streaming = len(ROKU_SOURCES & set(source_list)) >= 1 or len(STREAMING_APPS & set(source_list)) >= 5
+    if "roku" in eid or has_roku_sources or has_many_streaming:
         return "roku"
     
-    # 3. Android TV: app_id is Android package, or entity contains 'android'
-    android_packages = {"com.google.android.", "com.google.tv.", "com.android."}
-    is_android_app = any(app_id.startswith(pkg) for pkg in android_packages)
-    android_indicators = ["mediashell", "backdrop", "tvlauncher", "android.tv"]
-    is_android_indicator = any(ind in app_id for ind in android_indicators)
-    if is_android_app or is_android_indicator or ("android" in eid and device_class == "tv"):
+    # 3. Android TV: app_id is Android package name, or contains Android indicators
+    is_android_app = any(app_id.startswith(pkg) for pkg in ANDROID_PACKAGE_PREFIXES)
+    is_android_indicator = any(ind in app_id for ind in ANDROID_INDICATORS)
+    if is_android_app or is_android_indicator:
         return "android_tv"
     
     # 4. webOS (LG): entity contains 'lg' or 'webos'
@@ -56,22 +92,106 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict) -> str:
     if "bravia" in eid or "sony" in eid:
         return "bravia"
     
-    # 7. Music Assistant: app_id is 'music_assistant'
+    # 7. ESPHome: entity contains 'esphome'
+    if "esphome" in eid:
+        return "esphome"
+    
+    # 8. DLNA: entity contains 'dlna'
+    if "dlna" in eid:
+        return "dlna"
+    
+    # 9. Music Assistant: app_id is 'music_assistant'
     if app_id == "music_assistant":
         return "music_assistant"
     
-    # 8. Generic TV: device_class=tv with source_list containing TV inputs
-    tv_inputs = {"live tv", "tv", "hdmi", "hdmi 1", "hdmi 2", "av"}
+    # 10. Generic TV: device_class=tv with TV inputs in source_list
+    tv_inputs = {"live tv", "tv", "hdmi", "hdmi 1", "hdmi 2", "hdmi 3", "av", "component"}
     has_tv_inputs = bool(tv_inputs & set(source_list))
     if device_class == "tv" or has_tv_inputs:
         return "generic_tv"
     
-    # 9. Speaker: device_class=speaker
+    # 11. Speaker: device_class=speaker
     if device_class == "speaker":
         return "speaker"
     
-    # 10. Fallback
-    return "generic"
+    # 12. Use loaded components as additional signal
+    if loaded_components:
+        if "cast.media_player" in loaded_components and supported_features & SUPPORT_PLAY_MEDIA:
+            return "cast"
+        if "roku" in loaded_components and supported_features & SUPPORT_BROWSE_MEDIA:
+            return "roku"
+        if "webostv.media_player" in loaded_components:
+            return "webos"
+        if "samsungtv.media_player" in loaded_components:
+            return "samsung"
+        if "androidtv_remote.media_player" in loaded_components:
+            return "android_tv"
+        if "dlna_dmr.media_player" in loaded_components:
+            return "dlna"
+    
+    # 12. Fallback: unknown device
+    return "unknown"
+
+async def search_device_type(entity_id: str, attributes: dict, loaded_components: Optional[Set[str]] = None) -> Optional[str]:
+    """Search the web to identify an unknown device type using available clues.
+    
+    Uses entity_id patterns, app_id, supported_features, and loaded components
+    to construct a search query and determine the device platform.
+    """
+    clues = []
+    
+    # Extract clues from entity_id
+    eid_parts = entity_id.lower().replace("media_player.", "").replace("_", " ").split()
+    clues.extend(eid_parts)
+    
+    # Extract clues from app_id
+    app_id = attributes.get("app_id", "")
+    if app_id:
+        clues.append(app_id)
+    
+    # Extract clues from supported_features
+    features = attributes.get("supported_features", 0)
+    if features & SUPPORT_BROWSE_MEDIA:
+        clues.append("browse media")
+    if features & SUPPORT_SELECT_SOURCE:
+        clues.append("source select")
+    
+    # Extract clues from loaded components
+    if loaded_components:
+        related = [c for c in loaded_components if "media_player" in c or "tv" in c or "cast" in c or "roku" in c]
+        clues.extend(related)
+    
+    if not clues:
+        return None
+    
+    # Construct search query
+    query = f"home assistant media_player {' '.join(clues[:5])} integration type"
+    
+    try:
+        from websearch import web_search
+        results = await web_search(query, num_results=3)
+        
+        # Analyze results for platform indicators
+        combined = " ".join([r.get("snippet", "") + " " + r.get("title", "") for r in results]).lower()
+        
+        platform_keywords = {
+            "cast": ["google cast", "chromecast", "cast integration"],
+            "roku": ["roku integration", "roku media player"],
+            "android_tv": ["android tv", "androidtv_remote", "adb"],
+            "webos": ["lg webos", "webostv"],
+            "samsung": ["samsung tv", "tizen", "smartthings"],
+            "bravia": ["sony bravia"],
+            "dlna": ["dlna", "dlna_dmr"],
+        }
+        
+        for platform, keywords in platform_keywords.items():
+            if any(kw in combined for kw in keywords):
+                log.info(f"[announce.search] Web search suggests {platform} for {entity_id}")
+                return platform
+    except Exception as e:
+        log.warning(f"[announce.search] Web search failed: {e}")
+    
+    return None
 
 async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float) -> Dict[str, Any]:
     """Cast devices support direct URL playback."""
@@ -127,7 +247,7 @@ async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_
     if result.get("ok"):
         return result
     
-    # Try ADB to launch VLC or default media player
+    # Try ADB to launch media player
     log.info(f"[announce.android_tv] Trying ADB command to launch media")
     await call_service(ha_url, ha_token, "androidtv", "adb_command", entity_id, {"command": "HOME"})
     await asyncio.sleep(1)
@@ -166,10 +286,28 @@ async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url:
 async def announce_music_assistant(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float) -> Dict[str, Any]:
     """Music Assistant integration."""
     from ha_client import call_service
-    log.info(f"[announce.mass] Using mass.play_announcement on {entity_id}")
-    return await call_service(ha_url, ha_token, "mass", "play_announcement", entity_id, {
-        "url": media_url,
-        "use_pre_announcement": False
+    log.info(f"[announce.mass] Using media_player.play_media on {entity_id}")
+    return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
+        "media_content_id": media_url,
+        "media_content_type": "url"
+    })
+
+async def announce_esphome(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float) -> Dict[str, Any]:
+    """ESPHome media player."""
+    from ha_client import call_service
+    log.info(f"[announce.esphome] Trying play_media on {entity_id}")
+    return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
+        "media_content_id": media_url,
+        "media_content_type": "url"
+    })
+
+async def announce_dlna(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float) -> Dict[str, Any]:
+    """DLNA renderer."""
+    from ha_client import call_service
+    log.info(f"[announce.dlna] Trying play_media on {entity_id}")
+    return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
+        "media_content_id": media_url,
+        "media_content_type": "url"
     })
 
 async def announce_generic_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float) -> Dict[str, Any]:
@@ -190,10 +328,11 @@ async def announce_speaker(ha_url: str, ha_token: str, entity_id: str, media_url
         "media_content_type": "url"
     })
 
-async def announce_generic(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float) -> Dict[str, Any]:
-    """Last resort fallback."""
+async def announce_unknown(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float) -> Dict[str, Any]:
+    """Unknown device: try generic play_media, log all attributes for later identification."""
     from ha_client import call_service
-    log.info(f"[announce.generic] Trying play_media on {entity_id}")
+    log.info(f"[announce.unknown] Unknown device type for {entity_id}, trying generic play_media")
+    log.info(f"[announce.unknown] Attributes: app_id={media_url}, entity_id={entity_id}")
     return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "url"
@@ -207,15 +346,28 @@ TV_HANDLER_MAP = {
     "samsung": announce_samsung,
     "bravia": announce_bravia,
     "music_assistant": announce_music_assistant,
+    "esphome": announce_esphome,
+    "dlna": announce_dlna,
     "generic_tv": announce_generic_tv,
     "speaker": announce_speaker,
-    "generic": announce_generic,
+    "unknown": announce_unknown,
 }
 
-async def dispatch_announce(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str, attributes: dict) -> Dict[str, Any]:
+async def dispatch_announce(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str, attributes: dict, loaded_components: Optional[Set[str]] = None) -> Dict[str, Any]:
     """Dispatch announcement to the appropriate TV handler based on device detection."""
-    tv_type = detect_tv_type(entity_id, state, attributes)
-    handler = TV_HANDLER_MAP.get(tv_type, announce_generic)
+    tv_type = detect_tv_type(entity_id, state, attributes, loaded_components)
     
-    log.info(f"[announce] Detected type: {tv_type} for {entity_id} (app_id={attributes.get('app_id', '?')}, device_class={attributes.get('device_class', '?')})")
+    # If unknown, try web search fallback
+    if tv_type == "unknown":
+        log.info(f"[announce] Unknown device type for {entity_id}, attempting web search...")
+        search_result = await search_device_type(entity_id, attributes, loaded_components)
+        if search_result:
+            tv_type = search_result
+            log.info(f"[announce] Web search identified type as: {tv_type}")
+        else:
+            log.warning(f"[announce] Could not identify device type for {entity_id}, using unknown handler")
+    
+    handler = TV_HANDLER_MAP.get(tv_type, announce_unknown)
+    
+    log.info(f"[announce] Detected type: {tv_type} for {entity_id} (app_id={attributes.get('app_id', '?')}, device_class={attributes.get('device_class', '?')}, features={attributes.get('supported_features', '?')})")
     return await handler(ha_url, ha_token, entity_id, media_url, volume)

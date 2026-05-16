@@ -7,29 +7,79 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     import ha_client
-    from schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
+    from schemas import MediaPlayRequest, ExecutionResult
     from config import MASS_CONFIG_ENTRY_ID
 except ImportError:
     import ha_client
-    from schemas import MediaPlayRequest, MediaTransportRequest, TVCastRequest, ExecutionResult
+    from schemas import MediaPlayRequest, ExecutionResult
     from config import MASS_CONFIG_ENTRY_ID
 
 log = logging.getLogger("execution.media")
 
+# Media type detection patterns
+VIDEO_PATTERNS = [r"youtube\.com", r"youtu\.be", r"vimeo\.com", r"rumble\.com", r"dailymotion\.com", r"tiktok\.com", r"twitch\.tv"]
+AUDIOBOOK_PATTERNS = [r"audiobookshelf", r"abs", r"audiobook", r"book\s+"]
+PODCAST_PATTERNS = [r"podcast", r"episode", r"show\s+", r"itunes\.apple\.com", r"open\.spotify\.com/show"]
+MUSIC_PATTERNS = [r"spotify\.com/track", r"spotify\.com/album", r"soundcloud\.com", r"bandcamp\.com"]
+
+def detect_media_type(query: str, media_type_hint: str = None) -> str:
+    """Detect media type from query content and hints."""
+    if media_type_hint and media_type_hint in ("music", "video", "podcast", "audiobook", "radio", "url", "announcement"):
+        return media_type_hint
+    
+    if not query:
+        return "music"
+    
+    query_lower = query.lower()
+    
+    # Check if query is a URL
+    if query_lower.startswith(("http://", "https://")):
+        for pattern in VIDEO_PATTERNS:
+            if re.search(pattern, query_lower):
+                return "video"
+        for pattern in PODCAST_PATTERNS:
+            if re.search(pattern, query_lower):
+                return "podcast"
+        for pattern in MUSIC_PATTERNS:
+            if re.search(pattern, query_lower):
+                return "music"
+        return "url"
+    
+    # Check for media type keywords in query
+    for pattern in VIDEO_PATTERNS:
+        if re.search(pattern, query_lower):
+            return "video"
+    
+    # Check for audiobook indicators
+    if any(kw in query_lower for kw in ["audiobook", "read by", "narrated by", "chapter"]):
+        return "audiobook"
+    
+    # Check for podcast indicators
+    if any(kw in query_lower for kw in ["podcast", "episode of", "the daily show", "joe rogan"]):
+        return "podcast"
+    
+    # Default to music
+    return "music"
+
+async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str) -> str:
+    """Resolve entity_id from device_name if needed."""
+    if req.entity_id:
+        return ha_client.sanitize_entity_id("media_player", req.entity_id)
+    
+    if req.device_name:
+        entity_id = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player")
+        if entity_id:
+            return entity_id
+    
+    raise ValueError("entity_id or device_name is required")
+
 async def resolve_mass_entity(ctx, original_entity: str) -> str:
-    """
-    Resolve a media_player entity to its Music Assistant variant.
-    Many Cast/AndroidTV devices have both a native media_player and a MASS media_player.
-    Music playback works best through the MASS entity.
-    """
+    """Resolve a media_player entity to its Music Assistant variant."""
     all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
     if not all_states:
         return original_entity
     
-    # Extract the device name from the original entity
     name_part = original_entity.replace("media_player.", "")
-    
-    # Find the friendly_name of the original entity
     original_friendly = None
     for state in all_states:
         if state.get("entity_id") == original_entity:
@@ -41,7 +91,6 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     
     search = original_friendly.lower()
     
-    # Look for a MASS entity with matching friendly name
     for state in all_states:
         eid = state.get("entity_id", "")
         if not eid.startswith("media_player."):
@@ -51,7 +100,6 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
         source = attrs.get("source", "").lower()
         integration = attrs.get("integration", "")
         
-        # Match by friendly name AND (music_assistant source or integration)
         if search in friendly and ("music assistant" in source or integration == "music_assistant"):
             if eid != original_entity:
                 log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid}")
@@ -59,25 +107,13 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     
     return original_entity
 
-
-async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
-    ctx = req.user_context
-    full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
-    log.info(f"[media/play] user={ctx.user} entity={full_entity_id} (original={req.entity_id})")
-
-    # Music Assistant library lookup path.
+async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
+    """Play music via Music Assistant or fallback."""
+    mass_entity = await resolve_mass_entity(ctx, entity_id)
+    
     if req.query:
-        # Resolve to MASS entity if available
-        mass_entity = await resolve_mass_entity(ctx, full_entity_id)
-        
-        # Step 1: Search MASS for the query to get a proper URI
-        # Note: music_assistant.search does NOT require an entity_id
         search_result = await ha_client.call_service(
-            ctx.ha_url,
-            ctx.ha_token,
-            "music_assistant",
-            "search",
-            entity_id="",
+            ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
             service_data={
                 "config_entry_id": MASS_CONFIG_ENTRY_ID,
                 "name": req.query,
@@ -88,10 +124,8 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         )
         
         if search_result.get("ok") and search_result.get("service_response"):
-            # HA wraps the response: {"changed_states": [], "service_response": {actual_results}}
             raw = search_result["service_response"]
             resp = raw.get("service_response", raw)
-            # Try tracks first, then albums, artists, playlists, radio
             uri = None
             media_type_label = ""
             for category in ["tracks", "albums", "artists", "playlists", "radio"]:
@@ -104,101 +138,181 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
             if uri:
                 log.info(f"[media/play] MASS search found: {uri} ({media_type_label})")
                 result = await ha_client.call_service(
-                    ctx.ha_url,
-                    ctx.ha_token,
-                    "music_assistant",
-                    "play_media",
-                    mass_entity,
-                    {
-                        "media_id": uri,
-                        "enqueue": "play" if req.enqueue == "replace" else req.enqueue,
-                    },
+                    ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
+                    {"media_id": uri, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
                 )
                 if result.get("ok"):
-                    return ExecutionResult(
-                        status="SUCCESS",
-                        message=f"Music Assistant playback started for '{req.query}' ({media_type_label}).",
-                        service="media_play",
-                    )
-            else:
-                log.warning(f"[media/play] MASS search returned no results for '{req.query}'")
-
-        # Fallback: standard media_player.play_media (for URLs/video casting)
+                    return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
+        
+        # Fallback: standard media_player.play_media
         result = await ha_client.call_service(
-            ctx.ha_url,
-            ctx.ha_token,
-            "media_player",
-            "play_media",
-            full_entity_id,
-            {
-                "media": {
-                    "media_content_id": req.query,
-                    "media_content_type": req.media_content_type or "music"
-                },
-                "enqueue": "play" if req.enqueue == "replace" else req.enqueue,
-            },
+            ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
+            {"media": {"media_content_id": req.query, "media_content_type": "music"}, "enqueue": "play"},
         )
         if result.get("ok"):
-            return ExecutionResult(
-                status="SUCCESS",
-                message=f"Playback started for '{req.query}'.",
-                service="media_play",
-            )
-
-        return ExecutionResult(
-            status="FAILURE",
-            message=f"Playback failed for '{req.query}'.",
-            service="media_play",
-        )
-
-    # --- LEGACY PORT: YouTube Deep Linking ---
-    url = req.media_content_id or ""
-    yt_match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11}).*", url)
+            return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' on {entity_id}.", service="media_play")
     
-    service_data: dict = {}
-    if ("youtube" in url or "youtu.be" in url) and yt_match:
-        video_id = yt_match.group(1)
-        log.info(f"[media/play] Detected YouTube URL. Deep-linking to video {video_id}")
-        # If it's a Roku, use the native deep-link format
-        if "roku" in req.entity_id:
-             service_data = {
-                "media_content_id": "837", # YouTube App ID
-                "media_content_type": "app",
-                "extra": {"content_id": video_id, "media_type": "live"}
-             }
-        else:
-             # Standard Cast / Android TV YouTube format
-             service_data["media_content_id"] = video_id
-             service_data["media_content_type"] = "video/youtube"
-    else:
-        if req.media_content_id:
-            service_data["media_content_id"] = req.media_content_id
-            service_data["media_content_type"] = req.media_content_type or "url"
+    return ExecutionResult(status="FAILURE", message=f"Could not play '{req.query}' on {entity_id}.", service="media_play")
 
-    if req.enqueue:
-        service_data["enqueue"] = req.enqueue
-
-    # Auto-power-on check
-    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
-    if state and state.get("state") == "off":
-        log.info(f"[media/play] Device {full_entity_id} is off. Turning on...")
-        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", full_entity_id)
-        await asyncio.sleep(2)
-
+async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
+    """Play video via yt-dlp stream."""
+    from handlers import video as video_handler
+    
+    query = req.query or req.media_content_id or ""
+    
+    # Check if already a URL
+    video_url = video_handler.extract_video_url(query)
+    if not video_url:
+        video_url = await video_handler.search_youtube(query)
+        if not video_url:
+            return ExecutionResult(status="FAILURE", message=f"Could not find video for '{query}'.", service="media_play")
+    
+    # Download and stream
+    media_id, title = await video_handler.download_video(video_url)
+    if not media_id:
+        return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
+    
+    # Get public host for streaming
+    from config import EXECUTION_EXTERNAL_HOST
+    public_host = EXECUTION_EXTERNAL_HOST or "192.168.2.205"
+    stream_url = f"http://{public_host}:8003/media/{media_id}"
+    
+    # Play on device
     result = await ha_client.call_service(
-        ctx.ha_url, ctx.ha_token,
-        "media_player", "play_media",
-        full_entity_id, service_data or None,
+        ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
+        {"media_content_id": stream_url, "media_content_type": "video/mp4"},
     )
     
     if result.get("ok"):
-        return ExecutionResult(status="SUCCESS", message="Playback started.", service="media_play")
-    return ExecutionResult(status="FAILURE", message=f"Playback failed: {result.get('error')}", service="media_play", detail=result)
+        return ExecutionResult(status="SUCCESS", message=f"Playing video '{title or query}' on {entity_id}.", service="media_play")
+    
+    return ExecutionResult(status="FAILURE", message=f"Failed to play video on {entity_id}.", service="media_play")
 
-async def handle_media_transport(req: MediaTransportRequest) -> ExecutionResult:
+async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
+    """Play podcast via Music Assistant or URL."""
+    if req.query and req.query.startswith(("http://", "https://")):
+        # Direct podcast URL
+        result = await ha_client.call_service(
+            ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
+            {"media_content_id": req.query, "media_content_type": "audio"},
+        )
+        if result.get("ok"):
+            return ExecutionResult(status="SUCCESS", message=f"Playing podcast on {entity_id}.", service="media_play")
+    
+    # Try MASS search for podcast
+    mass_entity = await resolve_mass_entity(ctx, entity_id)
+    search_result = await ha_client.call_service(
+        ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
+        service_data={
+            "config_entry_id": MASS_CONFIG_ENTRY_ID,
+            "name": req.query,
+            "media_type": ["track", "album"],
+            "limit": 5,
+        },
+        return_response=True,
+    )
+    
+    if search_result.get("ok") and search_result.get("service_response"):
+        raw = search_result["service_response"]
+        resp = raw.get("service_response", raw)
+        for category in ["tracks", "albums"]:
+            items = resp.get(category, [])
+            if items:
+                uri = items[0].get("uri")
+                result = await ha_client.call_service(
+                    ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
+                    {"media_id": uri, "enqueue": "play"},
+                )
+                if result.get("ok"):
+                    return ExecutionResult(status="SUCCESS", message=f"Playing podcast '{req.query}' on {entity_id}.", service="media_play")
+    
+    return ExecutionResult(status="FAILURE", message=f"Could not play podcast '{req.query}' on {entity_id}. Try providing a direct URL.", service="media_play")
+
+async def play_audiobook(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
+    """Play audiobook via Audiobookshelf."""
+    from handlers import audiobookshelf as abs_handler
+    
+    if not req.query:
+        return ExecutionResult(status="FAILURE", message="Audiobook title or query is required.", service="media_play")
+    
+    # Search ABS
+    search_result = await abs_handler.handle_audiobookshelf(
+        type("ABSRequest", (), {"user_context": ctx, "action": "search", "query": req.query, "limit": 5, "entity_id": entity_id})()
+    )
+    
+    if search_result.status == "SUCCESS" and search_result.detail:
+        books = search_result.detail.get("results", [])
+        if books:
+            book = books[0]
+            book_id = book.get("id")
+            # Play the book
+            play_result = await abs_handler.handle_audiobookshelf(
+                type("ABSRequest", (), {"user_context": ctx, "action": "play", "book_id": book_id, "entity_id": entity_id})()
+            )
+            return play_result
+    
+    return ExecutionResult(status="FAILURE", message=f"Could not find audiobook '{req.query}'.", service="media_play")
+
+async def play_url(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
+    """Play a direct URL on the device."""
+    url = req.media_content_id or req.query
+    content_type = req.media_content_type or "url"
+    
+    result = await ha_client.call_service(
+        ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
+        {"media_content_id": url, "media_content_type": content_type},
+    )
+    
+    if result.get("ok"):
+        return ExecutionResult(status="SUCCESS", message=f"Playing URL on {entity_id}.", service="media_play")
+    
+    return ExecutionResult(status="FAILURE", message=f"Failed to play URL on {entity_id}.", service="media_play")
+
+async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
+    """Unified media play handler supporting all content types and devices."""
+    ctx = req.user_context
+    ha_url = ctx.ha_url
+    ha_token = ctx.ha_token
+    
+    # Resolve entity
+    try:
+        entity_id = await resolve_entity(req, ha_url, ha_token)
+    except ValueError as e:
+        return ExecutionResult(status="FAILURE", message=str(e), service="media_play")
+    
+    log.info(f"[media/play] user={ctx.user} entity={entity_id} query='{req.query}' type='{req.media_type}'")
+    
+    # Detect media type
+    media_type = detect_media_type(req.query or req.media_content_id or "", req.media_type)
+    log.info(f"[media/play] Detected media type: {media_type}")
+    
+    # Set volume if requested
+    if req.volume is not None:
+        await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": req.volume})
+    
+    # Power on if needed
+    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+    if state and state.get("state") in ("off", "unavailable", "standby"):
+        log.info(f"[media/play] Device {entity_id} is {state.get('state')}, turning on...")
+        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id)
+        await asyncio.sleep(2)
+    
+    # Route to appropriate handler
+    if media_type == "video":
+        return await play_video(req, entity_id, ctx)
+    elif media_type == "podcast":
+        return await play_podcast(req, entity_id, ctx)
+    elif media_type == "audiobook":
+        return await play_audiobook(req, entity_id, ctx)
+    elif media_type == "url":
+        return await play_url(req, entity_id, ctx)
+    else:
+        return await play_music(req, entity_id, ctx)
+
+async def handle_media_transport(req) -> ExecutionResult:
+    """Handle media transport commands."""
     ctx = req.user_context
     
-    # --- LEGACY PORT: Remote Button Mapping ---
     button_map = {
         "home": "HOME", "back": "BACK", "up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT",
         "select": "SELECT", "enter": "SELECT", "ok": "SELECT", "info": "INFO", "replay": "INSTANT_REPLAY",
@@ -212,12 +326,10 @@ async def handle_media_transport(req: MediaTransportRequest) -> ExecutionResult:
     domain = full_entity_id.split(".")[0]
     target_entity = full_entity_id
     
-    # If it's a "button" command (Remote), switch to remote domain
     if service.isupper():
         domain = "remote"
         service_cmd = "send_command"
         data = {"command": service}
-        # Roku: media_player.roku -> remote.roku
         if "media_player" in target_entity:
             target_entity = target_entity.replace("media_player.", "remote.")
     else:
@@ -229,22 +341,18 @@ async def handle_media_transport(req: MediaTransportRequest) -> ExecutionResult:
         data = {"volume_level": req.volume_level}
 
     result = await ha_client.call_service(
-        ctx.ha_url, ctx.ha_token,
-        domain, service_cmd,
-        target_entity, data or None,
+        ctx.ha_url, ctx.ha_token, domain, service_cmd, target_entity, data or None,
     )
     
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Media command '{service}' executed.", service="media_transport")
     return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)
 
-async def handle_tv_cast(req: TVCastRequest) -> ExecutionResult:
-    # This is now largely redundant with refined handle_media_play, but keeping for specialized casting
-    ctx = req.user_context
-    log.info(f"[tv/cast] entity={req.media_player_entity_id} content={req.media_content_id}")
-    
+async def handle_tv_cast(req) -> ExecutionResult:
+    """Handle TV cast requests (legacy compatibility)."""
+    from schemas import MediaPlayRequest
     play_req = MediaPlayRequest(
-        user_context=ctx,
+        user_context=req.user_context,
         entity_id=req.media_player_entity_id,
         media_content_id=req.media_content_id,
         media_content_type=req.media_content_type
