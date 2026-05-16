@@ -309,43 +309,96 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     else:
         return await play_music(req, entity_id, ctx)
 
+async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
+    """Check if a media_player entity is an Android TV device."""
+    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+    if not state:
+        return False
+    attrs = state.get("attributes", {})
+    app_id = (attrs.get("app_id") or "").lower()
+    # Android TV indicators: Android package names or known Android TV apps
+    android_indicators = ("com.google.android.", "com.google.tv.", "com.android.", 
+                          "mediashell", "backdrop", "tvlauncher", "android.tv")
+    return any(ind in app_id for ind in android_indicators)
+
 async def handle_media_transport(req) -> ExecutionResult:
-    """Handle media transport commands."""
+    """Handle media transport commands with Android TV-specific handling."""
     ctx = req.user_context
+    ha_url = ctx.ha_url
+    ha_token = ctx.ha_token
+    command = req.command.lower()
+    full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     
+    # Check if device is Android TV
+    is_atv = await is_android_tv(ha_url, ha_token, full_entity_id)
+    
+    # Android TV-specific command handling
+    if is_atv:
+        # "stop", "close", "go home" → HOME button (exit app, keep TV on)
+        if command in ("stop", "home", "close"):
+            log.info(f"[media/transport] Android TV HOME command for {full_entity_id}")
+            result = await ha_client.call_service(
+                ha_url, ha_token, "androidtv_remote", "send_command", full_entity_id,
+                {"command": "home"}
+            )
+            if result.get("ok"):
+                return ExecutionResult(status="SUCCESS", message=f"Returned to home screen on {full_entity_id}.", service="media_transport")
+            return ExecutionResult(status="FAILURE", message=f"Failed to return home: {result.get('error')}", service="media_transport", detail=result)
+        
+        # "power_off", "turn_off" → SLEEP command (actually power off TV)
+        if command in ("power_off", "turn_off"):
+            log.info(f"[media/transport] Android TV POWER OFF for {full_entity_id}")
+            result = await ha_client.call_service(
+                ha_url, ha_token, "androidtv_remote", "send_command", full_entity_id,
+                {"command": "sleep"}
+            )
+            if result.get("ok"):
+                return ExecutionResult(status="SUCCESS", message=f"Powered off {full_entity_id}.", service="media_transport")
+            return ExecutionResult(status="FAILURE", message=f"Failed to power off: {result.get('error')}", service="media_transport", detail=result)
+        
+        # "back" → BACK button
+        if command == "back":
+            log.info(f"[media/transport] Android TV BACK command for {full_entity_id}")
+            result = await ha_client.call_service(
+                ha_url, ha_token, "androidtv_remote", "send_command", full_entity_id,
+                {"command": "back"}
+            )
+            if result.get("ok"):
+                return ExecutionResult(status="SUCCESS", message=f"Sent back command to {full_entity_id}.", service="media_transport")
+            return ExecutionResult(status="FAILURE", message=f"Failed to send back: {result.get('error')}", service="media_transport", detail=result)
+    
+    # Standard media transport commands (all devices)
     button_map = {
-        "home": "HOME", "back": "BACK", "up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT",
-        "select": "SELECT", "enter": "SELECT", "ok": "SELECT", "info": "INFO", "replay": "INSTANT_REPLAY",
         "pause": "media_pause", "resume": "media_play", "stop": "media_stop", 
         "next": "media_next_track", "previous": "media_previous_track",
         "volume_up": "volume_up", "volume_down": "volume_down", "mute": "volume_mute"
     }
     
-    service = button_map.get(req.command.lower(), req.command)
-    full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
+    service = button_map.get(command, command)
     domain = full_entity_id.split(".")[0]
     target_entity = full_entity_id
     
-    if service.isupper():
-        domain = "remote"
+    # Remote button commands (uppercase = remote.send_command)
+    remote_buttons = {"home", "back", "up", "down", "left", "right", "select", "enter", "ok", "info", "replay"}
+    if command in remote_buttons:
         service_cmd = "send_command"
-        data = {"command": service}
-        if "media_player" in target_entity:
-            target_entity = target_entity.replace("media_player.", "remote.")
+        data = {"command": command.upper()}
+        domain = "remote"
+        target_entity = full_entity_id.replace("media_player.", "remote.")
     else:
         service_cmd = service
         data = {}
 
-    if req.command in ("volume_up", "volume_down") and req.volume_level is not None:
+    if command in ("volume_up", "volume_down") and req.volume_level is not None:
         service_cmd = "volume_set"
         data = {"volume_level": req.volume_level}
 
     result = await ha_client.call_service(
-        ctx.ha_url, ctx.ha_token, domain, service_cmd, target_entity, data or None,
+        ha_url, ha_token, domain, service_cmd, target_entity, data or None,
     )
     
     if result.get("ok"):
-        return ExecutionResult(status="SUCCESS", message=f"Media command '{service}' executed.", service="media_transport")
+        return ExecutionResult(status="SUCCESS", message=f"Media command '{command}' executed on {full_entity_id}.", service="media_transport")
     return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)
 
 async def handle_tv_cast(req) -> ExecutionResult:
