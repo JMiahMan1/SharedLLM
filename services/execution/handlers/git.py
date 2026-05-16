@@ -59,7 +59,7 @@ async def _resolve_workspace_path(workspace_id: Optional[str] = None) -> str:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.post(
-                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces/resolve",
+                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
                     json={"workspace_id": workspace_id, "user_context": {"user": "system", "is_admin": True}},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
