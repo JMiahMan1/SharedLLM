@@ -22,11 +22,25 @@ log = logging.getLogger("execution.audiobookshelf")
 
 async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
     ctx = req.user_context
-    abs_url, abs_key = abs_client.resolve_abs_credentials(ctx)
-    if not abs_url or not abs_key:
+    abs_url, abs_key, username, password = abs_client.resolve_abs_credentials(ctx)
+    if not abs_url:
         return ExecutionResult(
             status="FAILURE",
-            message="Audiobookshelf URL or API key not configured.",
+            message="Audiobookshelf URL not configured.",
+            service="audiobookshelf",
+        )
+    if not abs_key and (username and password):
+        abs_key = await abs_client.abs_login(abs_url, username, password)
+        if not abs_key:
+            return ExecutionResult(
+                status="FAILURE",
+                message="Audiobookshelf login failed with provided credentials.",
+                service="audiobookshelf",
+            )
+    if not abs_key:
+        return ExecutionResult(
+            status="FAILURE",
+            message="Audiobookshelf API key or username/password not configured.",
             service="audiobookshelf",
         )
 
