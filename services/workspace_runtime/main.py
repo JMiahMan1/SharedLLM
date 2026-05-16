@@ -623,17 +623,17 @@ def _derive_workspace_id(requested_id: Optional[str], resolved_user: str, repo_u
     return f"{_normalize_workspace_slug(resolved_user)}-{_derive_repo_name(repo_url)}"
 
 
-def _derive_workspace_container_path(repo_url: str, scope: str = "user", owner_user: Optional[str] = None) -> str:
+def _derive_workspace_container_path(workspace_id: str, scope: str = "user", owner_user: Optional[str] = None) -> str:
     """Derive the container mount path based on scope.
     
-    System workspaces: system/{repo_name}
-    User workspaces: users/{owner_user}/{repo_name}
+    System workspaces: system/{workspace_id}
+    User workspaces: users/{owner_user}/{workspace_id}
     """
-    repo_name = _derive_repo_name(repo_url)
+    ws_slug = _normalize_workspace_slug(workspace_id)
     if scope == "system":
-        return f"system/{repo_name}"
+        return f"system/{ws_slug}"
     user_slug = _normalize_workspace_slug(owner_user or "default")
-    return f"users/{user_slug}/{repo_name}"
+    return f"users/{user_slug}/{ws_slug}"
 
 
 def _workspace_capabilities(workspace: dict[str, Any]) -> list[str]:
