@@ -11,7 +11,7 @@ from typing import Optional, Any, Dict, List, Callable, Awaitable
 from gateway.history import REDIS_URL
 from gateway.config import (
     OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
-    STORAGE_SVC, INTERNAL_SECRET,
+    STORAGE_SVC, RAG_SVC, INTERNAL_SECRET,
     RAVEN_MAX_TOTAL_SECONDS,
     RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
 )
@@ -815,6 +815,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "identitymanagerequest": (EXECUTION_SVC, "/execute/identity/manage"),
                 "audiobookshelfrequest": (EXECUTION_SVC, "/execute/audiobookshelf"),
                 "llminforequest": (EXECUTION_SVC, "/execute/llm/info"),
+                "contextsearchrequest": (RAG_SVC, "/rag/search"),
             }
 
             lookup_action = action.lower().strip() if action else ""

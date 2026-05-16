@@ -57,6 +57,8 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "audiobookshelfrequest": (EXECUTION_SVC, "/execute/audiobookshelf"),
     "documentbroadcastrequest": (EXECUTION_SVC, "/execute/composite/broadcast"),
     "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
+    "contextsearchrequest": (RAG_SVC, "/rag/search"),
+    "contextsearchrequest": (RAG_SVC, "/rag/search"),
 }
 
 SINGLE_TURN_TOOL_GUIDE = """
@@ -381,6 +383,76 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     hits = sorted(hits, key=lambda h: not h.get("is_active", False), reverse=True)
     return hits
 
+async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials) -> str:
+    """Execute a single tool call and return the result string."""
+    if action == "controlplanerequest":
+        payload = tool_data.get("payload", tool_data)
+        service_name = payload.get("service_name")
+        sub_action = payload.get("action", "restart")
+        if not service_name:
+            return "Error: service_name is required"
+        cp_url = CONTROL_PLANE_URL or "http://control_plane:8008"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                if sub_action == "restart":
+                    resp = await client.post(f"{cp_url}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                else:
+                    resp = await client.get(f"{CONTROL_PLANE_URL}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                
+                if resp.status_code == 200:
+                    return f"Control Plane '{sub_action}' succeeded on {service_name}: {resp.text}"
+                return f"Control Plane error {resp.status_code}: {resp.text}"
+        except Exception as e:
+            log.error(f"Control Plane execution error: {e}")
+            return f"Control Plane execution failed: {e}"
+    
+    elif action in SINGLE_TURN_TOOL_ENDPOINTS:
+        svc_base, endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
+        
+        try:
+            payload = tool_data.get("payload", tool_data)
+            payload["user_context"] = creds.model_dump()
+            
+            if action == "contextsearchrequest":
+                payload["user_id"] = creds.user or "default"
+            
+            if action == "announcementrequest" and not payload.get("entity_id") and not payload.get("device_name"):
+                device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|cast|chrome))", query)
+                if not device_match:
+                    device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?((?:Office|Living Room|Loft|Bedroom|Kitchen|Bathroom)[A-Za-z\s]*?)(?:\b)", query)
+                if device_match:
+                    device_name = device_match.group(1).strip()
+                    if not any(t in device_name.lower() for t in ["tv", "speaker", "display", "cast", "chrome"]):
+                        type_match = re.search(r"(speaker|tv|display|cast|chrome)", query, re.IGNORECASE)
+                        if type_match:
+                            device_name += " " + type_match.group(1)
+                    payload["device_name"] = device_name
+                    log.info(f"[_execute_single_tool] Auto-resolved device_name='{device_name}' from query")
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                if resp.status_code == 200:
+                    result = resp.json()
+                    if action == "executionlogrequest":
+                        logs = result.get("detail", {}).get("logs", "")
+                        if logs:
+                            return f"{result.get('message', '')}\n\n```\n{logs}\n```"
+                    if action == "contextsearchrequest":
+                        results = result.get("results", [])
+                        if not results:
+                            return "No relevant context found. Try a different query or collection."
+                        context_text = "\n".join([f"- {r.get('content', '')}" for r in results])
+                        return f"Found {len(results)} relevant results:\n{context_text}"
+                    return result.get("message", "Action completed successfully.")
+                else:
+                    return f"Tool execution failed ({resp.status_code}): {resp.text}"
+        except Exception as e:
+            log.error(f"Single-turn tool execution error: {e}")
+            return f"I encountered an error while executing the tool: {e}"
+    else:
+        log.warning(f"[_execute_single_tool] Unsupported tool for single-turn: {action}")
+        return f"I found a tool call for '{action}', but it is not supported in the standard path. Please ask Raven to perform this task."
+
 async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None, show_thinking: bool = False) -> str:
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"
@@ -391,41 +463,46 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
     
-    # No grammar constraint - model produces JSON naturally via system prompt
     options = {"temperature": 0.0, "num_predict": 2048, "show_thinking": show_thinking}
 
-    # --- RETRY LOGIC FOR MODEL SWITCHING ---
     MAX_INFERENCE_RETRIES = 3
-    ans = ""
+    MAX_TURNS = 3
 
-    for retry_count in range(MAX_INFERENCE_RETRIES):
-        try:
-            data = await call_ollama(
-                {
-                    "model": model,
-                    "messages": messages,
-                    "options": options,
-                    "chunk_callback": chunk_callback,
-                },
-                use_chat=True,
-            )
-            ans = data.get("message", {}).get("content", "")
-            break # Success!
-        except Exception as e:
-            log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
-            if retry_count < MAX_INFERENCE_RETRIES - 1:
-                wait_time = 5 * (retry_count + 1)
-                log.info(f"[_single_turn_inference] Retrying in {wait_time}s...")
-                await asyncio.sleep(wait_time)
-            else:
-                log.error(f"[_single_turn_inference] FATAL: All inference retries failed: {e}")
-                return f"I encountered an error while trying to generate a response (All retries failed): {e}"
-
-    # Tool Extraction
     from gateway.agent_loop import extract_action_json
 
-    tool_data = extract_action_json(ans)
-    if tool_data:
+    for turn in range(MAX_TURNS):
+        log.info(f"[_single_turn_inference] Turn {turn + 1}/{MAX_TURNS}")
+        ans = ""
+
+        for retry_count in range(MAX_INFERENCE_RETRIES):
+            try:
+                data = await call_ollama(
+                    {
+                        "model": model,
+                        "messages": messages,
+                        "options": options,
+                        "chunk_callback": chunk_callback,
+                    },
+                    use_chat=True,
+                )
+                ans = data.get("message", {}).get("content", "")
+                break
+            except Exception as e:
+                log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
+                if retry_count < MAX_INFERENCE_RETRIES - 1:
+                    wait_time = 5 * (retry_count + 1)
+                    log.info(f"[_single_turn_inference] Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    log.error(f"[_single_turn_inference] FATAL: All inference retries failed: {e}")
+                    return f"I encountered an error while trying to generate a response (All retries failed): {e}"
+
+        tool_data = extract_action_json(ans)
+        if not tool_data:
+            # No tool call — this is our final answer
+            break
+
+        # Normalize tool_data keys
         if "tool" in tool_data and "action" not in tool_data:
             tool_data["action"] = tool_data.pop("tool")
         if "operation" in tool_data and "action" not in tool_data:
@@ -441,75 +518,27 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         if "function" in tool_data and "action" not in tool_data:
             tool_data["action"] = tool_data["function"].get("name", "")
             tool_data["payload"] = tool_data["function"].get("arguments", {})
+
         action = tool_data.get("action", "").lower().strip()
         log.info(f"[_single_turn_inference] Tool call detected: {action}")
         log.info(f"[_single_turn_inference] Raw LLM output: {ans[:500]}")
         log.info(f"[_single_turn_inference] Extracted tool_data: {tool_data}")
-        
-        if action == "controlplanerequest":
-            payload = tool_data.get("payload", tool_data)
-            service_name = payload.get("service_name")
-            sub_action = payload.get("action", "restart")
-            if not service_name:
-                return "Error: service_name is required"
-            cp_url = CONTROL_PLANE_URL or "http://control_plane:8008"
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    if sub_action == "restart":
-                        resp = await client.post(f"{cp_url}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-                    else:
-                        resp = await client.get(f"{CONTROL_PLANE_URL}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-                    
-                    if resp.status_code == 200:
-                        return f"Control Plane '{sub_action}' succeeded on {service_name}: {resp.text}"
-                    return f"Control Plane error {resp.status_code}: {resp.text}"
-            except Exception as e:
-                log.error(f"Control Plane execution error: {e}")
-                return f"Control Plane execution failed: {e}"
-        
-        elif action in SINGLE_TURN_TOOL_ENDPOINTS:
-            svc_base, endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
-            
-            try:
-                payload = tool_data.get("payload", tool_data)
-                payload["user_context"] = creds.model_dump()
-                
-                # Auto-resolve entity for announcements if LLM omitted entity target
-                if action == "announcementrequest" and not payload.get("entity_id") and not payload.get("device_name"):
-                    # Extract device name from query: look for patterns like "on the X", "to X", "via X"
-                    import re
-                    device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|cast|chrome))", query)
-                    if not device_match:
-                        device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?((?:Office|Living Room|Loft|Bedroom|Kitchen|Bathroom)[A-Za-z\s]*?)(?:\b)", query)
-                    if device_match:
-                        device_name = device_match.group(1).strip()
-                        # Append device type if not already included
-                        if not any(t in device_name.lower() for t in ["tv", "speaker", "display", "cast", "chrome"]):
-                            type_match = re.search(r"(speaker|tv|display|cast|chrome)", query, re.IGNORECASE)
-                            if type_match:
-                                device_name += " " + type_match.group(1)
-                        payload["device_name"] = device_name
-                        log.info(f"[_single_turn_inference] Auto-resolved device_name='{device_name}' from query")
-                
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                    if resp.status_code == 200:
-                        result = resp.json()
-                        # For log/inspection tools, include the detail in the response
-                        if action == "executionlogrequest":
-                            logs = result.get("detail", {}).get("logs", "")
-                            if logs:
-                                return f"{result.get('message', '')}\n\n```\n{logs}\n```"
-                        return result.get("message", "Action completed successfully.")
-                    else:
-                        return f"Tool execution failed ({resp.status_code}): {resp.text}"
-            except Exception as e:
-                log.error(f"Single-turn tool execution error: {e}")
-                return f"I encountered an error while executing the tool: {e}"
-        else:
-            log.warning(f"[_single_turn_inference] Unsupported tool for single-turn: {action}")
-            return f"I found a tool call for '{action}', but it is not supported in the standard path. Please ask Raven to perform this task."
 
+        # Append LLM's response to conversation
+        messages.append({"role": "assistant", "content": ans})
+
+        # Execute the tool
+        tool_result = await _execute_single_tool(action, tool_data, query, creds)
+        log.info(f"[_single_turn_inference] Tool result: {tool_result[:300] if tool_result else 'empty'}")
+
+        # Append tool result to conversation for next turn
+        messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
+
+        # If this was the last turn, return the tool result directly
+        if turn == MAX_TURNS - 1:
+            return tool_result
+
+    # Final answer processing — strip pure JSON if it wraps a readable field
     if ans.strip().startswith("{") and ans.strip().endswith("}"):
         try:
             parsed = json.loads(ans)

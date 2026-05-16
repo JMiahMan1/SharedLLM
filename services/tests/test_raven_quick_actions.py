@@ -144,3 +144,31 @@ def test_all_templates_contain_autonomy_signals():
         query_lower = template["query"].lower()
         has_signal = any(signal in query_lower for signal in AUTONOMOUS_SIGNALS)
         assert has_signal, f"Quick Action '{template['label']}' lacks autonomy signal in: {template['query']}"
+
+
+def test_raven_prompt_includes_context_search_tool():
+    assert "ContextSearchRequest" in RAVEN_AUTONOMOUS_PROTOCOL
+    assert "collection_name" in RAVEN_AUTONOMOUS_PROTOCOL
+    assert "ha_entities" in RAVEN_AUTONOMOUS_PROTOCOL
+    assert "system_capabilities" in RAVEN_AUTONOMOUS_PROTOCOL
+
+
+def test_context_search_in_single_turn_endpoints():
+    from gateway.orchestrator import SINGLE_TURN_TOOL_ENDPOINTS
+    assert "contextsearchrequest" in SINGLE_TURN_TOOL_ENDPOINTS
+    svc, endpoint = SINGLE_TURN_TOOL_ENDPOINTS["contextsearchrequest"]
+    assert endpoint == "/rag/search"
+
+
+def test_context_search_in_agent_action_map():
+    from gateway.agent_loop import RAG_SVC
+    # Verify RAG_SVC is importable in agent_loop
+    assert RAG_SVC is not None
+
+
+def test_context_search_schema_exists():
+    from gateway.schemas import ContextSearchRequest
+    schema = ContextSearchRequest(query="test", collection_name="ha_entities")
+    assert schema.query == "test"
+    assert schema.collection_name == "ha_entities"
+    assert schema.k == 5  # default value
