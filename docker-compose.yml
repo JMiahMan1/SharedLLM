@@ -158,6 +158,8 @@ services:
       dockerfile: services/logging/Dockerfile
     container_name: sharedllm_logging
     restart: unless-stopped
+    ports:
+      - "8006:8006"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
