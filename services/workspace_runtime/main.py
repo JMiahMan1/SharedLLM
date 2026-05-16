@@ -545,7 +545,7 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
         if not repo_url:
             raise HTTPException(status_code=400, detail="repo_url is required to create a workspace")
         workspace_id = _derive_workspace_id(ref.workspace_id, resolved_user, repo_url)
-        container_mount_path = str(ref.container_mount_path or ref.local_path or _derive_workspace_container_path(workspace_id, resolved_user)).strip()
+        container_mount_path = str(ref.container_mount_path or ref.local_path or _derive_workspace_container_path(repo_url)).strip()
         match = {
             "id": workspace_id,
             "display_name": str(ref.display_name or workspace_id).strip(),
@@ -609,8 +609,8 @@ def _derive_workspace_id(requested_id: Optional[str], resolved_user: str, repo_u
     return f"{_normalize_workspace_slug(resolved_user)}-{_derive_repo_name(repo_url)}"
 
 
-def _derive_workspace_container_path(workspace_id: str, resolved_user: str) -> str:
-    return f"users/{_normalize_workspace_slug(resolved_user)}/workspaces/{_normalize_workspace_slug(workspace_id)}"
+def _derive_workspace_container_path(repo_url: str) -> str:
+    return _derive_repo_name(repo_url)
 
 
 def _workspace_capabilities(workspace: dict[str, Any]) -> list[str]:
