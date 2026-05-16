@@ -62,6 +62,13 @@ const LLMSettings: React.FC = () => {
   }
 
   const activeProvider = getSetting('active_llm_provider') || 'ollama';
+  
+  // Auto-migrate legacy llama_server provider to ollama
+  React.useEffect(() => {
+    if (activeProvider === 'llama_server') {
+      setDrafts({ ...drafts, active_llm_provider: 'ollama' });
+    }
+  }, [activeProvider]);
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -96,8 +103,7 @@ const LLMSettings: React.FC = () => {
             
             <div className="space-y-3">
               {[
-                { id: 'ollama', label: 'Local (Ollama)', icon: Cpu, desc: 'Privacy-first, low latency local inference.' },
-                { id: 'llama_server', label: 'Local (LLaMA Server)', icon: Cpu, desc: 'GGUF turboquant for 35B+ models with lazy model routing.' },
+                { id: 'ollama', label: 'Local (Ollama / llama.cpp)', icon: Cpu, desc: 'Privacy-first, low latency local inference. Works with Ollama, llama.cpp server, or any /api/chat compatible endpoint.' },
                 { id: 'openrouter', label: 'Cloud (OpenRouter)', icon: Cloud, desc: 'High-power inference via cloud providers.' }
               ].map(provider => (
                 <button
@@ -172,7 +178,7 @@ const LLMSettings: React.FC = () => {
         <div className="lg:col-span-2 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Local Models */}
-            <div className={`glass-panel p-6 border-white/5 transition-opacity ${activeProvider !== 'ollama' && activeProvider !== 'llama_server' ? 'opacity-50' : 'opacity-100'}`}>
+            <div className={`glass-panel p-6 border-white/5 transition-opacity ${activeProvider !== 'ollama' ? 'opacity-50' : 'opacity-100'}`}>
               <div className="flex items-center gap-3 mb-6">
                 <Cpu size={20} className="text-orange-400" />
                 <h4 className="text-xs font-black uppercase tracking-widest text-white">Local Model Mapping</h4>
