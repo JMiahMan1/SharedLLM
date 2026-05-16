@@ -354,7 +354,7 @@ async def announce_unknown(ha_url: str, ha_token: str, entity_id: str, media_url
     """Unknown device: try generic play_media, log all attributes for later identification."""
     from ha_client import call_service
     log.info(f"[announce.unknown] Unknown device type for {entity_id}, trying generic play_media")
-    log.info(f"[announce.unknown] Attributes: app_id={attributes.get('app_id', '?')}, entity_id={entity_id}")
+    log.info(f"[announce.unknown] Playing media on {entity_id}: {media_url[:60]} (app_id={attributes.get('app_id', '?')})")
     return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "url"
