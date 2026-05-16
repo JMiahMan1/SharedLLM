@@ -25,9 +25,9 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest
+        SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest
     )
-    from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video
+    from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
     from handlers import docker_logs as docker_logs_handler
     from handlers import git as git_handler
     from handlers import deployment as deployment_handler
@@ -43,9 +43,9 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest
         )
-        from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video
+        from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
         from .handlers import docker_logs as docker_logs_handler
         from .handlers import git as git_handler
         from .handlers import deployment as deployment_handler
@@ -900,3 +900,23 @@ async def execute_video_play(req: VideoPlayRequest):
 async def execute_diagnostics(req: DiagnosticRequest):
     log.info(f"[diagnostics] user={req.user_context.user} service={req.service} lines={req.lines}")
     return await diagnostics.handle_get_system_logs(req.model_dump())
+
+@app.post("/execute/audiobookshelf", response_model=ExecutionResult)
+async def execute_audiobookshelf(req: AudiobookshelfRequest):
+    ctx = req.user_context
+    log.info(f"[abs] user={ctx.user} action={req.action} query={req.query}")
+    return await audiobookshelf.handle_audiobookshelf(req)
+
+@app.post("/execute/composite/broadcast", response_model=ExecutionResult)
+async def execute_composite_broadcast(req):
+    """Read a document from storage and broadcast as TTS to a media player."""
+    ctx = req.user_context
+    log.info(f"[composite] broadcast: {getattr(req, 'input_path', '')} -> {getattr(req, 'entity_id', '')}")
+    return await composite.handle_document_broadcast(req)
+
+@app.post("/execute/composite/night_mode", response_model=ExecutionResult)
+async def execute_composite_night_mode(req):
+    """Activate night mode: lights off, climate set, optional sleep sounds."""
+    ctx = req.user_context
+    log.info(f"[composite] night_mode for user={ctx.user}")
+    return await composite.handle_night_mode(req)
