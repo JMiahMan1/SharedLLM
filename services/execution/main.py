@@ -162,7 +162,7 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
     playing_seen = False
     
     while time.time() - start < timeout:
-        state_resp = await ha_client.get_entity_state(ha_url, ha_token, entity_id)
+        state_resp = await ha_client.get_state(ha_url, ha_token, entity_id)
         if not state_resp:
             await asyncio.sleep(0.5)
             continue
