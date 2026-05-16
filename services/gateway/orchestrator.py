@@ -256,7 +256,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
 
 async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
     """Dynamically discover weather entities from HA and return live forecast data."""
-    from ha_state_cache import get_cached_state
+    from gateway.ha_state_cache import get_cached_state
     
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)
@@ -282,7 +282,7 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
             return ""
         
         # Cache all states for future lookups
-        from ha_state_cache import cache_all_states
+        from gateway.ha_state_cache import cache_all_states
         cache_all_states(entities)
         
         parts = []
@@ -329,7 +329,7 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     entity_id is the stable join key between RAG metadata and live state.
     Even if friendly_name changes in HA, entity_id remains constant.
     """
-    from ha_state_cache import get_cached_state, cache_all_states, fetch_live_states
+    from gateway.ha_state_cache import get_cached_state, cache_all_states, fetch_live_states
     
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)

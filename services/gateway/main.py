@@ -1545,7 +1545,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                             result = resp.json()
                             orphaned = result.get("orphaned_entity_ids", [])
                             if orphaned:
-                                from ha_state_cache import get_redis
+                                from gateway.ha_state_cache import get_redis
                                 r = get_redis()
                                 for eid in orphaned:
                                     try:
