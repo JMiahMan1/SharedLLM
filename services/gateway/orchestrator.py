@@ -4,6 +4,7 @@ import re
 import logging
 import httpx
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 from gateway.schemas import ResolvedCredentials
 from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
@@ -237,7 +238,85 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
                                 break
     except Exception as e:
         log.error(f"RAG search failed: {e}")
+
+    # Proactively inject weather context for weather-related queries
+    weather_keywords = ["weather", "forecast", "rain", "snow", "temperature", "outside", "humid", "wind", "storm", "sunny", "cloudy", "cold", "hot", "warm"]
+    if any(kw in q for kw in weather_keywords) and creds:
+        weather_ctx = await _fetch_weather_context(creds)
+        if weather_ctx:
+            rag_context += f"\n[WEATHER]\n{weather_ctx}\n"
+
     return rag_context.strip()
+
+
+async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
+    """Dynamically discover weather entities from HA and return live forecast data."""
+    from ha_state_cache import get_cached_state
+    
+    ha_url = getattr(creds, "ha_url", None)
+    ha_token = getattr(creds, "ha_token", None)
+    if not ha_url or not ha_token:
+        return ""
+    
+    try:
+        # Fetch all entities to find weather domain
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/discovery/entities",
+                params={"ha_url": ha_url, "ha_token": ha_token},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code != 200:
+                return ""
+            data = resp.json()
+            entities = data.get("entities", []) if isinstance(data, dict) else []
+        
+        # Find weather domain entities
+        weather_entities = [e for e in entities if e.get("entity_id", "").startswith("weather.")]
+        if not weather_entities:
+            return ""
+        
+        # Cache all states for future lookups
+        from ha_state_cache import cache_all_states
+        cache_all_states(entities)
+        
+        parts = []
+        for e in weather_entities:
+            eid = e.get("entity_id", "")
+            friendly = e.get("attributes", {}).get("friendly_name", eid)
+            state = e.get("state", "unknown")
+            attrs = e.get("attributes", {})
+            
+            details = [f"{friendly} ({eid}): {state}"]
+            for key in ["temperature", "humidity", "forecast", "wind_speed", "pressure", "dew_point", "uv_index", "precipitation"]:
+                if key in attrs:
+                    details.append(f"  {key}: {attrs[key]}")
+            
+            # Include forecast if available
+            forecast = attrs.get("forecast", [])
+            if forecast:
+                forecast_items = []
+                for f in forecast[:3]:  # Next 3 forecast periods
+                    f_parts = []
+                    if "datetime" in f:
+                        f_parts.append(f["datetime"][:10])
+                    if "condition" in f:
+                        f_parts.append(f["condition"])
+                    if "temperature" in f:
+                        f_parts.append(f"{f['temperature']}°")
+                    if "precipitation" in f:
+                        f_parts.append(f"rain: {f['precipitation']}mm")
+                    if f_parts:
+                        forecast_items.append(" ".join(f_parts))
+                if forecast_items:
+                    details.append(f"  forecast: {' | '.join(forecast_items)}")
+            
+            parts.append("\n".join(details))
+        
+        return "\n".join(parts)
+    except Exception as e:
+        log.error(f"Failed to fetch weather context: {e}")
+        return ""
 
 async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredentials) -> list:
     """Fetch live HA state (Redis-cached) and merge with RAG entity metadata.
@@ -300,7 +379,8 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     return hits
 
 async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None, show_thinking: bool = False) -> str:
-    system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"
+    now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
+    system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
         log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
