@@ -369,8 +369,8 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         audiobookshelf_pass=decrypt(user.audiobookshelf_pass_enc) if user.audiobookshelf_pass_enc else None,
         git_url=user.git_url,
         git_user=user.git_user,
-        git_token=decrypt(user.git_token_enc) if user.git_token_enc else None
-
+        git_token=decrypt(user.git_token_enc) if user.git_token_enc else None,
+        preferred_tts_voice=user.preferred_tts_voice or "af_heart"
     )
 
 @app.get("/health")
@@ -736,6 +736,26 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     return {"status": "SUCCESS", "message": f"Connected to GitLab as {resp.json().get('username')}"}
                 else:
                     return {"status": "ERROR", "message": f"GitLab returned {resp.status_code}"}
+
+            elif service == "Audiobookshelf":
+                url = config.get("audiobookshelf_url") or config.get("abs_url")
+                username = config.get("audiobookshelf_user") or config.get("abs_user")
+                password = config.get("audiobookshelf_pass") or config.get("abs_pass")
+                if not url:
+                    return {"status": "ERROR", "message": "URL is required"}
+                if not username or not password:
+                    return {"status": "ERROR", "message": "Username and Password are required"}
+
+                resp = await client.post(
+                    f"{url.rstrip('/')}/api/login",
+                    json={"username": username, "password": password}
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    user_info = data.get("user", {})
+                    return {"status": "SUCCESS", "message": f"Connected to Audiobookshelf as {user_info.get('username')}"}
+                else:
+                    return {"status": "ERROR", "message": f"Audiobookshelf returned {resp.status_code}: {resp.text[:100]}"}
 
             return {"status": "ERROR", "message": f"Service {service} not testable yet"}
             
