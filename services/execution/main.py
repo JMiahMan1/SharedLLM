@@ -883,20 +883,15 @@ async def execute_announce(req: AnnouncementRequest):
             log.warning(f"[announce] Playback NOT verified: {verification['detail']}")
             result = {"ok": False, "error": f"Playback not confirmed: {verification['detail']}", "verification": verification}
     
-    # 5. Wait for playback to complete (state returns to idle)
+    # 5. Quick confirmation via logbook (faster than polling state)
     if result.get("ok"):
-        log.info(f"[announce] Waiting for playback to complete...")
-        for _ in range(20):
-            await asyncio.sleep(1)
-            states = await ha_client.get_states(ha_url, ha_token) or []
-            for s in states:
-                if s.get("entity_id") == target_player:
-                    if s.get("state") in ("idle", "off", "unavailable"):
-                        log.info(f"[announce] Playback complete, state={s.get('state')}")
-                        break
-            else:
-                continue
-            break
+        try:
+            log_entries = await ha_client.get_logbook(ha_url, ha_token, target_player, days=1)
+            if log_entries:
+                latest = log_entries[-1]
+                log.info(f"[announce] Logbook confirms: {latest.get('state', '?')} - {latest.get('message', '')[:80]}")
+        except Exception as e:
+            log.debug(f"[announce] Logbook check skipped: {e}")
     
     # 6. Restore initial state if device was off
     if was_off and result.get("ok"):

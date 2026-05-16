@@ -241,6 +241,7 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
     """
     Resolve a human-readable device name to an HA entity_id.
     Searches all states for entities matching the device_name in their friendly_name or entity_id.
+    Prefers exact matches over partial matches.
     """
     if not ha_url or not device_name:
         return None
@@ -249,7 +250,7 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
     if not states:
         return None
     
-    search = device_name.lower()
+    search = device_name.lower().strip()
     candidates = []
     
     for state in states:
@@ -258,19 +259,39 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
             continue
         
         friendly_name = state.get("attributes", {}).get("friendly_name", "").lower()
+        eid_base = entity_id.lower().replace(f"{domain}.", "")
         
-        # Score: exact match in friendly_name or entity_id
+        # Score: exact match gets highest priority
         score = 0
-        if search in friendly_name:
+        
+        # Exact friendly name match (highest priority)
+        if friendly_name == search:
+            score += 100
+        # Exact entity_id base match (e.g., "office_tv" matches "media_player.office_tv")
+        elif eid_base == search.replace(" ", "_"):
+            score += 90
+        # Starts with search (e.g., "office tv" matches "office tv chrome")
+        elif friendly_name.startswith(search):
+            score += 50
+        elif eid_base.startswith(search.replace(" ", "_")):
+            score += 40
+        # Contains search (fallback)
+        elif search in friendly_name:
             score += 10
-        if search in entity_id.lower():
+        elif search.replace(" ", "_") in eid_base:
             score += 5
+        
         # Bonus for word-level matches
         for word in search.split():
             if word in friendly_name:
                 score += 3
-            if word in entity_id.lower():
+            if word in eid_base:
                 score += 2
+        
+        # Penalty for numeric suffixes (e.g., "office_tv_3" when searching "office tv")
+        if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_"):
+            if any(c.isdigit() for c in eid_base.split("_")[-1:]):
+                score -= 5
         
         if score > 0:
             candidates.append((score, entity_id))
