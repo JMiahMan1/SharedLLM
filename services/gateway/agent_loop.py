@@ -307,12 +307,8 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
             base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
             timeout=timeout
         )
-    elif active_provider == "llama_server":
-        return OllamaProvider(
-            base_url=settings.get("llama_server_proxy_url", "http://alpaca-proxy:11434"),
-            timeout=timeout
-        )
     else:
+        # Both ollama and llama_server use the same /api/chat compatible endpoint
         return OllamaProvider(
             base_url=settings.get("llm_local_url", OLLAMA_URL),
             timeout=timeout
@@ -380,12 +376,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 selected_model = settings.get("cloud_coding_model")
             else:
                 selected_model = settings.get("cloud_assistant_model")
-        elif active_provider_name == "llama_server":
-            if is_technical:
-                selected_model = settings.get("llama_server_coding_model") or settings.get("ollama_coding_model")
-            else:
-                selected_model = settings.get("llama_server_assistant_model") or settings.get("ollama_assistant_model")
         else:
+            # Both ollama and llama_server use the same model settings
             if is_technical:
                 selected_model = settings.get("ollama_coding_model") or settings.get("coding_model")
             else:

@@ -126,24 +126,15 @@ const LLMSettings: React.FC = () => {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Local Ollama URL</label>
+                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Local LLM URL</label>
                 <input 
                   type="text" 
                   value={getSetting('llm_local_url')} 
                   onChange={e => setDrafts({...drafts, llm_local_url: e.target.value})}
                   className="glass-input w-full text-xs"
-                  placeholder="http://localhost:11434"
+                  placeholder="http://llama-server:11434"
                 />
-              </div>
-              <div>
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">LLaMA Server Proxy URL</label>
-                <input 
-                  type="text" 
-                  value={getSetting('llama_server_proxy_url')} 
-                  onChange={e => setDrafts({...drafts, llama_server_proxy_url: e.target.value})}
-                  className="glass-input w-full text-xs"
-                  placeholder="http://alpaca-proxy:11434"
-                />
+                <p className="text-[9px] text-slate-600 mt-1">Works with Ollama, llama.cpp server, or any /api/chat compatible endpoint.</p>
               </div>
               <div>
                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Cloud API URL</label>
@@ -179,9 +170,9 @@ const LLMSettings: React.FC = () => {
 
         {/* Model Mappings */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Local Models */}
-            <div className={`glass-panel p-6 border-white/5 transition-opacity ${activeProvider !== 'ollama' ? 'opacity-50' : 'opacity-100'}`}>
+            <div className={`glass-panel p-6 border-white/5 transition-opacity ${activeProvider !== 'ollama' && activeProvider !== 'llama_server' ? 'opacity-50' : 'opacity-100'}`}>
               <div className="flex items-center gap-3 mb-6">
                 <Cpu size={20} className="text-orange-400" />
                 <h4 className="text-xs font-black uppercase tracking-widest text-white">Local Model Mapping</h4>
@@ -203,38 +194,6 @@ const LLMSettings: React.FC = () => {
                       className="glass-input w-full text-xs bg-black/40"
                     >
                       <option value="">Select Local Model</option>
-                      {availableModels.map(m => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* LLaMA Server Models */}
-            <div className={`glass-panel p-6 border-white/5 transition-opacity ${activeProvider !== 'llama_server' ? 'opacity-50' : 'opacity-100'}`}>
-              <div className="flex items-center gap-3 mb-6">
-                <Cpu size={20} className="text-amber-400" />
-                <h4 className="text-xs font-black uppercase tracking-widest text-white">LLaMA Server GGUF Mapping</h4>
-              </div>
-              <div className="space-y-6">
-                {[
-                  { label: 'Assistant (35B+)', key: 'llama_server_assistant_model', icon: Brain },
-                  { label: 'Coding (35B+)', key: 'llama_server_coding_model', icon: Code },
-                  { label: 'Librarian (35B+)', key: 'llama_server_librarian_model', icon: Library }
-                ].map(role => (
-                  <div key={role.key} className="glass-card p-4 bg-white/5">
-                    <div className="flex items-center gap-2 mb-3">
-                      <role.icon size={14} className="text-slate-500" />
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{role.label}</span>
-                    </div>
-                    <select
-                      value={getSetting(role.key)}
-                      onChange={e => setDrafts({...drafts, [role.key]: e.target.value})}
-                      className="glass-input w-full text-xs bg-black/40"
-                    >
-                      <option value="">Select LLaMA Server Model</option>
                       {availableModels.map(m => (
                         <option key={m} value={m}>{m}</option>
                       ))}
