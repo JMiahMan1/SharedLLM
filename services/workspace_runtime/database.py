@@ -43,6 +43,8 @@ def _migrate_workspace_table():
         if "excludes" not in columns:
             # Use TEXT for JSON storage in SQLite
             conn.execute(text("ALTER TABLE workspace ADD COLUMN excludes TEXT"))
+        if "is_default" not in columns:
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN is_default BOOLEAN DEFAULT 0"))
 
 
 def get_session():
