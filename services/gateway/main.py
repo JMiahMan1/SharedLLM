@@ -358,7 +358,9 @@ AUTONOMOUS_SIGNALS = (
     "fix the service", "fix the codebase", "fix the error", "auto-fix",
     "debug the system", "raven", "use raven", "dev loop", "agentic",
     "autonomous", "check container logs", "rebuild service", "deploy fix",
-    "repair", "execute fix", "fix it", "debug it", "fix the code", "apply the fix"
+    "repair", "execute fix", "fix it", "debug it", "fix the code", "apply the fix",
+    "audit the codebase", "sync workspace", "pull latest", "convert them to",
+    "review requirements", "check dependencies", "report any conflicts",
 )
 TTS_SIGNALS = (
   "tts", "audiobook", "read this", "make audible", "clean for speech", 
@@ -676,13 +678,9 @@ def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     if any(token in q for token in TTS_SIGNALS):
       return RAVEN_NARRATOR_PROTOCOL
     if any(token in q for token in AUTONOMOUS_SIGNALS):
-      if "raven" in q or "self repair" in q or "self-repair" in q:
-          return RAVEN_AUTONOMOUS_PROTOCOL
-      return AUTONOMOUS_EVOLUTION_AGENT_PROMPT
+      return RAVEN_AUTONOMOUS_PROTOCOL
     if any(token in q for token in CODING_SIGNALS):
       return CODE_HELPER_SYSTEM_INSTRUCTION
-    # Librarian is for research/knowledge queries. 
-    # For everything else, use the standard Librarian prompt which now includes hardware control.
     return ASSIST_SYSTEM_INSTRUCTION
 
 

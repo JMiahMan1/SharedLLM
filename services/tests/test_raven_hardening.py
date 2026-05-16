@@ -190,20 +190,22 @@ async def test_workspace_shell_allows_safe_read_only_commands(monkeypatch, tmp_p
 @pytest.mark.asyncio
 async def test_git_handler_allows_autonomous_commit(monkeypatch, tmp_path):
     """After removing the autonomous block, Raven can commit directly."""
-    # Use tmp_path workspace, NOT ~/SharedLLM
     monkeypatch.setattr(git_handler, "WORKSPACE_ROOT", str(tmp_path))
 
-    async def fake_branch():
+    async def fake_resolve_workspace(workspace_id=None):
+        return str(tmp_path)
+
+    async def fake_branch(cwd=None):
         return "main"
 
     async def fake_run_git(args, cwd=None, env_override=None):
-        # Simulate successful git commit
         return {
             "returncode": 0,
             "stdout": "abc123 commit message",
             "stderr": ""
         }
 
+    monkeypatch.setattr(git_handler, "_resolve_workspace_path", fake_resolve_workspace)
     monkeypatch.setattr(git_handler, "_get_current_branch", fake_branch)
     monkeypatch.setattr(git_handler, "_run_git", fake_run_git)
 
@@ -221,12 +223,15 @@ async def test_git_handler_allows_autonomous_commit(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_git_handler_blocks_reset_for_all_users(monkeypatch, tmp_path):
-    # Use tmp_path workspace, NOT ~/SharedLLM
     monkeypatch.setattr(git_handler, "WORKSPACE_ROOT", str(tmp_path))
 
-    async def fake_branch():
+    async def fake_resolve_workspace(workspace_id=None):
+        return str(tmp_path)
+
+    async def fake_branch(cwd=None):
         return "main"
 
+    monkeypatch.setattr(git_handler, "_resolve_workspace_path", fake_resolve_workspace)
     monkeypatch.setattr(git_handler, "_get_current_branch", fake_branch)
     req = GitOperationRequest(
         user_context=UserContext(user="admin", is_admin=True),
@@ -235,7 +240,6 @@ async def test_git_handler_blocks_reset_for_all_users(monkeypatch, tmp_path):
 
     result = await git_handler.handle_git(req)
 
-    # Handler returns dict for blocked actions
     status = result.status if hasattr(result, 'status') else result.get("status")
     detail = result.detail if hasattr(result, 'detail') else result.get("detail", {})
     assert status == "FAILURE"
