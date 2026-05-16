@@ -78,7 +78,8 @@ async def _resolve_workspace_path(workspace_id: Optional[str] = None) -> str:
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status_code == 200:
-                workspaces = resp.json()
+                data = resp.json()
+                workspaces = data.get("workspaces", []) if isinstance(data, dict) else data
                 
                 # First try to find the default workspace
                 for ws in workspaces:
