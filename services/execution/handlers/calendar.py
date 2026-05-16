@@ -102,6 +102,12 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             if not dt:
                 return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_add")
             
+            # Ensure datetime is aware in the user's configured timezone
+            local_tz = _get_local_tz()
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=local_tz)
+            dt_utc = dt.astimezone(tz.tzutc())
+            
             def _add():
                 client = provider.calendar_client()
                 calendars = client.principal().calendars()
@@ -120,9 +126,8 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                             break
                 if not selected: selected = calendars[0]
                 
-                dt_utc = dt.astimezone(tz.tzutc())
                 selected.save_event(dtstart=dt_utc, dtend=dt_utc + timedelta(hours=1), summary=req.summary)
-                return f"Added '{req.summary}' to {selected.name} for {dt.strftime('%I:%M %p')}."
+                return f"Added '{req.summary}' to {selected.name} for {dt.strftime('%Y-%m-%d %I:%M %p %Z')}."
 
             res_msg = await loop.run_in_executor(None, _add)
             return ExecutionResult(status="SUCCESS", message=res_msg, service="calendar_add")
