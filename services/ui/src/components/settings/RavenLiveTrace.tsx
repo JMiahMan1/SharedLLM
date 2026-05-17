@@ -85,6 +85,37 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
     }
   };
 
+  const renderLogData = (log: StreamEvent) => {
+    if (log.type === 'action_payload') {
+      try {
+        const parsed = JSON.parse(log.data);
+        return (
+          <div className="pl-6 mt-1 mb-2">
+            <div className="bg-white/5 border-l-2 border-yellow-500/50 p-3 rounded-r text-xs font-mono">
+              <pre className="whitespace-pre-wrap break-words text-yellow-300/80">
+                {JSON.stringify(parsed, null, 2)}
+              </pre>
+            </div>
+          </div>
+        );
+      } catch {
+        return (
+          <div className="pl-6 mt-1 mb-2">
+            <div className="bg-white/5 border-l-2 border-yellow-500/50 p-2 rounded-r text-xs">
+              {log.data}
+            </div>
+          </div>
+        );
+      }
+    }
+
+    if (log.type === 'reasoning') {
+      return <span className="italic opacity-80">{log.data}</span>;
+    }
+
+    return <span>{log.data}</span>;
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Raven Live Trace - Mission #${missionId}`} size="4xl">
       <div className="flex flex-col h-[600px] bg-black border border-white/10 rounded-lg overflow-hidden font-mono text-sm shadow-inner shadow-black/50">
@@ -116,16 +147,8 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
         >
           {logs.map((log, i) => (
             <div key={i} className={`whitespace-pre-wrap ${getLogColor(log.type)}`}>
-              <span className="opacity-50 select-none mr-2">[{new Date().toISOString().split('T')[1].slice(0,-1)}]</span>
-              {log.type === 'action_payload' ? (
-                <div className="pl-6 mt-1 mb-2">
-                  <div className="bg-white/5 border-l-2 border-yellow-500/50 p-2 rounded-r text-xs">
-                    {log.data}
-                  </div>
-                </div>
-              ) : (
-                <span>{log.data}</span>
-              )}
+              <span className="opacity-50 select-none mr-2 text-xs">[{new Date().toISOString().split('T')[1].slice(0, -1)}]</span>
+              {renderLogData(log)}
             </div>
           ))}
           {isConnected && (
