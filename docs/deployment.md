@@ -7,19 +7,19 @@ SharedLLM runs on a **two-machine architecture**:
 | Role | Machine | Purpose |
 |------|---------|---------|
 | **LLM Host** | Local machine (this machine) | Runs Ollama (`alpaca-proxy`), `llama-server`, `alpaca-indexer` |
-| **SharedLLM Server** | `192.168.2.205` (Jarvis) | Runs all SharedLLM microservices (gateway, execution, identity, RAG, etc.) |
+| **SharedLLM Server** | `ai.local` (mDNS — falls back to static IP when mDNS is unavailable) | Runs all SharedLLM microservices (gateway, execution, identity, RAG, etc.) |
 
 The LLM Host provides inference via `ollama-server` (port 11434) and `llama-server` (port 8080). The SharedLLM server connects to these via Docker `extra_hosts` mapping.
 
 ## Source vs Workspace
 
-**Critical rule**: The workspace (`/workspaces/system/sharedllm`) is for **runtime artifacts only** — git operations, file edits, and agent execution. It is **never** the source for building or deploying services.
+**Critical rule**: The workspace root (configured via `WORKSPACE_HOST_PATH` in your `.env`) is for **runtime artifacts only** — git operations, file edits, and agent execution. It is **never** the source for building or deploying services.
 
-All builds and deployments come from the **source repository** at `/home/jeremiah/SharedLLM` on the server.
+All builds and deployments come from the **source repository** — the directory where you cloned the project on the server (i.e., your local checkout, not the workspace runtime path).
 
 ```
-Source repo (build/deploy):  /home/jeremiah/SharedLLM
-Workspace (runtime only):    /home/jeremiah/workspaces/system/sharedllm
+Source repo (build/deploy):  <your cloned repo directory on the server>
+Workspace (runtime only):    <WORKSPACE_HOST_PATH from .env>
 ```
 
 ## Deployment Flow
@@ -31,8 +31,8 @@ git add -A && git commit -m "your message" && git push origin microservices
 
 ### 2. Pull and Deploy on Server
 ```bash
-ssh jeremiah@192.168.2.205
-cd /home/jeremiah/SharedLLM          # ← SOURCE REPO, NOT WORKSPACE
+ssh <server-user>@<server-host>       # values from your environment config
+cd <source-repo-directory>            # ← SOURCE REPO, NOT WORKSPACE
 git pull origin microservices
 bash scripts/deploy.sh               # auto-detects changed services
 ```
@@ -40,13 +40,13 @@ bash scripts/deploy.sh               # auto-detects changed services
 ### 3. Auto-Deploy (Post-Merge Hook)
 The repo has a post-merge hook that detects changes and auto-rebuilds affected services:
 ```bash
-cd /home/jeremiah/SharedLLM && git pull origin microservices
+cd <source-repo-directory> && git pull origin microservices
 # Auto-deploy runs automatically after merge
 ```
 
 ## What NOT to Do
 
-- **Never** run `docker compose up --build` from `/home/jeremiah/workspaces/system/sharedllm`
+- **Never** run `docker compose up --build` from the workspace root (`WORKSPACE_HOST_PATH`)
 - **Never** copy `.env` files into the workspace directory
 - **Never** treat the workspace as a build context
 - **Never** start Ollama on the server — it runs on the LLM Host only

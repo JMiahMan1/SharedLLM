@@ -24,7 +24,7 @@ def discover_prod_ip():
 
 PROD_IP = discover_prod_ip() or os.getenv("EXECUTION_EXTERNAL_HOST")
 if not PROD_IP:
-    raise RuntimeError("EXECUTION_EXTERNAL_HOST or docker-compose.yml ai-server IP is required")
+    raise RuntimeError("EXECUTION_EXTERNAL_HOST or docker-compose.yml extra_hosts entry is required (maps ai.local)")
 EXECUTION_URL = f"http://{PROD_IP}:8003"
 
 # Common User Context for testing

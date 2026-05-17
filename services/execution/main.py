@@ -1067,7 +1067,10 @@ async def execute_entity_search(req: EntitySearchRequest):
             "device_class": device_class,
             "area_id": area,
             "app_id": attrs.get("app_id", ""),
+            "source": attrs.get("source", ""),
+            "source_list": attrs.get("source_list", [])[:5],
             "supported_features": attrs.get("supported_features", 0),
+            "platform": _detect_media_platform(eid, attrs),
         })
     
     # Sort by relevance: exact matches first, then partial
@@ -1097,6 +1100,28 @@ async def execute_ha_service(req: HAServiceRequest):
     if result.get("ok"):
         return _ok(f"{req.domain}.{req.service} executed.", "ha_service")
     return _fail(f"Service call failed: {result.get('error')}", "ha_service", result)
+
+def _detect_media_platform(entity_id: str, attrs: dict) -> str:
+    """Detect the TV/media platform type from entity attributes."""
+    eid_lower = entity_id.lower()
+    app_id = (attrs.get("app_id") or "").lower()
+    source_list = [s.lower() for s in (attrs.get("source_list") or [])]
+    
+    platform_map = {
+        "roku": ["roku", "tcl", "sharp"],
+        "webos": ["webos", "lg_", "lg.webos"],
+        "samsung": ["samsung", "samsungtv", "tizen"],
+        "android_tv": ["androidtv", "android_tv", "com.google.android", "com.google.tv"],
+        "chromecast": ["chrome", "_cast", "backdrop"],
+        "bravia": ["bravia", "sony"],
+        "esphome": ["esphome"],
+        "dlna": ["dlna"],
+    }
+    for platform, indicators in platform_map.items():
+        for ind in indicators:
+            if ind in eid_lower or ind in app_id or any(ind in src for src in source_list):
+                return platform
+    return "unknown"
 
 @app.get("/discovery/entities")
 async def discovery_entities(ha_url: str, ha_token: str):
