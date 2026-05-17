@@ -74,7 +74,7 @@ async def discover_device(
     if result:
         return result
 
-    result = await _discover_via_network_scan(entity_id, device_type, subnet)
+    result = await _discover_via_network_scan(entity_id, ha_url, ha_token, device_type, subnet)
     if result:
         return result
 
@@ -358,7 +358,7 @@ async def _discover_via_ssdp(
 
 
 async def _discover_via_network_scan(
-    entity_id: str, device_type: Optional[str] = None, subnet: str = DEFAULT_SUBNET
+    entity_id: str, ha_url: str, ha_token: str, device_type: Optional[str] = None, subnet: str = DEFAULT_SUBNET
 ) -> Optional[dict]:
     """Scan subnet for device by probing known ports.
 
@@ -370,9 +370,7 @@ async def _discover_via_network_scan(
     import ipaddress
 
     try:
-        ha_url_env = os.environ.get("HA_URL", "")
-        ha_token_env = os.environ.get("HA_TOKEN", "")
-        state = await ha_client.get_state(ha_url_env, ha_token_env, entity_id)
+        state = await ha_client.get_state(ha_url, ha_token, entity_id)
         friendly = ""
         if state:
             friendly = state.get("attributes", {}).get("friendly_name", "").lower()
