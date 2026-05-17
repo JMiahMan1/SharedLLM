@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter } from 'lucide-react';
+import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { HealthStatus, LogEntry, SmokeTestResult, Workspace } from '../services/api';
@@ -303,6 +303,33 @@ const MissionsPane = () => {
     onError: (err: any) => toast.error(err.message || 'Failed to kill mission'),
   });
 
+  const deleteMissionMutation = useMutation({
+    mutationFn: (id: number) => api.deleteRavenMission(id),
+    onSuccess: () => {
+      toast.success('Mission Deleted');
+      refetch();
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to delete mission'),
+  });
+
+  const pauseMissionMutation = useMutation({
+    mutationFn: (id: number) => api.pauseRavenMission(id),
+    onSuccess: () => {
+      toast.success('Mission Paused');
+      refetch();
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to pause mission'),
+  });
+
+  const resumeMissionMutation = useMutation({
+    mutationFn: (id: number) => api.resumeRavenMission(id),
+    onSuccess: () => {
+      toast.success('Mission Resumed');
+      refetch();
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to resume mission'),
+  });
+
   const filteredMissions = statusFilter === 'all'
     ? missions
     : missions.filter((m: any) => m.status === statusFilter);
@@ -364,7 +391,7 @@ const MissionsPane = () => {
       <div className="flex items-center gap-2 mb-4">
         <Filter size={14} className="text-slate-500" />
         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Filter:</span>
-        {['all', 'executing', 'completed', 'failed', 'pending'].map(s => (
+        {['all', 'executing', 'paused', 'completed', 'failed', 'pending'].map(s => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
@@ -419,17 +446,46 @@ const MissionsPane = () => {
                         <Eye size={12} /> Watch Live
                       </button>
                       <button
+                        onClick={() => pauseMissionMutation.mutate(mission.id)}
+                        disabled={pauseMissionMutation.isPending}
+                        className="glass-button bg-yellow-500/10 border-yellow-500/20 text-yellow-300 hover:bg-yellow-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                      >
+                        <Pause size={12} /> Pause
+                      </button>
+                      <button
                         onClick={() => {
                           if (confirm(`Abort mission #${mission.id}?`)) {
                             killMissionMutation.mutate(mission.id);
                           }
                         }}
                         disabled={killMissionMutation.isPending}
-                        className="glass-button bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
+                        className="glass-button bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
                       >
                         Stop
                       </button>
                     </>
+                  )}
+                  {mission.status === 'paused' && (
+                    <button
+                      onClick={() => resumeMissionMutation.mutate(mission.id)}
+                      disabled={resumeMissionMutation.isPending}
+                      className="glass-button bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                    >
+                      <PlayCircle size={12} /> Resume
+                    </button>
+                  )}
+                  {(mission.status === 'completed' || mission.status === 'failed') && (
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete mission #${mission.id}? This cannot be undone.`)) {
+                          deleteMissionMutation.mutate(mission.id);
+                        }
+                      }}
+                      disabled={deleteMissionMutation.isPending}
+                      className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                    >
+                      <Trash2 size={12} /> Delete
+                    </button>
                   )}
                 </div>
               </div>
