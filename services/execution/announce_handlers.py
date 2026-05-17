@@ -203,45 +203,31 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
     })
 
 async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Roku uses Media Assistant app (ID 782875) via roku.launch service."""
+    """Roku: try media_player.play_media directly, then remote.send_command for Home."""
     from ha_client import call_service
-    log.info(f"[announce.roku] Launching Media Assistant on {entity_id}")
+    log.info(f"[announce.roku] Trying play_media on {entity_id}")
     
-    # Launch Media Assistant app using roku.launch service
-    result = await call_service(ha_url, ha_token, "roku", "launch", entity_id, {
-        "app_id": "782875"
+    # Roku Media Assistant can play direct URLs via media_player.play_media
+    result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
+        "media_content_id": media_url,
+        "media_content_type": "audio/wav"
     })
+    
     if result.get("ok"):
-        await asyncio.sleep(3.0)
-        
-        # Send media URL to Media Assistant via media_player.play_media
-        play_result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-            "media_content_id": media_url,
-            "media_content_type": "audio/wav"
-        })
-        
-        NON_PLAYING_STATES = ("idle", "off", "standby", "unavailable", "unknown")
-        if state in NON_PLAYING_STATES:
-            prev_app = (attributes or {}).get("app_id") if attributes else None
-            prev_source = (attributes or {}).get("source") if attributes else None
-            await asyncio.sleep(5.0)
-            if prev_app and prev_app != "782875":
-                log.info(f"[announce.roku] Device was '{state}' with app '{prev_app}', restoring previous app")
-                await call_service(ha_url, ha_token, "roku", "launch", entity_id, {
-                    "app_id": prev_app
-                })
-            elif prev_source and prev_source.lower() in ROKU_SOURCES:
-                log.info(f"[announce.roku] Device was '{state}' on source '{prev_source}', restoring to home")
-                await call_service(ha_url, ha_token, "media_player", "select_source", entity_id, {
-                    "source": prev_source,
-                })
-            else:
-                log.info(f"[announce.roku] Device was '{state}' with no prior app, returning to home")
-                await call_service(ha_url, ha_token, "roku", "press", entity_id, {
-                    "key": "Home"
-                })
-        return play_result
-    return result
+        return result
+    
+    # Fallback: try launching Media Assistant app via remote entity
+    remote_entity = entity_id.replace("media_player.", "remote.")
+    log.info(f"[announce.roku] Launching Media Assistant via remote on {remote_entity}")
+    await call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {
+        "command": "Home"
+    })
+    await asyncio.sleep(2.0)
+    
+    return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
+        "media_content_id": media_url,
+        "media_content_type": "audio/wav"
+    })
 
 async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
     """webOS TV: try webostv.notify, then media_player as fallback."""
@@ -256,7 +242,7 @@ async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: 
     if result.get("ok"):
         return result
     
-    log.info(f"[announce.webos] Falling back to media_player.play_media")
+    log.info("[announce.webos] Falling back to media_player.play_media")
     return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "url"
@@ -276,7 +262,7 @@ async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_
         return result
     
     # Try ADB to launch media player
-    log.info(f"[announce.android_tv] Trying ADB command to launch media")
+    log.info("[announce.android_tv] Trying ADB command to launch media")
     await call_service(ha_url, ha_token, "androidtv", "adb_command", entity_id, {"command": "HOME"})
     await asyncio.sleep(1)
     
@@ -285,7 +271,7 @@ async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_
     })
 
 async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Samsung Tizen TV."""
+    """Samsung Tizen TV: try play_media, then samsungtv.send_key fallback."""
     from ha_client import call_service
     log.info(f"[announce.samsung] Trying play_media on {entity_id}")
     
@@ -297,9 +283,10 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
     if result.get("ok"):
         return result
     
-    return await call_service(ha_url, ha_token, "samsungtv", "send_command", entity_id, {
-        "method": "ms.remote.control",
-        "params": {"Cmd": "Play"}
+    # Fallback: use samsungtv send_key to trigger playback
+    log.info(f"[announce.samsung] Falling back to samsungtv.send_key on {entity_id}")
+    return await call_service(ha_url, ha_token, "samsungtv", "send_key", entity_id, {
+        "key": "KEY_PLAY"
     })
 
 async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
