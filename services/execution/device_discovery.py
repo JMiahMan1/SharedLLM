@@ -526,28 +526,32 @@ async def bulk_scan(
 
     media_states = [s for s in all_states if s["entity_id"].startswith("media_player.")]
 
+    # Limit concurrency to avoid overwhelming HA with simultaneous get_state calls
+    semaphore = asyncio.Semaphore(5)
+
     async def _scan_one(state: dict):
-        entity_id = state["entity_id"]
-        attrs = state.get("attributes", {})
-        integration = attrs.get("integration", "")
-        device_type = None
-        if "roku" in entity_id.lower() or integration == "roku":
-            device_type = "roku"
-        elif "webos" in entity_id.lower() or integration == "webostv":
-            device_type = "webos"
-        elif "samsung" in entity_id.lower() or integration == "samsungtv":
-            device_type = "samsung"
-        elif "android" in entity_id.lower() or integration == "androidtv":
-            device_type = "androidtv"
-        elif "cast" in entity_id.lower() or "chrome" in entity_id.lower() or integration == "cast":
-            device_type = "cast"
-        elif "esphome" in entity_id.lower() or integration == "esphome":
-            device_type = "esphome"
-        elif "mqtt" in entity_id.lower() or integration == "mqtt":
-            device_type = "mqtt"
-        return await discover_device(
-            entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
-        )
+        async with semaphore:
+            entity_id = state["entity_id"]
+            attrs = state.get("attributes", {})
+            integration = attrs.get("integration", "")
+            device_type = None
+            if "roku" in entity_id.lower() or integration == "roku":
+                device_type = "roku"
+            elif "webos" in entity_id.lower() or integration == "webostv":
+                device_type = "webos"
+            elif "samsung" in entity_id.lower() or integration == "samsungtv":
+                device_type = "samsung"
+            elif "android" in entity_id.lower() or integration == "androidtv":
+                device_type = "androidtv"
+            elif "cast" in entity_id.lower() or "chrome" in entity_id.lower() or integration == "cast":
+                device_type = "cast"
+            elif "esphome" in entity_id.lower() or integration == "esphome":
+                device_type = "esphome"
+            elif "mqtt" in entity_id.lower() or integration == "mqtt":
+                device_type = "mqtt"
+            return await discover_device(
+                entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
+            )
 
     results = await asyncio.gather(*[_scan_one(s) for s in media_states], return_exceptions=True)
     return [r for r in results if r and not isinstance(r, Exception)]
