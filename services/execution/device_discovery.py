@@ -543,34 +543,79 @@ async def bulk_scan(
 
     media_states = [s for s in all_states if s["entity_id"].startswith("media_player.")]
 
-    # Limit concurrency to avoid overwhelming HA with simultaneous get_state calls
+    # Step 1: Scan subnet once to build IP -> device map
+    log.info(f"[discovery] Scanning subnet {subnet} for devices...")
+    import httpx
+    import ipaddress
+    device_map = {}  # ip -> {type, metadata}
+    
+    all_ports = set()
+    for ports in DEVICE_PORTS.values():
+        for port, _ in ports:
+            all_ports.add(port)
+    port_list = sorted(all_ports)
+    
+    candidates = [
+        str(ip) for ip in ipaddress.IPv4Network(subnet)
+        if not str(ip).endswith(".0") and not str(ip).endswith(".255")
+    ]
+    
+    batch_size = 30
+    async with httpx.AsyncClient(verify=False) as client:
+        for i in range(0, len(candidates), batch_size):
+            batch = candidates[i:i + batch_size]
+            tasks = []
+            task_map = []
+            for ip in batch:
+                for port in port_list:
+                    tasks.append(_probe_port(client, ip, port))
+                    task_map.append((ip, port))
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for (ip, port), resp in zip(task_map, results):
+                if isinstance(resp, dict) and resp.get("ip") and ip not in device_map:
+                    metadata = resp.get("metadata", {})
+                    device_map[ip] = {
+                        "type": metadata.get("type", "unknown"),
+                        "metadata": metadata,
+                    }
+    
+    log.info(f"[discovery] Found {len(device_map)} devices on network: {list(device_map.keys())}")
+    
+    # Step 2: Match entities to discovered devices
     semaphore = asyncio.Semaphore(5)
-
+    
     async def _scan_one(state: dict):
         async with semaphore:
             entity_id = state["entity_id"]
             attrs = state.get("attributes", {})
             integration = attrs.get("integration", "")
-            device_type = None
-            if "roku" in entity_id.lower() or integration == "roku":
-                device_type = "roku"
-            elif "webos" in entity_id.lower() or integration == "webostv":
-                device_type = "webos"
-            elif "samsung" in entity_id.lower() or integration == "samsungtv":
-                device_type = "samsung"
-            elif "android" in entity_id.lower() or integration == "androidtv":
-                device_type = "androidtv"
-            elif "cast" in entity_id.lower() or "chrome" in entity_id.lower() or integration == "cast":
-                device_type = "cast"
-            elif "esphome" in entity_id.lower() or integration == "esphome":
-                device_type = "esphome"
-            elif "tasmota" in entity_id.lower() or integration == "tasmota":
-                device_type = "tasmota"
-            elif "mqtt" in entity_id.lower() or integration == "mqtt":
-                device_type = "mqtt"
-            return await discover_device(
-                entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
-            )
+            entity_lower = entity_id.lower()
+            friendly = (attrs.get("friendly_name") or "").lower()
+            
+            # Try HA registry and entity attrs first
+            result = await _discover_via_ha_registry(entity_id, ha_url, ha_token, None)
+            if result:
+                return result
+            result = await _discover_via_entity_attrs(entity_id, ha_url, ha_token)
+            if result:
+                return result
+            
+            # Match to discovered device by type
+            for ip, dev_info in device_map.items():
+                dev_type = dev_info["type"]
+                if dev_type in entity_lower or dev_type == integration.lower():
+                    await device_registry.set_device(
+                        entity_id,
+                        ip=ip,
+                        friendly_name=attrs.get("friendly_name", ""),
+                        discovery_method="network_scan",
+                        metadata=dev_info["metadata"],
+                    )
+                    log.info(f"[discovery] Matched {entity_id} to {ip} (type={dev_type})")
+                    return await device_registry.get_device(entity_id)
+            
+            log.warning(f"[discovery] All strategies failed for {entity_id}")
+            return None
 
     results = await asyncio.gather(*[_scan_one(s) for s in media_states], return_exceptions=True)
     return [r for r in results if r and not isinstance(r, Exception)]
