@@ -388,6 +388,7 @@ async def _discover_via_network_scan(
             model = (metadata.get("model") or "").lower()
             serial = (metadata.get("serial") or "").lower()
             device_name = (metadata.get("device_name") or "").lower()
+            device_type = (metadata.get("type") or "").lower()
 
             if not friendly and not entity_base:
                 return True
@@ -401,6 +402,12 @@ async def _discover_via_network_scan(
                 if len(word) > 2 and word in searchable:
                     log.info(f"[discovery] Name match for {entity_id}: '{word}' found in '{searchable}'")
                     return True
+
+            # Accept if entity type matches probed device type
+            if device_type and device_type in entity_id.lower():
+                log.info(f"[discovery] Type match for {entity_id}: '{device_type}' in entity_id")
+                return True
+
             log.info(f"[discovery] Name mismatch for {entity_id}: friendly='{friendly}' entity_base='{entity_base}' searchable='{searchable}'")
             return False
 
@@ -449,31 +456,31 @@ async def _probe_port(client, ip: str, port: int) -> dict:
                     root = ET.fromstring(resp.content)
                     serial = root.findtext("serial-number", "")
                     model = root.findtext("model-name", "")
-                    return {"ip": ip, "metadata": {"serial": serial, "model": model}}
+                    return {"ip": ip, "metadata": {"serial": serial, "model": model, "type": "roku"}}
                 except ET.ParseError:
-                    return {"ip": ip}
+                    return {"ip": ip, "metadata": {"type": "roku"}}
         elif port == 3000:
             resp = await client.get(f"http://{ip}:3000", timeout=1)
             if resp.status_code == 200:
-                return {"ip": ip}
+                return {"ip": ip, "metadata": {"type": "webos"}}
         elif port == 8001:
             resp = await client.get(f"http://{ip}:8001/api/v2/", timeout=1)
             if resp.status_code == 200:
                 try:
                     info = resp.json()
-                    return {"ip": ip, "metadata": {"model": info.get("device", {}).get("modelName", "")}}
+                    return {"ip": ip, "metadata": {"model": info.get("device", {}).get("modelName", ""), "type": "samsung"}}
                 except Exception:
-                    return {"ip": ip}
+                    return {"ip": ip, "metadata": {"type": "samsung"}}
         elif port == 8009:
             resp = await client.get(f"http://{ip}:8009/setup/eureka_info", timeout=1)
             if resp.status_code == 200:
-                return {"ip": ip}
+                return {"ip": ip, "metadata": {"type": "cast"}}
         elif port == 5555:
             try:
                 _, writer = await asyncio.open_connection(ip, port)
                 writer.close()
                 await writer.wait_closed()
-                return {"ip": ip}
+                return {"ip": ip, "metadata": {"type": "androidtv"}}
             except Exception:
                 pass
         elif port == 80:
