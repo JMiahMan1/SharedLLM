@@ -453,11 +453,7 @@ const MissionsPane = () => {
                         <Pause size={12} /> Pause
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm(`Abort mission #${mission.id}?`)) {
-                            killMissionMutation.mutate(mission.id);
-                          }
-                        }}
+                        onClick={() => killMissionMutation.mutate(mission.id)}
                         disabled={killMissionMutation.isPending}
                         className="glass-button bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
                       >
@@ -476,11 +472,7 @@ const MissionsPane = () => {
                   )}
                   {(mission.status === 'completed' || mission.status === 'failed') && (
                     <button
-                      onClick={() => {
-                        if (confirm(`Delete mission #${mission.id}? This cannot be undone.`)) {
-                          deleteMissionMutation.mutate(mission.id);
-                        }
-                      }}
+                      onClick={() => deleteMissionMutation.mutate(mission.id)}
                       disabled={deleteMissionMutation.isPending}
                       className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
                     >
