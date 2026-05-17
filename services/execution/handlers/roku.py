@@ -120,18 +120,17 @@ async def get_roku_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:
     try:
         import ipaddress
         async with httpx.AsyncClient(verify=False) as client:
-            local_net = ipaddress.IPv4Network("192.168.2.0/24")
-            for ip in local_net:
-                ip_str = str(ip)
-                if ip_str.endswith(".0") or ip_str.endswith(".255"):
-                    continue
-                try:
-                    resp = await client.get(f"http://{ip_str}:8060/query/device-info", timeout=2)
-                    if resp.status_code == 200 and b"roku" in resp.content.lower():
-                        log.info(f"[roku] Found Roku via network scan: {ip_str}")
-                        return ip_str
-                except Exception:
-                    pass
+            candidates = [str(ip) for ip in ipaddress.IPv4Network("192.168.2.0/24")
+                          if not str(ip).endswith(".0") and not str(ip).endswith(".255")]
+            batch_size = 30
+            for i in range(0, len(candidates), batch_size):
+                batch = candidates[i:i + batch_size]
+                tasks = [client.get(f"http://{ip}:8060/query/device-info", timeout=1) for ip in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for ip, resp in zip(batch, results):
+                    if not isinstance(resp, Exception) and resp.status_code == 200 and b"roku" in resp.content.lower():
+                        log.info(f"[roku] Found Roku via network scan: {ip}")
+                        return ip
     except Exception as e:
         log.warning(f"[roku] Network scan failed: {e}")
     
