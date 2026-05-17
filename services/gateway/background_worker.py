@@ -647,7 +647,6 @@ class RavenWorker:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(
                         f"{EXECUTION_SVC}/discovery/entities",
-                        params={"ha_url": ha_url, "ha_token": ha_token},
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
                     if resp.status_code != 200:
