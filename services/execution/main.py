@@ -932,8 +932,20 @@ async def execute_announce(req: AnnouncementRequest):
     # 1. Power on if needed
     if was_off:
         log.info(f"[announce] Device was {initial_state.get('state')}, turning on...")
-        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
-        await asyncio.sleep(2.0)
+        # Detect device type for platform-specific power-on
+        from announce_handlers import detect_tv_type
+        attrs = initial_state.get("attributes", {}) if initial_state else {}
+        initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
+        device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
+        
+        # Samsung TVs need KEY_POWER via samsungtv service and longer wait
+        if device_type == "samsung":
+            log.info(f"[announce] Using samsungtv.send_key KEY_POWER for {target_player}")
+            await ha_client.call_service(ha_url, ha_token, "samsungtv", "send_key", target_player, {"key": "KEY_POWER"})
+            await asyncio.sleep(8.0)  # Samsung TVs take longer to boot
+        else:
+            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
+            await asyncio.sleep(2.0)
     
     # 2. Set volume
     await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
