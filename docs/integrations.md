@@ -95,27 +95,57 @@ AirPlay, Cast, etc.).
 
 ---
 
-## 3. Roku Integration (`StandardIntegration` / `RokuIntegration`)
+## 3. Roku Integration (`roku.py` / `media_assistant_roku.py`)
 
 **Target Devices**: All Roku TVs and streaming players.
 
-### Roku: Features
+### Roku: Architecture
 
-* **Music Assistant Delegation**: When a music intent is detected for a Roku, the
-  system launches the **Media Assistant Channel (782875)** via ECP to provide a
-  visual UI, while delegating high-quality audio streaming to Music Assistant.
-* **ECP Playback Control**: Standard playback commands (Play, Pause, Stop) are
-  sent via Roku's External Control Protocol.
-* **Intelligent Query Cleaning**: Content searches are cleaned to remove room
-  names and prepositions, ensuring accurate YouTube or Music Assistant searches.
+Roku uses a **two-part approach** for music playback because Roku devices do NOT
+support direct URL streaming via `media_player.play_media`:
+
+1. **ECP Launch (UI)**: Launches the **Media Assistant Channel (782875)** on the
+   Roku device via HTTP POST to `http://{roku_ip}:8060/launch/782875` with params:
+   - `t=a` — Audio mode (triggers rich music UI)
+   - `autoplay=true` — Auto-start playback
+   - `songName`, `artistName`, `albumArt` — Metadata for display
+
+2. **MA Sibling Delegation (Audio)**: Finds the Music Assistant player entity
+   that is a sibling of the Roku entity (same friendly name, has `active_queue`
+   or `mass_player_type` attribute), then calls
+   `music_assistant/play_media` on that entity for actual audio streaming.
+
+### Roku: Key Functions (`services/execution/handlers/roku.py`)
+
+| Function | Purpose |
+| :--- | :--- |
+| `is_roku_device()` | Detects Roku via entity_id patterns, app_id, source_list |
+| `get_roku_ip()` | Discovers Roku IP via HA device registry or SSDP broadcast |
+| `find_ma_player_sibling()` | Finds MA player entity by matching friendly_name + MA attributes |
+| `roku_play_music()` | Orchestrates ECP launch + MA audio delegation |
+| `roku_press()` / `roku_launch()` | Transport commands via HA roku domain |
+
+### Roku: ECP Parameters
+
+| Param | Value | Purpose |
+| :--- | :--- | :--- |
+| `t` | `a` (audio) / `v` (video) | Media type mode |
+| `autoplay` | `true` | Auto-start playback |
+| `songName` | Track title | Displayed on Roku UI |
+| `artistName` | Artist name | Displayed on Roku UI |
+| `albumArt` | Image URL | Album art on Roku UI |
+| `u` | Stream URL | Direct URL (video only, NOT for music/library URIs) |
+| `videoName` | Video title | Displayed for video |
+| `videoFormat` | `mp4` / `hls` | Video format hint |
 
 ### Roku: User Guide & Voice Commands
 
 | Intent | Natural Speech Example | What Happens |
 | :--- | :--- | :--- |
-| **Play Music** | "Play Brandon Lake on Gracies TV" | Launches MA App on Roku + Starts MA audio stream. |
-| **App Launch** | "Open Netflix on the Bedroom TV" | Sends ECP launch command for specific app ID. |
-| **Navigation** | "Go down", "Select", "Go Home" | Sends standard remote control codes via ECP. |
+| **Play Music** | "Play Brandon Lake on Gracies TV" | 1. Finds Roku IP; 2. Launches MA App via ECP; 3. Finds MA player sibling; 4. Delegates audio to MA |
+| **App Launch** | "Open Netflix on the Bedroom TV" | Sends ECP launch command for specific app ID |
+| **Navigation** | "Go down", "Select", "Go Home" | Sends standard remote control codes via ECP |
+| **Video** | "Watch a fireplace video on Gracies TV" | yt-dlp resolves URL → local stream → ECP launch with `t=v` |
 
 ---
 
