@@ -5,6 +5,7 @@ Manages ChromaDB for vector search and ingestion.
 """
 import os
 import sys
+import json
 import logging
 import time
 import hashlib
@@ -410,12 +411,25 @@ async def sync_ha(payload: dict, user_id: Optional[str] = None):
         area = attrs.get("area_id") or "unassigned area"
         device_class = attrs.get("device_class", "")
         supported = attrs.get("supported_features", 0)
-        is_active = state.lower() in ACTIVE_STATES
         
-        # Store metadata only — state is fetched live from HA at query time
+        # Device registry enrichment
+        dev_ip = attrs.get("_device_ip", "")
+        dev_mac = attrs.get("_device_mac", "")
+        dev_hostname = attrs.get("_device_hostname", "")
+        dev_method = attrs.get("_device_discovery_method", "")
+        dev_last_verified = attrs.get("_device_last_verified", 0)
+        dev_metadata = attrs.get("_device_metadata", {})
+        
+        # Build content string (semantic search text)
         content = f"Device: {fname} (ID: {eid}) | Area: {area} | Type: {eid.split('.')[0]}"
         if device_class:
             content += f" | Device Class: {device_class}"
+        if dev_ip:
+            content += f" | IP: {dev_ip}"
+        if dev_mac:
+            content += f" | MAC: {dev_mac}"
+        if dev_hostname:
+            content += f" | Hostname: {dev_hostname}"
         
         cid = f"ha:{eid}"
         created_at = now
@@ -437,7 +451,14 @@ async def sync_ha(payload: dict, user_id: Optional[str] = None):
             "domain": eid.split(".")[0],
             "updated_at": now,
             "created_at": created_at,
-            "indexed_at": now_ts
+            "indexed_at": now_ts,
+            # Device registry fields (for structured filtering)
+            "device_ip": dev_ip,
+            "device_mac": dev_mac,
+            "device_hostname": dev_hostname,
+            "device_discovery_method": dev_method,
+            "device_last_verified": str(dev_last_verified) if dev_last_verified else "",
+            "device_metadata": json.dumps(dev_metadata) if dev_metadata else "",
         })
     
     if docs:

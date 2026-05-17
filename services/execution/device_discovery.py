@@ -3,13 +3,13 @@
 Multi-strategy device network discovery module.
 
 Discovers IP, MAC, and hostname for HA entities using ordered strategies:
-1. Persistent registry cache
+1. Persistent registry cache (aiosqlite, instant)
 2. HA device registry (REST API) + ESPHome config entries
 3. HA entity attributes (some integrations expose IP/MAC directly)
 4. ARP table scan (requires host network mode)
 5. mDNS/Bonjour resolution (.local hostnames from entity_id)
 6. SSDP broadcast (Roku, DLNA, Chromecast)
-7. Batched network port scan (fallback)
+7. Batched network port scan (fallback, slowest)
 
 Each strategy is independent and can be called individually or as a pipeline.
 Discovered info is automatically persisted to the device registry.
@@ -49,7 +49,7 @@ async def discover_device(
 ) -> Optional[dict]:
     """Full discovery pipeline. Returns device info dict or None."""
     if use_cache:
-        cached = device_registry.get_device(entity_id)
+        cached = await device_registry.get_device(entity_id)
         if cached and cached.get("ip") and not cached.get("ip_stale"):
             log.info(f"[discovery] Cache hit for {entity_id}: {cached['ip']}")
             return cached
@@ -101,7 +101,10 @@ async def _discover_via_ha_registry(
             if resp.status_code != 200:
                 return None
 
-            for entry in resp.json():
+            entries = resp.json()
+            device_registry_list = None
+
+            for entry in entries:
                 domain = entry.get("domain", "")
                 title = (entry.get("title") or "").lower()
                 entity_lower = entity_id.lower()
@@ -122,18 +125,24 @@ async def _discover_via_ha_registry(
                     continue
 
                 mac = None
-                try:
-                    dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
-                    if dev_resp.status_code == 200:
-                        for dev in dev_resp.json():
-                            config_entries = dev.get("config_entries", [])
-                            if entry["entry_id"] in config_entries:
-                                for conn in dev.get("connections", []):
-                                    if conn and conn[0] == "mac":
-                                        mac = conn[1]
-                                        break
-                except Exception:
-                    pass
+                if device_registry_list is None:
+                    try:
+                        dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
+                        if dev_resp.status_code == 200:
+                            device_registry_list = dev_resp.json()
+                    except Exception:
+                        device_registry_list = []
+
+                if device_registry_list:
+                    for dev in device_registry_list:
+                        config_entries = dev.get("config_entries", [])
+                        if entry["entry_id"] in config_entries:
+                            for conn in dev.get("connections", []):
+                                if conn and conn[0] == "mac":
+                                    mac = conn[1]
+                                    break
+                        if mac:
+                            break
 
                 hostname = None
                 try:
@@ -141,7 +150,7 @@ async def _discover_via_ha_registry(
                 except Exception:
                     pass
 
-                device_registry.set_device(
+                await device_registry.set_device(
                     entity_id,
                     ip=host,
                     mac=mac,
@@ -151,7 +160,7 @@ async def _discover_via_ha_registry(
                     discovery_method="ha_registry",
                 )
                 log.info(f"[discovery] Found {entity_id} via HA registry: ip={host} mac={mac}")
-                return device_registry.get_device(entity_id)
+                return await device_registry.get_device(entity_id)
     except Exception as e:
         log.warning(f"[discovery] HA registry lookup failed: {e}")
 
@@ -176,7 +185,7 @@ async def _discover_via_ha_registry(
                                any(part in title for part in friendly_lower.split() if len(part) > 2):
                                 host = entry.get("data", {}).get("host")
                                 if host:
-                                    device_registry.set_device(
+                                    await device_registry.set_device(
                                         entity_id,
                                         ip=host,
                                         friendly_name=friendly_name,
@@ -184,7 +193,7 @@ async def _discover_via_ha_registry(
                                         discovery_method="ha_esphome_config",
                                     )
                                     log.info(f"[discovery] Found {entity_id} via ESPHome config: ip={host}")
-                                    return device_registry.get_device(entity_id)
+                                    return await device_registry.get_device(entity_id)
         except Exception as e:
             log.warning(f"[discovery] ESPHome config lookup failed: {e}")
 
@@ -205,7 +214,7 @@ async def _discover_via_entity_attrs(
         mac = attrs.get("mac_address") or attrs.get("mac")
 
         if ip or mac:
-            device_registry.set_device(
+            await device_registry.set_device(
                 entity_id,
                 ip=ip,
                 mac=mac,
@@ -215,7 +224,7 @@ async def _discover_via_entity_attrs(
                 discovery_method="entity_attributes",
             )
             log.info(f"[discovery] Found {entity_id} via entity attrs: ip={ip} mac={mac}")
-            return device_registry.get_device(entity_id)
+            return await device_registry.get_device(entity_id)
     except Exception as e:
         log.warning(f"[discovery] Entity attr lookup failed: {e}")
     return None
@@ -248,7 +257,7 @@ async def _discover_via_arp(
 
             if (friendly and any(word in hostname_part for word in friendly.split() if len(word) > 2)) or \
                (entity_base and any(word in hostname_part for word in entity_base.split() if len(word) > 2)):
-                device_registry.set_device(
+                await device_registry.set_device(
                     entity_id,
                     ip=ip_part,
                     mac=mac_part,
@@ -257,7 +266,7 @@ async def _discover_via_arp(
                     discovery_method="arp",
                 )
                 log.info(f"[discovery] Found {entity_id} via ARP: ip={ip_part} mac={mac_part}")
-                return device_registry.get_device(entity_id)
+                return await device_registry.get_device(entity_id)
     except Exception as e:
         log.warning(f"[discovery] ARP lookup failed: {e}")
     return None
@@ -282,7 +291,7 @@ async def _discover_via_mdns(
         for hostname in candidates:
             try:
                 ip = socket.gethostbyname(hostname)
-                device_registry.set_device(
+                await device_registry.set_device(
                     entity_id,
                     ip=ip,
                     hostname=hostname.rstrip(".local"),
@@ -290,7 +299,7 @@ async def _discover_via_mdns(
                     discovery_method="mdns",
                 )
                 log.info(f"[discovery] Found {entity_id} via mDNS: {hostname} -> {ip}")
-                return device_registry.get_device(entity_id)
+                return await device_registry.get_device(entity_id)
             except socket.gaierror:
                 continue
     except Exception as e:
@@ -331,13 +340,13 @@ async def _discover_via_ssdp(
                         data, addr = sock.recvfrom(4096)
                         if (device_type == "roku" or not device_type) and b"Roku" in data:
                             sock.close()
-                            device_registry.set_device(
+                            await device_registry.set_device(
                                 entity_id,
                                 ip=addr[0],
                                 discovery_method="ssdp",
                             )
                             log.info(f"[discovery] Found {entity_id} via SSDP (Roku): {addr[0]}")
-                            return device_registry.get_device(entity_id)
+                            return await device_registry.get_device(entity_id)
                     except sock_module.timeout:
                         break
                 sock.close()
@@ -379,13 +388,15 @@ async def _discover_via_network_scan(
             for i in range(0, len(candidates), batch_size):
                 batch = candidates[i:i + batch_size]
                 tasks = []
+                task_map = []
                 for ip in batch:
                     for port, _ in ports:
                         tasks.append(_probe_port(client, ip, port))
+                        task_map.append(ip)
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                for ip, resp in zip(batch, results):
+                for ip, resp in zip(task_map, results):
                     if isinstance(resp, dict) and resp.get("ip"):
-                        device_registry.set_device(
+                        await device_registry.set_device(
                             entity_id,
                             ip=ip,
                             friendly_name=friendly,
@@ -393,7 +404,7 @@ async def _discover_via_network_scan(
                             metadata=resp.get("metadata", {}),
                         )
                         log.info(f"[discovery] Found {entity_id} via network scan: {ip}")
-                        return device_registry.get_device(entity_id)
+                        return await device_registry.get_device(entity_id)
     except Exception as e:
         log.warning(f"[discovery] Network scan failed: {e}")
     return None
@@ -483,24 +494,21 @@ async def bulk_scan(
     ha_url: str, ha_token: str, subnet: str = DEFAULT_SUBNET
 ) -> list[dict]:
     """Scan for all known media devices on the network."""
-    discovered = []
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
-        return discovered
+        return []
 
     media_entities = [
         s["entity_id"] for s in all_states
         if s["entity_id"].startswith("media_player.")
     ]
 
-    for entity_id in media_entities:
+    async def _scan_one(entity_id: str):
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
         if not state:
-            continue
-
+            return None
         attrs = state.get("attributes", {})
         integration = attrs.get("integration", "")
-
         device_type = None
         if "roku" in entity_id.lower() or integration == "roku":
             device_type = "roku"
@@ -516,11 +524,9 @@ async def bulk_scan(
             device_type = "esphome"
         elif "mqtt" in entity_id.lower() or integration == "mqtt":
             device_type = "mqtt"
-
-        result = await discover_device(
+        return await discover_device(
             entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
         )
-        if result:
-            discovered.append(result)
 
-    return discovered
+    results = await asyncio.gather(*[_scan_one(e) for e in media_entities], return_exceptions=True)
+    return [r for r in results if r and not isinstance(r, Exception)]
