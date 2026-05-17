@@ -1,6 +1,7 @@
 fastembed
 redis
 fastapi
-uvicorn
+uvicorn[standard]
 httpx
 pydantic
+websockets
