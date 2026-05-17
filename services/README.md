@@ -44,6 +44,43 @@ This directory contains the microservices refactor of the SharedLLM system.
   code state rather than provider-synced snapshots, while provider sync is done
   explicitly through the Storage provider abstraction.
 
+## Credential Resolution Architecture
+
+The `.env` file is a **seed-only** artifact. It must NEVER be read directly by any service, test, or script at runtime.
+
+### Rule: Identity Is the Single Source of Truth
+
+| Component | .env Access | Runtime Credentials |
+|-----------|-------------|---------------------|
+| **Identity Service** | ✅ Reads `.env` **only** during initial seed (`/api/admin/seed`) | Stores encrypted credentials in its database |
+| **All other services** | ❌ Never reads `.env` | Resolves credentials via `POST /api/resolve` to Identity |
+| **Tests** | ❌ Never reads `.env` | Uses mocks or `PYTEST_CURRENT_TEST` placeholders |
+
+### How It Works
+
+1. **Seeding**: On first boot (or forced re-seed), Identity reads integration URLs/tokens from `.env` and stores them encrypted in its SQLite database.
+2. **Resolution**: Any service needing credentials calls Identity's `/api/resolve` endpoint with a `rag_user` identifier, passing the `X-Internal-Secret` header. Identity returns decrypted `ha_url`, `ha_token`, `nextcloud_*`, etc.
+3. **Runtime**: Services use resolved credentials for API calls. The `.env` file is irrelevant after seeding.
+
+### Example
+
+```python
+# ✅ Correct: Resolve credentials from Identity
+creds = await resolve_internal_user("default")
+ha_url = creds["ha_url"]
+ha_token = creds["ha_token"]
+
+# ❌ Wrong: Read from config.py / .env
+from config import HA_URL, HA_TOKEN  # Only for seed fallback, never production
+```
+
+### Forced Re-seeding
+
+If environment variables change in the legacy `.env`, trigger a forced re-seed:
+```bash
+curl -X POST "http://localhost:8001/api/admin/seed?force=true" -H "X-Internal-Secret: your-secret"
+```
+
 ## Testing & Diagnostics
 
 ### Integration Smoke Test
@@ -54,9 +91,3 @@ python3 services/tests/soa_smoke_test.py
 
 ### Global Error Handling
 All services implement a global exception handler that returns detailed tracebacks in the `detail` field of 500 responses, facilitating rapid debugging without manual log diving.
-
-### Forced Re-seeding
-If environment variables change in the legacy `.env`, trigger a forced re-seed:
-```bash
-curl -X POST "http://localhost:8001/api/admin/seed?force=true" -H "X-Internal-Secret: your-secret"
-```

@@ -1159,7 +1159,12 @@ def _detect_media_platform(entity_id: str, attrs: dict) -> str:
     return "unknown"
 
 @app.get("/discovery/entities")
-async def discovery_entities(ha_url: str, ha_token: str):
+async def discovery_entities(request: Request):
+    creds = await resolve_internal_user("default")
+    ha_url = (creds or {}).get("ha_url", "")
+    ha_token = (creds or {}).get("ha_token", "")
+    if not ha_url or not ha_token:
+        raise HTTPException(status_code=400, detail="HA credentials not configured in Identity")
     states = await ha_client.get_states(ha_url, ha_token) or []
     areas = await ha_client.get_areas(ha_url, ha_token) or {}
     import device_registry
@@ -1184,7 +1189,12 @@ async def discovery_entities(ha_url: str, ha_token: str):
     return {"entities": states}
 
 @app.get("/discovery/history")
-async def discovery_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1):
+async def discovery_history(entity_id: str, days: int = 1):
+    creds = await resolve_internal_user("default")
+    ha_url = (creds or {}).get("ha_url", "")
+    ha_token = (creds or {}).get("ha_token", "")
+    if not ha_url or not ha_token:
+        raise HTTPException(status_code=400, detail="HA credentials not configured in Identity")
     return await ha_client.get_history(ha_url, ha_token, entity_id, days)
 
 @app.get("/discovery/devices")
@@ -1206,14 +1216,15 @@ async def discovery_device(entity_id: str):
 async def discovery_device_refresh(entity_id: str, request: Request):
     """Trigger re-discovery for a specific device."""
     import device_discovery
-    body = await request.json()
-    ha_url = body.get("ha_url", "")
-    ha_token = body.get("ha_token", "")
+    body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     device_type = body.get("device_type")
     subnet = body.get("subnet", "192.168.2.0/24")
     
+    creds = await resolve_internal_user("default")
+    ha_url = (creds or {}).get("ha_url", "")
+    ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "ha_url and ha_token required"}
+        return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
     
     import device_registry
     await device_registry.invalidate_device(entity_id, reason="manual_refresh")
@@ -1228,13 +1239,14 @@ async def discovery_device_refresh(entity_id: str, request: Request):
 async def discovery_bulk_scan(request: Request):
     """Bulk network scan for all media devices."""
     import device_discovery
-    body = await request.json()
-    ha_url = body.get("ha_url", "")
-    ha_token = body.get("ha_token", "")
+    body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     subnet = body.get("subnet", "192.168.2.0/24")
     
+    creds = await resolve_internal_user("default")
+    ha_url = (creds or {}).get("ha_url", "")
+    ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "ha_url and ha_token required"}
+        return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
     
     discovered = await device_discovery.bulk_scan(ha_url, ha_token, subnet)
     return {"status": "SUCCESS", "discovered": discovered, "count": len(discovered)}
@@ -1249,16 +1261,26 @@ async def discovery_device_remove(entity_id: str):
     return {"status": "FAILURE", "message": f"Device {entity_id} not found"}
 
 @app.get("/discovery/profile/{entity_id}")
-async def discovery_device_profile(entity_id: str, ha_url: str, ha_token: str, subnet: str = "192.168.2.0/24"):
+async def discovery_device_profile(entity_id: str, subnet: str = "192.168.2.0/24"):
     """Generate a complete device profile with network info, HA data, and control methods."""
     import device_profiler
+    creds = await resolve_internal_user("default")
+    ha_url = (creds or {}).get("ha_url", "")
+    ha_token = (creds or {}).get("ha_token", "")
+    if not ha_url or not ha_token:
+        return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
     profile = await device_profiler.profile_device(entity_id, ha_url, ha_token, subnet)
     return profile
 
 @app.get("/discovery/profile")
-async def discovery_profile_all(ha_url: str, ha_token: str, subnet: str = "192.168.2.0/24"):
+async def discovery_profile_all(subnet: str = "192.168.2.0/24"):
     """Profile all media_player entities."""
     import device_profiler
+    creds = await resolve_internal_user("default")
+    ha_url = (creds or {}).get("ha_url", "")
+    ha_token = (creds or {}).get("ha_token", "")
+    if not ha_url or not ha_token:
+        return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
     profiles = await device_profiler.profile_all_media_devices(ha_url, ha_token, subnet)
     return {"profiles": profiles, "count": len(profiles)}
 
