@@ -203,25 +203,32 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
     })
 
 async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Roku uses Media Assistant app (ID 782875)."""
+    """Roku uses Media Assistant app (ID 782875) via roku.launch service."""
     from ha_client import call_service
     log.info(f"[announce.roku] Launching Media Assistant on {entity_id}")
-    result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": "782875",
-        "media_content_type": "app",
-        "extra": {"content_id": media_url, "media_type": "audio/wav"}
+    
+    # Launch Media Assistant app using roku.launch service
+    result = await call_service(ha_url, ha_token, "roku", "launch", entity_id, {
+        "app_id": "782875"
     })
     if result.get("ok"):
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(3.0)
+        
+        # Send media URL to Media Assistant via media_player.play_media
+        play_result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
+            "media_content_id": media_url,
+            "media_content_type": "audio/wav"
+        })
+        
         NON_PLAYING_STATES = ("idle", "off", "standby", "unavailable", "unknown")
         if state in NON_PLAYING_STATES:
             prev_app = (attributes or {}).get("app_id") if attributes else None
             prev_source = (attributes or {}).get("source") if attributes else None
+            await asyncio.sleep(5.0)
             if prev_app and prev_app != "782875":
-                log.info(f"[announce.roku] Device was '{state}' with app '{prev_app}', restoring previous app to prevent queue resume")
-                await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-                    "media_content_id": prev_app,
-                    "media_content_type": "app",
+                log.info(f"[announce.roku] Device was '{state}' with app '{prev_app}', restoring previous app")
+                await call_service(ha_url, ha_token, "roku", "launch", entity_id, {
+                    "app_id": prev_app
                 })
             elif prev_source and prev_source.lower() in ROKU_SOURCES:
                 log.info(f"[announce.roku] Device was '{state}' on source '{prev_source}', restoring to home")
@@ -229,12 +236,11 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
                     "source": prev_source,
                 })
             else:
-                log.info(f"[announce.roku] Device was '{state}' with no prior app, returning to home to prevent queue resume")
-                remote_entity = entity_id.replace("media_player.", "remote.")
-                await call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {
-                    "command": "Home",
+                log.info(f"[announce.roku] Device was '{state}' with no prior app, returning to home")
+                await call_service(ha_url, ha_token, "roku", "press", entity_id, {
+                    "key": "Home"
                 })
-            await asyncio.sleep(1.0)
+        return play_result
     return result
 
 async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
