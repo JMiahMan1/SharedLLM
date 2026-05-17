@@ -143,9 +143,9 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                 if result.get("ok"):
                     return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
         
-        # Fallback: standard media_player.play_media
+        # Fallback: standard media_player.play_media (use resolved MASS entity)
         result = await ha_client.call_service(
-            ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
+            ctx.ha_url, ctx.ha_token, "media_player", "play_media", mass_entity,
             {"media": {"media_content_id": req.query, "media_content_type": "music"}, "enqueue": "play"},
         )
         if result.get("ok"):
