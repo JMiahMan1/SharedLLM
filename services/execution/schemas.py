@@ -464,6 +464,16 @@ class WorkspaceLintRequest(BaseRequest):
     linter: Optional[str] = Field(None, description="Force a specific linter (black, flake8, eslint, yamllint)")
     fix: bool = Field(False, description="If true, apply auto-fixes where possible (e.g. black --write)")
 
+    @model_validator(mode="before")
+    @classmethod
+    def pivot_lint_path(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "relative_path" in data and "path" not in data:
+                data["path"] = data.pop("relative_path")
+            if "file_path" in data and "path" not in data:
+                data["path"] = data.pop("file_path")
+        return data
+
 class StorageFileReadRequest(BaseRequest):
     """
     Reads a file from Nextcloud storage (Documents/Notes).
