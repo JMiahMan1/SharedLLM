@@ -149,6 +149,77 @@ support direct URL streaming via `media_player.play_media`:
 
 ---
 
+## 3.5 Device Discovery & Profiling
+
+The system maintains a **persistent device registry** that maps HA friendly names
+to network addresses and control capabilities. This enables the system to know
+*exactly* how to interact with each device when a command is issued.
+
+### Architecture
+
+```
+User says "Play music on Gracies TV"
+  → resolve_by_friendly_name(cap_map, "gracies tv")
+  → entity_id: media_player.28_tcl_roku_tv
+  → device_type: roku
+  → ip: 192.168.2.166
+  → control.play_media: ["ecp_launch", "ma_delegation"]
+  → Execute: roku_play_music(ha_url, ha_token, entity_id, query)
+```
+
+### Discovery Pipeline (7 strategies, ordered by speed)
+
+1. **Persistent cache** — if IP was previously discovered, use it instantly
+2. **HA device registry** — config entries contain host/IP, device registry has MAC
+3. **Entity attributes** — some integrations expose `ip_address`/`mac_address`
+4. **ARP table** — matches hostname patterns to `arp -a` output
+5. **mDNS** — resolves `.local` hostnames derived from friendly_name
+6. **SSDP broadcast** — Roku (`roku:ecp`), DLNA, Cast devices respond
+7. **Network port scan** — probes known ports in batches of 30
+
+### Device Registry Storage
+
+Persistent JSON at `/data/device_registry.json` (Docker volume `execution_data`):
+```json
+{
+  "devices": {
+    "media_player.28_tcl_roku_tv": {
+      "ip": "192.168.2.166",
+      "mac": "cc:b0:da:c6:8f:21",
+      "hostname": "28TCLRokuTV",
+      "friendly_name": "Gracies TV",
+      "integration": "roku",
+      "discovery_method": "ha_registry",
+      "last_verified": 1715961234.5
+    }
+  }
+}
+```
+
+### Capability Map
+
+Built by profiling all media_player entities. Maps friendly names to:
+- **Device type** (roku, webostv, samsungtv, androidtv, cast, esphome, mqtt, dlna)
+- **Network info** (IP, MAC, hostname, open ports)
+- **Control methods** (power_on, power_off, play_media, transport)
+- **WOL support** (webos and samsung support Wake-on-LAN)
+- **Recommendations** (best practices for each device)
+
+### HTTP API
+
+| Endpoint | Purpose |
+| :--- | :--- |
+| `GET /discovery/devices` | List all registered devices |
+| `GET /discovery/devices/{entity_id}` | Get device info |
+| `POST /discovery/devices/{entity_id}/refresh` | Force re-discovery |
+| `DELETE /discovery/devices/{entity_id}` | Remove from registry |
+| `POST /discovery/scan` | Bulk network scan |
+| `GET /discovery/profile/{entity_id}` | Full device profile |
+| `GET /discovery/profile` | Profile all media devices |
+| `GET /discovery/control_methods` | Document all control methods |
+
+---
+
 ## 4. Android TV Integration (`AndroidTVIntegration`)
 
 **Target Devices**: Nvidia Shield, Chromecast with Google TV, Sony/TCL Android
