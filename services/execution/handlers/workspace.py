@@ -356,7 +356,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                 return -1, "", f"Tool not found: {cmd[0]}"
 
         # ── Python ───────────────────────────────────────────────────────────
-        if ext == ".py" or forced in ("black", "flake8", "python"):
+        if ext == ".py" or forced in ("ruff", "black", "flake8", "python"):
             # Syntax check first — catches malformed files (missing imports, broken syntax)
             rc, out, err = _run(["python3", "-m", "py_compile", str(abs_path)])
             if rc == -1:
@@ -365,15 +365,11 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             if rc != 0:
                 passed = False
             else:
-                # Light style check — only flag real issues, not nitpicks
-                flake8_ignore = "E501,W503,W504,E203,E402,F401,F841"
-                rc, out, err = _run(["flake8", f"--ignore={flake8_ignore}", "--max-line-length=999", str(abs_path)])
-                if rc == -1:
-                    results.append({"tool": "flake8", "returncode": rc, "output": "flake8 not installed — skipping style check"})
-                else:
-                    results.append({"tool": "flake8", "returncode": rc, "output": out or err})
-                    if rc != 0:
-                        passed = False
+                # Ruff: fast modern linter + formatter (replaces flake8, black, isort)
+                rc, out, err = _run(["ruff", "check", str(abs_path)])
+                results.append({"tool": "ruff", "returncode": rc, "output": out or err})
+                if rc != 0:
+                    passed = False
 
         # ── JavaScript / TypeScript ───────────────────────────────────────────
         elif ext in (".js", ".ts", ".jsx", ".tsx", ".mjs") or forced == "eslint":

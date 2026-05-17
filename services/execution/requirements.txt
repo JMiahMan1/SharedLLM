@@ -21,3 +21,4 @@ kokoro-onnx
 onnxruntime
 soundfile
 yt-dlp
+ruff
