@@ -19,13 +19,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     import ha_client
     from schemas import ExecutionResult
+    import device_registry
+    import device_discovery
 except ImportError:
     import ha_client
     from schemas import ExecutionResult
+    import device_registry
+    import device_discovery
 
 log = logging.getLogger("execution.roku")
 
-# Roku key mappings
 ROKU_KEYS = {
     "home": "Home", "back": "Back", "enter": "Select", "select": "Select",
     "up": "Up", "down": "Down", "left": "Left", "right": "Right",
@@ -39,7 +42,6 @@ ROKU_KEYS = {
     "input_hdmi4": "InputHDMI4", "input_tuner": "InputTuner",
 }
 
-# Common Roku app IDs
 ROKU_APPS = {
     "netflix": "12", "youtube": "837", "hulu": "2285",
     "disney_plus": "291097", "prime_video": "13", "spotify": "22297",
@@ -72,79 +74,12 @@ async def is_roku_device(ha_url: str, ha_token: str, entity_id: str) -> bool:
 
 
 async def get_roku_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:
-    """Discover Roku IP via HA device registry, SSDP, or local network scan."""
-    import httpx
-    try:
-        headers = {"Authorization": f"Bearer {ha_token}"}
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
-            resp = await client.get(f"{ha_url}/api/devices", headers=headers)
-            if resp.status_code == 200:
-                devices = resp.json()
-                for dev in devices:
-                    dev_name = (dev.get("name") or "").lower()
-                    entity_name = entity_id.replace("media_player.", "").replace("_", " ").lower()
-                    if any(part in dev_name for part in entity_name.split() if len(part) > 2):
-                        for conn in dev.get("connections", []):
-                            if conn and conn[0] == "network":
-                                return conn[1]
-    except Exception as e:
-        log.warning(f"[roku] Device registry IP lookup failed: {e}")
-    
-    try:
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(3)
-        sock.bind(("", 0))
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        ssdp_request = (
-            'M-SEARCH * HTTP/1.1\r\n'
-            'HOST: 239.255.255.250:1900\r\n'
-            'MAN: "ssdp:discover"\r\n'
-            'MX: 2\r\n'
-            'ST: roku:ecp\r\n'
-            '\r\n'
-        )
-        sock.sendto(ssdp_request.encode(), ("239.255.255.250", 1900))
-        while True:
-            try:
-                data, addr = sock.recvfrom(1024)
-                if b"Roku" in data or b"roku" in data:
-                    sock.close()
-                    return addr[0]
-            except socket.timeout:
-                break
-        sock.close()
-    except Exception as e:
-        log.warning(f"[roku] SSDP discovery failed: {e}")
-    
-    try:
-        import ipaddress
-        async with httpx.AsyncClient(verify=False) as client:
-            candidates = [str(ip) for ip in ipaddress.IPv4Network("192.168.2.0/24")
-                          if not str(ip).endswith(".0") and not str(ip).endswith(".255")]
-            batch_size = 30
-            for i in range(0, len(candidates), batch_size):
-                batch = candidates[i:i + batch_size]
-                tasks = [client.get(f"http://{ip}:8060/query/device-info", timeout=1) for ip in batch]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for ip, resp in zip(batch, results):
-                    if not isinstance(resp, Exception) and resp.status_code == 200 and b"roku" in resp.content.lower():
-                        log.info(f"[roku] Found Roku via network scan: {ip}")
-                        return ip
-    except Exception as e:
-        log.warning(f"[roku] Network scan failed: {e}")
-    
-    return None
-
-
-async def _probe_roku_ecp(client, ip: str) -> str | None:
-    """Probe a single IP for Roku ECP response."""
-    try:
-        resp = await client.get(f"http://{ip}:8060/query/device-info", timeout=2)
-        if resp.status_code == 200 and b"roku" in resp.content.lower():
-            return ip
-    except Exception:
-        pass
+    """Discover Roku IP via unified discovery pipeline."""
+    result = await device_discovery.discover_device(
+        entity_id, ha_url, ha_token, device_type="roku"
+    )
+    if result:
+        return result.get("ip")
     return None
 
 
@@ -153,16 +88,16 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return None
-    
+
     roku_friendly = ""
     for state in all_states:
         if state.get("entity_id") == roku_entity:
             roku_friendly = state.get("attributes", {}).get("friendly_name", "").lower()
             break
-    
+
     if not roku_friendly:
         return None
-    
+
     for state in all_states:
         eid = state.get("entity_id", "")
         if not eid.startswith("media_player.") or eid == roku_entity:
@@ -171,16 +106,16 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
         friendly = attrs.get("friendly_name", "").lower()
         source = attrs.get("source", "").lower()
         integration = attrs.get("integration", "")
-        
+
         is_ma = ("music_assistant" in str(integration).lower() or
                  "active_queue" in attrs or
                  "mass_player_type" in attrs or
                  "music_assistant" in source)
-        
+
         if is_ma and (roku_friendly in friendly or friendly in roku_friendly):
             log.info(f"[roku] Found MA player sibling: {eid}")
             return eid
-    
+
     log.warning(f"[roku] No MA player sibling found for {roku_entity}")
     return None
 
@@ -193,7 +128,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     2. Call music_assistant/play_media on the MA player sibling for audio
     """
     log.info(f"[roku.music] Playing '{query}' on {roku_entity}")
-    
+
     roku_ip = await get_roku_ip(ha_url, ha_token, roku_entity)
     if not roku_ip:
         log.warning("[roku.music] Could not find Roku IP, falling back to MA-only")
@@ -205,14 +140,14 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
             )
             if result.get("ok"):
                 return ExecutionResult(status="SUCCESS", message=f"Playing '{query}' on {roku_entity} (MA only).", service="roku_music")
-    
+
     ma_entity = await find_ma_player_sibling(ha_url, ha_token, roku_entity)
     if not ma_entity:
         return ExecutionResult(status="FAILURE", message=f"Could not find Music Assistant player for {roku_entity}.", service="roku_music")
-    
+
     import httpx
     params = {"t": "a", "autoplay": "true"}
-    
+
     search_result = await ha_client.call_service(
         ha_url, ha_token, "music_assistant", "search", entity_id="",
         service_data={
@@ -223,12 +158,12 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
         },
         return_response=True,
     )
-    
+
     song_name = query
     artist_name = ""
     ma_media_id = query
     ma_media_type = "track"
-    
+
     if search_result.get("ok") and search_result.get("service_response"):
         raw = search_result["service_response"]
         resp = raw.get("service_response", raw)
@@ -249,7 +184,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                 break
     else:
         params["songName"] = song_name
-    
+
     ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
     try:
         log.info(f"[roku.music] Launching Media Assistant via ECP: {ecp_url}")
@@ -262,16 +197,17 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                 log.warning(f"[roku.music] ECP launch returned {resp.status_code}")
     except Exception as e:
         log.warning(f"[roku.music] ECP launch failed: {e}")
-    
+        device_registry.invalidate_device(roku_entity)
+
     log.info(f"[roku.music] Delegating audio to MA: {ma_entity} media_id={ma_media_id} type={ma_media_type}")
     result = await ha_client.call_service(
         ha_url, ha_token, "music_assistant", "play_media", ma_entity,
         {"media_id": ma_media_id, "media_type": ma_media_type, "enqueue": "play"},
     )
-    
+
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
-    
+
     return ExecutionResult(status="FAILURE", message=f"Failed to play music on {roku_entity}: {result.get('error')}", service="roku_music", detail=result)
 
 

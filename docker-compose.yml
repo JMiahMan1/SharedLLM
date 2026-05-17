@@ -78,6 +78,7 @@ services:
       - /home/jeremiah/.ssh:/home/sharedllm/.ssh:ro
       - kokoro_models:/app/models
       - ${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}:/workspaces
+      - execution_data:/data
 
   rag:
     build:
@@ -320,14 +321,15 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
 
-volumes:
-  identity_db:
-  chroma_data:
-  logging_data:
-  workspace_runtime_data:
-  redis_data:
-  huggingface_cache:
-  qdrant_cache:
-  caddy_data:
-  caddy_config:
-  kokoro_models:
+ volumes:
+   identity_db:
+   chroma_data:
+   logging_data:
+   workspace_runtime_data:
+   redis_data:
+   huggingface_cache:
+   qdrant_cache:
+   caddy_data:
+   caddy_config:
+   kokoro_models:
+   execution_data:
