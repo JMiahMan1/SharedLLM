@@ -542,6 +542,38 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         tool_result = await _execute_single_tool(action, tool_data, query, creds)
         log.info(f"[_single_turn_inference] Tool result: {tool_result[:300] if tool_result else 'empty'}")
 
+        # Post-write lint hook: auto-lint after file write/patch to catch syntax errors
+        lintable_actions = {"workspacefilewriterequest", "workspacefilepatchrequest"}
+        if action.lower() in lintable_actions and isinstance(tool_data.get("payload"), dict):
+            payload = tool_data["payload"]
+            file_path = payload.get("file_path", "") or payload.get("relative_path", "")
+            if file_path:
+                ext = file_path.rsplit(".", 1)[-1] if "." in file_path else ""
+                lintable_exts = {"py", "js", "ts", "tsx", "sh", "bash", "json", "yaml", "yml"}
+                if ext in lintable_exts:
+                    log.info(f"[_single_turn_inference] Post-write lint hook for {file_path} (ext={ext})")
+                    try:
+                        async with httpx.AsyncClient(timeout=15.0) as lint_client:
+                            lint_resp = await lint_client.post(
+                                f"{EXECUTION_SVC}/execute/workspace_lint",
+                                json={"file_path": file_path},
+                                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                            )
+                            if lint_resp.status_code == 200:
+                                lint_data = lint_resp.json()
+                                if lint_data.get("status") == "FAILURE":
+                                    lint_msg = lint_data.get("message", "")
+                                    detail = lint_data.get("detail", {}) or {}
+                                    issues = detail.get("issues", [])
+                                    issue_lines = [f"  Line {i.get('line', '?')}: {i.get('code', '')} {i.get('message', '')}" for i in issues]
+                                    lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
+                                    tool_result = f"{tool_result}\n\n{lint_feedback}"
+                                    log.warning(f"[_single_turn_inference] Lint feedback: {lint_feedback[:200]}")
+                                elif lint_data.get("status") == "SUCCESS":
+                                    log.info(f"[_single_turn_inference] Lint passed for {file_path}")
+                    except Exception as lint_e:
+                        log.warning(f"[_single_turn_inference] Lint hook failed: {lint_e}")
+
         # Append tool result to conversation for next turn
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
 
