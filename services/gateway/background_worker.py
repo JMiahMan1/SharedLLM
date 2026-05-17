@@ -407,6 +407,9 @@ class RavenWorker:
             "missing",
             "loc",
             "validation error",
+            "no valid tool call",
+            "failed to produce valid tool",
+            "agent failed to produce",
         ]
         if any(indicator in result_lower for indicator in schema_error_indicators):
             log.warning(f"[Worker] Schema error detected — candidate for model upgrade")
