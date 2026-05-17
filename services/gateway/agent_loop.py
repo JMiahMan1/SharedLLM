@@ -958,7 +958,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         if lookup_action in lintable_actions and isinstance(payload, dict):
                             file_path = payload.get("file_path") or payload.get("path", "")
                             if file_path:
-                                lint_feedback = await run_post_write_lint(file_path, EXECUTION_SVC, INTERNAL_SECRET, log)
+                                lint_feedback = await run_post_write_lint(file_path, EXECUTION_SVC, INTERNAL_SECRET, log, payload.get("user_context"))
                                 if lint_feedback:
                                     await stream_event("result_error", lint_feedback)
                                     exec_data = {
@@ -1061,7 +1061,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     return ans
 
 
-async def run_post_write_lint(file_path: str, execution_svc: str, internal_secret: str, logger) -> Optional[str]:
+async def run_post_write_lint(file_path: str, execution_svc: str, internal_secret: str, logger, user_context: Optional[dict] = None) -> Optional[str]:
     """
     Shared post-write lint hook. Returns lint feedback string on failure, None on success.
     """
@@ -1072,10 +1072,13 @@ async def run_post_write_lint(file_path: str, execution_svc: str, internal_secre
 
     logger.info(f"Post-write lint check for {file_path} (ext={ext})")
     try:
+        lint_payload = {"path": file_path}
+        if user_context:
+            lint_payload["user_context"] = user_context
         async with httpx.AsyncClient(timeout=15.0) as lint_client:
             lint_resp = await lint_client.post(
                 f"{execution_svc}/execute/workspace_lint",
-                json={"path": file_path},
+                json=lint_payload,
                 headers={"X-Internal-Secret": internal_secret},
             )
             if lint_resp.status_code == 200:
