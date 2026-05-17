@@ -1,5 +1,16 @@
 # Deployment Guide
 
+## Architecture Overview
+
+SharedLLM runs on a **two-machine architecture**:
+
+| Role | Machine | Purpose |
+|------|---------|---------|
+| **LLM Host** | Local machine (this machine) | Runs Ollama (`alpaca-proxy`), `llama-server`, `alpaca-indexer` |
+| **SharedLLM Server** | `192.168.2.205` (Jarvis) | Runs all SharedLLM microservices (gateway, execution, identity, RAG, etc.) |
+
+The LLM Host provides inference via `ollama-server` (port 11434) and `llama-server` (port 8080). The SharedLLM server connects to these via Docker `extra_hosts` mapping.
+
 ## Source vs Workspace
 
 **Critical rule**: The workspace (`/workspaces/system/sharedllm`) is for **runtime artifacts only** — git operations, file edits, and agent execution. It is **never** the source for building or deploying services.
@@ -23,7 +34,7 @@ git add -A && git commit -m "your message" && git push origin microservices
 ssh jeremiah@192.168.2.205
 cd /home/jeremiah/SharedLLM          # ← SOURCE REPO, NOT WORKSPACE
 git pull origin microservices
-docker compose up -d --build gateway  # builds from source, not workspace
+bash scripts/deploy.sh               # auto-detects changed services
 ```
 
 ### 3. Auto-Deploy (Post-Merge Hook)
@@ -38,6 +49,7 @@ cd /home/jeremiah/SharedLLM && git pull origin microservices
 - **Never** run `docker compose up --build` from `/home/jeremiah/workspaces/system/sharedllm`
 - **Never** copy `.env` files into the workspace directory
 - **Never** treat the workspace as a build context
+- **Never** start Ollama on the server — it runs on the LLM Host only
 
 The workspace is a git clone managed by Raven and the workspace runtime service. Its contents are ephemeral and may differ from the deployed source.
 
@@ -50,6 +62,25 @@ The auto-deploy script detects which services changed:
 - Changes to `services/ui/*` → rebuild ui
 - Changes to `docker-compose.yml` → rebuild all
 
+## Linting
+
+Python files are linted with **ruff** (replaces flake8/black/isort):
+```bash
+python -m ruff check services/gateway/
+python -m ruff check --fix services/gateway/  # auto-fix
+```
+
+The gateway has a **post-write lint hook** that automatically lints Python files after `WorkspaceFileWriteRequest` or `WorkspaceFilePatchRequest`. Lint failures are fed back to the LLM for correction.
+
+## Model Auto-Upgrade
+
+When a Raven mission fails due to schema/tool format errors (422, "no valid tool call", etc.), the worker automatically retries with the **largest available model** from Ollama. The upgrade model is discovered dynamically via `GET /api/tags` — no hardcoded model names.
+
+```python
+# _get_upgrade_model() queries Ollama and picks the largest model by size
+upgrade_model = await self._get_upgrade_model(current_model)
+```
+
 ## Verifying Deployment
 
 ```bash
@@ -61,4 +92,7 @@ docker compose logs --tail=20 gateway
 
 # Verify API health
 curl http://localhost:11435/health/ready
+
+# Verify Ollama connectivity from server
+docker exec sharedllm_gateway curl -s http://ollama-server:11434/api/tags
 ```
