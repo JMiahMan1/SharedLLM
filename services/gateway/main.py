@@ -3085,6 +3085,21 @@ async def resume_mission(request: Request, id_or_slug: str):
         
         return {"status": "SUCCESS", "message": f"Mission {real_id} resumed. LLM access restored."}
 
+@app.delete("/api/raven/missions/{id_or_slug}")
+async def delete_mission(request: Request, id_or_slug: str):
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    async with borrow_http_client() as client:
+        resp = await client.delete(
+            f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return {"status": "SUCCESS", "message": f"Mission {id_or_slug} deleted."}
+
 @app.get("/api/raven/missions")
 async def get_user_missions(request: Request):
     creds = await _resolve_identity_from_request(request)
