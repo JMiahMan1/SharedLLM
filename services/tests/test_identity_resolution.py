@@ -4,10 +4,13 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
-# Set environment variables for testing
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
-os.environ["INIT_DB"] = "false"
+# Set environment variables for testing (respect CI overrides)
+if "INTERNAL_SECRET" not in os.environ:
+    os.environ["INTERNAL_SECRET"] = "test-secret"
+if "FERNET_KEY" not in os.environ:
+    os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
+if "INIT_DB" not in os.environ:
+    os.environ["INIT_DB"] = "false"
 
 import identity.main as identity_main
 from identity.main import app, get_session, _store_user_api_key
