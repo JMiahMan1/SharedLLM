@@ -396,19 +396,14 @@ async def _discover_via_network_scan(
             searchable = f"{model} {serial} {device_name}".lower()
             for word in friendly.split():
                 if len(word) > 2 and word in searchable:
-                    log.info(f"[discovery] Name match for {entity_id}: '{word}' found in '{searchable}'")
                     return True
             for word in entity_base.split():
                 if len(word) > 2 and word in searchable:
-                    log.info(f"[discovery] Name match for {entity_id}: '{word}' found in '{searchable}'")
                     return True
 
-            # Accept if entity type matches probed device type
             if device_type and device_type in entity_id.lower():
-                log.info(f"[discovery] Type match for {entity_id}: '{device_type}' in entity_id")
                 return True
 
-            log.info(f"[discovery] Name mismatch for {entity_id}: friendly='{friendly}' entity_base='{entity_base}' searchable='{searchable}'")
             return False
 
         async with httpx.AsyncClient(verify=False) as client:
