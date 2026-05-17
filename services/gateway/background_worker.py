@@ -10,16 +10,14 @@ import httpx
 import os
 from typing import Any, Dict, Optional
 from gateway.orchestrator import process_full_orchestration
-from gateway.config import SYSTEM_IDENTITY, INTERNAL_SECRET
-from gateway.messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
+from gateway.config import (
+    SYSTEM_IDENTITY, INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC,
+    RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, OLLAMA_URL,
+)
+from gateway.messaging import InferenceJobQueue, TIER2_SEMAPHORE, TIER3_LOCK
 from gateway.agent_loop import should_persist_learning
 
 log = logging.getLogger("gateway.background_worker")
-
-from gateway.config import (
-    INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC, RAVEN_MAX_TOTAL_SECONDS,
-    RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, SYSTEM_IDENTITY,
-)
 
 CHECK_INTERVAL_SECONDS = RAVEN_CHECK_INTERVAL
 ERROR_THRESHOLD = RAVEN_ERROR_THRESHOLD
@@ -412,20 +410,47 @@ class RavenWorker:
             "agent failed to produce",
         ]
         if any(indicator in result_lower for indicator in schema_error_indicators):
-            log.warning(f"[Worker] Schema error detected — candidate for model upgrade")
+            log.warning("[Worker] Schema error detected — candidate for model upgrade")
             return True
         
         # Also detect when model just writes garbage instead of using tools
         if "successfully wrote" in result_lower and len(result) < 200:
-            log.warning(f"[Worker] Suspicious short 'success' — candidate for model upgrade")
+            log.warning("[Worker] Suspicious short 'success' — candidate for model upgrade")
             return True
         
         return False
 
+    async def _get_upgrade_model(self, current_model: str) -> str:
+        """
+        Dynamically find the largest available model that isn't the current one.
+        Queries Ollama's /api/tags and picks the model with the largest size.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{OLLAMA_URL}/api/tags")
+                if resp.status_code != 200:
+                    log.warning(f"[Worker] Failed to fetch Ollama models: {resp.status_code}")
+                    return current_model
+                models = resp.json().get("models", [])
+                if not models:
+                    log.warning("[Worker] No models available from Ollama")
+                    return current_model
+                # Filter out the current model and pick the largest by size
+                candidates = [m for m in models if m["name"] != current_model]
+                if not candidates:
+                    log.warning("[Worker] No alternative models available for upgrade")
+                    return current_model
+                best = max(candidates, key=lambda m: m.get("size", 0))
+                log.info(f"[Worker] Selected upgrade model: {best['name']} ({best.get('size', 0) / 1e9:.1f}GB)")
+                return best["name"]
+        except Exception as e:
+            log.warning(f"[Worker] Failed to discover upgrade model: {e}")
+            return current_model
+
     async def _retry_with_bigger_model(self, mission_id: int, payload: Dict[str, Any], result_str: str):
         """Re-enqueue mission with a larger model after schema failure."""
         original_model = payload.get("model", "unknown")
-        upgrade_model = "qwen3.6-35b-a3b:q4_k_m"
+        upgrade_model = await self._get_upgrade_model(original_model)
         
         payload["_retry_count"] = payload.get("_retry_count", 0) + 1
         payload["model"] = upgrade_model
