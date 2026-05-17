@@ -465,9 +465,8 @@ class RavenWorker:
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
         
-        new_job_id = f"{payload.get('_job_id', 'unknown')}_retry{retry_count}"
-        await self.job_queue.enqueue_job("raven_resume", payload, job_id=new_job_id)
-        log.info(f"[Worker] Mission {mission_id} re-enqueued with {upgrade_model} as job {new_job_id}")
+        await self.job_queue.enqueue_job("raven_resume", payload)
+        log.info(f"[Worker] Mission {mission_id} re-enqueued with {upgrade_model} as retry {retry_count}")
 
     async def _trigger_tts_callback(self, payload: Dict[str, Any], message: str):
         """Proactively broadcast result via TTS."""
