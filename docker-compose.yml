@@ -24,9 +24,9 @@ services:
     ports:
       - 8001:8001
     extra_hosts:
-      - "ollama-server:192.168.1.216"
+      - "ollama-server:192.168.4.179"
       - "ai-server:192.168.2.205"
-      - "llama-server:192.168.1.216"
+      - "llama-server:192.168.4.179"
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -54,9 +54,9 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "ollama-server:192.168.1.216"
+      - "ollama-server:192.168.4.179"
       - "ai-server:192.168.2.205"
-      - "llama-server:192.168.1.216"
+      - "llama-server:192.168.4.179"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -136,9 +136,9 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "ollama-server:192.168.1.216"
+      - "ollama-server:192.168.4.179"
       - "ai-server:192.168.2.205"
-      - "llama-server:192.168.1.216"
+      - "llama-server:192.168.4.179"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - IDENTITY_SVC_URL=http://identity:8001
