@@ -948,7 +948,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
                     short_msg = exec_data.get("message", "Success")
                     await stream_event("result_success", short_msg)
-                     action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
+                    action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
                     # Track successful tool executions (non-ERROR responses)
                     if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
                         successful_tool_calls += 1
