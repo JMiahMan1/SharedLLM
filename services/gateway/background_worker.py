@@ -348,6 +348,11 @@ class RavenWorker:
                         status = "completed"
                         log.info(f"[Worker] Mission {mission_id} completed with meaningful result")
                     else:
+                        # Check if this looks like a schema/tool format error — retry with bigger model
+                        needs_upgrade = self._should_upgrade_model(result_str, payload)
+                        if needs_upgrade:
+                            await self._retry_with_bigger_model(mission_id, payload, result_str)
+                            return  # Don't update status yet — retry will handle it
                         status = "failed"
                         result_str = f"Mission did not accomplish meaningful work. Result: {result_str[:500]}"
                         log.warning(f"[Worker] Mission {mission_id} marked failed — no meaningful work accomplished")
@@ -384,6 +389,57 @@ class RavenWorker:
                     await heartbeat_task
                 except asyncio.CancelledError:
                     pass
+
+    def _should_upgrade_model(self, result: str, payload: Dict[str, Any]) -> bool:
+        """
+        Detect if a mission failed due to schema/tool format errors that suggest
+        the model was too small to understand the tool calling format.
+        """
+        retry_count = payload.get("_retry_count", 0)
+        if retry_count >= 1:
+            return False  # Only one retry allowed
+        
+        result_lower = result.lower()
+        schema_error_indicators = [
+            "422",
+            "schema error",
+            "field required",
+            "missing",
+            "loc",
+            "validation error",
+        ]
+        if any(indicator in result_lower for indicator in schema_error_indicators):
+            log.warning(f"[Worker] Schema error detected — candidate for model upgrade")
+            return True
+        
+        # Also detect when model just writes garbage instead of using tools
+        if "successfully wrote" in result_lower and len(result) < 200:
+            log.warning(f"[Worker] Suspicious short 'success' — candidate for model upgrade")
+            return True
+        
+        return False
+
+    async def _retry_with_bigger_model(self, mission_id: int, payload: Dict[str, Any], result_str: str):
+        """Re-enqueue mission with a larger model after schema failure."""
+        original_model = payload.get("model", "unknown")
+        upgrade_model = "qwen3:35b"
+        
+        payload["_retry_count"] = payload.get("_retry_count", 0) + 1
+        payload["model"] = upgrade_model
+        
+        retry_count = payload["_retry_count"]
+        log.warning(f"[Worker] Upgrading mission {mission_id} from {original_model} → {upgrade_model} (retry {retry_count})")
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.patch(
+                f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                json={"status": "executing", "result": f"Retrying with larger model ({upgrade_model}). Previous attempt: {result_str[:200]}"},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+        
+        new_job_id = f"{payload.get('_job_id', 'unknown')}_retry{retry_count}"
+        await self.job_queue.enqueue_job("raven_resume", payload, job_id=new_job_id)
+        log.info(f"[Worker] Mission {mission_id} re-enqueued with {upgrade_model} as job {new_job_id}")
 
     async def _trigger_tts_callback(self, payload: Dict[str, Any], message: str):
         """Proactively broadcast result via TTS."""
