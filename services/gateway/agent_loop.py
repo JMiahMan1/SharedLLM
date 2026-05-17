@@ -343,6 +343,38 @@ def get_http_client() -> httpx.AsyncClient:
 
 _stream_redis = None
 
+def should_persist_learning(result: str) -> bool:
+    """
+    Prevent meaningless results from being added to RAG.
+    We don't want the LLM to learn that reading a file or failing a tool call is success.
+    """
+    if not result or result.strip() in ("None", "", "null"):
+        return False
+    result_lower = result.lower()
+    failure_indicators = [
+        "tool execution failed",
+        "422",
+        "400",
+        "500",
+        "error:",
+        "failed:",
+        "traceback",
+    ]
+    for indicator in failure_indicators:
+        if indicator in result_lower:
+            return False
+    read_only_patterns = ["read ", "lines from"]
+    if all(p in result_lower for p in read_only_patterns):
+        return False
+    try:
+        parsed = json.loads(result)
+        if isinstance(parsed, dict) and "action" in parsed and "payload" in parsed and "result" not in parsed:
+            return False
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return True
+
+
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None, rag_context: str = "", show_thinking: bool = False) -> Any:
     full_audit_log = []
     
@@ -932,6 +964,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.error(f"[AgentLoop] Tool execution failed: {e}")
             exec_data = {"status": "ERROR", "message": str(e)}
 
+
     async def _persist_learning(summary: str) -> None:
         try:
             tags = ["raven", "autonomous", "repair"]
@@ -987,12 +1020,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         pass
 
     if action_log and not (isinstance(exec_data, dict) and exec_data.get("status") == "ERROR"):
-        learning_summary = "\n".join([
-            f"Query: {query}",
-            f"Actions: {' | '.join(action_log)}",
-            f"Final answer: {ans}",
-        ])
-        await _persist_learning(learning_summary)
+        if should_persist_learning(ans):
+            learning_summary = "\n".join([
+                f"Query: {query}",
+                f"Actions: {' | '.join(action_log)}",
+                f"Final answer: {ans}",
+            ])
+            await _persist_learning(learning_summary)
+        else:
+            log.info(f"[AgentLoop] Skipping RAG learning persistence — result appears meaningless: {ans[:100]}")
 
     if mission_id and full_audit_log:
         try:
