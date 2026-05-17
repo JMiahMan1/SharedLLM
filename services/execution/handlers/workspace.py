@@ -360,7 +360,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             # Syntax check first — catches malformed files (missing imports, broken syntax)
             rc, out, err = _run(["python3", "-m", "py_compile", str(abs_path)])
             if rc == -1:
-                return _ok(f"Python compiler not available — skipping lint.", {"path": req.path, "skipped": True})
+                return _ok("Python compiler not available — skipping lint.", {"path": req.path, "skipped": True})
             results.append({"tool": "py_compile", "returncode": rc, "output": out or err})
             if rc != 0:
                 passed = False
