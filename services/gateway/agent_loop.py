@@ -1,4 +1,3 @@
-import os
 import logging
 import json
 import asyncio
@@ -952,6 +951,46 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     # Track successful tool executions (non-ERROR responses)
                     if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
                         successful_tool_calls += 1
+
+                        # --- POST-WRITE LINT HOOK ---
+                        # After file write/patch, auto-lint to catch syntax errors early
+                        lintable_actions = {"workspacefilewriterequest", "workspacefilepatchrequest"}
+                        if lookup_action in lintable_actions and isinstance(payload, dict):
+                            file_path = payload.get("file_path") or payload.get("path", "")
+                            ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
+                            lintable_exts = {"py", "js", "ts", "tsx", "sh", "bash", "json", "yaml", "yml"}
+                            if ext in lintable_exts:
+                                log.info(f"[AgentLoop] Post-write lint check for {file_path} (ext={ext})")
+                                try:
+                                    lint_resp = await client.post(
+                                        f"{EXECUTION_SVC}/execute/workspace_lint",
+                                        json={"path": file_path, "user_context": payload.get("user_context", {})},
+                                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                    )
+                                    if lint_resp.status_code == 200:
+                                        lint_data = lint_resp.json()
+                                        lint_status = lint_data.get("status", "")
+                                        if lint_status == "FAILURE":
+                                            # Extract key lint output for LLM
+                                            detail = lint_data.get("detail", {})
+                                            results = detail.get("results", []) if isinstance(detail, dict) else []
+                                            issue_lines = []
+                                            for r in results:
+                                                output = r.get("output", "")
+                                                if output:
+                                                    issue_lines.extend(output.split("\n")[:8])
+                                            lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
+                                            log.warning(f"[AgentLoop] {lint_feedback}")
+                                            await stream_event("result_error", lint_feedback)
+                                            exec_data = {
+                                                "status": "LINT_ERRORS",
+                                                "message": lint_feedback,
+                                                "file_path": file_path,
+                                            }
+                                        else:
+                                            log.info(f"[AgentLoop] Post-write lint clean for {file_path}")
+                                except Exception as lint_e:
+                                    log.warning(f"[AgentLoop] Post-write lint check failed: {lint_e}")
 
                     # Checkpoint state after successful tool execution
                     await _save_checkpoint(iter_num)

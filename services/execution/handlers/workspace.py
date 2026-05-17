@@ -7,7 +7,7 @@ import shlex
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import WORKSPACE_ROOT
-from typing import Dict, Any, Optional
+from typing import Optional
 from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceSearchRequest, WorkspaceShellRequest, ExecutionResult
 
 log = logging.getLogger("execution.workspace")
@@ -352,14 +352,15 @@ async def handle_workspace_lint(req) -> ExecutionResult:
 
         # ── Python ───────────────────────────────────────────────────────────
         if ext == ".py" or forced in ("black", "flake8", "python"):
-            if forced != "flake8":
-                black_args = [str(abs_path)] if req.fix else ["--check", "--diff", str(abs_path)]
-                rc, out, err = _run(["black"] + black_args)
-                results.append({"tool": "black", "returncode": rc, "output": out or err})
-                if rc != 0:
-                    passed = False
-            if forced != "black":
-                rc, out, err = _run(["flake8", "--max-line-length=120", str(abs_path)])
+            # Syntax check first — catches malformed files (missing imports, broken syntax)
+            rc, out, err = _run(["python3", "-m", "py_compile", str(abs_path)])
+            results.append({"tool": "py_compile", "returncode": rc, "output": out or err})
+            if rc != 0:
+                passed = False
+            else:
+                # Light style check — only flag real issues, not nitpicks
+                flake8_ignore = "E501,W503,W504,E203,E402,F401,F841"  # line length, line breaks, whitespace, unused imports
+                rc, out, err = _run(["flake8", f"--ignore={flake8_ignore}", "--max-line-length=999", str(abs_path)])
                 results.append({"tool": "flake8", "returncode": rc, "output": out or err})
                 if rc != 0:
                     passed = False
