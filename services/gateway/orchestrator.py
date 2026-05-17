@@ -440,7 +440,8 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                 if resp.status_code == 200:
                     result = resp.json()
                     if action == "executionlogrequest":
-                        logs = result.get("detail", {}).get("logs", "")
+                        detail = result.get("detail") or {}
+                        logs = detail.get("logs", "")
                         if logs:
                             return f"{result.get('message', '')}\n\n```\n{logs}\n```"
                     if action == "contextsearchrequest":
