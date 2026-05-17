@@ -524,15 +524,10 @@ async def bulk_scan(
     if not all_states:
         return []
 
-    media_entities = [
-        s["entity_id"] for s in all_states
-        if s["entity_id"].startswith("media_player.")
-    ]
+    media_states = [s for s in all_states if s["entity_id"].startswith("media_player.")]
 
-    async def _scan_one(entity_id: str):
-        state = await ha_client.get_state(ha_url, ha_token, entity_id)
-        if not state:
-            return None
+    async def _scan_one(state: dict):
+        entity_id = state["entity_id"]
         attrs = state.get("attributes", {})
         integration = attrs.get("integration", "")
         device_type = None
@@ -554,5 +549,5 @@ async def bulk_scan(
             entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
         )
 
-    results = await asyncio.gather(*[_scan_one(e) for e in media_entities], return_exceptions=True)
+    results = await asyncio.gather(*[_scan_one(s) for s in media_states], return_exceptions=True)
     return [r for r in results if r and not isinstance(r, Exception)]
