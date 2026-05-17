@@ -82,8 +82,44 @@ curl -X POST http://localhost:8004/rag/purge \
 | Key | Type | TTL | Purpose |
 |-----|------|-----|---------|
 | `raven:mission:history:{id}` | List | 24h | Ordered event log for WebSocket replay |
-| `raven:mission:stream:{id}` | PubSub channel | N/A | Live event broadcast |
+| `raven:mission:Stream:{id}` | PubSub channel | N/A | Live event broadcast |
 | `raven:mission:kill:{id}` | PubSub channel | N/A | Kill signal channel |
+| `raven:mission:pause:{id}` | String | 1h | Pause flag — when set, AgentLoop defers LLM calls |
+
+## Pause / Resume for LLM Access
+
+### Why Pause?
+When multiple missions or chat sessions compete for the same LLM backend (Ollama/llama.cpp), you may want to pause a background mission to free up GPU/VRAM for interactive chat, or vice versa. The pause mechanism lets you temporarily defer LLM access without killing the mission.
+
+### How It Works
+1. **Pause** — `POST /api/raven/missions/{id}/pause` sets `raven:mission:pause:{id} = "PAUSED"` in Redis (1h TTL)
+2. **AgentLoop Check** — Before each LLM inference call, the agent loop polls the pause flag. If set, it enters a wait loop (5s poll interval) and emits pause heartbeat events to the WebSocket stream.
+3. **Resume** — `POST /api/raven/missions/{id}/resume` deletes the pause flag. The agent loop detects this on the next poll cycle and continues execution.
+
+### Behavior During Pause
+- Mission status remains `executing` (not paused in DB)
+- Checkpoint is preserved — no progress is lost
+- Total mission timeout (`RAVEN_MAX_TOTAL_SECONDS`) continues counting
+- WebSocket stream receives: `"Mission paused — waiting for LLM access to become available."`
+- Heartbeat logs every 60s: `"Still paused (60s elapsed)"`
+
+### API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/raven/missions/{id}/pause` | Pause mission LLM access |
+| `POST` | `/api/raven/missions/{id}/resume` | Resume mission LLM access |
+| `POST` | `/api/raven/missions/{id}/kill` | Terminate mission (existing) |
+
+### Example
+```bash
+# Pause mission 42
+curl -X POST http://localhost:8080/api/raven/missions/42/pause \
+  -H "Authorization: Bearer <token>"
+
+# Resume mission 42
+curl -X POST http://localhost:8080/api/raven/missions/42/resume \
+  -H "Authorization: Bearer <token>"
+```
 
 ## WebSocket Live Trace
 
