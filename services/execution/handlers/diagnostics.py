@@ -15,6 +15,23 @@ except ImportError:
 
 log = logging.getLogger("execution.diagnostics")
 
+def get_docker_logs(container_name: str, tail: int = 50) -> tuple[bool, str, str]:
+    """Get container logs using Docker SDK or fallback to CLI."""
+    try:
+        import docker
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        logs = container.logs(tail=tail, stderr=True, stdout=True).decode('utf-8', errors='replace')
+        return True, logs, ""
+    except Exception as e:
+        log.warning(f"Docker SDK failed, trying CLI: {e}")
+        try:
+            cmd = ["docker", "logs", "--tail", str(tail), container_name]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            return result.returncode == 0, result.stdout, result.stderr
+        except Exception as e2:
+            return False, "", str(e2)
+
 async def handle_get_system_logs(req_data: dict) -> ExecutionResult:
     """
     Advanced log retrieval for a specific service.
@@ -27,23 +44,31 @@ async def handle_get_system_logs(req_data: dict) -> ExecutionResult:
             path = req_data.get("path", "/app")
             cmd = ["ls", "-la", path]
             result = subprocess.run(cmd, capture_output=True, text=True)
-        else:
-            # We use docker command to get logs of the container
-            # Note: the execution container must have access to docker.sock
-            cmd = ["docker", "logs", "--tail", str(lines), f"sharedllm_{service}"]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            return ExecutionResult(
-                status="SUCCESS", 
-                message=f"Retrieved {lines} lines for {service}", 
-                service="diagnostics",
-                detail={"logs": result.stdout}
-            )
-        else:
+            if result.returncode == 0:
+                return ExecutionResult(
+                    status="SUCCESS", 
+                    message=f"Listed {path}", 
+                    service="diagnostics",
+                    detail={"output": result.stdout}
+                )
             return ExecutionResult(
                 status="FAILURE", 
-                message=f"Failed to get logs for {service}: {result.stderr}", 
+                message=f"Failed to list {path}: {result.stderr}", 
+                service="diagnostics"
+            )
+        else:
+            container_name = f"sharedllm_{service}"
+            success, stdout, stderr = get_docker_logs(container_name, lines)
+            if success:
+                return ExecutionResult(
+                    status="SUCCESS", 
+                    message=f"Retrieved {lines} lines for {service}", 
+                    service="diagnostics",
+                    detail={"logs": stdout}
+                )
+            return ExecutionResult(
+                status="FAILURE", 
+                message=f"Failed to get logs for {service}: {stderr}", 
                 service="diagnostics"
             )
     except Exception as e:
@@ -64,17 +89,15 @@ async def handle_execution_logs(req_data: dict) -> ExecutionResult:
         service_filter = None
     
     try:
-        cmd = ["docker", "logs", "--tail", str(lines), "sharedllm_execution"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode != 0:
+        success, stdout, stderr = get_docker_logs("sharedllm_execution", lines)
+        if not success:
             return ExecutionResult(
                 status="FAILURE",
-                message=f"Failed to retrieve execution logs: {result.stderr}",
+                message=f"Failed to retrieve execution logs: {stderr}",
                 service="execution_logs"
             )
         
-        log_lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
+        log_lines = stdout.strip().split("\n") if stdout.strip() else []
         
         # Filter by service/handler if specified
         if service_filter:
