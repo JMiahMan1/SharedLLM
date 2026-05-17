@@ -938,11 +938,13 @@ async def execute_announce(req: AnnouncementRequest):
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
         
-        # Samsung TVs need KEY_POWER via samsungtv service and longer wait
+        # Samsung TVs need longer wait time (15-30s to boot)
         if device_type == "samsung":
-            log.info(f"[announce] Using samsungtv.send_key KEY_POWER for {target_player}")
-            await ha_client.call_service(ha_url, ha_token, "samsungtv", "send_key", target_player, {"key": "KEY_POWER"})
-            await asyncio.sleep(8.0)  # Samsung TVs take longer to boot
+            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
+            await asyncio.sleep(15.0)
+        elif device_type == "webos":
+            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
+            await asyncio.sleep(10.0)
         else:
             await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
             await asyncio.sleep(2.0)
@@ -1020,7 +1022,10 @@ async def execute_announce(req: AnnouncementRequest):
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
         
-        verification = await verify_playback(ha_url, ha_token, target_player, media_url, timeout=15, device_type=device_type)
+        # TVs need longer verification timeout
+        verify_timeout = 30 if device_type in ("samsung", "webos") else 15
+        
+        verification = await verify_playback(ha_url, ha_token, target_player, media_url, timeout=verify_timeout, device_type=device_type)
         if verification["verified"]:
             log.info(f"[announce] Playback VERIFIED: {verification['detail']}")
         else:
