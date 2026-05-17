@@ -971,15 +971,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                         lint_data = lint_resp.json()
                                         lint_status = lint_data.get("status", "")
                                         if lint_status == "FAILURE":
-                                            # Extract key lint output for LLM
-                                            detail = lint_data.get("detail", {})
+                                            lint_msg = lint_data.get("message", "")
+                                            detail = lint_data.get("detail", {}) or {}
                                             results = detail.get("results", []) if isinstance(detail, dict) else []
-                                            issue_lines = []
-                                            for r in results:
-                                                output = r.get("output", "")
-                                                if output:
-                                                    issue_lines.extend(output.split("\n")[:8])
-                                            lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
+                                            if results:
+                                                issue_lines = []
+                                                for r in results:
+                                                    output = r.get("output", "")
+                                                    if output:
+                                                        issue_lines.extend(output.split("\n")[:8])
+                                                lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
+                                            else:
+                                                lint_feedback = f"LINT FAILED for {file_path}: {lint_msg}"
                                             log.warning(f"[AgentLoop] {lint_feedback}")
                                             await stream_event("result_error", lint_feedback)
                                             exec_data = {

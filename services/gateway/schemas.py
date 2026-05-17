@@ -98,9 +98,19 @@ class WorkspaceFileWriteRequest(BaseModel):
     path: str
     content: str
 
+class PatchChunk(BaseModel):
+    old_text: str = Field(..., alias="target_content", description="The exact text to find and replace")
+    new_text: str = Field(..., alias="replacement_content", description="The new text to replace it with")
+
+    model_config = {"populate_by_name": True}
+
 class WorkspaceFilePatchRequest(BaseModel):
-    path: str
-    chunks: List[Dict[str, str]]  # List of {"old_text": "...", "new_text": "..."}
+    path: str = Field(..., alias="file_path")
+    chunks: List[PatchChunk] = Field(..., alias="patch")
+    commit_after: bool = False
+    commit_message: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
 
 class WorkspaceShellRequest(BaseModel):
     command: str
