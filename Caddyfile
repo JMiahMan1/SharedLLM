@@ -53,7 +53,7 @@
     }
 
     handle /execute* {
-        reverse_proxy execution:8003
+        reverse_proxy localhost:8003
     }
 
     handle /control_plane* {
@@ -62,11 +62,11 @@
     }
 
     handle /discovery* {
-        reverse_proxy execution:8003
+        reverse_proxy localhost:8003
     }
 
     handle /media* {
-        reverse_proxy execution:8003
+        reverse_proxy localhost:8003
     }
 
     # 3. Route Identity/Auth API traffic
