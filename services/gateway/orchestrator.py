@@ -388,6 +388,9 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
 
 async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials) -> str:
     """Execute a single tool call and return the result string."""
+    # Normalize action: strip underscores/spaces, lowercase → canonical form
+    action = re.sub(r'[\s_]+', '', action).lower()
+    
     if action == "controlplanerequest":
         payload = tool_data.get("payload", tool_data)
         service_name = payload.get("service_name")

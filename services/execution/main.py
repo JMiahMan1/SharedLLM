@@ -476,8 +476,72 @@ async def execute_volumes(req: VolumeInventoryRequest):
     return await volume_handler.handle_volumes(req)
 
 
+def _normalize_llm_body(body: dict) -> dict:
+    """Handle common LLM hallucinations: nested body/payload wrappers, action keys."""
+    # Unwrap nested body/payload
+    if "body" in body and isinstance(body["body"], dict):
+        inner = body.pop("body")
+        body.update(inner)
+    if "payload" in body and isinstance(body["payload"], dict):
+        inner = body.pop("payload")
+        body.update(inner)
+    # Remove non-schema keys
+    body.pop("action", None)
+    body.pop("operation", None)
+    return body
+
+
 @app.post("/execute/workspace_search", response_model=ExecutionResult)
-async def execute_workspace_search(req: WorkspaceSearchRequest):
+async def execute_workspace_search(request: Request):
+    """Accept workspace_search with hallucinated field names and normalize them."""
+    body = await request.json()
+    body = _normalize_llm_body(body)
+    
+    # Handle nested query object (LLM sometimes nests search params inside query)
+    if "query" in body and isinstance(body["query"], dict):
+        q_obj = body.pop("query")
+        if "search_term" in q_obj:
+            body["query"] = q_obj["search_term"]
+        elif "search_query" in q_obj:
+            body["query"] = q_obj["search_query"]
+        elif "pattern" in q_obj:
+            body["query"] = q_obj["pattern"]
+        elif "text" in q_obj:
+            body["query"] = q_obj["text"]
+        else:
+            body["query"] = str(q_obj)
+        if "file_type" in q_obj and "include" not in body:
+            ft = q_obj["file_type"]
+            body["include"] = f"*.{ft}" if not ft.startswith("*") else ft
+        if "file_pattern" in q_obj and "include" not in body:
+            body["include"] = q_obj["file_pattern"]
+        if "path" in q_obj and "path" not in body:
+            body["path"] = q_obj["path"]
+        if "directory" in q_obj and "path" not in body:
+            body["path"] = q_obj["directory"]
+    
+    # Normalize common hallucinated field names
+    if "search_term" in body and "query" not in body:
+        body["query"] = body.pop("search_term")
+    if "search_query" in body and "query" not in body:
+        body["query"] = body.pop("search_query")
+    if "pattern" in body and "query" not in body:
+        body["query"] = body.pop("pattern")
+    if "file_type" in body and "include" not in body:
+        ft = body.pop("file_type")
+        body["include"] = f"*.{ft}" if not ft.startswith("*") else ft
+    if "file_pattern" in body and "include" not in body:
+        body["include"] = body.pop("file_pattern")
+    if "directory" in body and "path" not in body:
+        body["path"] = body.pop("directory")
+    if "search_path" in body and "path" not in body:
+        body["path"] = body.pop("search_path")
+    
+    # Ensure user_context exists
+    if "user_context" not in body:
+        body["user_context"] = {"user": "default", "is_admin": True}
+    
+    req = WorkspaceSearchRequest(**body)
     return await workspace.handle_workspace_search(req)
 
 @app.post("/execute/workspace_shell", response_model=ExecutionResult)
@@ -485,21 +549,48 @@ async def execute_workspace_shell(req: WorkspaceShellRequest):
     return await workspace.handle_workspace_shell(req)
 
 @app.post("/execute/workspace_file_read", response_model=ExecutionResult)
-async def execute_workspace_file_read(req: WorkspaceFileReadRequest):
+async def execute_workspace_file_read(request: Request):
+    body = await request.json()
+    body = _normalize_llm_body(body)
+    if "file_path" in body and "path" not in body:
+        body["path"] = body.pop("file_path")
+    if "filename" in body and "path" not in body:
+        body["path"] = body.pop("filename")
+    if "user_context" not in body:
+        body["user_context"] = {"user": "default", "is_admin": True}
+    req = WorkspaceFileReadRequest(**body)
     res = await workspace.handle_workspace_read(req)
     if res.status == "FAILURE":
         raise HTTPException(status_code=404, detail=res.message)
     return res
 
 @app.post("/execute/workspace_file_write", response_model=ExecutionResult)
-async def execute_workspace_file_write(req: WorkspaceFileWriteRequest):
+async def execute_workspace_file_write(request: Request):
+    body = await request.json()
+    body = _normalize_llm_body(body)
+    if "file_path" in body and "path" not in body:
+        body["path"] = body.pop("file_path")
+    if "filename" in body and "path" not in body:
+        body["path"] = body.pop("filename")
+    if "user_context" not in body:
+        body["user_context"] = {"user": "default", "is_admin": True}
+    req = WorkspaceFileWriteRequest(**body)
     res = await workspace.handle_workspace_write(req)
     if res.status == "FAILURE":
         raise HTTPException(status_code=400, detail=res.message)
     return res
 
 @app.post("/execute/workspace_file_patch", response_model=ExecutionResult)
-async def execute_workspace_file_patch(req: WorkspaceFilePatchRequest):
+async def execute_workspace_file_patch(request: Request):
+    body = await request.json()
+    body = _normalize_llm_body(body)
+    if "file_path" in body and "path" not in body:
+        body["path"] = body.pop("file_path")
+    if "filename" in body and "path" not in body:
+        body["path"] = body.pop("filename")
+    if "user_context" not in body:
+        body["user_context"] = {"user": "default", "is_admin": True}
+    req = WorkspaceFilePatchRequest(**body)
     res = await workspace.handle_workspace_patch(req)
     if res.status == "FAILURE":
         raise HTTPException(status_code=400, detail=res.message)
@@ -507,11 +598,31 @@ async def execute_workspace_file_patch(req: WorkspaceFilePatchRequest):
 
 
 @app.post("/execute/workspace_lint", response_model=ExecutionResult)
-async def execute_workspace_lint(req: WorkspaceLintRequest):
-    """
-    Lint a file in the local Git workspace.
-    Auto-detects tool from extension: .py→black+flake8, .js/.ts→eslint, .json→json.tool, .yaml→yamllint.
-    """
+async def execute_workspace_lint(request: Request):
+    """Lint a file in the local Git workspace with hallucinated field normalization."""
+    body = await request.json()
+    body = _normalize_llm_body(body)
+    
+    # Normalize hallucinated field names
+    if "file_path" in body and "path" not in body:
+        body["path"] = body.pop("file_path")
+    if "file_paths" in body and "path" not in body:
+        fps = body.pop("file_paths")
+        body["path"] = fps[0] if isinstance(fps, list) else fps
+    if "file_pattern" in body and "path" not in body:
+        body["path"] = body.pop("file_pattern")
+    if "files" in body and "path" not in body:
+        files = body.pop("files")
+        body["path"] = files[0] if isinstance(files, list) else files
+    if "filename" in body and "path" not in body:
+        body["path"] = body.pop("filename")
+    if "target" in body and "path" not in body:
+        body["path"] = body.pop("target")
+    
+    if "user_context" not in body:
+        body["user_context"] = {"user": "default", "is_admin": True}
+    
+    req = WorkspaceLintRequest(**body)
     return await workspace.handle_workspace_lint(req)
 
 
