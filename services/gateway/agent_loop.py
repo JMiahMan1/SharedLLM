@@ -797,6 +797,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             action_map_aliases = {
                 "read_file": "WorkspaceFileReadRequest",
                 "write_file": "WorkspaceFileWriteRequest",
+                "filewriterequest": "WorkspaceFileWriteRequest",
                 "patch_file": "WorkspaceFilePatchRequest",
                 "lint_file": "WorkspaceLintRequest",
                 "ripgrep": "WorkspaceSearchRequest",
@@ -947,53 +948,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
                     short_msg = exec_data.get("message", "Success")
                     await stream_event("result_success", short_msg)
-                    action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
+                     action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
                     # Track successful tool executions (non-ERROR responses)
                     if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
                         successful_tool_calls += 1
 
                         # --- POST-WRITE LINT HOOK ---
-                        # After file write/patch, auto-lint to catch syntax errors early
                         lintable_actions = {"workspacefilewriterequest", "workspacefilepatchrequest"}
                         if lookup_action in lintable_actions and isinstance(payload, dict):
                             file_path = payload.get("file_path") or payload.get("path", "")
-                            ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
-                            lintable_exts = {"py", "js", "ts", "tsx", "sh", "bash", "json", "yaml", "yml"}
-                            if ext in lintable_exts:
-                                log.info(f"[AgentLoop] Post-write lint check for {file_path} (ext={ext})")
-                                try:
-                                    lint_resp = await client.post(
-                                        f"{EXECUTION_SVC}/execute/workspace_lint",
-                                        json={"path": file_path, "user_context": payload.get("user_context", {})},
-                                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                                    )
-                                    if lint_resp.status_code == 200:
-                                        lint_data = lint_resp.json()
-                                        lint_status = lint_data.get("status", "")
-                                        if lint_status == "FAILURE":
-                                            lint_msg = lint_data.get("message", "")
-                                            detail = lint_data.get("detail", {}) or {}
-                                            results = detail.get("results", []) if isinstance(detail, dict) else []
-                                            if results:
-                                                issue_lines = []
-                                                for r in results:
-                                                    output = r.get("output", "")
-                                                    if output:
-                                                        issue_lines.extend(output.split("\n")[:8])
-                                                lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
-                                            else:
-                                                lint_feedback = f"LINT FAILED for {file_path}: {lint_msg}"
-                                            log.warning(f"[AgentLoop] {lint_feedback}")
-                                            await stream_event("result_error", lint_feedback)
-                                            exec_data = {
-                                                "status": "LINT_ERRORS",
-                                                "message": lint_feedback,
-                                                "file_path": file_path,
-                                            }
-                                        else:
-                                            log.info(f"[AgentLoop] Post-write lint clean for {file_path}")
-                                except Exception as lint_e:
-                                    log.warning(f"[AgentLoop] Post-write lint check failed: {lint_e}")
+                            if file_path:
+                                lint_feedback = await run_post_write_lint(file_path, EXECUTION_SVC, INTERNAL_SECRET, log)
+                                if lint_feedback:
+                                    await stream_event("result_error", lint_feedback)
+                                    exec_data = {
+                                        "status": "LINT_ERRORS",
+                                        "message": lint_feedback,
+                                        "file_path": file_path,
+                                    }
 
                     # Checkpoint state after successful tool execution
                     await _save_checkpoint(iter_num)
@@ -1087,3 +1059,44 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     await _clear_checkpoint()
 
     return ans
+
+
+async def run_post_write_lint(file_path: str, execution_svc: str, internal_secret: str, logger) -> Optional[str]:
+    """
+    Shared post-write lint hook. Returns lint feedback string on failure, None on success.
+    """
+    ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
+    lintable_exts = {"py", "js", "ts", "tsx", "sh", "bash", "json", "yaml", "yml"}
+    if ext not in lintable_exts:
+        return None
+
+    logger.info(f"Post-write lint check for {file_path} (ext={ext})")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as lint_client:
+            lint_resp = await lint_client.post(
+                f"{execution_svc}/execute/workspace_lint",
+                json={"path": file_path},
+                headers={"X-Internal-Secret": internal_secret},
+            )
+            if lint_resp.status_code == 200:
+                lint_data = lint_resp.json()
+                if lint_data.get("status") == "FAILURE":
+                    lint_msg = lint_data.get("message", "")
+                    detail = lint_data.get("detail", {}) or {}
+                    results = detail.get("results", []) if isinstance(detail, dict) else []
+                    if results:
+                        issue_lines = []
+                        for r in results:
+                            output = r.get("output", "")
+                            if output:
+                                issue_lines.extend(output.split("\n")[:8])
+                        lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
+                    else:
+                        lint_feedback = f"LINT FAILED for {file_path}: {lint_msg}"
+                    logger.warning(f"{lint_feedback}")
+                    return lint_feedback
+                else:
+                    logger.info(f"Post-write lint clean for {file_path}")
+    except Exception as lint_e:
+        logger.warning(f"Post-write lint check failed: {lint_e}")
+    return None
