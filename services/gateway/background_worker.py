@@ -425,7 +425,7 @@ class RavenWorker:
     async def _retry_with_bigger_model(self, mission_id: int, payload: Dict[str, Any], result_str: str):
         """Re-enqueue mission with a larger model after schema failure."""
         original_model = payload.get("model", "unknown")
-        upgrade_model = "qwen3:35b"
+        upgrade_model = "qwen3.6-35b-a3b:q4_k_m"
         
         payload["_retry_count"] = payload.get("_retry_count", 0) + 1
         payload["model"] = upgrade_model
