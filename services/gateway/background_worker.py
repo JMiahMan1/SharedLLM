@@ -62,9 +62,9 @@ class RavenWorker:
 
     async def _recover_orphaned_missions(self):
         """
-        On startup, any mission still in 'executing' status is an orphan —
-        the gateway was killed or restarted mid-run. Mark them failed so the
-        UI unblocks and TIER3_LOCK is not permanently held.
+        On startup, any mission still in 'executing' or 'paused' status is an orphan —
+        the gateway was killed or restarted mid-run. Re-enqueue them so they resume
+        automatically from their last checkpoint.
         """
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -75,15 +75,25 @@ class RavenWorker:
                 if resp.status_code != 200:
                     return
                 missions = resp.json()
-                orphans = [m for m in missions if m.get("status") == "executing"]
+                orphans = [m for m in missions if m.get("status") in ("executing", "paused")]
                 for mission in orphans:
                     mid = mission["id"]
+                    # Re-enqueue the mission — AgentLoop will restore from Redis checkpoint
+                    payload = {
+                        "query": mission["proposed_mission"],
+                        "model": mission.get("coding_model") or "qwen3:8b",
+                        "system": f"You are Raven, an autonomous agent executing a user-assigned background mission.\n\nExecute the following task to the best of your ability:\n{mission['proposed_mission']}",
+                        "stream": False,
+                        "creds": {"user": "default", "is_admin": True},
+                        "_mission_id": mid,
+                    }
+                    await self.job_queue.enqueue_job("raven_resume", payload)
                     await client.patch(
                         f"http://identity:8001/api/raven/missions/{mid}",
-                        json={"status": "failed", "result": "Mission interrupted: gateway restarted during execution."},
+                        json={"status": "queued"},
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
-                    log.warning(f"[RavenWorker] Recovered orphaned mission #{mid} → marked failed")
+                    log.warning(f"[RavenWorker] Recovered orphaned mission #{mid} → re-enqueued (will resume from checkpoint)")
         except Exception as e:
             log.warning(f"[RavenWorker] Orphan recovery failed (non-critical): {e}")
 

@@ -536,7 +536,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         # --- HARD KILL SWITCH (Redis polling) ---
         if mission_id:
             try:
-                # Resolve redis instance for kill-switch check
                 r_kill = redis.from_url(REDIS_URL, decode_responses=True)
                 kill_flag = await r_kill.get(f"raven:mission:kill:{mission_id}")
                 if kill_flag:
@@ -546,6 +545,26 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     return "MISSION TERMINATED: User requested cancellation via control plane."
             except Exception as e:
                 log.error(f"[AgentLoop] Error checking mission kill flag: {e}")
+
+        # --- PAUSE FOR LLM ACCESS (Redis polling) ---
+        if mission_id:
+            try:
+                r_pause = redis.from_url(REDIS_URL, decode_responses=True)
+                pause_count = 0
+                while await r_pause.get(f"raven:mission:pause:{mission_id}"):
+                    if pause_count == 0:
+                        log.warning(f"[AgentLoop] MISSION PAUSED for {mission_id}. Waiting for resume signal.")
+                        await stream_event("system", "Mission paused — waiting for LLM access to become available.")
+                    pause_count += 1
+                    await asyncio.sleep(5)
+                    if pause_count % 12 == 0:
+                        log.info(f"[AgentLoop] Still paused ({pause_count * 5}s elapsed)")
+                if pause_count > 0:
+                    log.info(f"[AgentLoop] Mission {mission_id} resumed after {pause_count * 5}s pause.")
+                    await stream_event("system", f"Mission resumed after {pause_count * 5}s pause.")
+                await r_pause.close()
+            except Exception as e:
+                log.error(f"[AgentLoop] Error checking mission pause flag: {e}")
         
         await stream_event("system", f"Agent loop iteration {iter_num}/{MAX_TOOL_ITERATIONS} started.")
         log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | total elapsed {elapsed_total:.0f}s")

@@ -3045,6 +3045,48 @@ async def kill_mission(request: Request, id_or_slug: str):
         
         return {"status": "SUCCESS", "message": f"Mission {real_id} kill signal sent."}
 
+@app.post("/api/raven/missions/{id_or_slug}/pause")
+async def pause_mission(request: Request, id_or_slug: str):
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    async with borrow_http_client() as client:
+        m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        if m_resp.status_code != 200:
+            raise HTTPException(status_code=m_resp.status_code, detail="Mission not found")
+        mission_data = m_resp.json()
+        real_id = mission_data["id"]
+
+        from gateway.history import REDIS_URL
+        import redis.asyncio as redis
+        r = redis.from_url(REDIS_URL, decode_responses=True)
+        await r.set(f"raven:mission:pause:{real_id}", "PAUSED", ex=3600)
+        await r.close()
+        
+        return {"status": "SUCCESS", "message": f"Mission {real_id} paused. LLM access will be deferred until resumed."}
+
+@app.post("/api/raven/missions/{id_or_slug}/resume")
+async def resume_mission(request: Request, id_or_slug: str):
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    async with borrow_http_client() as client:
+        m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        if m_resp.status_code != 200:
+            raise HTTPException(status_code=m_resp.status_code, detail="Mission not found")
+        mission_data = m_resp.json()
+        real_id = mission_data["id"]
+
+        from gateway.history import REDIS_URL
+        import redis.asyncio as redis
+        r = redis.from_url(REDIS_URL, decode_responses=True)
+        await r.delete(f"raven:mission:pause:{real_id}")
+        await r.close()
+        
+        return {"status": "SUCCESS", "message": f"Mission {real_id} resumed. LLM access restored."}
+
 @app.get("/api/raven/missions")
 async def get_user_missions(request: Request):
     creds = await _resolve_identity_from_request(request)
