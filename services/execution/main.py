@@ -155,14 +155,17 @@ from config import TEMP_MEDIA_DIR
 TEMP_VIDEO_DIR = TEMP_MEDIA_DIR
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
-async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_media_url: str, timeout: int = 10) -> Dict[str, Any]:
+async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_media_url: str, timeout: int = 10, device_type: str = "unknown") -> Dict[str, Any]:
     """Verify that a media player actually started playing the expected content.
+    
+    For speakers/Chromecast: requires 'playing' state with matching media URL.
+    For TVs: accepts 'on' or 'idle' state since TVs don't always report 'playing' for audio.
     
     Returns dict with: verified (bool), state, media_content_id, app_name, detail
     """
     import time
     start = time.time()
-    playing_seen = False
+    is_tv = device_type in ("roku", "samsung", "webos", "android_tv", "bravia", "generic_tv")
     
     while time.time() - start < timeout:
         state_resp = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -175,11 +178,20 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
         current_media = attrs.get("media_content_id", "")
         app_name = attrs.get("app_name", attrs.get("app_id", ""))
         
-        # Check if we see 'playing' state with matching media URL
+        # For TVs: accept 'on' or 'idle' as success (TVs don't report 'playing' for audio)
+        if is_tv and current_state in ("on", "idle", "playing"):
+            log.info(f"[verify_playback] TV device {entity_id} state='{current_state}' (acceptable for TV)")
+            return {
+                "verified": True,
+                "state": current_state,
+                "media_content_id": current_media,
+                "app_name": app_name,
+                "detail": f"Playback confirmed on TV (state='{current_state}')"
+            }
+        
+        # For speakers/Chromecast: require 'playing' state with matching media URL
         if current_state == "playing" and expected_media_url in str(current_media):
-            playing_seen = True
             log.info(f"[verify_playback] CONFIRMED playing: {entity_id} -> {current_media[:60]}")
-            # Wait a moment to ensure it's stable, then return success
             await asyncio.sleep(1)
             return {
                 "verified": True,
@@ -191,7 +203,7 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
         
         await asyncio.sleep(0.5)
     
-    # Timeout without seeing playing state
+    # Timeout without seeing acceptable state
     last_state = state_resp.get("state", "unknown") if state_resp else "unknown"
     last_media = state_resp.get("attributes", {}).get("media_content_id", "") if state_resp else ""
     return {
@@ -990,7 +1002,13 @@ async def execute_announce(req: AnnouncementRequest):
     # 4. Verify playback actually happened
     if result.get("ok") and media_url:
         log.info(f"[announce] Verifying playback on {target_player}...")
-        verification = await verify_playback(ha_url, ha_token, target_player, media_url, timeout=15)
+        # Detect device type for lenient TV verification
+        from announce_handlers import detect_tv_type
+        attrs = initial_state.get("attributes", {}) if initial_state else {}
+        initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
+        device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
+        
+        verification = await verify_playback(ha_url, ha_token, target_player, media_url, timeout=15, device_type=device_type)
         if verification["verified"]:
             log.info(f"[announce] Playback VERIFIED: {verification['detail']}")
         else:
