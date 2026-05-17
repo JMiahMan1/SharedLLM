@@ -1,6 +1,5 @@
 # services/gateway/main.py
 import os
-import sys
 import logging
 import json
 import asyncio
@@ -18,8 +17,8 @@ from pathlib import Path
 # --- Setup Logging IMMEDIATELY ---
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
-from gateway.schemas import ChatRequest, ResolvedCredentials
-from gateway.agent_loop import AgentLoop, extract_action_json, execute_inference as provider_execute_inference, get_vram_safe_params
+from gateway.schemas import ResolvedCredentials
+from gateway.agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
 from gateway.config import (
     OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
     STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
@@ -130,10 +129,10 @@ def _make_openai_chunk(content: str, model: str, finish_reason: str = None):
     }
 
 # --- Imports from internal modules ---
-from gateway.schemas import ChatRequest, ChatResponse, OllamaPullRequest, OllamaGenerateRequest, StorageListRequest, StorageIndexRequest, WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceShellRequest, GitOperationRequest, ControlPlaneRequest, SystemLearningRequest, WorkspaceBootstrapRequest
+from gateway.schemas import StorageListRequest, StorageIndexRequest
 from gateway.intent_engine import engine
-from gateway.history import get_history, update_history, ping_redis, get_long_term_memory, extract_and_store_user_facts
-from gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, LIBRARIAN_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+from gateway.history import update_history, ping_redis
+from gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 from gateway.messaging import InferenceJobQueue, JobStatus
 from gateway.config import REDIS_URL as _REDIS_URL
 REDIS_URL = _REDIS_URL
@@ -147,9 +146,8 @@ log.info("Successfully imported Raven background worker.")
 
 # --- Configuration (from shared config) ---
 from gateway.config import (
-    IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
-    LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
-    INTERNAL_SECRET, OLLAMA_URL, CONFIG, FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
+    CONTROL_PLANE_URL,
+    FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
 )
 LOGGING_SVC_URL = LOGGING_SVC
 
@@ -675,7 +673,7 @@ async def select_model_for_query(query: str) -> str:
 
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
-    from gateway.prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, RAVEN_AUTONOMOUS_PROTOCOL, RAVEN_NARRATOR_PROTOCOL
+    from gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL, RAVEN_NARRATOR_PROTOCOL
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
       return RAVEN_NARRATOR_PROTOCOL
@@ -3150,29 +3148,39 @@ async def proxy_docker_exec(service_name: str, body: Dict[str, Any], request: Re
 async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str = ""):
     # Validate auth token
     if token:
-        async with borrow_http_client() as client:
-            auth_resp = await client.get(
-                f"{IDENTITY_SVC}/api/users/me",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            if auth_resp.status_code != 200:
-                await websocket.close(code=1008, reason="Invalid token")
-                return
-    
-    await websocket.accept()
-    # Resolve to real ID
-    async with borrow_http_client() as client:
-        resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-        if resp.status_code != 200:
-            await websocket.send_text(json.dumps({"error": "Mission not found"}))
-            await websocket.close()
+        try:
+            async with borrow_http_client() as client:
+                auth_resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users/me",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                if auth_resp.status_code != 200:
+                    log.warning(f"[WebSocket] Token validation failed for mission {id_or_slug}: {auth_resp.status_code}")
+                    await websocket.close(code=1008, reason="Invalid token")
+                    return
+        except Exception as e:
+            log.warning(f"[WebSocket] Token validation error: {e}")
+            await websocket.close(code=1011, reason="Auth service unavailable")
             return
-        mission_data = resp.json()
-        real_id = mission_data["id"]
-
+    
     try:
-        from gateway.history import REDIS_URL
+        await websocket.accept()
+    except Exception as e:
+        log.error(f"[WebSocket] Failed to accept connection: {e}")
+        return
         
+    # Resolve to real ID
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+            if resp.status_code != 200:
+                await websocket.send_text(json.dumps({"type": "system", "data": f"Mission {id_or_slug} not found"}))
+                await websocket.close()
+                return
+            mission_data = resp.json()
+            real_id = mission_data["id"]
+
+        from gateway.history import REDIS_URL
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
         
@@ -3196,23 +3204,31 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
                     if message["type"] == "message":
                         await websocket.send_text(message["data"])
             except Exception as e:
-                log.warning(f"Pubsub reader error: {e}")
+                log.warning(f"[WebSocket] Pubsub reader error: {e}")
 
         reader_task = asyncio.create_task(reader())
         try:
             while True:
-                await websocket.receive_text() # keep alive or detect disconnect
+                await websocket.receive_text()
         except WebSocketDisconnect:
             pass
         except Exception as e:
-            log.warning(f"WebSocket error: {e}")
+            log.warning(f"[WebSocket] Client disconnect: {e}")
         finally:
             reader_task.cancel()
-            await pubsub.unsubscribe(channel)
+            try:
+                await pubsub.unsubscribe(channel)
+            except Exception:
+                pass
             await r.close()
+    except WebSocketDisconnect:
+        pass
     except Exception as e:
-        log.error(f"WebSocket setup error: {e}")
-        await websocket.close()
+        log.error(f"[WebSocket] Setup error for mission {id_or_slug}: {e}")
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 # ---- Config Endpoints ----
 
