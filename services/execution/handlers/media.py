@@ -226,16 +226,34 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
 
 async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play podcast via Music Assistant or URL."""
+    from handlers import roku as roku_handler
+
     if req.query and req.query.startswith(("http://", "https://")):
         # Direct podcast URL
+        is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
+        if is_roku:
+            ma_entity = await roku_handler.find_ma_player_sibling(ctx.ha_url, ctx.ha_token, entity_id)
+            if ma_entity:
+                result = await ha_client.call_service(
+                    ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", ma_entity,
+                    {"media_id": req.query, "media_type": "track", "enqueue": "play"},
+                )
+                if result.get("ok"):
+                    return ExecutionResult(status="SUCCESS", message=f"Playing podcast on {entity_id}.", service="media_play")
         result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
             {"media_content_id": req.query, "media_content_type": "audio"},
         )
         if result.get("ok"):
             return ExecutionResult(status="SUCCESS", message=f"Playing podcast on {entity_id}.", service="media_play")
-    
+
     # Try MASS search for podcast
+    is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
+    if is_roku:
+        return await roku_handler.roku_play_music(
+            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", MASS_CONFIG_ENTRY_ID,
+        )
+
     mass_entity = await resolve_mass_entity(ctx, entity_id)
     search_result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
@@ -247,7 +265,7 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
         },
         return_response=True,
     )
-    
+
     if search_result.get("ok") and search_result.get("service_response"):
         raw = search_result["service_response"]
         resp = raw.get("service_response", raw)
@@ -261,7 +279,7 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
                 )
                 if result.get("ok"):
                     return ExecutionResult(status="SUCCESS", message=f"Playing podcast '{req.query}' on {entity_id}.", service="media_play")
-    
+
     return ExecutionResult(status="FAILURE", message=f"Could not play podcast '{req.query}' on {entity_id}. Try providing a direct URL.", service="media_play")
 
 async def play_audiobook(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
