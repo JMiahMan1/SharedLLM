@@ -1174,6 +1174,87 @@ async def discovery_entities(ha_url: str, ha_token: str):
 async def discovery_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1):
     return await ha_client.get_history(ha_url, ha_token, entity_id, days)
 
+@app.get("/discovery/devices")
+async def discovery_devices():
+    """List all registered devices with network info."""
+    import device_registry
+    return {"devices": device_registry.list_devices()}
+
+@app.get("/discovery/devices/{entity_id}")
+async def discovery_device(entity_id: str):
+    """Get registered device info for a specific entity."""
+    import device_registry
+    device = device_registry.get_device(entity_id)
+    if device:
+        return {"device": device}
+    return {"device": None, "message": f"No device registered for {entity_id}"}
+
+@app.post("/discovery/devices/{entity_id}/refresh")
+async def discovery_device_refresh(entity_id: str, request: Request):
+    """Trigger re-discovery for a specific device."""
+    import device_discovery
+    body = await request.json()
+    ha_url = body.get("ha_url", "")
+    ha_token = body.get("ha_token", "")
+    device_type = body.get("device_type")
+    subnet = body.get("subnet", "192.168.2.0/24")
+    
+    if not ha_url or not ha_token:
+        return {"status": "FAILURE", "message": "ha_url and ha_token required"}
+    
+    import device_registry
+    device_registry.invalidate_device(entity_id, reason="manual_refresh")
+    result = await device_discovery.discover_device(
+        entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
+    )
+    if result:
+        return {"status": "SUCCESS", "device": result}
+    return {"status": "FAILURE", "message": f"Could not discover {entity_id}"}
+
+@app.post("/discovery/scan")
+async def discovery_bulk_scan(request: Request):
+    """Bulk network scan for all media devices."""
+    import device_discovery
+    body = await request.json()
+    ha_url = body.get("ha_url", "")
+    ha_token = body.get("ha_token", "")
+    subnet = body.get("subnet", "192.168.2.0/24")
+    
+    if not ha_url or not ha_token:
+        return {"status": "FAILURE", "message": "ha_url and ha_token required"}
+    
+    discovered = await device_discovery.bulk_scan(ha_url, ha_token, subnet)
+    return {"status": "SUCCESS", "discovered": discovered, "count": len(discovered)}
+
+@app.delete("/discovery/devices/{entity_id}")
+async def discovery_device_remove(entity_id: str):
+    """Remove a device from the registry."""
+    import device_registry
+    removed = device_registry.remove_device(entity_id)
+    if removed:
+        return {"status": "SUCCESS", "message": f"Removed {entity_id}"}
+    return {"status": "FAILURE", "message": f"Device {entity_id} not found"}
+
+@app.get("/discovery/profile/{entity_id}")
+async def discovery_device_profile(entity_id: str, ha_url: str, ha_token: str, subnet: str = "192.168.2.0/24"):
+    """Generate a complete device profile with network info, HA data, and control methods."""
+    import device_profiler
+    profile = await device_profiler.profile_device(entity_id, ha_url, ha_token, subnet)
+    return profile
+
+@app.get("/discovery/profile")
+async def discovery_profile_all(ha_url: str, ha_token: str, subnet: str = "192.168.2.0/24"):
+    """Profile all media_player entities."""
+    import device_profiler
+    profiles = await device_profiler.profile_all_media_devices(ha_url, ha_token, subnet)
+    return {"profiles": profiles, "count": len(profiles)}
+
+@app.get("/discovery/control_methods")
+async def discovery_control_methods():
+    """Document all supported device types and their control methods."""
+    import device_profiler
+    return {"control_methods": device_profiler.CONTROL_METHODS}
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "execution"}
