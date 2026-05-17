@@ -603,7 +603,13 @@ async def bulk_scan(
             # Match to discovered device by type
             for ip, dev_info in device_map.items():
                 dev_type = dev_info["type"]
-                if dev_type in entity_lower or dev_type == integration.lower():
+                # Cast devices may have "chrome" or "cast" in entity_id
+                type_aliases = {
+                    "cast": ["cast", "chrome"],
+                    "androidtv": ["android", "adb"],
+                }
+                match_terms = type_aliases.get(dev_type, [dev_type])
+                if any(t in entity_lower for t in match_terms) or dev_type == integration.lower():
                     await device_registry.set_device(
                         entity_id,
                         ip=ip,
