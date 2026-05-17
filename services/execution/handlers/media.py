@@ -321,20 +321,116 @@ async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
                           "mediashell", "backdrop", "tvlauncher", "android.tv")
     return any(ind in app_id for ind in android_indicators)
 
+async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
+    """Check if a media_player entity is an LG WebOS TV."""
+    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+    if not state:
+        return False
+    attrs = state.get("attributes", {})
+    app_id = (attrs.get("app_id") or "").lower()
+    entity_id_lower = entity_id.lower()
+    # WebOS indicators: webostv entity prefix or com.webos app_id
+    webos_indicators = ("com.webos.", "webos.tv", "lg.webos")
+    if any(ind in app_id for ind in webos_indicators):
+        return True
+    # Check entity_id for webostv pattern
+    if "webostv" in entity_id_lower:
+        return True
+    return False
+
+async def is_samsung_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
+    """Check if a media_player entity is a Samsung Tizen TV."""
+    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+    if not state:
+        return False
+    attrs = state.get("attributes", {})
+    app_id = (attrs.get("app_id") or "").lower()
+    entity_id_lower = entity_id.lower()
+    # Samsung Tizen indicators: org.tizen app_id or samsungtv entity prefix
+    samsung_indicators = ("org.tizen.", "samsung.tv", "tizen.tv")
+    if any(ind in app_id for ind in samsung_indicators):
+        return True
+    # Check entity_id for samsungtv pattern
+    if "samsungtv" in entity_id_lower:
+        return True
+    return False
+
+async def handle_webos_command(ha_url: str, ha_token: str, entity_id: str, command: str) -> ExecutionResult:
+    """Send a command to an LG WebOS TV via webostv integration."""
+    # WebOS command mapping
+    webos_commands = {
+        "home": "HOME", "back": "BACK", "enter": "ENTER", "pause": "PAUSE",
+        "play": "PLAY", "stop": "STOP", "fast_forward": "FASTFORWARD",
+        "rewind": "REWIND", "channel_up": "CHANNELUP", "channel_down": "CHANNELDOWN",
+        "volume_up": "VOLUMEUP", "volume_down": "VOLUMEDOWN", "mute": "MUTE",
+        "red": "RED", "green": "GREEN", "yellow": "YELLOW", "blue": "BLUE",
+        "power_off": "POWER", "power_on": "POWER",
+    }
+    
+    webos_cmd = webos_commands.get(command.lower())
+    if not webos_cmd:
+        return ExecutionResult(status="FAILURE", message=f"Unsupported WebOS command: {command}", service="media_transport")
+    
+    log.info(f"[media/webos] Sending command '{webos_cmd}' to {entity_id}")
+    result = await ha_client.call_service(
+        ha_url, ha_token, "webostv", "command", entity_id,
+        {"command": webos_cmd}
+    )
+    
+    if result.get("ok"):
+        return ExecutionResult(status="SUCCESS", message=f"Sent '{command}' to {entity_id} (WebOS).", service="media_transport")
+    return ExecutionResult(status="FAILURE", message=f"Failed to send '{command}' to WebOS TV: {result.get('error')}", service="media_transport", detail=result)
+
+async def handle_samsung_command(ha_url: str, ha_token: str, entity_id: str, command: str) -> ExecutionResult:
+    """Send a command to a Samsung Tizen TV via samsungtv integration."""
+    # Samsung key mapping
+    samsung_keys = {
+        "home": "KEY_HOME", "back": "KEY_RETURN", "enter": "KEY_ENTER",
+        "pause": "KEY_PAUSE", "play": "KEY_PLAY", "stop": "KEY_STOP",
+        "fast_forward": "KEY_FF", "rewind": "KEY_REWIND",
+        "channel_up": "KEY_CHUP", "channel_down": "KEY_CHDOWN",
+        "volume_up": "KEY_VOLUP", "volume_down": "KEY_VOLDOWN", "mute": "KEY_MUTE",
+        "power_off": "KEY_POWER", "power_on": "KEY_POWER",
+        "up": "KEY_UP", "down": "KEY_DOWN", "left": "KEY_LEFT", "right": "KEY_RIGHT",
+        "info": "KEY_INFO", "menu": "KEY_MENU", "tools": "KEY_TOOLS",
+        "exit": "KEY_EXIT", "source": "KEY_SOURCE",
+    }
+    
+    samsung_key = samsung_keys.get(command.lower())
+    if not samsung_key:
+        return ExecutionResult(status="FAILURE", message=f"Unsupported Samsung command: {command}", service="media_transport")
+    
+    log.info(f"[media/samsung] Sending key '{samsung_key}' to {entity_id}")
+    result = await ha_client.call_service(
+        ha_url, ha_token, "samsungtv", "send_key", entity_id,
+        {"key": samsung_key}
+    )
+    
+    if result.get("ok"):
+        return ExecutionResult(status="SUCCESS", message=f"Sent '{command}' to {entity_id} (Samsung).", service="media_transport")
+    return ExecutionResult(status="FAILURE", message=f"Failed to send '{command}' to Samsung TV: {result.get('error')}", service="media_transport", detail=result)
+
 async def handle_media_transport(req) -> ExecutionResult:
-    """Handle media transport commands with Android TV-specific handling."""
+    """Handle media transport commands with TV-specific handling for Android TV, WebOS, and Samsung."""
     ctx = req.user_context
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
     command = req.command.lower()
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     
-    # Check if device is Android TV
-    is_atv = await is_android_tv(ha_url, ha_token, full_entity_id)
+    # Detect TV type
+    tv_type = "standard"
+    if await is_android_tv(ha_url, ha_token, full_entity_id):
+        tv_type = "android"
+    elif await is_webos_tv(ha_url, ha_token, full_entity_id):
+        tv_type = "webos"
+    elif await is_samsung_tv(ha_url, ha_token, full_entity_id):
+        tv_type = "samsung"
+    
+    log.info(f"[media/transport] Device type: {tv_type} for {full_entity_id}")
     
     # Android TV-specific command handling
-    if is_atv:
-        # "stop", "close", "go home" → HOME button (exit app, keep TV on)
+    if tv_type == "android":
         if command in ("stop", "home", "close"):
             log.info(f"[media/transport] Android TV HOME command for {full_entity_id}")
             result = await ha_client.call_service(
@@ -345,7 +441,6 @@ async def handle_media_transport(req) -> ExecutionResult:
                 return ExecutionResult(status="SUCCESS", message=f"Returned to home screen on {full_entity_id}.", service="media_transport")
             return ExecutionResult(status="FAILURE", message=f"Failed to return home: {result.get('error')}", service="media_transport", detail=result)
         
-        # "power_off", "turn_off" → SLEEP command (actually power off TV)
         if command in ("power_off", "turn_off"):
             log.info(f"[media/transport] Android TV POWER OFF for {full_entity_id}")
             result = await ha_client.call_service(
@@ -356,7 +451,6 @@ async def handle_media_transport(req) -> ExecutionResult:
                 return ExecutionResult(status="SUCCESS", message=f"Powered off {full_entity_id}.", service="media_transport")
             return ExecutionResult(status="FAILURE", message=f"Failed to power off: {result.get('error')}", service="media_transport", detail=result)
         
-        # "back" → BACK button
         if command == "back":
             log.info(f"[media/transport] Android TV BACK command for {full_entity_id}")
             result = await ha_client.call_service(
@@ -366,6 +460,22 @@ async def handle_media_transport(req) -> ExecutionResult:
             if result.get("ok"):
                 return ExecutionResult(status="SUCCESS", message=f"Sent back command to {full_entity_id}.", service="media_transport")
             return ExecutionResult(status="FAILURE", message=f"Failed to send back: {result.get('error')}", service="media_transport", detail=result)
+    
+    # WebOS-specific command handling
+    elif tv_type == "webos":
+        webos_result = await handle_webos_command(ha_url, ha_token, full_entity_id, command)
+        if webos_result.status == "SUCCESS":
+            return webos_result
+        # Fallback to standard commands if WebOS command not supported
+        log.info(f"[media/transport] WebOS command failed, falling back to standard for {command}")
+    
+    # Samsung-specific command handling
+    elif tv_type == "samsung":
+        samsung_result = await handle_samsung_command(ha_url, ha_token, full_entity_id, command)
+        if samsung_result.status == "SUCCESS":
+            return samsung_result
+        # Fallback to standard commands if Samsung command not supported
+        log.info(f"[media/transport] Samsung command failed, falling back to standard for {command}")
     
     # Standard media transport commands (all devices)
     button_map = {
