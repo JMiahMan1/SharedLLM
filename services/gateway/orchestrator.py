@@ -530,6 +530,16 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             tool_data["action"] = tool_data["function"].get("name", "")
             tool_data["payload"] = tool_data["function"].get("arguments", {})
 
+        # Normalize hallucinated/shortened action names
+        action_aliases = {
+            "filewriterequest": "workspacefilewriterequest",
+            "filereadrequest": "workspacefilereadrequest",
+            "filepatchrequest": "workspacefilepatchrequest",
+        }
+        raw_action = tool_data.get("action", "").lower().strip()
+        if raw_action in action_aliases:
+            tool_data["action"] = action_aliases[raw_action]
+
         action = tool_data.get("action", "").lower().strip()
         log.info(f"[_single_turn_inference] Tool call detected: {action}")
         log.info(f"[_single_turn_inference] Raw LLM output: {ans[:500]}")
@@ -548,42 +558,10 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             payload = tool_data["payload"]
             file_path = payload.get("file_path", "") or payload.get("path", "") or payload.get("relative_path", "")
             if file_path:
-                ext = file_path.rsplit(".", 1)[-1] if "." in file_path else ""
-                lintable_exts = {"py", "js", "ts", "tsx", "sh", "bash", "json", "yaml", "yml"}
-                if ext in lintable_exts:
-                    log.info(f"[_single_turn_inference] Post-write lint hook for {file_path} (ext={ext})")
-                    try:
-                        user_ctx = {
-                            "user": creds.user if hasattr(creds, "user") else "default",
-                            "is_admin": creds.is_admin if hasattr(creds, "is_admin") else False,
-                        }
-                        async with httpx.AsyncClient(timeout=15.0) as lint_client:
-                            lint_resp = await lint_client.post(
-                                f"{EXECUTION_SVC}/execute/workspace_lint",
-                                json={"path": file_path, "user_context": user_ctx},
-                                headers={"X-Internal-Secret": INTERNAL_SECRET}
-                            )
-                            if lint_resp.status_code == 200:
-                                lint_data = lint_resp.json()
-                                if lint_data.get("status") == "FAILURE":
-                                    lint_msg = lint_data.get("message", "")
-                                    detail = lint_data.get("detail", {}) or {}
-                                    results = detail.get("results", []) if isinstance(detail, dict) else []
-                                    if results:
-                                        issue_lines = []
-                                        for r in results:
-                                            output = r.get("output", "")
-                                            if output:
-                                                issue_lines.extend(output.split("\n")[:8])
-                                        lint_feedback = f"LINT FAILED for {file_path}:\n" + "\n".join(issue_lines[:15])
-                                    else:
-                                        lint_feedback = f"LINT FAILED for {file_path}: {lint_msg}"
-                                    tool_result = f"{tool_result}\n\n{lint_feedback}"
-                                    log.warning(f"[_single_turn_inference] Lint feedback: {lint_feedback[:200]}")
-                                elif lint_data.get("status") == "SUCCESS":
-                                    log.info(f"[_single_turn_inference] Lint passed for {file_path}")
-                    except Exception as lint_e:
-                        log.warning(f"[_single_turn_inference] Lint hook failed: {lint_e}")
+                from gateway.agent_loop import run_post_write_lint
+                lint_feedback = await run_post_write_lint(file_path, EXECUTION_SVC, INTERNAL_SECRET, log)
+                if lint_feedback:
+                    tool_result = f"{tool_result}\n\n{lint_feedback}"
 
         # Append tool result to conversation for next turn
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
