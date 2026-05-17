@@ -4,7 +4,6 @@ import json
 import re
 import logging
 import httpx
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 from gateway.schemas import ResolvedCredentials
@@ -104,7 +103,6 @@ async def get_llm_settings() -> Dict[str, str]:
 
 async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from gateway.config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":
@@ -262,7 +260,6 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
 
 async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
     """Dynamically discover weather entities from HA and return live forecast data."""
-    from gateway.ha_state_cache import get_cached_state
     
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)
@@ -335,7 +332,7 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     entity_id is the stable join key between RAG metadata and live state.
     Even if friendly_name changes in HA, entity_id remains constant.
     """
-    from gateway.ha_state_cache import get_cached_state, cache_all_states, fetch_live_states
+    from gateway.ha_state_cache import get_cached_state, fetch_live_states
     
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)
