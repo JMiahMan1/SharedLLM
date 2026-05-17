@@ -108,6 +108,16 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
 
 async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play music via Music Assistant or fallback."""
+    from handlers import roku as roku_handler
+    
+    is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
+    
+    if is_roku:
+        log.info("[media/play] Detected Roku device, using Roku music handler")
+        return await roku_handler.roku_play_music(
+            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", MASS_CONFIG_ENTRY_ID,
+        )
+    
     mass_entity = await resolve_mass_entity(ctx, entity_id)
     
     if req.query:
@@ -143,10 +153,9 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                 if result.get("ok"):
                     return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
         
-        # Fallback: standard media_player.play_media (use resolved MASS entity)
         result = await ha_client.call_service(
-            ctx.ha_url, ctx.ha_token, "media_player", "play_media", mass_entity,
-            {"media": {"media_content_id": req.query, "media_content_type": "music"}, "enqueue": "play"},
+            ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
+            {"media_id": req.query, "media_type": "track", "enqueue": "play"},
         )
         if result.get("ok"):
             return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' on {entity_id}.", service="media_play")
