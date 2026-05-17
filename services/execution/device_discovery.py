@@ -360,24 +360,47 @@ async def _discover_via_ssdp(
 async def _discover_via_network_scan(
     entity_id: str, device_type: Optional[str] = None, subnet: str = DEFAULT_SUBNET
 ) -> Optional[dict]:
-    """Scan subnet for device by probing known ports."""
+    """Scan subnet for device by probing known ports.
+
+    Only returns a match if the probed device info correlates with the entity
+    (friendly name, model, or serial match). Prevents all entities mapping to
+    the first responding IP on the subnet.
+    """
     import httpx
     import ipaddress
 
     try:
-        state = await ha_client.get_state(
-            os.environ.get("HA_URL", ""),
-            os.environ.get("HA_TOKEN", ""),
-            entity_id,
-        )
+        ha_url_env = os.environ.get("HA_URL", "")
+        ha_token_env = os.environ.get("HA_TOKEN", "")
+        state = await ha_client.get_state(ha_url_env, ha_token_env, entity_id)
         friendly = ""
         if state:
             friendly = state.get("attributes", {}).get("friendly_name", "").lower()
+        entity_base = entity_id.split(".")[-1].lower().replace("_", " ")
 
         if device_type and device_type in DEVICE_PORTS:
             ports = DEVICE_PORTS[device_type]
         else:
             ports = [(8060, "roku"), (3000, "webos"), (8001, "samsung"), (5555, "adb"), (8009, "cast")]
+
+        def _name_matches(probe_info: dict) -> bool:
+            """Check if probed device info correlates with the target entity."""
+            metadata = probe_info.get("metadata", {})
+            model = (metadata.get("model") or "").lower()
+            serial = (metadata.get("serial") or "").lower()
+            device_name = (metadata.get("device_name") or "").lower()
+
+            if not friendly and not entity_base:
+                return True
+
+            searchable = f"{model} {serial} {device_name}".lower()
+            for word in friendly.split():
+                if len(word) > 2 and word in searchable:
+                    return True
+            for word in entity_base.split():
+                if len(word) > 2 and word in searchable:
+                    return True
+            return False
 
         async with httpx.AsyncClient(verify=False) as client:
             candidates = [
@@ -394,17 +417,20 @@ async def _discover_via_network_scan(
                         tasks.append(_probe_port(client, ip, port))
                         task_map.append(ip)
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                for ip, resp in zip(task_map, results):
+                for (ip, port), resp in zip(zip(task_map, [p for _, p in ports] * len(batch)), results):
                     if isinstance(resp, dict) and resp.get("ip"):
-                        await device_registry.set_device(
-                            entity_id,
-                            ip=ip,
-                            friendly_name=friendly,
-                            discovery_method="network_scan",
-                            metadata=resp.get("metadata", {}),
-                        )
-                        log.info(f"[discovery] Found {entity_id} via network scan: {ip}")
-                        return await device_registry.get_device(entity_id)
+                        if _name_matches(resp):
+                            await device_registry.set_device(
+                                entity_id,
+                                ip=ip,
+                                friendly_name=friendly,
+                                discovery_method="network_scan",
+                                metadata=resp.get("metadata", {}),
+                            )
+                            log.info(f"[discovery] Found {entity_id} via network scan: {ip}")
+                            return await device_registry.get_device(entity_id)
+                        else:
+                            log.debug(f"[discovery] Network scan found {ip} but name mismatch for {entity_id} (friendly='{friendly}')")
     except Exception as e:
         log.warning(f"[discovery] Network scan failed: {e}")
     return None
