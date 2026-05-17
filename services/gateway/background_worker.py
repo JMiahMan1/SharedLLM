@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from gateway.orchestrator import process_full_orchestration
 from gateway.config import SYSTEM_IDENTITY, INTERNAL_SECRET
 from gateway.messaging import InferenceJobQueue, JobStatus, TIER2_SEMAPHORE, TIER3_LOCK
+from gateway.agent_loop import should_persist_learning
 
 log = logging.getLogger("gateway.background_worker")
 
@@ -341,14 +342,23 @@ class RavenWorker:
             mission_id = payload.get("_mission_id")
             if mission_id:
                 try:
+                    result_str = str(ans)
+                    is_meaningful = should_persist_learning(result_str)
+                    if is_meaningful:
+                        status = "completed"
+                        log.info(f"[Worker] Mission {mission_id} completed with meaningful result")
+                    else:
+                        status = "failed"
+                        result_str = f"Mission did not accomplish meaningful work. Result: {result_str[:500]}"
+                        log.warning(f"[Worker] Mission {mission_id} marked failed — no meaningful work accomplished")
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                            json={"status": "completed", "result": str(ans)},
+                            json={"status": status, "result": result_str},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
                 except Exception as patch_e:
-                    log.error(f"Failed to update mission {mission_id} to completed: {patch_e}")
+                    log.error(f"Failed to update mission {mission_id} status: {patch_e}")
             
         except Exception as e:
             import traceback
