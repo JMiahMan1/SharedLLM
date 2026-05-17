@@ -72,7 +72,7 @@ async def is_roku_device(ha_url: str, ha_token: str, entity_id: str) -> bool:
 
 
 async def get_roku_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:
-    """Discover Roku IP via HA device registry or SSDP."""
+    """Discover Roku IP via HA device registry, SSDP, or local network scan."""
     import httpx
     try:
         headers = {"Authorization": f"Bearer {ha_token}"}
@@ -101,7 +101,7 @@ async def get_roku_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:
             'HOST: 239.255.255.250:1900\r\n'
             'MAN: "ssdp:discover"\r\n'
             'MX: 2\r\n'
-            'ST: urn:dial-multiscreen-org:service:dial:1\r\n'
+            'ST: roku:ecp\r\n'
             '\r\n'
         )
         sock.sendto(ssdp_request.encode(), ("239.255.255.250", 1900))
@@ -117,6 +117,35 @@ async def get_roku_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:
     except Exception as e:
         log.warning(f"[roku] SSDP discovery failed: {e}")
     
+    try:
+        import ipaddress
+        async with httpx.AsyncClient(verify=False, timeout=2) as client:
+            local_net = ipaddress.IPv4Network("192.168.2.0/24")
+            tasks = []
+            for ip in local_net:
+                ip_str = str(ip)
+                if ip_str.endswith(".0") or ip_str.endswith(".255"):
+                    continue
+                tasks.append(_probe_roku_ecp(client, ip_str))
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, str):
+                    log.info(f"[roku] Found Roku via network scan: {result}")
+                    return result
+    except Exception as e:
+        log.warning(f"[roku] Network scan failed: {e}")
+    
+    return None
+
+
+async def _probe_roku_ecp(client, ip: str) -> str | None:
+    """Probe a single IP for Roku ECP response."""
+    try:
+        resp = await client.get(f"http://{ip}:8060/query/device-info", timeout=2)
+        if resp.status_code == 200 and b"roku" in resp.content.lower():
+            return ip
+    except Exception:
+        pass
     return None
 
 
