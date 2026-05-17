@@ -88,12 +88,14 @@ def _get_discovery_suggestion(path: str) -> Optional[str]:
     """Dynamically discovers similar files in the workspace to help agents self-correct."""
     try:
         filename = os.path.basename(path)
-        if not filename: return None
+        if not filename:
+            return None
         
         matches = []
         for root, dirs, files in os.walk(WORKSPACE_ROOT):
             # Skip hidden directories like .git
-            if "/.git" in root: continue
+            if "/.git" in root:
+                continue
             for f in files:
                 if f.lower() == filename.lower():
                     rel_path = os.path.relpath(os.path.join(root, f), WORKSPACE_ROOT)
@@ -176,7 +178,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                         "line": match_data.get("line_number"),
                         "text": match_data.get("lines", {}).get("text", "").strip()
                     })
-            except:
+            except Exception:
                 # Basic grep fallback parsing
                 parts = line.split(":", 2)
                 if len(parts) >= 3:
@@ -285,14 +287,14 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
             old_lines = chunk.old_text.splitlines(keepends=True)
             
             # Normalize for matching
-            old_norm = [l.strip() for l in old_lines if l.strip()]
+            old_norm = [line.strip() for line in old_lines if line.strip()]
             
             best_match = None
             highest_ratio = 0.0
             
             # Scan file for best matching block of code
             for i in range(len(lines) - len(old_norm) + 1):
-                candidate = [l.strip() for l in lines[i:i+len(old_lines)] if l.strip()]
+                candidate = [line.strip() for line in lines[i:i+len(old_lines)] if line.strip()]
                 ratio = difflib.SequenceMatcher(None, old_norm, candidate[:len(old_norm)]).ratio()
                 
                 if ratio > highest_ratio:
