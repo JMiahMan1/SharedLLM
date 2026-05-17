@@ -35,6 +35,7 @@ DEVICE_PORTS = {
     "cast": [(8009, "cast")],
     "dlna": [(9197, "dlna"), (8200, "dlna")],
     "esphome": [(80, "esphome"), (8080, "espcam")],
+    "tasmota": [(80, "tasmota")],
     "mqtt": [(1883, "mqtt"), (8883, "mqtt-tls")],
 }
 
@@ -476,10 +477,12 @@ async def _probe_port(client, ip: str, port: int) -> dict:
             resp = await client.get(f"http://{ip}/", timeout=1)
             if resp.status_code == 200:
                 content = resp.text.lower()
+                import re
+                name_match = re.search(r"<title>(.*?)</title>", resp.text, re.IGNORECASE)
+                device_name = name_match.group(1) if name_match else ""
+                if "tasmota" in content:
+                    return {"ip": ip, "metadata": {"device_name": device_name, "type": "tasmota"}}
                 if "esphome" in content or "esp" in content:
-                    import re
-                    name_match = re.search(r"<title>(.*?)</title>", resp.text, re.IGNORECASE)
-                    device_name = name_match.group(1) if name_match else ""
                     return {"ip": ip, "metadata": {"device_name": device_name, "type": "esphome"}}
         elif port == 8080:
             resp = await client.get(f"http://{ip}:8080/", timeout=1)
@@ -547,6 +550,8 @@ async def bulk_scan(
                 device_type = "cast"
             elif "esphome" in entity_id.lower() or integration == "esphome":
                 device_type = "esphome"
+            elif "tasmota" in entity_id.lower() or integration == "tasmota":
+                device_type = "tasmota"
             elif "mqtt" in entity_id.lower() or integration == "mqtt":
                 device_type = "mqtt"
             return await discover_device(
