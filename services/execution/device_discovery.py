@@ -518,7 +518,9 @@ async def bulk_scan(
     ha_url: str, ha_token: str, subnet: str = DEFAULT_SUBNET
 ) -> list[dict]:
     """Scan for all known media devices on the network."""
+    log.info(f"[discovery] bulk_scan starting: ha_url={ha_url}, ha_token_len={len(ha_token)}, subnet={subnet}")
     all_states = await ha_client.get_states(ha_url, ha_token)
+    log.info(f"[discovery] bulk_scan got {len(all_states) if all_states else 0} states from HA")
     if not all_states:
         return []
 
