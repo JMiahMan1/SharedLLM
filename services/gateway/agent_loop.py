@@ -350,6 +350,12 @@ def should_persist_learning(result: str) -> bool:
     if not result or result.strip() in ("None", "", "null"):
         return False
     result_lower = result.lower()
+    
+    # Lint results with "issues found" are meaningful — the LLM found real problems.
+    # Only reject if it's a tool execution error, not a diagnostic finding.
+    if "lint issues found" in result_lower or "lint passed" in result_lower:
+        return True
+    
     failure_indicators = [
         "tool execution failed",
         "422",
@@ -773,71 +779,143 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             action_log.append(f"ITERATION {iter_num}: Your response did not contain a valid JSON tool call. Every mission step MUST be a tool call.")
             continue
 
-        action_name = tool_data.get("action", "").lower()
+        # ── Tool Name Resolution Pipeline ──────────────────────────────────────
+        # 1. Normalize: strip underscores/spaces, lowercase → canonical form
+        # 2. Short-alias lookup for semantic names (read_file, shell, etc.)
+        # 3. Regex pattern matching for common hallucinations
+        # 4. Fuzzy match fallback with helpful error message
+        raw_action = str(tool_data.get("action") or tool_data.get("operation") or "")
+        action_name = re.sub(r'[\s_]+', '', raw_action).lower()
+
         if action_name not in ALLOWED_TOOLS:
-            log.warning(f"[AgentLoop] Unknown action: {action_name}")
-            valid_list = ", ".join(sorted(list(ALLOWED_TOOLS)))
-            error_msg = (
-                f"SCHEMA ERROR: Unknown action '{action_name}'. "
-                f"You MUST use one of the following valid tool names: {valid_list}. "
-                "Correct your JSON and try again."
-            )
-            action_log.append(f"ITERATION {iter_num}: {error_msg}")
-            exec_data = {"status": "ERROR", "message": error_msg}
-            continue
+            short_action = raw_action.lower().strip()
+
+            # ── Tier 1: Exact short aliases (semantic names that don't normalize) ──
+            action_map_aliases = {
+                "read_file": "workspacefilereadrequest",
+                "write_file": "workspacefilewriterequest",
+                "filewriterequest": "workspacefilewriterequest",
+                "patch_file": "workspacefilepatchrequest",
+                "lint_file": "workspacelintrequest",
+                "ripgrep": "workspacesearchrequest",
+                "grep": "workspacesearchrequest",
+                "search": "workspacesearchrequest",
+                "shell": "workspaceshellrequest",
+                "run": "workspaceshellrequest",
+                "shellcommand": "workspaceshellrequest",
+                "browse": "webreadrequest",
+                "webread": "webreadrequest",
+                "edit_file": "workspacefilepatchrequest",
+                "file_patch": "workspacefilepatchrequest",
+                "apply_patches": "workspacefilepatchrequest",
+                "status": "gitoperationrequest",
+                "add": "gitoperationrequest",
+                "commit": "gitoperationrequest",
+                "push": "gitoperationrequest",
+                "pull": "gitoperationrequest",
+                "diff": "gitoperationrequest",
+                "log": "gitoperationrequest",
+                "restart_service": "controlplanerequest",
+            }
+            if short_action in action_map_aliases:
+                action_name = action_map_aliases[short_action]
+
+            # ── Tier 2: Regex patterns for common hallucinations ──
+            if action_name not in ALLOWED_TOOLS:
+                regex_aliases = [
+                    (r'.*workspace.*shell.*', "workspaceshellrequest"),
+                    (r'.*workspace.*search.*', "workspacesearchrequest"),
+                    (r'.*workspace.*lint.*', "workspacelintrequest"),
+                    (r'.*workspace.*read.*', "workspacefilereadrequest"),
+                    (r'.*workspace.*write.*', "workspacefilewriterequest"),
+                    (r'.*workspace.*patch.*', "workspacefilepatchrequest"),
+                    (r'.*workspace.*bootstrap.*', "workspacebootstraprequest"),
+                    (r'.*storage.*file.*read.*', "storagefilereadrequest"),
+                    (r'.*storage.*file.*write.*', "storagefilewriterequest"),
+                    (r'.*storage.*list.*', "storagelistrequest"),
+                    (r'.*storage.*index.*', "storageindexrequest"),
+                    (r'.*git.*operation.*', "gitoperationrequest"),
+                    (r'.*git.*status.*', "gitoperationrequest"),
+                    (r'.*git.*commit.*', "gitoperationrequest"),
+                    (r'.*git.*push.*', "gitoperationrequest"),
+                    (r'.*git.*pull.*', "gitoperationrequest"),
+                    (r'.*light.*control.*', "lightcontrolrequest"),
+                    (r'.*media.*play.*', "mediaplayrequest"),
+                    (r'.*media.*status.*', "mediastatusrequest"),
+                    (r'.*media.*transport.*', "mediatransportrequest"),
+                    (r'.*video.*play.*', "videoplayrequest"),
+                    (r'.*tv.*cast.*', "tvcastrequest"),
+                    (r'.*climate.*', "climaterequest"),
+                    (r'.*security.*', "securityrequest"),
+                    (r'.*announcement.*', "announcementrequest"),
+                    (r'.*ha.*service.*', "haservicerequest"),
+                    (r'.*calendar.*', "calendarrequest"),
+                    (r'.*note.*', "noterequest"),
+                    (r'.*timer.*', "timerrequest"),
+                    (r'.*talk.*', "talkrequest"),
+                    (r'.*web.*search.*', "websearchrequest"),
+                    (r'.*web.*read.*', "webreadrequest"),
+                    (r'.*docker.*log.*', "dockerlogsrequest"),
+                    (r'.*docker.*compose.*', "dockercomposerequest"),
+                    (r'.*deployment.*', "deploymentrequest"),
+                    (r'.*capability.*index.*', "capabilityindexrequest"),
+                    (r'.*volume.*inventory.*', "volumeinventoryrequest"),
+                    (r'.*system.*learning.*', "systemlearningrequest"),
+                    (r'.*discovery.*sync.*', "discoverysyncrequest"),
+                    (r'.*identity.*', "identityrequest"),
+                    (r'.*audiobookshelf.*', "audiobookshelfrequest"),
+                    (r'.*llm.*info.*', "llminforequest"),
+                    (r'.*context.*search.*', "contextsearchrequest"),
+                    (r'.*ha.*config.*', "haconfigrequest"),
+                    (r'.*control.*plane.*', "controlplanerequest"),
+                    (r'.*restart.*service.*', "controlplanerequest"),
+                    (r'.*entity.*search.*', "entitysearchrequest"),
+                    (r'.*logbook.*', "logbookrequest"),
+                    (r'.*execution.*log.*', "executionlogrequest"),
+                ]
+                for pattern, target in regex_aliases:
+                    if re.match(pattern, short_action):
+                        action_name = target
+                        break
+
+            # ── Tier 3: Fuzzy match fallback ──
+            if action_name not in ALLOWED_TOOLS:
+                import difflib
+                matches = difflib.get_close_matches(action_name, list(ALLOWED_TOOLS), n=1, cutoff=0.6)
+                if matches:
+                    action_name = matches[0]
+                    log.info(f"[AgentLoop] Fuzzy-matched '{raw_action}' → '{action_name}'")
+                else:
+                    # Build a helpful tool table for the LLM
+                    tool_categories = {
+                        "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspaceshellrequest", "workspacebootstraprequest"],
+                        "Git Tools": ["gitoperationrequest"],
+                        "Storage Tools": ["storagefilereadrequest", "storagefilewriterequest", "storagelistrequest", "storageindexrequest"],
+                        "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest"],
+                        "Web Tools": ["websearchrequest", "webreadrequest"],
+                        "Docker Tools": ["dockerlogsrequest", "dockercomposerequest"],
+                        "HA Tools": ["lightcontrolrequest", "haservicerequest", "climate", "securityrequest", "announcementrequest", "entitysearchrequest", "logbookrequest", "executionlogrequest", "haconfigrequest"],
+                        "Other": ["calendarrequest", "noterequest", "timerrequest", "talkrequest", "tvcastrequest", "systemlearningrequest", "discoverysyncrequest", "identityrequest", "identitymanagerequest", "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "deploymentrequest", "capabilityindexrequest", "volumeinventoryrequest", "controlplanerequest"],
+                    }
+                    tool_table = "\n".join(f"  {cat}: {', '.join(tools)}" for cat, tools in tool_categories.items())
+                    closest = difflib.get_close_matches(action_name, list(ALLOWED_TOOLS), n=3, cutoff=0.4)
+                    closest_str = f" Closest matches: {', '.join(closest)}." if closest else ""
+                    error_msg = (
+                        f"SCHEMA ERROR: Unknown tool '{raw_action}'.{closest_str}\n"
+                        f"Available tools by category:\n{tool_table}\n"
+                        f"Use the EXACT tool name from the list above."
+                    )
+                    log.warning(f"[AgentLoop] Unknown action: {action_name} (raw: {raw_action})")
+                    action_log.append(f"ITERATION {iter_num}: {error_msg}")
+                    exec_data = {"status": "ERROR", "message": error_msg}
+                    continue
 
         await stream_event("action", f"Executing Tool: {action_name}")
         log.info(f"[AgentLoop] Dispatching action: {action_name}")
 
         try:
-            # Normalize action name for better matching
-            action = str(tool_data.get("action") or tool_data.get("operation") or "").lower()
+            action = action_name
             payload = tool_data.get("payload", tool_data)
-            
-            action_map_aliases = {
-                "read_file": "WorkspaceFileReadRequest",
-                "write_file": "WorkspaceFileWriteRequest",
-                "filewriterequest": "WorkspaceFileWriteRequest",
-                "patch_file": "WorkspaceFilePatchRequest",
-                "lint_file": "WorkspaceLintRequest",
-                "ripgrep": "WorkspaceSearchRequest",
-                "grep": "WorkspaceSearchRequest",
-                "search": "WorkspaceSearchRequest",
-                "shell": "WorkspaceShellRequest",
-                "run": "WorkspaceShellRequest",
-                "ShellCommand": "WorkspaceShellRequest",
-                "WebRead": "WebReadRequest",
-                "Browse": "WebReadRequest",
-                "gitstatus": "GitOperationRequest",
-                "git_status": "GitOperationRequest",
-                "gitdiff": "GitOperationRequest",
-                "git_diff": "GitOperationRequest",
-                "gitlog": "GitOperationRequest",
-                "git_log": "GitOperationRequest",
-                "gitpull": "GitOperationRequest",
-                "git_pull": "GitOperationRequest",
-                "git_add": "GitOperationRequest",
-                "git_commit": "GitOperationRequest",
-                "git_push": "GitOperationRequest",
-                "git_sync": "GitOperationRequest",
-                "status": "GitOperationRequest",
-                "add": "GitOperationRequest",
-                "commit": "GitOperationRequest",
-                "push": "GitOperationRequest",
-                "pull": "GitOperationRequest",
-                "diff": "GitOperationRequest",
-                "log": "GitOperationRequest",
-                "gitoperationrequest": "GitOperationRequest",
-                "edit_file": "WorkspaceFilePatchRequest",
-                "file_patch": "WorkspaceFilePatchRequest",
-                "apply_patches": "WorkspaceFilePatchRequest",
-                "workspace_file_read": "WorkspaceFileReadRequest",
-                "workspace_file_write": "WorkspaceFileWriteRequest",
-                "workspace_file_patch": "WorkspaceFilePatchRequest"
-            }
-            
-            if action in action_map_aliases:
-                action = action_map_aliases[action].lower()
 
             action_map = {
                 "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
