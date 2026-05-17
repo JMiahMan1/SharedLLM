@@ -33,7 +33,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
+      - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -49,8 +49,7 @@ services:
       dockerfile: services/execution/Dockerfile
     container_name: sharedllm_execution
     restart: always
-    ports:
-      - 8003:8003
+    network_mode: host
     env_file:
       - .env
     extra_hosts:
@@ -61,13 +60,13 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server:11434
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
-      - REDIS_URL=redis://redis:6379/0
+      - IDENTITY_SVC_URL=http://localhost:8001
+      - EXECUTION_SVC_URL=http://localhost:8003
+      - RAG_SVC_URL=http://localhost:8004
+      - STORAGE_SVC_URL=http://localhost:8005
+      - LOGGING_SVC_URL=http://localhost:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://localhost:8007
+      - REDIS_URL=redis://localhost:6379/0
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
       - WORKSPACE_ROOT=/workspaces
@@ -91,7 +90,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
+      - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -142,7 +141,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
+      - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -170,7 +169,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
+      - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -200,7 +199,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
+      - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -226,7 +225,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
+      - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -255,7 +254,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
+      - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -310,7 +309,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution:8003
+      - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
