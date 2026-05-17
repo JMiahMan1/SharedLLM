@@ -120,9 +120,7 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
-            import traceback
             log.error(f"[ha_client] get_state({entity_id}) failed: {type(e).__name__}: {e}")
-            log.debug(f"[ha_client] get_state traceback: {traceback.format_exc()}")
             return None
 
 async def get_config(ha_url: str, ha_token: str) -> dict:
@@ -156,9 +154,7 @@ async def get_states(ha_url: str, ha_token: str) -> list:
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
-            import traceback
             log.error(f"[ha_client] get_states failed: {type(e).__name__}: {e}")
-            log.debug(f"[ha_client] get_states traceback: {traceback.format_exc()}")
             return []  # Ensure empty list on error
 
 async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1) -> list:
