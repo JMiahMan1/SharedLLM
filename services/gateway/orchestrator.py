@@ -556,7 +556,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             file_path = payload.get("file_path", "") or payload.get("path", "") or payload.get("relative_path", "")
             if file_path:
                 from gateway.agent_loop import run_post_write_lint
-                lint_feedback = await run_post_write_lint(file_path, EXECUTION_SVC, INTERNAL_SECRET, log)
+                user_ctx = payload.get("user_context") or creds.model_dump()
+                lint_feedback = await run_post_write_lint(file_path, EXECUTION_SVC, INTERNAL_SECRET, log, user_ctx)
                 if lint_feedback:
                     tool_result = f"{tool_result}\n\n{lint_feedback}"
 
