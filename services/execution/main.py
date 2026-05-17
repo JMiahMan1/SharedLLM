@@ -1042,11 +1042,66 @@ async def execute_announce(req: AnnouncementRequest):
         except Exception as e:
             log.debug(f"[announce] Logbook check skipped: {e}")
     
-    # 6. Restore initial state if device was off
+    # 6. Restore initial state for ALL devices
     if was_off and result.get("ok"):
         log.info(f"[announce] Restoring device to previous state (turning off)...")
         await ha_client.call_service(ha_url, ha_token, "media_player", "turn_off", target_player, {})
         await asyncio.sleep(1)
+    elif initial_state and result.get("ok"):
+        # Restore volume, source, and resume playback if device was playing
+        attrs = initial_state.get("attributes", {})
+        initial_state_str = initial_state.get("state", "unknown")
+        
+        # Restore volume
+        saved_volume = attrs.get("volume_level")
+        if saved_volume is not None:
+            current_state = await ha_client.get_state(ha_url, ha_token, target_player)
+            if current_state:
+                current_volume = current_state.get("attributes", {}).get("volume_level")
+                if current_volume is not None and abs(current_volume - saved_volume) > 0.01:
+                    log.info(f"[announce] Restoring volume from {current_volume} to {saved_volume}")
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", target_player, {"volume_level": saved_volume})
+        
+        # Restore source/input
+        saved_source = attrs.get("source")
+        if saved_source:
+            current_state = await ha_client.get_state(ha_url, ha_token, target_player)
+            if current_state:
+                current_source = current_state.get("attributes", {}).get("source")
+                if current_source != saved_source:
+                    log.info(f"[announce] Restoring source from '{current_source}' to '{saved_source}'")
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "select_source", target_player, {"source": saved_source})
+                    await asyncio.sleep(2)
+        
+        # Resume playback if device was playing/paused
+        if initial_state_str in ("playing", "paused"):
+            saved_media = attrs.get("media_content_id")
+            saved_position = attrs.get("media_position")
+            if saved_media:
+                log.info(f"[announce] Resuming previous media on {target_player}")
+                await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", target_player,
+                    {"media_content_id": saved_media, "media_content_type": attrs.get("media_content_type", "url")})
+                if saved_position and initial_state_str == "playing":
+                    await asyncio.sleep(2)
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_seek", target_player,
+                        {"seek_position": saved_position})
+            else:
+                # No media URL saved, just restore play/pause state
+                if initial_state_str == "playing":
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_play", target_player)
+                elif initial_state_str == "paused":
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_pause", target_player)
+        
+        # Restore mute state
+        saved_muted = attrs.get("is_volume_muted")
+        if saved_muted is not None:
+            current_state = await ha_client.get_state(ha_url, ha_token, target_player)
+            if current_state:
+                current_muted = current_state.get("attributes", {}).get("is_volume_muted", False)
+                if current_muted != saved_muted:
+                    log.info(f"[announce] Restoring mute state to {saved_muted}")
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "volume_mute", target_player,
+                        {"is_volume_muted": saved_muted})
 
     if result.get("ok"):
         return _ok(f"Announcement sent successfully to {target_player}.", "announce")
