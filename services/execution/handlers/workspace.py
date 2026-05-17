@@ -349,23 +349,31 @@ async def handle_workspace_lint(req) -> ExecutionResult:
         passed = True
 
         def _run(cmd):
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+            except FileNotFoundError:
+                return -1, "", f"Tool not found: {cmd[0]}"
 
         # ── Python ───────────────────────────────────────────────────────────
         if ext == ".py" or forced in ("black", "flake8", "python"):
             # Syntax check first — catches malformed files (missing imports, broken syntax)
             rc, out, err = _run(["python3", "-m", "py_compile", str(abs_path)])
+            if rc == -1:
+                return _ok(f"Python compiler not available — skipping lint.", {"path": req.path, "skipped": True})
             results.append({"tool": "py_compile", "returncode": rc, "output": out or err})
             if rc != 0:
                 passed = False
             else:
                 # Light style check — only flag real issues, not nitpicks
-                flake8_ignore = "E501,W503,W504,E203,E402,F401,F841"  # line length, line breaks, whitespace, unused imports
+                flake8_ignore = "E501,W503,W504,E203,E402,F401,F841"
                 rc, out, err = _run(["flake8", f"--ignore={flake8_ignore}", "--max-line-length=999", str(abs_path)])
-                results.append({"tool": "flake8", "returncode": rc, "output": out or err})
-                if rc != 0:
-                    passed = False
+                if rc == -1:
+                    results.append({"tool": "flake8", "returncode": rc, "output": "flake8 not installed — skipping style check"})
+                else:
+                    results.append({"tool": "flake8", "returncode": rc, "output": out or err})
+                    if rc != 0:
+                        passed = False
 
         # ── JavaScript / TypeScript ───────────────────────────────────────────
         elif ext in (".js", ".ts", ".jsx", ".tsx", ".mjs") or forced == "eslint":
