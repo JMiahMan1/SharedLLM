@@ -1162,12 +1162,25 @@ def _detect_media_platform(entity_id: str, attrs: dict) -> str:
 async def discovery_entities(ha_url: str, ha_token: str):
     states = await ha_client.get_states(ha_url, ha_token) or []
     areas = await ha_client.get_areas(ha_url, ha_token) or {}
+    import device_registry
+    registry = await device_registry.list_devices()
     for s in states:
         eid = s.get("entity_id")
         if eid in areas:
             if "attributes" not in s:
                 s["attributes"] = {}
             s["attributes"]["area_id"] = areas[eid]
+        if eid in registry:
+            dev = registry[eid]
+            if "attributes" not in s:
+                s["attributes"] = {}
+            s["attributes"]["_device_ip"] = dev.get("ip")
+            s["attributes"]["_device_mac"] = dev.get("mac")
+            s["attributes"]["_device_hostname"] = dev.get("hostname")
+            s["attributes"]["_device_discovery_method"] = dev.get("discovery_method")
+            s["attributes"]["_device_last_verified"] = dev.get("last_verified")
+            if dev.get("metadata"):
+                s["attributes"]["_device_metadata"] = dev["metadata"]
     return {"entities": states}
 
 @app.get("/discovery/history")
@@ -1178,13 +1191,13 @@ async def discovery_history(ha_url: str, ha_token: str, entity_id: str, days: in
 async def discovery_devices():
     """List all registered devices with network info."""
     import device_registry
-    return {"devices": device_registry.list_devices()}
+    return {"devices": await device_registry.list_devices()}
 
 @app.get("/discovery/devices/{entity_id}")
 async def discovery_device(entity_id: str):
     """Get registered device info for a specific entity."""
     import device_registry
-    device = device_registry.get_device(entity_id)
+    device = await device_registry.get_device(entity_id)
     if device:
         return {"device": device}
     return {"device": None, "message": f"No device registered for {entity_id}"}
@@ -1203,7 +1216,7 @@ async def discovery_device_refresh(entity_id: str, request: Request):
         return {"status": "FAILURE", "message": "ha_url and ha_token required"}
     
     import device_registry
-    device_registry.invalidate_device(entity_id, reason="manual_refresh")
+    await device_registry.invalidate_device(entity_id, reason="manual_refresh")
     result = await device_discovery.discover_device(
         entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
     )
@@ -1230,7 +1243,7 @@ async def discovery_bulk_scan(request: Request):
 async def discovery_device_remove(entity_id: str):
     """Remove a device from the registry."""
     import device_registry
-    removed = device_registry.remove_device(entity_id)
+    removed = await device_registry.remove_device(entity_id)
     if removed:
         return {"status": "SUCCESS", "message": f"Removed {entity_id}"}
     return {"status": "FAILURE", "message": f"Device {entity_id} not found"}

@@ -64,6 +64,7 @@ and generates a profile for each device detailing:
 """
 import logging
 import socket
+import asyncio
 
 import device_discovery
 import ha_client
@@ -354,7 +355,7 @@ async def profile_device(
 async def profile_all_media_devices(
     ha_url: str, ha_token: str, subnet: str = "192.168.2.0/24"
 ) -> list[dict]:
-    """Profile all media_player entities on the network."""
+    """Profile all media_player entities concurrently."""
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return []
@@ -364,19 +365,15 @@ async def profile_all_media_devices(
         if s["entity_id"].startswith("media_player.")
     ]
 
-    profiles = []
-    for entity_id in media_entities:
+    async def _profile_one(entity_id: str):
         try:
-            profile = await profile_device(entity_id, ha_url, ha_token, subnet)
-            profiles.append(profile)
+            return await profile_device(entity_id, ha_url, ha_token, subnet)
         except Exception as e:
             log.warning(f"[profiler] Failed to profile {entity_id}: {e}")
-            profiles.append({
-                "entity_id": entity_id,
-                "error": str(e),
-            })
+            return {"entity_id": entity_id, "error": str(e)}
 
-    return profiles
+    results = await asyncio.gather(*[_profile_one(e) for e in media_entities], return_exceptions=True)
+    return [r for r in results if not isinstance(r, Exception)]
 
 
 async def build_capability_map(

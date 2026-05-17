@@ -22,3 +22,4 @@ onnxruntime
 soundfile
 yt-dlp
 ruff
+aiosqlite>=0.20.0
