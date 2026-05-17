@@ -472,9 +472,13 @@ async def _probe_port(client, ip: str, port: int) -> dict:
                 except Exception:
                     return {"ip": ip, "metadata": {"type": "samsung"}}
         elif port == 8009:
-            resp = await client.get(f"http://{ip}:8009/setup/eureka_info", timeout=1)
-            if resp.status_code == 200:
+            try:
+                _, writer = await asyncio.open_connection(ip, port)
+                writer.close()
+                await writer.wait_closed()
                 return {"ip": ip, "metadata": {"type": "cast"}}
+            except Exception:
+                pass
         elif port == 5555:
             try:
                 _, writer = await asyncio.open_connection(ip, port)
