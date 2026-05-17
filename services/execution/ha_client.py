@@ -156,7 +156,9 @@ async def get_states(ha_url: str, ha_token: str) -> list:
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
-            log.error(f"[ha_client] get_states failed: {e}")
+            import traceback
+            log.error(f"[ha_client] get_states failed: {type(e).__name__}: {e}")
+            log.debug(f"[ha_client] get_states traceback: {traceback.format_exc()}")
             return []  # Ensure empty list on error
 
 async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1) -> list:
