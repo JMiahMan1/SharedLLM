@@ -675,4 +675,18 @@ export const api = {
     const resp = await apiClient.post(`/api/raven/missions/${id}/kill`);
     return resp.data;
   },
+
+  async deleteRavenMission(id: number): Promise<void> {
+    await apiClient.delete(`/api/raven/missions/${id}`);
+  },
+
+  async pauseRavenMission(id: number): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/raven/missions/${id}/pause`);
+    return resp.data;
+  },
+
+  async resumeRavenMission(id: number): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/raven/missions/${id}/resume`);
+    return resp.data;
+  },
 };
