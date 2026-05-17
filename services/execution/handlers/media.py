@@ -9,12 +9,10 @@ try:
     import ha_client
     from schemas import MediaPlayRequest, ExecutionResult
     from config import MASS_CONFIG_ENTRY_ID
-    from announce_handlers import detect_tv_type
 except ImportError:
     import ha_client
     from schemas import MediaPlayRequest, ExecutionResult
     from config import MASS_CONFIG_ENTRY_ID
-    from announce_handlers import detect_tv_type
 
 log = logging.getLogger("execution.media")
 
@@ -81,7 +79,6 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     if not all_states:
         return original_entity
     
-    name_part = original_entity.replace("media_player.", "")
     original_friendly = None
     for state in all_states:
         if state.get("entity_id") == original_entity:
