@@ -135,15 +135,25 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
 
     stream_url = await abs_client.get_stream_url(abs_url, abs_key, book_id)
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
+    ha_url = ctx_ha_url(req)
+    ha_token = ctx_ha_token(req)
 
-    state = await ha_client.get_state(ctx_ha_url(req), ctx_ha_token(req), full_entity_id)
+    state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
     if state and state.get("state") == "off":
-        await ha_client.call_service(ctx_ha_url(req), ctx_ha_token(req), "media_player", "turn_on", full_entity_id)
+        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", full_entity_id)
         import asyncio
         await asyncio.sleep(2)
 
+    # Detect if this is a Roku device — needs two-step MASS flow
+    from handlers import roku as roku_handler
+    is_roku = await roku_handler.is_roku_device(ha_url, ha_token, full_entity_id)
+
+    if is_roku:
+        return await _roku_play_audiobook(full_entity_id, stream_url, book_title, ha_url, ha_token)
+
+    # All other devices: direct play_media with ABS stream URL
     result = await ha_client.call_service(
-        ctx_ha_url(req), ctx_ha_token(req),
+        ha_url, ha_token,
         "media_player", "play_media",
         full_entity_id,
         {"media_content_id": stream_url, "media_content_type": "audio/mp4"},
@@ -178,9 +188,18 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
 
     stream_url = await abs_client.get_stream_url(abs_url, abs_key, item_id)
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
+    ha_url = ctx_ha_url(req)
+    ha_token = ctx_ha_token(req)
+
+    # Detect if this is a Roku device
+    from handlers import roku as roku_handler
+    is_roku = await roku_handler.is_roku_device(ha_url, ha_token, full_entity_id)
+
+    if is_roku:
+        return await _roku_play_audiobook(full_entity_id, stream_url, title, ha_url, ha_token)
 
     result = await ha_client.call_service(
-        ctx_ha_url(req), ctx_ha_token(req),
+        ha_url, ha_token,
         "media_player", "play_media",
         full_entity_id,
         {"media_content_id": stream_url, "media_content_type": "audio/mp4"},
@@ -290,6 +309,37 @@ async def _handle_get_book(abs_url: str, abs_key: str, req) -> ExecutionResult:
             "chapters": len(book.get("media", {}).get("chapters", [])),
         },
     )
+
+
+async def _roku_play_audiobook(roku_entity: str, stream_url: str, title: str, ha_url: str, ha_token: str) -> ExecutionResult:
+    """Play audiobook on Roku: ECP launch Media Assistant app + delegate audio to MA sibling."""
+    from handlers import roku as roku_handler
+    import asyncio
+    import httpx
+
+    ma_entity = await roku_handler.find_ma_player_sibling(ha_url, ha_token, roku_entity)
+    if not ma_entity:
+        return ExecutionResult(status="FAILURE", message=f"No Music Assistant player found for {roku_entity}.", service="audiobookshelf")
+
+    roku_ip = await roku_handler.get_roku_ip(ha_url, ha_token, roku_entity)
+    if roku_ip:
+        params = {"t": "a", "autoplay": "true", "songName": title}
+        ecp_url = f"http://{roku_ip}:8060/launch/{roku_handler.MEDIA_ASSISTANT_CHANNEL_ID}"
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+                resp = await client.post(ecp_url, params=params)
+                if resp.status_code in (200, 204):
+                    await asyncio.sleep(3)
+        except Exception as e:
+            log.warning(f"[abs.roku] ECP launch failed: {e}")
+
+    result = await ha_client.call_service(
+        ha_url, ha_token, "music_assistant", "play_media", ma_entity,
+        {"media_id": stream_url, "media_type": "track", "enqueue": "play"},
+    )
+    if result.get("ok"):
+        return ExecutionResult(status="SUCCESS", message=f"Now playing audiobook: {title}", service="audiobookshelf")
+    return ExecutionResult(status="FAILURE", message=f"Audiobook playback failed: {result.get('error')}", service="audiobookshelf")
 
 
 def _format_time(seconds: float) -> str:

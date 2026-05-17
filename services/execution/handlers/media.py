@@ -163,37 +163,65 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     return ExecutionResult(status="FAILURE", message=f"Could not play '{req.query}' on {entity_id}.", service="media_play")
 
 async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
-    """Play video via yt-dlp stream."""
+    """Play video via yt-dlp stream. Routes through MASS for Roku devices."""
     from handlers import video as video_handler
-    
+    from handlers import roku as roku_handler
+
     query = req.query or req.media_content_id or ""
-    
+
     # Check if already a URL
     video_url = video_handler.extract_video_url(query)
     if not video_url:
         video_url = await video_handler.search_youtube(query)
         if not video_url:
             return ExecutionResult(status="FAILURE", message=f"Could not find video for '{query}'.", service="media_play")
-    
+
     # Download and stream
     media_id, title = await video_handler.download_video(video_url)
     if not media_id:
         return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
-    
+
     # Get public host for streaming
     from config import EXECUTION_EXTERNAL_HOST
     public_host = EXECUTION_EXTERNAL_HOST or "192.168.2.205"
     stream_url = f"http://{public_host}:8003/media/{media_id}"
-    
-    # Play on device
+
+    # Roku: route through MASS sibling
+    is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
+    if is_roku:
+        ma_entity = await roku_handler.find_ma_player_sibling(ctx.ha_url, ctx.ha_token, entity_id)
+        if ma_entity:
+            # Launch Media Assistant app on Roku
+            roku_ip = await roku_handler.get_roku_ip(ctx.ha_url, ctx.ha_token, entity_id)
+            if roku_ip:
+                import httpx
+                import asyncio
+                params = {"t": "a", "autoplay": "true", "songName": title or query}
+                ecp_url = f"http://{roku_ip}:8060/launch/{roku_handler.MEDIA_ASSISTANT_CHANNEL_ID}"
+                try:
+                    async with httpx.AsyncClient(verify=False, timeout=10) as client:
+                        resp = await client.post(ecp_url, params=params)
+                        if resp.status_code in (200, 204):
+                            await asyncio.sleep(3)
+                except Exception as e:
+                    log.warning(f"[media.video] ECP launch failed: {e}")
+
+            result = await ha_client.call_service(
+                ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", ma_entity,
+                {"media_id": stream_url, "media_type": "track", "enqueue": "play"},
+            )
+            if result.get("ok"):
+                return ExecutionResult(status="SUCCESS", message=f"Playing video '{title or query}' on {entity_id}.", service="media_play")
+
+    # All other devices: direct play_media
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
         {"media_content_id": stream_url, "media_content_type": "video/mp4"},
     )
-    
+
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing video '{title or query}' on {entity_id}.", service="media_play")
-    
+
     return ExecutionResult(status="FAILURE", message=f"Failed to play video on {entity_id}.", service="media_play")
 
 async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
