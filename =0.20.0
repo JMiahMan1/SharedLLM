@@ -1,6 +1,0 @@
-Defaulting to user installation because normal site-packages is not writeable
-Collecting aiosqlite
-  Downloading aiosqlite-0.22.1-py3-none-any.whl.metadata (4.3 kB)
-Downloading aiosqlite-0.22.1-py3-none-any.whl (17 kB)
-Installing collected packages: aiosqlite
-Successfully installed aiosqlite-0.22.1
