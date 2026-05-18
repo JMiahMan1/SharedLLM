@@ -134,6 +134,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     mass_entity = await resolve_mass_entity(ctx, entity_id)
     
     if req.query:
+        log.info(f"[media/play] Searching MASS for '{req.query}' on {entity_id}")
         search_result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
             service_data={
@@ -167,7 +168,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                     return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
         
         # Search returned nothing — try get_library random for generic queries
-        log.info(f"[media/play] MASS search empty for '{req.query}', trying library random")
+        log.warning(f"[media/play] MASS search returned 0 results for query='{req.query}' (config_entry={mass_entry}), falling back to library random")
         library_result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "music_assistant", "get_library", entity_id="",
             service_data={
@@ -185,7 +186,8 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             items = resp.get("items", [])
             if items:
                 uri = items[0].get("uri")
-                log.info(f"[media/play] Library random: {uri}")
+                track_name = items[0].get("name", "unknown")
+                log.info(f"[media/play] Library random fallback selected: '{track_name}' ({uri})")
                 result = await ha_client.call_service(
                     ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
                     {"media_id": uri, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
