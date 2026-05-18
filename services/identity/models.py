@@ -132,6 +132,11 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "raven_suspended", "value": "false", "description": "Suspend autonomous health checks (true/false)"},
     {"key": "raven_scan_interval", "value": "300", "description": "Frequency in seconds to scan container logs"},
     {"key": "raven_error_threshold", "value": "5", "description": "Number of errors required to trigger an anomaly alert"},
+    {"key": "raven_max_total_seconds", "value": "1800", "description": "Maximum total seconds for a Raven mission"},
+    {"key": "raven_iteration_timeout", "value": "600", "description": "Timeout in seconds for a single Raven iteration"},
+    {"key": "raven_heartbeat_interval", "value": "30", "description": "Heartbeat interval in seconds for Raven missions"},
+    {"key": "raven_hung_threshold", "value": "600", "description": "Seconds before a mission is considered hung"},
+    {"key": "raven_check_interval", "value": "300", "description": "Interval in seconds between Raven health checks"},
 
     # --- LOCAL TTS HARDWARE ---
     {"key": "system_default_tts_engine", "value": "kokoro", "description": "Global default local TTS engine (kokoro, piper)"},
@@ -140,6 +145,26 @@ DEFAULT_GLOBAL_SETTINGS = [
     # --- GATEWAY & ROUTING ---
     {"key": "fast_path_threshold", "value": "0.85", "description": "Confidence threshold to skip full intent parsing"},
     {"key": "ollama_timeout", "value": "600", "description": "Timeout in seconds for local inference calls"},
-    {"key": "openai_timeout", "value": "120", "description": "Timeout in seconds for cloud inference calls"}
+    {"key": "openai_timeout", "value": "120", "description": "Timeout in seconds for cloud inference calls"},
+
+    # --- SERVICE ENDPOINTS (overridable, Docker DNS defaults) ---
+    {"key": "identity_svc_url", "value": "http://identity:8001", "description": "Identity service URL"},
+    {"key": "execution_svc_url", "value": "http://execution:8003", "description": "Execution service URL"},
+    {"key": "rag_svc_url", "value": "http://rag:8004", "description": "RAG service URL"},
+    {"key": "storage_svc_url", "value": "http://storage:8005", "description": "Storage service URL"},
+    {"key": "logging_svc_url", "value": "http://logging:8006", "description": "Logging service URL"},
+    {"key": "workspace_runtime_svc_url", "value": "http://workspace_runtime:8007", "description": "Workspace runtime service URL"},
+    {"key": "control_plane_url", "value": "http://control_plane:8008", "description": "Control plane service URL"},
+    {"key": "redis_url", "value": "redis://redis:6379/0", "description": "Redis connection URL"},
+    {"key": "searxng_url", "value": "", "description": "SearXNG search service URL"},
+    {"key": "llama_server_proxy_url", "value": "", "description": "Legacy llama.cpp server proxy URL (deprecated)"},
+    {"key": "timezone", "value": "America/New_York", "description": "System timezone"},
+    {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5", "description": "Embedding model for RAG"},
+    {"key": "phrasebook_path", "value": "", "description": "Path to phrasebook file"},
+
+    # --- DNS MAPPINGS (multi-IP fallback support) ---
+    # Format: {"hostname": ["primary_ip", "fallback_ip", ...]}
+    # dnsmasq generates multiple A records; clients try in order
+    {"key": "dns_mappings", "value": "{\"ai-server\": [\"192.168.2.205\"], \"ollama-server\": [\"192.168.2.114\", \"192.168.4.179\"], \"llama-server\": [\"192.168.2.114\", \"192.168.4.179\"]}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object)"}
 ]
 

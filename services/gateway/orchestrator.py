@@ -2,13 +2,104 @@
 import asyncio
 import json
 import logging
-import asyncio
 import re
-import os
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Awaitable
 
+from gateway.config import INTERNAL_SECRET
+from gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
+from gateway.schemas import ResolvedCredentials
+
 log = logging.getLogger("gateway.orchestrator")
+
+# --- Default service URLs (Docker DNS) — overridable via Identity settings ---
+_DEFAULTS = {
+    "identity_svc_url": "http://identity:8001",
+    "execution_svc_url": "http://execution:8003",
+    "rag_svc_url": "http://rag:8004",
+    "storage_svc_url": "http://storage:8005",
+    "logging_svc_url": "http://logging:8006",
+    "workspace_runtime_svc_url": "http://workspace_runtime:8007",
+    "control_plane_url": "http://control_plane:8008",
+    "llm_local_url": "http://ollama:11434",
+    "redis_url": "redis://redis:6379/0",
+    "ollama_timeout": "600",
+    "fast_path_threshold": "0.85",
+    "raven_max_total_seconds": "1800",
+    "raven_iteration_timeout": "600",
+    "raven_heartbeat_interval": "30",
+    "raven_hung_threshold": "600",
+    "raven_check_interval": "300",
+    "raven_error_threshold": "5",
+    "timezone": "America/New_York",
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+}
+
+# --- Settings cache (refreshed periodically) ---
+_settings_cache: Optional[Dict[str, str]] = None
+_settings_cache_time: float = 0
+_SETTINGS_TTL = 30  # seconds
+
+
+async def get_all_settings() -> Dict[str, str]:
+    """Fetches ALL configuration from Identity service (single source of truth)."""
+    global _settings_cache, _settings_cache_time
+    import time
+    now = time.time()
+    if _settings_cache and (now - _settings_cache_time) < _SETTINGS_TTL:
+        return _settings_cache
+
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                "http://identity:8001/api/settings",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                fetched = {item["key"]: item["value"] for item in resp.json()}
+                # Merge with defaults for any missing keys
+                for key, default in _DEFAULTS.items():
+                    if key not in fetched or fetched[key] in ("", "auto"):
+                        fetched[key] = default
+                _settings_cache = fetched
+                _settings_cache_time = now
+                # Sync module-level constants in main.py for backward compat
+                _sync_main_constants(fetched)
+                return fetched
+    except Exception as e:
+        log.error(f"Failed to fetch Identity settings: {e}")
+    # Fallback to cached or defaults
+    return _settings_cache or dict(_DEFAULTS)
+
+
+def _sync_main_constants(settings: Dict[str, str]) -> None:
+    """Update module-level constants in main.py for backward compatibility."""
+    import gateway.main as main_mod
+    mappings = {
+        "identity_svc_url": "IDENTITY_SVC",
+        "execution_svc_url": "EXECUTION_SVC",
+        "rag_svc_url": "RAG_SVC",
+        "storage_svc_url": "STORAGE_SVC",
+        "logging_svc_url": "LOGGING_SVC",
+        "workspace_runtime_svc_url": "WORKSPACE_RUNTIME_SVC",
+        "control_plane_url": "CONTROL_PLANE_URL",
+        "llm_local_url": "OLLAMA_URL",
+    }
+    for key, attr in mappings.items():
+        val = settings.get(key)
+        if val and hasattr(main_mod, attr):
+            setattr(main_mod, attr, val)
+    # Sync LOGGING_SVC_URL alias
+    if hasattr(main_mod, "LOGGING_SVC_URL"):
+        main_mod.LOGGING_SVC_URL = settings.get("logging_svc_url", main_mod.LOGGING_SVC)
+
+
+def _get(settings: Dict[str, str], key: str, default: str = "") -> str:
+    """Get setting with fallback to defaults."""
+    val = settings.get(key, "")
+    if val in ("", "auto"):
+        return _DEFAULTS.get(key, default)
+    return val
 
 
 def strip_json_from_response(text: str) -> str:
@@ -65,48 +156,55 @@ def strip_json_from_response(text: str) -> str:
     # Last resort: return text stripped
     return text.strip()
 
-SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
-    "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
-    "mediaplayrequest": (EXECUTION_SVC, "/execute/media/play"),
-    "mediatransportrequest": (EXECUTION_SVC, "/execute/media/transport"),
-    "mediastatusrequest": (EXECUTION_SVC, "/execute/media/status"),
-    "videoplayrequest": (EXECUTION_SVC, "/execute/video/play"),
-    "tvcastrequest": (EXECUTION_SVC, "/execute/tv_cast"),
-    "climaterequest": (EXECUTION_SVC, "/execute/climate"),
-    "securityrequest": (EXECUTION_SVC, "/execute/security"),
-    "announcementrequest": (EXECUTION_SVC, "/execute/announce"),
-    "haservicerequest": (EXECUTION_SVC, "/execute/ha_service"),
-    "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
-    "noterequest": (EXECUTION_SVC, "/execute/note"),
-    "timerrequest": (EXECUTION_SVC, "/execute/timer"),
-    "talkrequest": (EXECUTION_SVC, "/execute/talk"),
-    "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
-    "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
-    "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
-    "dockercomposerequest": (EXECUTION_SVC, "/execute/docker"),
-    "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
-    "capabilityindexrequest": (EXECUTION_SVC, "/execute/index_capabilities"),
-    "volumeinventoryrequest": (EXECUTION_SVC, "/execute/volumes"),
-    "workspacefilereadrequest": (EXECUTION_SVC, "/execute/workspace_file_read"),
-    "workspacefilewriterequest": (EXECUTION_SVC, "/execute/workspace_file_write"),
-    "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
-    "workspacelintrequest": (EXECUTION_SVC, "/execute/workspace_lint"),
-    "workspacesearchrequest": (EXECUTION_SVC, "/execute/workspace_search"),
-    "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
-    "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
-    "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
-    "storagelistrequest": (EXECUTION_SVC, "/execute/storage_list"),
-    "workspacebootstraprequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/bootstrap"),
-    "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
-    "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
-    "storageindexrequest": (STORAGE_SVC, "/index/full"),
-    "logbookrequest": (EXECUTION_SVC, "/execute/ha_logbook"),
-    "executionlogrequest": (EXECUTION_SVC, "/execute/logs"),
-    "audiobookshelfrequest": (EXECUTION_SVC, "/execute/audiobookshelf"),
-    "documentbroadcastrequest": (EXECUTION_SVC, "/execute/composite/broadcast"),
-    "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
-    "contextsearchrequest": (RAG_SVC, "/rag/search"),
-    "haconfigrequest": (EXECUTION_SVC, "/execute/ha_config"),
+# Tool endpoint map (service base URL resolved at runtime from Identity)
+SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, str] = {
+    "lightcontrolrequest": "/execute/light",
+    "mediaplayrequest": "/execute/media/play",
+    "mediatransportrequest": "/execute/media/transport",
+    "mediastatusrequest": "/execute/media/status",
+    "videoplayrequest": "/execute/video/play",
+    "tvcastrequest": "/execute/tv_cast",
+    "climaterequest": "/execute/climate",
+    "securityrequest": "/execute/security",
+    "announcementrequest": "/execute/announce",
+    "haservicerequest": "/execute/ha_service",
+    "calendarrequest": "/execute/calendar",
+    "noterequest": "/execute/note",
+    "timerrequest": "/execute/timer",
+    "talkrequest": "/execute/talk",
+    "websearchrequest": "/execute/web_search",
+    "webreadrequest": "/execute/web_read",
+    "dockerlogsrequest": "/execute/docker_logs",
+    "dockercomposerequest": "/execute/docker",
+    "gitoperationrequest": "/execute/git",
+    "capabilityindexrequest": "/execute/index_capabilities",
+    "volumeinventoryrequest": "/execute/volumes",
+    "workspacefilereadrequest": "/execute/workspace_file_read",
+    "workspacefilewriterequest": "/execute/workspace_file_write",
+    "workspacefilepatchrequest": "/execute/workspace_file_patch",
+    "workspacelintrequest": "/execute/workspace_lint",
+    "workspacesearchrequest": "/execute/workspace_search",
+    "workspaceshellrequest": "/execute/workspace_shell",
+    "storagefilereadrequest": "/execute/storage_file_read",
+    "storagefilewriterequest": "/execute/storage_file_write",
+    "storagelistrequest": "/execute/storage_list",
+    "workspacebootstraprequest": "/workspaces/bootstrap",
+    "systemlearningrequest": "/execute/learning",
+    "discoverysyncrequest": "/execute/discovery_sync",
+    "storageindexrequest": "/index/full",
+    "logbookrequest": "/execute/ha_logbook",
+    "executionlogrequest": "/execute/logs",
+    "audiobookshelfrequest": "/execute/audiobookshelf",
+    "documentbroadcastrequest": "/execute/composite/broadcast",
+    "nightmoderequest": "/execute/composite/night_mode",
+    "contextsearchrequest": "/rag/search",
+    "haconfigrequest": "/execute/ha_config",
+}
+
+# Tool → service mapping (resolved at runtime)
+_TOOL_SERVICE_MAP = {
+    "workspacebootstraprequest": "workspace_runtime_svc_url",
+    "contextsearchrequest": "rag_svc_url",
 }
 
 SINGLE_TURN_TOOL_GUIDE = """
@@ -136,24 +234,14 @@ SINGLE_TURN_TOOL_GUIDE = """
 
 
 async def get_llm_settings() -> Dict[str, str]:
-    """Fetches LLM configuration from the Identity service."""
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(
-                f"{IDENTITY_SVC}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status_code == 200:
-                return {item["key"]: item["value"] for item in resp.json()}
-    except Exception as e:
-        log.error(f"Failed to fetch dynamic LLM settings: {e}")
-    return {}
+    """Fetches full LLM settings from Identity service (cached)."""
+    return await get_all_settings()
 
 
 async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
     active_provider = settings.get("active_llm_provider", "ollama")
-    timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
+    timeout = float(_get(settings, "ollama_timeout", "600"))
     if active_provider == "openrouter":
         return OpenRouterProvider(
             api_key=settings.get("llm_cloud_api_key", ""),
@@ -162,7 +250,7 @@ async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
         )
     else:
         return OllamaProvider(
-            base_url=settings.get("llm_local_url", OLLAMA_URL),
+            base_url=_get(settings, "llm_local_url", "http://ollama:11434"),
             timeout=timeout
         )
 
@@ -240,6 +328,9 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
 
 async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedCredentials] = None) -> str:
     rag_context = ""
+    settings = await get_all_settings()
+    rag_svc = _get(settings, "rag_svc_url")
+    exec_svc = _get(settings, "execution_svc_url")
     try:
         # Prioritize collections based on query intent
         q = query.lower()
@@ -264,7 +355,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
                     break
                     
                 resp = await client.post(
-                    f"{RAG_SVC}/rag/search",
+                    f"{rag_svc}/rag/search",
                     json={"collection_name": coll, "query": query, "user_id": user_id, "k": MAX_HITS_PER_COLL},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
@@ -309,6 +400,8 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
 
 async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
     """Dynamically discover weather entities from HA and return live forecast data."""
+    settings = await get_all_settings()
+    exec_svc = _get(settings, "execution_svc_url")
     
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)
@@ -319,7 +412,7 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
         # Fetch all entities to find weather domain
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                f"{EXECUTION_SVC}/discovery/entities",
+                f"{exec_svc}/discovery/entities",
                 params={"ha_url": ha_url, "ha_token": ha_token},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
@@ -405,7 +498,9 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     
     # On cache miss, fetch all live states and repopulate cache
     if cache_misses:
-        entities = await fetch_live_states(EXECUTION_SVC, ha_url, ha_token, INTERNAL_SECRET)
+        settings = await get_all_settings()
+        exec_svc = _get(settings, "execution_svc_url")
+        entities = await fetch_live_states(exec_svc, ha_url, ha_token, INTERNAL_SECRET)
         for e in entities:
             eid = e.get("entity_id", "")
             state = e.get("state", "unknown")
@@ -437,6 +532,10 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
 
 async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials) -> str:
     """Execute a single tool call and return the result string."""
+    settings = await get_all_settings()
+    exec_svc = _get(settings, "execution_svc_url")
+    control_plane = _get(settings, "control_plane_url")
+    
     # Normalize action: strip underscores/spaces, lowercase → canonical form
     action = re.sub(r'[\s_]+', '', action).lower()
     
@@ -446,13 +545,12 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
         sub_action = payload.get("action", "restart")
         if not service_name:
             return "Error: service_name is required"
-        cp_url = CONTROL_PLANE_URL or "http://control_plane:8008"
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 if sub_action == "restart":
-                    resp = await client.post(f"{cp_url}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                    resp = await client.post(f"{control_plane}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
                 else:
-                    resp = await client.get(f"{CONTROL_PLANE_URL}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                    resp = await client.get(f"{control_plane}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
                 
                 if resp.status_code == 200:
                     return f"Control Plane '{sub_action}' succeeded on {service_name}: {resp.text}"
@@ -462,7 +560,9 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
             return f"Control Plane execution failed: {e}"
     
     elif action in SINGLE_TURN_TOOL_ENDPOINTS:
-        svc_base, endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
+        endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
+        svc_key = _TOOL_SERVICE_MAP.get(action, "execution_svc_url")
+        svc_base = _get(settings, svc_key)
         
         try:
             payload = tool_data.get("payload", tool_data)
@@ -609,8 +709,10 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             file_path = payload.get("file_path", "") or payload.get("path", "") or payload.get("relative_path", "")
             if file_path:
                 from gateway.agent_loop import run_post_write_lint
+                settings = await get_all_settings()
+                exec_svc = _get(settings, "execution_svc_url")
                 user_ctx = payload.get("user_context") or creds.model_dump()
-                lint_feedback = await run_post_write_lint(file_path, EXECUTION_SVC, INTERNAL_SECRET, log, user_ctx)
+                lint_feedback = await run_post_write_lint(file_path, exec_svc, INTERNAL_SECRET, log, user_ctx)
                 if lint_feedback:
                     tool_result = f"{tool_result}\n\n{lint_feedback}"
 
