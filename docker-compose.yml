@@ -1,9 +1,7 @@
 networks:
   sharedllm:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.26.0.0/16
+    external: true
+    name: sharedllm_default
 
 services:
   dns-sync:
