@@ -55,16 +55,17 @@ MEDIA_ASSISTANT_CHANNEL_ID = "782875"
 
 async def is_roku_device(ha_url: str, ha_token: str, entity_id: str) -> bool:
     """Check if a media_player entity is a Roku device."""
+    entity_id_lower = entity_id.lower()
+    if "roku" in entity_id_lower:
+        return True
+
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:
         return False
     attrs = state.get("attributes", {})
     app_id = (attrs.get("app_id") or "").lower()
-    entity_id_lower = entity_id.lower()
     roku_indicators = ("roku.", "com.roku.", "roku media player")
     if any(ind in app_id for ind in roku_indicators):
-        return True
-    if "roku" in entity_id_lower:
         return True
     source_list = [s.lower() for s in (attrs.get("source_list") or [])]
     roku_sources = {"home", "roku media player", "the roku channel"}
