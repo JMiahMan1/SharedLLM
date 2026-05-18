@@ -233,7 +233,34 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             ctx.ha_url, ctx.ha_token, entity_id, stream_url, title or query,
         )
 
-    # Non-Roku: download and stream via play_media
+    # Cast/Android/WebOS/Samsung: stop active session, ensure TV is on, then play
+    # Stop any active session first (e.g., Music Assistant) to prevent conflicts
+    log.info(f"[media.video] Stopping active session on {entity_id} before video playback")
+    await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "media_stop", entity_id)
+    await asyncio.sleep(1)
+
+    # Power on device if needed
+    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id)
+    if state and state.get("state") in ("off", "idle", "standby", "unavailable"):
+        log.info(f"[media.video] Device is '{state.get('state')}', turning on...")
+        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", entity_id)
+        await asyncio.sleep(3)
+
+    # Volume safeguard: unmute and set to safe level
+    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id)
+    if state:
+        attrs = state.get("attributes", {})
+        if attrs.get("is_volume_muted"):
+            log.info(f"[media.video] Device is muted, unmuting")
+            await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_mute", entity_id, {"is_volume_muted": False})
+            await asyncio.sleep(1)
+        vol = attrs.get("volume_level")
+        if vol is not None and vol < 0.2:
+            log.info(f"[media.video] Volume too low ({vol}), boosting to 20%")
+            await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", entity_id, {"volume_level": 0.2})
+            await asyncio.sleep(1)
+
+    # Download video (non-progressive for Cast devices - they need complete file for Range requests)
     media_id, title = await video_handler.download_video(video_url)
     if not media_id:
         return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
@@ -242,6 +269,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     if not EXECUTION_EXTERNAL_HOST:
         return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
     stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+    log.info(f"[media.video] Casting video to {entity_id}: {stream_url}")
 
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
