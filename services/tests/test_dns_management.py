@@ -20,7 +20,7 @@ async def test_get_dns_config_returns_mappings():
     with patch("gateway.main.fetch_global_setting", new_callable=AsyncMock) as mock_fetch:
         async def side_effect(key, default=""):
             return {
-                "dns_mappings": '{"ollama-server": "192.168.4.179"}',
+                "dns_mappings": '{"ollama-server.local": "192.168.4.179"}',
                 "dns_upstream": "8.8.8.8,1.1.1.1",
                 "dns_poll_interval": "30",
             }.get(key, default)
@@ -28,7 +28,7 @@ async def test_get_dns_config_returns_mappings():
 
         result = await get_dns_config(mock_request)
 
-    assert result["dns_mappings"] == {"ollama-server": "192.168.4.179"}
+    assert result["dns_mappings"] == {"ollama-server.local": "192.168.4.179"}
     assert result["dns_upstream"] == "8.8.8.8,1.1.1.1"
     assert result["dns_poll_interval"] == 30
 
