@@ -8,13 +8,12 @@ import signal
 import subprocess
 from urllib.request import Request, urlopen
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services"))
-from config import (
-    IDENTITY_SVC_URL, INTERNAL_SECRET, DNS_CONF_PATH,
-    DNS_POLL_INTERVAL, UPSTREAM_DNS,
-)
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
+IDENTITY_URL = os.environ.get("IDENTITY_SVC_URL", "http://localhost:8001")
+DNS_CONF_PATH = os.environ.get("DNS_CONF_PATH", "/etc/dnsmasq.conf")
+DNS_POLL_INTERVAL = int(os.environ.get("DNS_POLL_INTERVAL", "30"))
+UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "192.168.1.1")
 
-IDENTITY_URL = IDENTITY_SVC_URL
 POLL_INTERVAL = DNS_POLL_INTERVAL
 
 running = True
