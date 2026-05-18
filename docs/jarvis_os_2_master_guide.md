@@ -128,8 +128,9 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
     *   **Voice ID Security Fallback:** If Voice ID confidence is `< 80%`, the system routes the query to a restricted "Guest" profile.
 
 ### 3.10 Video & YouTube Casting Engine
-*   **Backend Reality:** `execution/handlers/video.py` handles the `videoplayrequest`. It uses `yt-dlp` to search YouTube and extract the most compatible direct MP4 stream (`avc1/mp4a`) for Cast/Roku devices. It temporarily hosts this file on the Execution service's **media server (port 8888)** and natively commands Home Assistant to power on the target TV before pushing the stream URL.
+*   **Backend Reality:** `execution/handlers/video.py` handles the `videoplayrequest`. It uses `yt-dlp` to search YouTube and extract the most compatible direct MP4 stream (`avc1/mp4a`) for Cast/Roku devices. **Progressive download** (`download_video_progressive()`) returns control after 5MB buffered — the file continues downloading in the background while playback starts immediately. The file is hosted on the Execution service's **media server (port 8888)** via FastAPI `FileResponse` with HTTP Range support. Roku devices are launched via ECP to Media Assistant (app 782875); Cast/WebOS/Samsung/Android devices receive the URL via `media_player.play_media`. Wake-up logic for Roku is consolidated in `roku.roku_wake_device()` and called in parallel with download via `asyncio.create_task()`.
 *   **The "Why":** We proxy videos this way because native YouTube apps on smart devices (like Roku) are notoriously difficult to control via APIs. By downloading the direct MP4 and hosting it locally, Jarvis can force *any* media device in the house to play the video or audio, even if that device doesn't have a YouTube app installed.
+*   **CRITICAL:** NEVER use `download_video()` — it waits for full download before returning (causes 3+ minute timeouts). Progressive download is the only supported mode.
 *   **Jarvis OS 2.0 Enhancements:**
     *   **Universal Video Cast Widget:** Because the backend proxies the video, the UI can render a specialized video transport widget showing the YouTube thumbnail and providing standard, highly-responsive controls (skip, pause, stop) that work flawlessly across all devices—bypassing clunky native TV interfaces.
 
@@ -496,11 +497,13 @@ User request → /execute/announce (POST)
 
 ---
 
-#### Video Playback — yt-dlp + Disk File Streaming
+#### Video Playback — yt-dlp + Progressive Disk Streaming
 
-**Why yt-dlp?** Direct YouTube / Rumble / Vimeo playback on Cast, Roku, and Android TV requires being logged into the corresponding app on that device. Many devices lack the YouTube app entirely (generic Cast sticks, some Roku models). yt-dlp bypasses all of this by extracting a direct, publicly-accessible MP4 stream URL and downloading it to disk, where the execution service streams it directly.
+**Why yt-dlp?** Direct YouTube / Rumble / Vimeo playback on Cast, Roku, and Android TV requires being logged into the corresponding app on that device. Many devices lack the YouTube app entirely (generic Cast sticks, some Roku models). yt-dlp bypasses all of this by extracting a direct, publicly-accessible MP4 stream and downloading it to disk, where the execution service streams it directly.
 
-**Pipeline (from `handlers/video.py`):**
+**CRITICAL: Progressive Download Only** — ALWAYS use `download_video_progressive()` for ALL video playback (Roku, WebOS, Cast, Android, Samsung). NEVER use `download_video()` — it waits for full download before returning, causing 3+ minute timeouts. Progressive download returns control after 5MB buffered, enabling fast startup. The media server on port 8888 serves `.mp4.part` files with proper HTTP Range headers — Cast devices can stream partial files.
+
+**Pipeline (from `handlers/video.py` and `handlers/media.py`):**
 
 ```
 User request → /execute/media/play (VideoPlayRequest)
@@ -510,37 +513,60 @@ User request → /execute/media/play (VideoPlayRequest)
   │      Otherwise → run: yt-dlp --dump-json --no-download "ytsearch1:{query}"
   │                        to find the top YouTube result URL
   │
-  ├─ 2. yt-dlp download
+  ├─ 2. PROGRESSIVE download (returns after 5MB buffered)
   │      Format preference: best[ext=mp4][vcodec^=avc1][acodec^=mp4a]
   │         (H.264 + AAC = broadest Cast/Roku hardware decoder compatibility)
   │      Falls back to: best[ext=mp4] → best (any container)
   │      --merge-output-format mp4 ensures a single clean .mp4 output
-  │      Saved to disk: {TEMP_MEDIA_DIR}/{media_id}.mp4
+  │      Saved to disk: {TEMP_MEDIA_DIR}/{media_id}.mp4.part (while downloading)
   │         TEMP_MEDIA_DIR is set via config (volume-mounted at /data/media/)
   │         media_id = "vid-{8 hex chars}"  (e.g. "vid-7d9c3e1a")
+  │      Returns IMMEDIATELY after 5MB buffered — download continues in background
   │
   ├─ 3. Title retrieval
   │      Second yt-dlp --dump-json call to get the human-readable video title
   │      (used in the ExecutionResult message sent back to the user)
   │
-  ├─ 4. Public URL built: http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}
+  ├─ 4. Device-specific routing
+  │      │
+  │      ├─ ROKU:
+  │      │   ├─ Wake device in parallel (roku_wake_device via asyncio.create_task)
+  │      │   │   → media_player.turn_on if off/idle/unavailable
+  │      │   │   → remote.send_command("Home") on remote.* sibling
+  │      │   ├─ Wait for wake task to complete
+  │      │   ├─ Build URL: http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}
+  │      │   └─ ECP launch: POST http://<roku_ip>:8060/launch/782875
+  │      │       params: t=v, u=<mp4_url>, videoName=<title>, videoFormat=mp4
+  │      │
+  │      ├─ WebOS / Samsung / Cast / Android:
+  │      │   ├─ media_stop (clear active session)
+  │      │   ├─ Power on if off/idle/standby/unavailable
+  │      │   ├─ Volume safeguard (unmute, boost to 20% if too low)
+  │      │   ├─ Build URL: http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}
+  │      │   └─ HA service: media_player.play_media
+  │      │       media_content_id = the local MP4 URL
+  │      │       media_content_type = "video/mp4"
+  │      │
+  │      └─ All paths: background download continues after playback starts
   │
-  ├─ 5. Device power-on
-  │      If entity state is "off" → call media_player.turn_on, wait 2s
-  │
-  └─ 6. Cast the URL
-         HA service: media_player.play_media
-           media_content_id = the local MP4 URL
-           media_content_type = "video/mp4"
+  └─ 5. Background download completes → file renamed from .mp4.part to .mp4
 ```
 
 **`/media/{media_id}` endpoint behaviour for video:**
-- Falls through cache miss → checks disk: `{TEMP_VIDEO_DIR}/{media_id}.mp4`.
-- Serves via **`FileResponse`** with `Accept-Ranges: bytes` header enabled — this is critical. Streaming players (Cast, Roku) send range requests (`bytes=0-`) to seek and buffer. Without `Accept-Ranges`, playback may stall or fail immediately.
+- Served via **FastAPI `FileResponse`** (not custom HTTP server) with `Accept-Ranges: bytes` header enabled — this is critical. Streaming players (Cast, Roku) send range requests (`bytes=0-`) to seek and buffer. Without `Accept-Ranges`, playback may stall or fail immediately.
+- Checks disk for `{TEMP_VIDEO_DIR}/{media_id}.mp4` — if not found, checks for `{media_id}.mp4.part` (partial download in progress).
+- Returns **503** if media isn't ready yet — tells HA to retry instead of giving up permanently.
 
 **Codec choice rationale:** H.264 (`avc1`) + AAC (`mp4a`) is the lowest common denominator across all Cast, Roku, and Android TV hardware decoders. yt-dlp's format selector prioritizes this explicitly.
 
 **Supported sources:** YouTube, YouTube Shorts, Rumble, Vimeo (any source yt-dlp supports — the handler is source-agnostic via URL pattern detection).
+
+**Roku-specific details:**
+- Uses **Media Assistant app (ID 782875)** via ECP — not native Roku media player.
+- ECP param is `videoName` (NOT `songName` — that's for audio).
+- Wake-up logic consolidated in `roku.roku_wake_device()` — called in parallel with download via `asyncio.create_task()`.
+- Device IP discovered via 7-strategy pipeline (registry → HA attrs → ARP → mDNS → SSDP → port scan).
+- Video titles are sanitized to remove emojis (prevents URL encoding issues on Roku ECP).
 
 ---
 
@@ -550,11 +576,12 @@ User request → /execute/media/play (VideoPlayRequest)
 |---|---|---|
 | **Generated by** | Kokoro ONNX (local, offline) | yt-dlp CLI download |
 | **Stored as** | RAM (`TEMP_AUDIO_CACHE` dict) | Disk file (`/data/media/*.mp4`) |
-| **Served via** | `Response(bytes, media_type="audio/wav")` | `FileResponse` with `Accept-Ranges` |
+| **Served via** | FastAPI `Response(bytes, media_type="audio/wav")` | FastAPI `FileResponse` with `Accept-Ranges` |
 | **URL pattern** | `http://{host}:8888/media/tts-{id}` | `http://{host}:8888/media/vid-{id}` |
 | **Lifetime** | Process lifetime (ephemeral) | Until container restart or manual cleanup |
 | **Auth bypass** | N/A (fully local) | yt-dlp bypasses YouTube/platform auth |
-| **Pre-flight check** | Yes (5-retry self-ping) | No (download is synchronous before URL is built) |
+| **Pre-flight check** | Yes (5-retry self-ping) | No (progressive download returns after 5MB) |
+| **Download mode** | N/A (in-memory generation) | **Progressive only** — never full-wait |
 
 ---
 
@@ -687,19 +714,27 @@ Netflix `12`, YouTube `837`, Hulu `2285`, Disney+ `291097`, Prime Video `13`, Sp
 ```
 1. DISCOVER ROKU IP (same 7-strategy pipeline)
 
-2. SMART POWER SYNC
+2. SMART POWER SYNC (called in parallel with download via asyncio.create_task)
    get_state() checks if entity is "off", "idle", "unavailable", or "unknown"
    → if yes: media_player.turn_on → asyncio.sleep(2)
    → then: remote.send_command("Home") on the remote.* sibling entity → asyncio.sleep(2)
    (wakes from screensaver without requiring full boot)
+   Note: Wake logic is in roku_wake_device() — callers create_task() it in parallel
+         with download_video_progressive() for optimal latency
 
 3. ECP LAUNCH with video params
    POST http://<roku_ip>:8060/launch/782875
-     params: t=v, u=<mp4_url>, autoplay=true, songName=<title>, videoFormat=mp4
-   → Media Assistant app plays the MP4 directly (no HA play_media needed for video)
+     params: t=v, u=<mp4_url>, videoName=<title>, videoFormat=mp4
+   → Media Assistant app plays the MP4 directly from execution service port 8888
+   → Note: videoName (NOT songName) — songName is for audio only
+   → Title is sanitized to remove emojis (prevents URL encoding issues)
 
-4. Failure: device_registry.invalidate_device(), return FAILURE
+4. Post-launch state verification
+   get_state() confirms device transitioned to "on" or "playing"
+   Failure: device_registry.invalidate_device(), return FAILURE
 ```
+
+**Key distinction from music:** Video uses `t=v` + `videoName` + direct MP4 URL. Music uses `t=a` + `songName` + `artistName` + MA sibling delegation. They never share the same code path.
 
 ##### Announcement (`announce_roku` in `announce_handlers.py`)
 
