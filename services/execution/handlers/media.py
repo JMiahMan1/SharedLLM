@@ -263,8 +263,8 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", entity_id, {"volume_level": 0.2})
             await asyncio.sleep(1)
 
-    # Download video (non-progressive for Cast devices - they need complete file for Range requests)
-    media_id, title = await video_handler.download_video(video_url)
+    # Download video with progressive streaming (starts after 5MB buffered)
+    media_id, title = await video_handler.download_video_progressive(video_url)
     if not media_id:
         return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
 
