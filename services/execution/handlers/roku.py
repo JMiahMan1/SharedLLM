@@ -192,8 +192,12 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                 params["songName"] = song_name
                 if artist_name:
                     params["artistName"] = artist_name
-                if item.get("image", {}).get("path"):
-                    params["albumArt"] = item["image"]["path"]
+                image = item.get("image")
+                if image:
+                    if isinstance(image, dict):
+                        params["albumArt"] = image.get("path", image.get("url", ""))
+                    elif isinstance(image, str):
+                        params["albumArt"] = image
                 log.info(f"[roku.music] MA search match: {song_name} by {artist_name}")
                 break
     else:
