@@ -282,13 +282,15 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
             await asyncio.sleep(2)
 
     import httpx
-    params = {"t": "v", "u": video_url, "videoName": title, "videoFormat": "mp4"}
+    import re
+    clean_title = re.sub(r'[^\w\s\-\.\(\)\[\]]', '', title)[:100]
+    params = {"t": "v", "u": video_url, "videoName": clean_title or "Video", "videoFormat": "mp4"}
 
     ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
     try:
         log.info(f"[roku.video] Launching Media Assistant via ECP: {ecp_url}")
         async with httpx.AsyncClient(verify=False, timeout=30) as client:
-            resp = await client.post(ecp_url, params=params, content=b"")
+            resp = await client.post(ecp_url, params=params, data={})
             log.info(f"[roku.video] ECP response: {resp.status_code}")
             if resp.status_code in (200, 204):
                 await asyncio.sleep(3)
