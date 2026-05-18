@@ -1535,6 +1535,11 @@ async def execute_execution_logs(req: ExecutionLogRequest):
 @app.post("/execute/video/play", response_model=ExecutionResult)
 async def execute_video_play(req: VideoPlayRequest):
     ctx = req.user_context
+    if not ctx.ha_url or not ctx.ha_token:
+        creds = await resolve_internal_user("default")
+        if creds:
+            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
+            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
     log.info(f"[video/play] user={ctx.user} entity={req.entity_id} query='{req.query}'")
     return await video.handle_video_play(req)
 
