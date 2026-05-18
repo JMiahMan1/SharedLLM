@@ -256,6 +256,20 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     return ExecutionResult(status="FAILURE", message=f"Failed to play music on {roku_entity}: {result.get('error')}", service="roku_music", detail=result)
 
 
+async def roku_wake_device(ha_url: str, ha_token: str, roku_entity: str):
+    """Wake up Roku device from idle/off state. Call in parallel with download."""
+    state = await ha_client.get_state(ha_url, ha_token, roku_entity)
+    if state:
+        state_value = state.get("state", "")
+        if state_value in ("off", "idle", "unavailable", "unknown"):
+            log.info(f"[roku.wake] Device is '{state_value}', waking up...")
+            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", roku_entity)
+            await asyncio.sleep(2)
+            remote_entity = roku_entity.replace("media_player.", "remote.")
+            await ha_client.call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
+            await asyncio.sleep(2)
+
+
 async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_url: str,
                           title: str = "Video") -> ExecutionResult:
     """
