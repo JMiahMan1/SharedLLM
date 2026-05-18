@@ -135,7 +135,26 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
                 service="video_play",
             )
 
-    # Step 2: Download the video to disk
+    # Step 2: Check if device is Roku
+    from handlers import roku as roku_handler
+    is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, full_entity_id)
+    if is_roku:
+        log.info(f"[video/play] Detected Roku device, using Roku video handler")
+        media_id, title = await download_video(video_url)
+        if not media_id:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"Could not download video from {video_url}.",
+                service="video_play",
+            )
+        from config import EXECUTION_EXTERNAL_HOST
+        public_host = EXECUTION_EXTERNAL_HOST or "192.168.2.205"
+        stream_url = f"http://{public_host}:8003/media/{media_id}"
+        return await roku_handler.roku_play_video(
+            ctx.ha_url, ctx.ha_token, full_entity_id, stream_url, title or req.query,
+        )
+
+    # Step 3: Download the video to disk (non-Roku)
     media_id, title = await download_video(video_url)
     if not media_id:
         return ExecutionResult(
@@ -144,7 +163,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
             service="video_play",
         )
 
-    # Step 3: Build the local media URL for HA to stream
+    # Step 4: Build the local media URL for HA to stream
     def get_public_host():
         from config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
@@ -155,14 +174,14 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
     media_url = f"http://{public_host}:8003/media/{media_id}"
     log.info(f"[video/play] Casting URL: {media_url}")
 
-    # Step 4: Power on the device
+    # Step 5: Power on the device
     state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
     if state and state.get("state") == "off":
         log.info(f"[video/play] Device {full_entity_id} is off. Turning on...")
         await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", full_entity_id)
         await asyncio.sleep(2)
 
-    # Step 5: Cast the video URL
+    # Step 6: Cast the video URL
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         "media_player", "play_media",
