@@ -1045,10 +1045,19 @@ async def execute_announce(req: AnnouncementRequest):
         except Exception as e:
             log.debug(f"[announce] Logbook check skipped: {e}")
     
+    # Wait for announcement audio to finish before restoring
+    if result.get("ok"):
+        await asyncio.sleep(10)
+    
     # 6. Restore initial state for ALL devices
-    # Only turn off if device was truly off/unavailable (not idle/warm standby)
+    # Detect device type for restoration policy
+    from announce_handlers import detect_tv_type
+    device_type = detect_tv_type(target_player, initial_state.get("state", "unknown") if initial_state else "unknown", initial_state.get("attributes", {}) if initial_state else {}, loaded_components)
+    
+    # Roku devices: never turn off after announcement (they handle their own power)
+    # Other devices: only turn off if truly off/unavailable
     truly_off = initial_state and initial_state.get("state") in ("off", "unavailable")
-    if truly_off and result.get("ok"):
+    if truly_off and result.get("ok") and device_type != "roku":
         log.info("[announce] Restoring device to previous state (turning off)...")
         await ha_client.call_service(ha_url, ha_token, "media_player", "turn_off", target_player, {})
         await asyncio.sleep(1)

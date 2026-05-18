@@ -270,16 +270,16 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
     
     if ma_entity:
         log.info(f"[announce.roku] Delegating audio to MA sibling: {ma_entity}")
-        result = await call_service(ha_url, ha_token, "music_assistant", "play_media", ma_entity, {
-            "media_id": media_url,
-            "media_type": "track",
-            "enqueue": "play",
+        result = await call_service(ha_url, ha_token, "music_assistant", "play_announcement", ma_entity, {
+            "url": media_url,
+            "use_pre_announce": False,
         })
         if result.get("ok"):
             return result
-        log.warning(f"[announce.roku] MA play_media failed: {result.get('error')}, trying play_announcement")
-        result = await call_service(ha_url, ha_token, "music_assistant", "play_announcement", ma_entity, {
-            "message": media_url,
+        log.warning(f"[announce.roku] MA play_announcement failed: {result.get('error')}, trying play_media")
+        result = await call_service(ha_url, ha_token, "music_assistant", "play_media", ma_entity, {
+            "media_id": media_url,
+            "enqueue": "play",
         })
         if result.get("ok"):
             return result
