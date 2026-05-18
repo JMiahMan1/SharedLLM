@@ -187,8 +187,18 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                 item = items[0]
                 song_name = item.get("name", item.get("title", query))
                 artist_name = item.get("artist", {}).get("name", "") if isinstance(item.get("artist"), dict) else ""
-                ma_media_id = item.get("uri", query)
-                ma_media_type = category.rstrip("s")
+                uri = item.get("uri", query)
+                # Strip library:// prefix to match main branch behavior
+                if uri.startswith("library://"):
+                    parts = uri.replace("library://", "").split("/")
+                    if len(parts) >= 2:
+                        ma_media_type = parts[0]
+                        ma_media_id = parts[1]
+                    else:
+                        ma_media_id = uri
+                else:
+                    ma_media_id = uri
+                    ma_media_type = category.rstrip("s")
                 params["songName"] = song_name
                 if artist_name:
                     params["artistName"] = artist_name
@@ -198,7 +208,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                         params["albumArt"] = image.get("path", image.get("url", ""))
                     elif isinstance(image, str):
                         params["albumArt"] = image
-                log.info(f"[roku.music] MA search match: {song_name} by {artist_name}")
+                log.info(f"[roku.music] MA search match: {song_name} by {artist_name} (id={ma_media_id}, type={ma_media_type})")
                 break
     else:
         params["songName"] = song_name
