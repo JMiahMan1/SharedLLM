@@ -50,6 +50,7 @@ services:
       - LOGGING_SVC_URL=http://localhost:8006
       - WORKSPACE_RUNTIME_SVC_URL=http://localhost:8007
       - REDIS_URL=redis://localhost:6379/0
+      - SEARXNG_URL=http://localhost:8080
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
       - WORKSPACE_ROOT=/workspaces
