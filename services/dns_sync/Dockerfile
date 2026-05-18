@@ -8,4 +8,5 @@ COPY config/dns_sync.py ./dns_sync.py
 
 ENV DNS_CONF_PATH=/etc/dnsmasq.conf
 
-CMD ["python", "dns_sync.py"]
+# Start dnsmasq as daemon, then run sync script in foreground
+CMD dnsmasq && sleep 2 && exec python dns_sync.py
