@@ -155,6 +155,127 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
 *   **Jarvis OS 2.0 Enhancements:**
     *   **Proactive Energy Management:** Jarvis can detect anomalies (e.g., "The garage heater has been drawing 1500W for 4 hours while no presence is detected") and take autonomous action to suspend the device, simultaneously sending a voice notification via Nextcloud Talk.
     *   **Energy Insights Widget:** A sleek, glowing UI card that visualizes real-time household power draw. Instead of just showing a static number, the LLM generates a dynamic, human-readable summary (e.g., "Power usage is 30% lower than yesterday. Solar production is covering all active loads.").
+    *   **Device & Group Telemetry Monitoring:** Devices and groups can be tagged for ongoing telemetry tracking. See **Section 3.15** for the full monitoring and LLM pattern analysis system.
+
+### 3.14 Device & Light Grouping System
+
+This system allows users and admins to define logical groups of devices that act as a single unit for commands, announcements, alarms, and lighting scenes.
+
+#### Media Device Groups (Speakers & TVs)
+Currently, `AnnouncementRequest` and alarm triggers operate either on a single `entity_id` or `announce_all=true` (every non-blacklisted player in the house). Groups fill the gap between those two extremes.
+
+*   **System Groups (Admin-defined):**
+    *   `announce_all` — The existing wildcard group: every non-blacklisted media player.
+    *   `main_floor`, `upstairs`, `kids_rooms` — Room-cluster groups configured by the admin.
+*   **User Groups (User-defined):**
+    *   Each user can configure personal named groups in their profile (e.g., "My Devices": kitchen speaker + bedroom speaker).
+    *   When a user sets a timer or alarm, the target can be their personal group rather than a single device.
+    *   Groups are stored in `identity.db` keyed by `user_id`.
+
+**Resolution Priority:** The `AnnouncementRequest` schema will accept a `group_id` field. The execution handler resolves it to a list of `entity_id`s by querying the Identity service's group registry, then fans out the command in parallel (asyncio `gather`) to all members.
+
+**Backend Schema Addition:**
+```python
+class MediaGroupRequest(BaseRequest):
+    action: Literal["create", "delete", "list", "add_member", "remove_member"]
+    group_id: str                        # e.g. "my_devices" or "main_floor"
+    group_name: Optional[str] = None
+    member_entity_ids: Optional[List[str]] = None
+    scope: Literal["user", "system"] = "user"  # system = admin-only
+```
+
+#### Light Clusters (Groups of Lights Acting as One)
+A Light Cluster is a named collection of `light.*` entities that the LLM treats as a single controllable unit. When a command targets a cluster, the execution handler fans out to all members simultaneously.
+
+*   **Storage:** `identity.db` table `light_clusters`: `cluster_id`, `cluster_name`, `entity_ids` (JSON array), `owner_user_id`, `scope` (user/system/room).
+*   **LLM Tool Extension:** `LightControlRequest` gains an optional `cluster_id` field. If provided and no `entity_id` is given, the handler resolves the cluster and dispatches to all member lights.
+*   **Example:** A cluster called `kitchen` with 6 `light.*` entities. The LLM receives "set kitchen lights to warm white 50%" and dispatches one `asyncio.gather()` call to all six.
+
+**Backend Schema Addition:**
+```python
+class LightClusterRequest(BaseRequest):
+    action: Literal["create", "delete", "list", "add_member", "remove_member"]
+    cluster_id: str                      # e.g. "kitchen"
+    cluster_name: Optional[str] = None
+    member_entity_ids: Optional[List[str]] = None
+    room: Optional[str] = None           # auto-populates from HA area registry
+    scope: Literal["user", "system", "room"] = "room"
+```
+
+#### Light Patterns & Scenes
+Light patterns apply a *sequence of colors* across multiple lights in a cluster, enabling effects that go beyond uniform color changes. Patterns are stored as named templates.
+
+*   **Storage:** `identity.db` table `light_patterns`: `pattern_id`, `pattern_name`, `cluster_id`, `steps` (JSON), `loop` (bool), `transition_ms`.
+*   **`steps` Schema (JSON array):** Each step maps one or more entity positions to a specific color/brightness. Position is 0-indexed within the cluster's ordered member list.
+    ```json
+    [
+      {"positions": [0, 1], "rgb": [255, 140, 0], "brightness_pct": 80},
+      {"positions": [2, 3], "rgb": [255, 80, 0], "brightness_pct": 60},
+      {"positions": [4, 5], "rgb": [200, 40, 0], "brightness_pct": 40}
+    ]
+    ```
+*   **Built-in Pattern Library (System Defaults):**
+
+| Pattern Name | Description |
+| :--- | :--- |
+| `sunset` | Warm orange at the top rows, deep red at the bottom rows, simulating a gradient |
+| `christmas` | Alternates red (`#FF0000`) and green (`#00AA00`) across sequential lights |
+| `ocean` | Gradual wave from deep blue → cyan → teal across the cluster |
+| `daylight` | Uniform neutral white at full brightness (5500K equivalent) |
+| `night_mode` | Dim red-tinted light (sleep-safe wavelength) at 10% brightness |
+| `party` | Random RGB cycling across all lights simultaneously |
+
+*   **LLM Tool Extension:** `LightControlRequest` gains a `pattern_id` field. If provided, the handler loads the pattern steps and fans out individual color calls per position group.
+*   **Admin UI:** A pattern editor in `/admin/groups` allows admins to create and preview custom patterns visually before saving.
+
+---
+
+### 3.15 Device Telemetry Monitoring & LLM Pattern Analysis
+
+This system allows any device or group (media players, lights, smart plugs, sensors) to be enrolled in continuous telemetry monitoring. The collected data feeds an LLM-powered insight engine that surfaces observable behavioral patterns.
+
+#### What is Monitored
+For each enrolled device or group, the monitoring pipeline tracks three dimensions:
+
+| Dimension | Data Collected | Source |
+| :--- | :--- | :--- |
+| **Power Consumption** | Wattage over time, peak draw, idle draw, anomalous spikes | HA power/energy sensors (`sensor.*_power`, `sensor.*_energy`) |
+| **Availability** | Online/offline transitions, downtime duration, frequency of outages | HA `state` attribute (entity `unavailable` / `unknown`) |
+| **Usage Frequency** | How often activated, active duration, time-of-day distribution | HA state change logbook queries |
+
+#### Data Storage
+*   Raw telemetry snapshots are stored in a new `device_telemetry` table in the existing `/data/device_registry.db` SQLite DB.
+*   **Schema:**
+    ```sql
+    CREATE TABLE device_telemetry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_id TEXT NOT NULL,
+        recorded_at REAL NOT NULL,          -- Unix timestamp
+        power_w REAL,                       -- Current wattage (null if not a power device)
+        is_available INTEGER NOT NULL,      -- 1 = online, 0 = offline
+        state TEXT,                         -- Raw HA state string
+        source TEXT                         -- "poll", "ha_event", "webhook"
+    );
+    CREATE INDEX idx_telemetry_entity_time ON device_telemetry(entity_id, recorded_at);
+    ```
+*   **Retention Policy:** Raw telemetry is retained for 30 days. After 30 days, it is downsampled to hourly averages and stored in a `device_telemetry_archive` table for long-term trend analysis.
+
+#### Collection Mechanism
+The existing **Cleanup Loop** in `RavenWorker` (which already polls all HA entities every 5 minutes) is extended to write telemetry snapshots for enrolled devices. Additionally, a dedicated **HA WebSocket event subscriber** (`state_changed` events) provides real-time availability change detection without polling lag.
+
+#### LLM Pattern Analysis Engine
+The monitoring data alone is raw numbers. The LLM layer converts it into human-readable intelligence:
+
+1.  **Scheduled Analysis:** Nightly, the system runs a Raven `analysis_mission` that queries the last 7 days of telemetry for all enrolled entities.
+2.  **Pattern Prompt:** It constructs a structured prompt summarizing usage patterns per device and asks the LLM: *"Based on the following usage data, what observable behavioral patterns exist, and what do they likely mean about the household's habits?"*
+3.  **Insight Generation:** The LLM produces named insights (e.g., *"The kitchen TV is on every weekday between 7–8 AM, suggesting a morning news routine"*, *"The garage smart plug shows power spikes every 3 days, consistent with a battery charger cycle"*).
+4.  **Storage:** Insights are stored in the RAG `system_learnings` collection (same as Raven mission learnings) so they become permanent ambient context for future Jarvis conversations.
+5.  **Alerts:** If an enrolled device goes offline for longer than its configured threshold (e.g., `offline_alert_after_minutes: 30`), Jarvis immediately sends a voice notification via Nextcloud Talk/TTS.
+
+#### UI: Device Monitor Dashboard (`/admin/monitor`)
+*   **Enrollment Panel:** Admins select any HA entity or group and enroll it in monitoring. They configure `power_tracking`, `availability_tracking`, `usage_tracking`, and `offline_alert_threshold`.
+*   **Telemetry Cards:** One card per enrolled device/group showing: current state (online/offline), real-time power draw, 7-day usage sparkline, last outage event.
+*   **LLM Insights Feed:** A dedicated panel showing the most recent LLM-generated pattern insights, each tagged with the device name, date generated, and a confidence indicator.
 
 ---
 
@@ -217,7 +338,17 @@ This is fully self-healing: if you pull a new, larger model on the Inference Nod
 *   [ ] **Task 5.2:** Build the Assistant Overlay (Audio Visualizer).
 *   [ ] **Task 5.3:** Build Voice ID Routing Logic and Admin PIN Pad.
 
+### Phase 6: Device Grouping, Light Clusters & Telemetry Monitoring
+*   [ ] **Task 6.1:** Add `media_groups` and `user_device_groups` tables to `identity.db`. Build `MediaGroupRequest` schema and `/execute/groups/media` endpoint. Update `AnnouncementRequest` to accept `group_id` and fan out via `asyncio.gather()`.
+*   [ ] **Task 6.2:** Add `light_clusters` table to `identity.db`. Build `LightClusterRequest` schema and `/execute/groups/lights` endpoint. Extend `LightControlRequest` to accept `cluster_id`.
+*   [ ] **Task 6.3:** Add `light_patterns` table to `identity.db`. Seed the system default patterns (`sunset`, `christmas`, `ocean`, `daylight`, `night_mode`, `party`). Extend `LightControlRequest` to accept `pattern_id` and dispatch per-step fan-out.
+*   [ ] **Task 6.4:** Build the **Group Manager UI** (`/admin/groups`): media group creator, light cluster builder with drag-and-drop entity assignment, and the pattern step editor with a live preview panel.
+*   [ ] **Task 6.5:** Add `device_telemetry` and `device_telemetry_archive` tables to `/data/device_registry.db`. Extend the `RavenWorker` Cleanup Loop to write telemetry snapshots for enrolled entities. Add HA WebSocket `state_changed` subscriber for real-time availability tracking.
+*   [ ] **Task 6.6:** Build the nightly LLM pattern analysis Raven mission: query 7-day telemetry → construct pattern prompt → store insights in RAG `system_learnings`.
+*   [ ] **Task 6.7:** Build the **Device Monitor Dashboard UI** (`/admin/monitor`): enrollment panel, per-device telemetry cards with sparklines, and the LLM Insights Feed.
+
 ---
+
 
 ## 6. LLM Tool Schemas & UI Mapping
 
@@ -462,7 +593,139 @@ Four new dedicated handler files replace the old catch-all logic in `media.py`:
 
 Each handler includes `is_<brand>_device()` for runtime platform detection via HA entity attributes (app IDs, source lists).
 
-**Roku Music Two-Part Pattern:** Roku music is particularly complex. The handler: 1) Calls `music_assistant.search` to resolve the track URI, 2) Launches the Music Assistant app (`782875`) on the Roku via ECP HTTP call to `http://<roku_ip>:8060/launch/782875`, 3) Delegates actual audio playback to the Music Assistant `media_player` *sibling entity* found by `find_ma_player_sibling()`.
+---
+
+#### Roku: Full Implementation Detail
+
+The Roku handler (`handlers/roku.py`) is the most complex of the brand handlers because Roku's native API (`roku` HA integration) has no direct audio playback route — it can only control the UI. All media must go through the **ECP (External Control Protocol)** HTTP API at `http://<roku_ip>:8060`.
+
+> [!IMPORTANT]
+> **We use [Music Assistant (MASS)](https://music-assistant.io/) as the audio engine for all Roku media playback.** Music Assistant is a self-hosted music library manager that integrates with Home Assistant as a first-class integration. It handles library search, URI resolution, transcoding, and streaming to Roku hardware automatically. The HA integration exposes the `music_assistant.*` services we call directly.
+> - **HA Integration docs:** [home-assistant.io/integrations/music_assistant](https://www.home-assistant.io/integrations/music_assistant/)
+> - **MASS Python client (API reference):** [pypi.org/project/music-assistant-client](https://pypi.org/project/music-assistant-client/)
+> - **MASS Server & developer docs:** [music-assistant.io](https://music-assistant.io/)
+>
+> All direct Roku device commands use the **ECP (External Control Protocol)** — Roku's local HTTP API running on port `:8060`.
+> - **Roku ECP API reference:** [developer.roku.com/docs/developer-program/debugging/external-control-api.md](https://developer.roku.com/docs/developer-program/debugging/external-control-api.md)
+
+**Roku App ID Registry (built-in):**
+Netflix `12`, YouTube `837`, Hulu `2285`, Disney+ `291097`, Prime Video `13`, Spotify `22297`, Plex `13535`, Tubi `26079`, Peacock `427192`, HBO Max `301921`, Apple TV `472192`, **Media Assistant `782875`**.
+
+##### Music Playback — Five-Step Pipeline (`roku_play_music`)
+
+```
+1. RESOLVE MA CONFIG ENTRY
+   ha_client.find_mass_config_entry() — finds the MASS HA integration entry ID at runtime
+   (not hardcoded — dynamically queried from HA config entries)
+
+2. DISCOVER ROKU IP
+   device_discovery.discover_device(entity_id, device_type="roku")
+   → 7-strategy pipeline: registry cache → HA attrs → ARP → mDNS → SSDP → port scan
+   If IP not found: falls back to MA-only playback (skips ECP step)
+
+3. FIND MA PLAYER SIBLING
+   find_ma_player_sibling(ha_url, ha_token, roku_entity)
+   → Scans all HA media_player states to find one that:
+     - Has an active_queue attribute (must be a live MA output, not just any MA entity)
+     - Shares a name with the Roku entity (friendly_name substring match)
+     - Has music_assistant in its integration/source/mass_player_type attrs
+   → If no sibling found: returns FAILURE (can't delegate audio without it)
+
+4. MA SEARCH
+   ha_client.call_service("music_assistant", "search", ..., return_response=True)
+   → Resolves the user's query to a full library:// URI (e.g. library://track/12345)
+   → Uses MASS search across: tracks, albums, artists, playlists (limit=1)
+   → Extracts: song_name, artist_name, full_library_uri, ma_media_type
+   → ECP params populated: songName, artistName, albumArt (if available)
+   Ref: https://www.home-assistant.io/integrations/music_assistant/#action-music_assistantsearch
+
+5. ECP LAUNCH + MA AUDIO DELEGATION
+   POST http://<roku_ip>:8060/launch/782875
+     params: t=a, autoplay=true, songName=..., artistName=..., albumArt=...
+   → Opens Media Assistant app on Roku with the rich music UI (album art, title)
+   → asyncio.sleep(3) — waits for the app to load
+
+   Then: music_assistant.play_media on the MA sibling entity
+     media_id = full_library_uri (e.g. library://track/12345)
+     enqueue = "replace"
+   → MA handles transcoding and streaming to the Roku output automatically (MA 2.7+)
+   Ref: https://www.home-assistant.io/integrations/music_assistant/#action-music_assistantplay_media
+
+   Fallback: if music_assistant.play_media fails →
+     media_player.play_media with media_content_type="music"
+```
+
+**Failure modes handled:**
+- No Roku IP → skips ECP, falls back to pure MA sibling call
+- No MA sibling with `active_queue` → returns `FAILURE` (not silent)
+- ECP launch HTTP error → logs warning, `device_registry.invalidate_device()` marks IP stale for re-discovery
+
+##### Video Playback — Four-Step Pipeline (`roku_play_video`)
+
+```
+1. DISCOVER ROKU IP (same 7-strategy pipeline)
+
+2. SMART POWER SYNC
+   get_state() checks if entity is "off", "idle", "unavailable", or "unknown"
+   → if yes: media_player.turn_on → asyncio.sleep(2)
+   → then: remote.send_command("Home") on the remote.* sibling entity → asyncio.sleep(2)
+   (wakes from screensaver without requiring full boot)
+
+3. ECP LAUNCH with video params
+   POST http://<roku_ip>:8060/launch/782875
+     params: t=v, u=<mp4_url>, autoplay=true, songName=<title>, videoFormat=mp4
+   → Media Assistant app plays the MP4 directly (no HA play_media needed for video)
+
+4. Failure: device_registry.invalidate_device(), return FAILURE
+```
+
+##### Announcement (`announce_roku` in `announce_handlers.py`)
+
+Announcements on Roku use a **separate, simpler ECP path** from the music pipeline — no MA sibling is involved. The Kokoro-generated WAV is hosted by the execution service and passed directly to Media Assistant as an audio URL:
+
+```
+1. DISCOVER ROKU IP via device_discovery
+
+2. WAKE DISPLAY
+   ECP POST http://<roku_ip>:8060/keypress/Home  (wakes from screensaver)
+   media_player.turn_on via HA
+   asyncio.sleep(3)
+
+3. LAUNCH MEDIA ASSISTANT with audio URL
+   POST http://<roku_ip>:8060/launch/782875
+     params:
+       t=a                          ← audio type
+       u=<kokoro_wav_url>           ← the execution service /media/tts-{id} URL
+       songName="SharedLLM Announcement"  (or the actual TTS message text)
+       songFormat=wav
+       autoplay=true
+   → Media Assistant opens and plays the WAV directly from the execution service URL
+
+4. Fallback: media_player.play_media(media_content_type="url")
+```
+
+**Key distinction:** Music playback uses the `library://` URI + MA sibling delegation. Announcements use the raw `http://` WAV URL directly. They never share the same code path.
+
+##### TV Type Auto-Detection (`detect_tv_type` in `announce_handlers.py`)
+
+Before any dispatch, the system runs a 12-priority detection pass on the entity's attributes:
+1. Cast: `chrome`/`_cast` in entity_id OR known Cast app_id
+2. **Roku**: `roku` in entity_id OR Roku sources in source_list OR ≥5 streaming apps OR MA player with Roku `active_queue`
+3. Android TV: Android package prefix in app_id
+4. WebOS: `lg_`/`webos` in entity_id
+5. Samsung: `samsung`/`tizen` in entity_id
+6. Sony Bravia: `bravia`/`sony` in entity_id
+7. ESPHome/DLNA/Music Assistant: entity_id substring
+8. Generic TV: `device_class=tv` OR TV inputs (HDMI, AV) in source_list
+9. Speaker: `device_class=speaker`
+10. Loaded HA components (`cast.media_player`, `roku`, `webostv.media_player`, etc.)
+11. **Web search fallback**: If still unknown, constructs a search query from entity attrs and uses SearXNG to identify the platform
+12. Final fallback: `unknown` handler (generic `media_player.play_media`)
+
+**TCL and Sharp TVs** are mapped to Roku in the manufacturer pattern table (both brands use Roku OS), so they automatically follow the Roku announcement path.
+
+---
+
 
 #### Multi-Strategy Device Discovery Pipeline (`device_discovery.py`)
 To find physical device IPs for ECP/direct API calls, a 7-strategy ordered pipeline runs in sequence — stopping at the first hit:
@@ -614,7 +877,55 @@ This section breaks down the React/Ionic frontend page by page. It details exact
     *   *Type:* Horizontal Range Slider.
     *   *Controls:* Adjusts target device volume via `ha_client.py`.
 
-### 10.5 Personal Calendar (`/calendar`)
+### 10.5 Universal Remote Control (`/remote`)
+*   **Target Audience:** Standard Users (only shown if the user has at least one media device assigned to their profile)
+*   **Purpose:** A single, device-aware remote control UI that replaces the physical remote for any TV, speaker, or media player assigned to the user. Operates entirely through the existing `MediaTransportRequest` schema — no new backend endpoints required.
+*   **Visibility Rule:** The `/remote` route is hidden from navigation if the user has zero assigned `media_player.*` entities. When a device is assigned via the Admin User Management panel (Section 10.9), the route becomes visible automatically.
+
+#### Device Picker
+*   *Type:* Horizontal scrollable card row at the top of the page.
+*   *Each card shows:* Device friendly name + brand icon (Roku, Samsung, LG, etc.) + current state (On/Off/Playing).
+*   *Controls:* Tapping a card selects it as the active remote target. The button layout below adapts to the selected device's brand.
+
+#### Power & Input
+*   `[Power On]` / `[Power Off]` — maps to `MediaTransportRequest.command = "power_off"` + `media_player.turn_on` via HA.
+*   `[Input / Source]` — opens a bottom sheet listing the device's `source_list` from HA state. Selecting a source calls `media_player.select_source`.
+
+#### Navigation D-Pad
+*   *Type:* Classic circular D-Pad with center `[OK/Select]` button.
+*   *Controls:* `[▲]` `[▼]` `[◄]` `[►]` `[OK]` — maps to `MediaTransportRequest` commands (`up`, `down`, `left`, `right`, `enter`). For Roku, these translate to ECP key presses (`Up`, `Down`, `Left`, `Right`, `Select`). For other brands, the handler maps to platform-native equivalents.
+*   `[Home]` button — `MediaTransportRequest.command = "home"`.
+*   `[Back]` button — `MediaTransportRequest.command = "back"`.
+
+#### Volume Controls
+*   *Type:* Three-button cluster: `[Vol −]`, `[Mute]`, `[Vol +]`.
+*   *Controls:* Maps to `MediaTransportRequest.command = "volume_down"` / `"volume_up"` and `media_player.volume_mute`.
+*   *Optional:* Inline volume slider for precise control (calls `media_player.volume_set` with `volume_level` float).
+
+#### Playback Controls
+*   *Type:* Standard media button row: `[⏮ Prev]`, `[⏸ Play/Pause]`, `[⏭ Next]`, `[⏹ Stop]`.
+*   *Controls:* Maps to `MediaTransportRequest` `previous`, `resume`/`pause`, `next`, `stop`.
+
+#### Channel Controls (TV devices only)
+*   *Type:* `[Ch +]` / `[Ch −]` buttons — shown only when the target device `source_list` contains TV-input-style sources (Live TV, antenna, cable).
+*   *Controls:* Sends platform-specific channel commands (Roku: `ChannelUp`/`ChannelDown` ECP keys; others: HA `media_player.media_next_track` as a fallback).
+
+#### Quick App Launcher
+*   *Type:* Row of app icon buttons (Netflix, YouTube, Hulu, Plex, etc.).
+*   *Controls:* Populated from the Roku App ID Registry or HA `source_list` for non-Roku devices. Tapping launches the app via `roku_launch()` or `media_player.select_source`.
+*   *Only shown* for TV-class devices (not speakers).
+
+#### Brand Adaptation
+The backend already detects device brand via `detect_tv_type()`. The remote UI reads this from the device's HA state attributes and renders only the controls relevant to that platform:
+
+| Platform | Navigation | Volume | Channel | App Launcher |
+| :--- | :--- | :--- | :--- | :--- |
+| **Roku** | D-Pad (ECP) | ✅ | ✅ (ECP) | ✅ (App ID list) |
+| **Samsung / WebOS / Bravia** | D-Pad (HA service) | ✅ | ✅ | ✅ (source_list) |
+| **Android TV** | D-Pad (ADB) | ✅ | ✅ | ✅ (source_list) |
+| **Cast / Speaker** | Play controls only | ✅ | ❌ | ❌ |
+
+### 10.6 Personal Calendar (`/calendar`)
 *   **Target Audience:** Standard Users
 *   **Purpose:** A unified, user-specific view of all upcoming events, tasks, and chores.
 *   **Data Aggregation:** This page actively filters data. It pulls from Nextcloud (CalDAV) and Skylight (Chores), but **only displays items assigned to or belonging to the currently authenticated user**. It strips out other family members' noise to provide a focused daily agenda.
@@ -625,7 +936,7 @@ This section breaks down the React/Ionic frontend page by page. It details exact
     *   *Type:* Standard 30-day Calendar Grid.
     *   *Controls:* Color-coded dots indicate event density. Swiping left/right navigates months.
 
-### 10.6 Raven Ops Panel (`/admin/ops`)
+### 10.7 Raven Ops Panel (`/admin/ops`)
 *   **Target Audience:** Admins Only (Requires `is_admin=True`)
 *   **Purpose:** Interface for monitoring the autonomous LLM and managing the Docker Control Plane.
 *   **Operations Timeline:**
@@ -638,14 +949,14 @@ This section breaks down the React/Ionic frontend page by page. It details exact
     *   *Type:* Data Table with Status Dots (Green/Red).
     *   *Controls:* Lists all `sharedllm_` Docker containers. Includes `[View Logs]` (opens a terminal-style text box modal) and `[Restart]` (calls the Port 8008 Control Plane API) buttons.
 
-### 10.7 Dynamic Integrations Config (`/admin/integrations`)
+### 10.8 Dynamic Integrations Config (`/admin/integrations`)
 *   **Target Audience:** Admins Only
 *   **Purpose:** Configure backend integrations (HA, Nextcloud, GitHub) without touching `.env` files.
 *   **Dynamic Forms:**
     *   *Type:* Auto-generated Form fields based on JSON Schema.
     *   *Controls:* Text inputs for URLs, secure password masking fields for Tokens. Includes a `[Test Connection]` button (calls `/api/auth/test-connection` in Identity) and a `[Save]` button to persist encrypted credentials into `identity.db`.
 
-### 10.8 Admin User Management (`/admin/users`)
+### 10.9 Admin User Management (`/admin/users`)
 *   **Target Audience:** Admins Only (requires `is_admin=True`)
 *   **Purpose:** Securely manage household users, Voice ID assignments, and third-party credentials.
 *   **User Roster:**
@@ -656,7 +967,7 @@ This section breaks down the React/Ionic frontend page by page. It details exact
     *   *Controls:* Three large buttons for the source integration: `[Import from Nextcloud]`, `[Import from Home Assistant]`, `[Import from Skylight]`. 
     *   *Action:* The backend queries the selected service's API, returns a list of discovered users, and allows the admin to select which ones to batch-create inside Jarvis OS. It automatically links their source IDs to their new Jarvis profile.
 
-### 10.9 Emoji Sound Manager (`/admin/sounds`)
+### 10.10 Emoji Sound Manager (`/admin/sounds`)
 *   **Target Audience:** Admins Only (requires `is_admin=True`)
 *   **Purpose:** Map emoji characters to custom audio files for TTS splicing. This is the configuration interface for the system described in Section 6.9.
 *   **Mobile/Desktop:** Two-column grid on desktop; single-column list on mobile.
