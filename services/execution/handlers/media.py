@@ -120,10 +120,15 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
     
+    # Resolve MA config entry at runtime if not seeded
+    mass_entry = MASS_CONFIG_ENTRY_ID
+    if not mass_entry:
+        mass_entry = await ha_client.find_mass_config_entry(ctx.ha_url, ctx.ha_token)
+    
     if is_roku:
         log.info("[media/play] Detected Roku device, using Roku music handler")
         return await roku_handler.roku_play_music(
-            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", MASS_CONFIG_ENTRY_ID,
+            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", mass_entry,
         )
     
     mass_entity = await resolve_mass_entity(ctx, entity_id)
@@ -132,7 +137,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         search_result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
             service_data={
-                "config_entry_id": MASS_CONFIG_ENTRY_ID,
+                "config_entry_id": mass_entry,
                 "name": req.query,
                 "media_type": ["track", "artist", "album", "playlist", "radio"],
                 "limit": 5,
