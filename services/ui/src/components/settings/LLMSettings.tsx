@@ -9,7 +9,8 @@ import {
   Library,
   ShieldCheck,
   Globe,
-  Key
+  Key,
+  Clock
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
@@ -132,7 +133,7 @@ const LLMSettings: React.FC = () => {
                   value={getSetting('llm_local_url')} 
                   onChange={e => setDrafts({...drafts, llm_local_url: e.target.value})}
                   className="glass-input w-full text-xs"
-                  placeholder="http://llama-server:11434"
+                  placeholder="http://ollama-server.local:11434"
                 />
                 <p className="text-[9px] text-slate-600 mt-1">Works with Ollama, llama.cpp server, or any /api/chat compatible endpoint.</p>
               </div>
@@ -163,6 +164,34 @@ const LLMSettings: React.FC = () => {
                     placeholder="sk-••••••••••••••••"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">System Timezone</label>
+                <div className="relative">
+                  <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                  <select
+                    value={getSetting('timezone')}
+                    onChange={e => setDrafts({...drafts, timezone: e.target.value})}
+                    className="glass-input w-full text-xs pl-10 bg-black/40"
+                  >
+                    <option value="">Select Timezone</option>
+                    <option value="America/New_York">Eastern (ET)</option>
+                    <option value="America/Chicago">Central (CT)</option>
+                    <option value="America/Denver">Mountain (MT)</option>
+                    <option value="America/Phoenix">Mountain (MST, no DST)</option>
+                    <option value="America/Los_Angeles">Pacific (PT)</option>
+                    <option value="America/Anchorage">Alaska (AKT)</option>
+                    <option value="Pacific/Honolulu">Hawaii (HST)</option>
+                    <option value="Europe/London">London (GMT/BST)</option>
+                    <option value="Europe/Paris">Paris (CET/CEST)</option>
+                    <option value="Europe/Berlin">Berlin (CET/CEST)</option>
+                    <option value="Asia/Tokyo">Tokyo (JST)</option>
+                    <option value="Asia/Shanghai">Shanghai (CST)</option>
+                    <option value="Australia/Sydney">Sydney (AEST/AEDT)</option>
+                    <option value="UTC">UTC</option>
+                  </select>
+                </div>
+                <p className="text-[9px] text-slate-600 mt-1">Used for time/date queries and log timestamps.</p>
               </div>
             </div>
           </div>

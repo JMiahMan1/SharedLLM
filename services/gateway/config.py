@@ -43,7 +43,7 @@ RAVEN_ERROR_THRESHOLD = int(os.getenv("RAVEN_ERROR_THRESHOLD", "5"))
 FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 PHRASEBOOK_PATH = os.getenv("PHRASEBOOK_PATH", "")
-TIMEZONE = os.getenv("TIMEZONE", "America/Phoenix")
+TIMEZONE = os.getenv("TIMEZONE", "")  # Resolved at runtime from Identity settings
 
 # --- CONFIG dict for backward compat (resolved at runtime from Identity) ---
 CONFIG = {

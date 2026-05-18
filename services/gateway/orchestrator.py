@@ -32,7 +32,7 @@ _DEFAULTS = {
     "raven_hung_threshold": "600",
     "raven_check_interval": "300",
     "raven_error_threshold": "5",
-    "timezone": "America/Phoenix",
+    "timezone": "",  # Resolved at runtime from Identity settings
     "embedding_model": "BAAI/bge-small-en-v1.5",
 }
 
