@@ -13,8 +13,6 @@ services:
     networks:
       sharedllm:
         ipv4_address: 172.26.0.10
-    cap_add:
-      - NET_ADMIN
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - IDENTITY_SVC_URL=http://identity:8001
