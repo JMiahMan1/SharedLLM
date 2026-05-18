@@ -129,99 +129,52 @@ async def lifespan(app: FastAPI):
     
     # Start lightweight media server on port 8888 for external access
     def run_media_server():
-        from http.server import HTTPServer, SimpleHTTPRequestHandler
+        from http.server import HTTPServer, BaseHTTPRequestHandler
         import threading
         import re
         
-        class MediaHandler(SimpleHTTPRequestHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=TEMP_AUDIO_DIR, **kwargs)
-            
+        class MediaHandler(BaseHTTPRequestHandler):
             def do_GET(self):
-                match = re.match(r'/media/([^/]+)', self.path)
-                if match:
-                    media_id = match.group(1)
-                    # TTS audio from memory cache
-                    if media_id in TEMP_AUDIO_CACHE:
-                        self.send_response(200)
-                        self.send_header('Content-Type', 'audio/wav')
-                        self.send_header('Content-Length', len(TEMP_AUDIO_CACHE[media_id]))
-                        self.send_header('Accept-Ranges', 'bytes')
+                try:
+                    match = re.match(r'/media/([^/]+)', self.path)
+                    if match:
+                        media_id = match.group(1)
+                        # TTS audio from memory cache
+                        if media_id in TEMP_AUDIO_CACHE:
+                            self.send_response(200)
+                            self.send_header('Content-Type', 'audio/wav')
+                            self.send_header('Content-Length', len(TEMP_AUDIO_CACHE[media_id]))
+                            self.send_header('Accept-Ranges', 'bytes')
+                            self.end_headers()
+                            self.wfile.write(TEMP_AUDIO_CACHE[media_id])
+                            return
+                        # TTS audio from disk (.wav)
+                        wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
+                        if os.path.exists(wav_path):
+                            self._serve_file(wav_path, 'audio/wav')
+                            return
+                        # Video files from disk (.mp4)
+                        mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
+                        if os.path.exists(mp4_path):
+                            self._serve_video_progressive(mp4_path, 'video/mp4')
+                            return
+                    self.send_response(404)
+                    self.end_headers()
+                except Exception as e:
+                    log.error(f"[media.server] Error serving request: {e}", exc_info=True)
+                    try:
+                        self.send_response(500)
                         self.end_headers()
-                        self.wfile.write(TEMP_AUDIO_CACHE[media_id])
-                        return
-                    # TTS audio from disk (.wav)
-                    wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
-                    if os.path.exists(wav_path):
-                        self._serve_file(wav_path, 'audio/wav')
-                        return
-                    # Video files from disk (.mp4) — supports progressive downloads
-                    mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
-                    if os.path.exists(mp4_path):
-                        self._serve_video_progressive(mp4_path, 'video/mp4')
-                        return
-                self.send_response(404)
-                self.end_headers()
+                    except:
+                        pass
             
             def _serve_file(self, path, content_type):
-                self.send_response(200)
-                self.send_header('Content-Type', content_type)
-                self.send_header('Content-Length', os.path.getsize(path))
-                self.send_header('Accept-Ranges', 'bytes')
-                self.end_headers()
-                with open(path, 'rb') as f:
-                    self.wfile.write(f.read())
-            
-            def _serve_video_progressive(self, path, content_type):
-                """Serve video file with support for progressive downloads (growing files)."""
-                range_header = self.headers.get('Range')
                 file_size = os.path.getsize(path)
-                
-                if range_header:
-                    range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
-                    if range_match:
-                        start = int(range_match.group(1))
-                        requested_end = int(range_match.group(2)) if range_match.group(2) else None
-                        
-                        # For progressive downloads, use current file size
-                        current_size = os.path.getsize(path)
-                        end = min(requested_end, current_size - 1) if requested_end else current_size - 1
-                        
-                        if start >= current_size:
-                            self.send_response(416)
-                            self.send_header('Content-Range', f'bytes */{current_size}')
-                            self.end_headers()
-                            return
-                        
-                        content_length = end - start + 1
-                        self.send_response(206)
-                        self.send_header('Content-Type', content_type)
-                        self.send_header('Content-Length', content_length)
-                        self.send_header('Content-Range', f'bytes {start}-{end}/{current_size}')
-                        self.send_header('Accept-Ranges', 'bytes')
-                        self.end_headers()
-                        
-                        with open(path, 'rb') as f:
-                            f.seek(start)
-                            remaining = content_length
-                            while remaining > 0:
-                                chunk = f.read(min(65536, remaining))
-                                if not chunk:
-                                    break
-                                try:
-                                    self.wfile.write(chunk)
-                                    remaining -= len(chunk)
-                                except BrokenPipeError:
-                                    return
-                        return
-                
-                # No range request — serve from start with current file size
                 self.send_response(200)
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', file_size)
                 self.send_header('Accept-Ranges', 'bytes')
                 self.end_headers()
-                
                 with open(path, 'rb') as f:
                     while True:
                         chunk = f.read(65536)
@@ -232,8 +185,74 @@ async def lifespan(app: FastAPI):
                         except BrokenPipeError:
                             return
             
+            def _serve_video_progressive(self, path, content_type):
+                """Serve video file with support for progressive downloads (growing files)."""
+                try:
+                    range_header = self.headers.get('Range')
+                    file_size = os.path.getsize(path)
+                    
+                    if range_header:
+                        range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+                        if range_match:
+                            start = int(range_match.group(1))
+                            requested_end = int(range_match.group(2)) if range_match.group(2) else None
+                            
+                            current_size = os.path.getsize(path)
+                            end = min(requested_end, current_size - 1) if requested_end else current_size - 1
+                            
+                            if start >= current_size:
+                                self.send_response(416)
+                                self.send_header('Content-Range', f'bytes */{current_size}')
+                                self.end_headers()
+                                return
+                            
+                            content_length = end - start + 1
+                            self.send_response(206)
+                            self.send_header('Content-Type', content_type)
+                            self.send_header('Content-Length', content_length)
+                            self.send_header('Content-Range', f'bytes {start}-{end}/{current_size}')
+                            self.send_header('Accept-Ranges', 'bytes')
+                            self.end_headers()
+                            
+                            with open(path, 'rb') as f:
+                                f.seek(start)
+                                remaining = content_length
+                                while remaining > 0:
+                                    chunk = f.read(min(65536, remaining))
+                                    if not chunk:
+                                        break
+                                    try:
+                                        self.wfile.write(chunk)
+                                        remaining -= len(chunk)
+                                    except BrokenPipeError:
+                                        return
+                            return
+                    
+                    self.send_response(200)
+                    self.send_header('Content-Type', content_type)
+                    self.send_header('Content-Length', file_size)
+                    self.send_header('Accept-Ranges', 'bytes')
+                    self.end_headers()
+                    
+                    with open(path, 'rb') as f:
+                        while True:
+                            chunk = f.read(65536)
+                            if not chunk:
+                                break
+                            try:
+                                self.wfile.write(chunk)
+                            except BrokenPipeError:
+                                return
+                except Exception as e:
+                    log.error(f"[media.server] Error serving video: {e}", exc_info=True)
+                    try:
+                        self.send_response(500)
+                        self.end_headers()
+                    except:
+                        pass
+            
             def log_message(self, format, *args):
-                pass  # Suppress default logging
+                log.debug(f"[media.server] {format % args}")
         
         server = HTTPServer(('0.0.0.0', 8888), MediaHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
