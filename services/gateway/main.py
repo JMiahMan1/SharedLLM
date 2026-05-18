@@ -19,12 +19,44 @@ log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 from gateway.schemas import ResolvedCredentials
 from gateway.agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
-from gateway.config import (
-    OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, 
-    STORAGE_SVC, LOGGING_SVC, WORKSPACE_RUNTIME_SVC, 
-    INTERNAL_SECRET, OLLAMA_TIMEOUT, CONFIG
-)
+from gateway.config import INTERNAL_SECRET, CONFIG
 from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+from gateway.orchestrator import get_all_settings, _get
+
+# --- Compatibility layer: service URLs resolved from Identity at import time ---
+# These are lazy-resolved on first use. All code paths that reference these
+# will get the current Identity settings value.
+_svc_cache: dict = {}
+
+def _svc(key: str, default: str) -> str:
+    """Get service URL from cache (populated by get_all_settings calls)."""
+    if not _svc_cache:
+        # Populate defaults at import time; runtime calls refresh via get_all_settings
+        _svc_cache.update({
+            "identity_svc_url": "http://identity:8001",
+            "execution_svc_url": "http://execution:8003",
+            "rag_svc_url": "http://rag:8004",
+            "storage_svc_url": "http://storage:8005",
+            "logging_svc_url": "http://logging:8006",
+            "workspace_runtime_svc_url": "http://workspace_runtime:8007",
+            "control_plane_url": "http://control_plane:8008",
+            "llm_local_url": "http://ollama:11434",
+            "redis_url": "redis://redis:6379/0",
+            "ollama_timeout": "600",
+        })
+    return _svc_cache.get(key, default)
+
+# Backward-compatible aliases (updated by get_all_settings calls)
+IDENTITY_SVC = "http://identity:8001"
+EXECUTION_SVC = "http://execution:8003"
+RAG_SVC = "http://rag:8004"
+STORAGE_SVC = "http://storage:8005"
+LOGGING_SVC = "http://logging:8006"
+WORKSPACE_RUNTIME_SVC = "http://workspace_runtime:8007"
+CONTROL_PLANE_URL = "http://control_plane:8008"
+OLLAMA_URL = "http://ollama:11434"
+OLLAMA_TIMEOUT = 600.0
+LOGGING_SVC_URL = LOGGING_SVC
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -134,9 +166,22 @@ from gateway.intent_engine import engine
 from gateway.history import update_history, ping_redis
 from gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 from gateway.messaging import InferenceJobQueue, JobStatus
-from gateway.config import REDIS_URL as _REDIS_URL
-REDIS_URL = _REDIS_URL
-job_queue = InferenceJobQueue(REDIS_URL)
+from gateway.orchestrator import get_all_settings, _get
+
+# REDIS URL resolved at runtime from Identity
+async def _get_redis_url() -> str:
+    settings = await get_all_settings()
+    return _get(settings, "redis_url", "redis://redis:6379/0")
+
+# Job queue initialized lazily
+job_queue: Optional[InferenceJobQueue] = None
+
+async def get_job_queue() -> InferenceJobQueue:
+    global job_queue
+    if job_queue is None:
+        redis_url = await _get_redis_url()
+        job_queue = InferenceJobQueue(redis_url)
+    return job_queue
 
 # REDIS moved below imports
 
@@ -144,12 +189,7 @@ job_queue = InferenceJobQueue(REDIS_URL)
 from gateway.background_worker import worker as raven_worker
 log.info("Successfully imported Raven background worker.")
 
-# --- Configuration (from shared config) ---
-from gateway.config import (
-    CONTROL_PLANE_URL,
-    FAST_PATH_THRESHOLD as _DEFAULT_FAST_PATH_THRESHOLD,
-)
-LOGGING_SVC_URL = LOGGING_SVC
+LOGGING_SVC_URL = ""  # Resolved at runtime from Identity
 
 # Global Inference Lock (Strategy 8: Singleton Queue)
 async def fetch_global_setting(key: str, default: str = "") -> str:
@@ -169,29 +209,14 @@ async def fetch_global_setting(key: str, default: str = "") -> str:
 
 
 async def get_llm_settings() -> Dict[str, str]:
-    """Fetches full LLM settings from Identity Service."""
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(
-                f"{IDENTITY_SVC}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status_code == 200:
-                fetched = {item["key"]: item["value"] for item in resp.json()}
-                for k, v in list(fetched.items()):
-                    if v in ["auto", ""]:
-                        fetched[k] = None
-                return fetched
-    except Exception as e:
-        log.error(f"Failed to fetch dynamic LLM settings: {e}")
-    return {}
+    """Fetches full LLM settings from Identity Service (cached)."""
+    return await get_all_settings()
 
 
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from gateway.config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
-    timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
+    timeout = float(_get(settings, "ollama_timeout", "600"))
     if active_provider == "openrouter":
         return OpenRouterProvider(
             api_key=settings.get("llm_cloud_api_key", ""),
@@ -200,7 +225,7 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
         )
     else:
         return OllamaProvider(
-            base_url=settings.get("llm_local_url", OLLAMA_URL),
+            base_url=_get(settings, "llm_local_url", "http://ollama:11434"),
             timeout=timeout
         )
 

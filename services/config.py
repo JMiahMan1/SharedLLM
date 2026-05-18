@@ -24,13 +24,14 @@ FERNET_KEY = _required("FERNET_KEY")
 
 # --- External service endpoints (bootstrap defaults from .env) ---
 # Runtime values are fetched from Identity settings; these are fallbacks.
-OLLAMA_URL = _required("OLLAMA_URL")
-IDENTITY_SVC_URL = _required("IDENTITY_SVC_URL")
-EXECUTION_SVC_URL = _required("EXECUTION_SVC_URL")
-RAG_SVC_URL = _required("RAG_SVC_URL")
-STORAGE_SVC_URL = _required("STORAGE_SVC_URL")
-LOGGING_SVC_URL = _required("LOGGING_SVC_URL")
-WORKSPACE_RUNTIME_SVC_URL = _required("WORKSPACE_RUNTIME_SVC_URL")
+# Services on the Docker network use container names; host-networked services use localhost.
+OLLAMA_URL = _optional("OLLAMA_URL", "http://ollama:11434")
+IDENTITY_SVC_URL = _optional("IDENTITY_SVC_URL", "http://identity:8001")
+EXECUTION_SVC_URL = _optional("EXECUTION_SVC_URL", "http://execution:8003")
+RAG_SVC_URL = _optional("RAG_SVC_URL", "http://rag:8004")
+STORAGE_SVC_URL = _optional("STORAGE_SVC_URL", "http://storage:8005")
+LOGGING_SVC_URL = _optional("LOGGING_SVC_URL", "http://logging:8006")
+WORKSPACE_RUNTIME_SVC_URL = _optional("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime:8007")
 
 # --- Optional external services ---
 CONTROL_PLANE_URL = _optional("CONTROL_PLANE_URL")

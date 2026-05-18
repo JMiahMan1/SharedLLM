@@ -23,21 +23,10 @@ services:
     restart: unless-stopped
     ports:
       - 8001:8001
-    extra_hosts:
-      - "ollama-server:192.168.4.179"
-      - "ai-server:192.168.2.205"
-      - "llama-server:192.168.4.179"
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=http://ollama-server:11434
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://localhost:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - TZ=America/Phoenix
     volumes:
       - identity_db:/data
@@ -50,16 +39,10 @@ services:
     container_name: sharedllm_execution
     restart: always
     network_mode: host
-    env_file:
-      - .env
-    extra_hosts:
-      - "ollama-server:192.168.4.179"
-      - "ai-server:192.168.2.205"
-      - "llama-server:192.168.4.179"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=http://ollama-server:11434
+      # Host-networked service: use localhost for inter-service communication
       - IDENTITY_SVC_URL=http://localhost:8001
       - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://localhost:8004

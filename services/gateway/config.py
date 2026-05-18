@@ -1,40 +1,23 @@
-import sys
+"""
+Gateway configuration.
+
+NO .env imports for service URLs or credentials.
+All runtime settings come from Identity service at runtime.
+.env is seed-only (used only by Identity's /api/admin/seed endpoint).
+
+Only INTERNAL_SECRET is read from the environment (set by docker-compose).
+"""
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# --- Inter-service auth (set by docker-compose) ---
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
 
-from config import (
-    INTERNAL_SECRET,
-    OLLAMA_URL,
-    IDENTITY_SVC_URL as IDENTITY_SVC,
-    EXECUTION_SVC_URL as EXECUTION_SVC,
-    RAG_SVC_URL as RAG_SVC,
-    STORAGE_SVC_URL as STORAGE_SVC,
-    LOGGING_SVC_URL as LOGGING_SVC,
-    WORKSPACE_RUNTIME_SVC_URL as WORKSPACE_RUNTIME_SVC,
-    CONTROL_PLANE_URL,
-    SEARXNG_URL,
-    LLAMA_SERVER_PROXY_URL,
-    ASSISTANT_MODEL,
-    CODING_MODEL,
-    LIBRARIAN_MODEL,
-    RAVEN_MAX_TOTAL_SECONDS,
-    RAVEN_ITERATION_TIMEOUT,
-    RAVEN_HEARTBEAT_INTERVAL,
-    RAVEN_HUNG_THRESHOLD,
-    REDIS_URL,
-    FAST_PATH_THRESHOLD,
-    EMBEDDING_MODEL,
-    PHRASEBOOK_PATH,
-    RAVEN_CHECK_INTERVAL,
-    RAVEN_ERROR_THRESHOLD,
-)
-
-OLLAMA_TIMEOUT = 600.0
+# --- Constants (not user-configurable) ---
 SYSTEM_IDENTITY = "raven_system"
 
+# --- CONFIG dict for backward compat (resolved at runtime from Identity) ---
 CONFIG = {
-    "assistant_model": ASSISTANT_MODEL or "",
-    "librarian_model": LIBRARIAN_MODEL or "",
-    "coding_model": CODING_MODEL or "",
+    "assistant_model": "",
+    "librarian_model": "",
+    "coding_model": "",
 }
