@@ -101,7 +101,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=http://ollama-server:11434
+      - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
@@ -190,7 +190,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=http://ollama-server:11434
+      - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
@@ -222,7 +222,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=http://ollama-server:11434
+      - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
@@ -250,7 +250,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=http://ollama-server:11434
+      - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
@@ -281,7 +281,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=http://ollama-server:11434
+      - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
@@ -342,7 +342,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=http://ollama-server:11434
+      - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://localhost:8003
       - RAG_SVC_URL=http://rag:8004
