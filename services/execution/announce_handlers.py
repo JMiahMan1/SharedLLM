@@ -204,7 +204,7 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
         "media_content_type": "url"
     })
 
-async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Roku: wake display via ECP, launch Media Assistant with audio URL.
     
     Based on Media Assistant docs and main branch flow:
@@ -241,7 +241,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
             params = {
                 "t": "a",
                 "u": media_url,
-                "songName": "SharedLLM Announcement",
+                "songName": message or "SharedLLM Announcement",
                 "songFormat": "wav",
                 "autoplay": "true"
             }
@@ -400,7 +400,7 @@ TV_HANDLER_MAP = {
     "unknown": announce_unknown,
 }
 
-async def dispatch_announce(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str, attributes: dict, loaded_components: Optional[Set[str]] = None) -> Dict[str, Any]:
+async def dispatch_announce(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str, attributes: dict, loaded_components: Optional[Set[str]] = None, message: str = "") -> Dict[str, Any]:
     """Dispatch announcement to the appropriate TV handler based on device detection."""
     tv_type = detect_tv_type(entity_id, state, attributes, loaded_components)
     
@@ -417,4 +417,4 @@ async def dispatch_announce(ha_url: str, ha_token: str, entity_id: str, media_ur
     handler = TV_HANDLER_MAP.get(tv_type, announce_unknown)
     
     log.info(f"[announce] Detected type: {tv_type} for {entity_id} (app_id={attributes.get('app_id', '?')}, device_class={attributes.get('device_class', '?')}, features={attributes.get('supported_features', '?')})")
-    return await handler(ha_url, ha_token, entity_id, media_url, volume, state, attributes)
+    return await handler(ha_url, ha_token, entity_id, media_url, volume, state, attributes, message=message)
