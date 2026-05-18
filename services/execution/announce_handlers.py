@@ -275,21 +275,22 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
         ma_player = entity_id
         log.info(f"[announce.roku] No MA player found, using Roku entity: {ma_player}")
     
-    # 4. Delegate audio to Music Assistant player
-    log.info(f"[announce.roku] Delegating audio to MA: {ma_player} | URL: {media_url}")
-    result = await call_service(ha_url, ha_token, "media_player", "play_media", ma_player, {
-        "media_content_id": media_url,
-        "media_content_type": "url"
+    # 4. Delegate audio to Music Assistant via play_announcement
+    log.info(f"[announce.roku] Delegating audio to MA play_announcement: {ma_player} | URL: {media_url}")
+    result = await call_service(ha_url, ha_token, "music_assistant", "play_announcement", ma_player, {
+        "url": media_url,
+        "use_pre_announce": False,
+        "announce_volume": int(volume * 100)
     })
     
     if result.get("ok"):
         return result
     
-    # Fallback: try music_assistant.play_media service
-    log.info(f"[announce.roku] Fallback: music_assistant.play_media")
-    return await call_service(ha_url, ha_token, "music_assistant", "play_media", ma_player, {
-        "media_id": media_url,
-        "media_type": "url"
+    # Fallback: media_player.play_media with URL
+    log.info(f"[announce.roku] Fallback: media_player.play_media")
+    return await call_service(ha_url, ha_token, "media_player", "play_media", ma_player, {
+        "media_content_id": media_url,
+        "media_content_type": "url"
     })
 
 async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:

@@ -1062,11 +1062,11 @@ async def execute_announce(req: AnnouncementRequest):
             result = {"ok": False, "error": str(e)}
 
     # Fallback: Music Assistant (MASS) play_announcement
-    if not result.get("ok"):
-        log.info("[announce] Attempting Music Assistant (MASS) announcement...")
+    if not result.get("ok") and media_url:
+        log.info("[announce] Attempting Music Assistant (MASS) play_announcement...")
         result = await ha_client.call_service(ha_url, ha_token, "music_assistant", "play_announcement", target_player, {
-            "message": req.message,
-            "use_pre_announcement_signal": True
+            "url": media_url,
+            "use_pre_announce": False
         })
 
     # Last resort: local Piper
