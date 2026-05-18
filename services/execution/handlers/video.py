@@ -243,7 +243,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
         return EXECUTION_EXTERNAL_HOST
     
     public_host = get_public_host()
-    media_url = f"http://{public_host}:8003/media/{media_id}"
+    media_url = f"http://{public_host}:8888/media/{media_id}"
     log.info(f"[video/play] Casting URL: {media_url}")
 
     # Step 5: Power on the device
