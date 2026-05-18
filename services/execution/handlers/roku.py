@@ -84,7 +84,10 @@ async def get_roku_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:
 
 
 async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -> str | None:
-    """Find the Music Assistant player entity that is a sibling of the Roku entity."""
+    """Find the Music Assistant player entity that is a sibling of the Roku entity.
+    
+    Only returns MA players that have an active_queue (i.e., are connected to a MA output).
+    """
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return None
@@ -106,6 +109,11 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
         friendly = attrs.get("friendly_name", "").lower()
         source = attrs.get("source", "").lower()
         integration = attrs.get("integration", "")
+        active_queue = attrs.get("active_queue")
+
+        # Must have an active MA queue to be a valid playback target
+        if not active_queue:
+            continue
 
         is_ma = ("music_assistant" in str(integration).lower() or
                  "active_queue" in attrs or
@@ -113,10 +121,10 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
                  "music_assistant" in source)
 
         if is_ma and (roku_friendly in friendly or friendly in roku_friendly):
-            log.info(f"[roku] Found MA player sibling: {eid}")
+            log.info(f"[roku] Found MA player sibling: {eid} (queue: {active_queue})")
             return eid
 
-    log.warning(f"[roku] No MA player sibling found for {roku_entity}")
+    log.warning(f"[roku] No MA player sibling with active queue found for {roku_entity}")
     return None
 
 

@@ -74,7 +74,10 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str) -> s
     raise ValueError("entity_id or device_name is required")
 
 async def resolve_mass_entity(ctx, original_entity: str) -> str:
-    """Resolve a media_player entity to its Music Assistant variant."""
+    """Resolve a media_player entity to its Music Assistant variant.
+    
+    Only returns MA players that have an active_queue (i.e., are connected to a MA output).
+    """
     all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
     if not all_states:
         return original_entity
@@ -98,10 +101,15 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
         friendly = attrs.get("friendly_name", "").lower()
         source = attrs.get("source", "").lower()
         integration = attrs.get("integration", "")
+        active_queue = attrs.get("active_queue")
+        
+        # Must have an active MA queue to be a valid playback target
+        if not active_queue:
+            continue
         
         if search in friendly and ("music assistant" in source or integration == "music_assistant"):
             if eid != original_entity:
-                log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid}")
+                log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid} (queue: {active_queue})")
                 return eid
     
     return original_entity
