@@ -65,6 +65,9 @@ def generate_dnsmasq_config(mappings):
             ips = [ips]
         elif not isinstance(ips, list):
             continue
+        # Ensure hostname has .local suffix for dnsmasq local domain
+        if not hostname.endswith('.local'):
+            hostname = f"{hostname}.local"
         for ip in ips:
             if ip:
                 lines.append(f"address=/{hostname}/{ip}")
