@@ -229,11 +229,12 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
 
     log.info(f"[roku.music] Delegating audio to MA: {ma_entity} media_id={ma_media_id} type={ma_media_type}")
     
-    # Bypass MA's Roku player provider (which fails with "Invalid response from Roku API")
-    # MA's play_announcement proxies URLs through its own server, which the Roku CAN reach
+    # Use MA's native API to play media on the Roku queue
+    # MA handles the transcoding and streaming to the Roku Media Assistant channel
     # Extract MA server IP from entity_picture
     ma_state = await ha_client.get_state(ha_url, ha_token, ma_entity)
     ma_server_ip = "192.168.1.212"  # default
+    queue_id = "ROKU_2N0062385487"  # default from active_queue
     if ma_state:
         entity_picture = ma_state.get("attributes", {}).get("entity_picture", "")
         if entity_picture and entity_picture.startswith("http://"):
@@ -242,6 +243,9 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
             if match:
                 ma_server_ip = match.group(1)
                 log.info(f"[roku.music] Extracted MA server IP: {ma_server_ip}")
+        active_queue = ma_state.get("attributes", {}).get("active_queue", "")
+        if active_queue:
+            queue_id = active_queue
     
     # Extract track ID from library URI
     track_id = ma_media_id
@@ -250,7 +254,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     elif ma_media_id.isdigit():
         pass  # already just the ID
     else:
-        # Fallback: use MA play_media service (may fail)
+        # Fallback: use MA play_media service with raw query
         log.info(f"[roku.music] Non-library URI, falling back to MA play_media")
         result = await ha_client.call_service(
             ha_url, ha_token, "music_assistant", "play_media", ma_entity,
@@ -260,41 +264,35 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
             return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
         return ExecutionResult(status="FAILURE", message=f"Failed to play music on {roku_entity}: {result.get('error')}", service="roku_music", detail=result)
     
-    # Construct MA stream URL
-    stream_url = f"http://{ma_server_ip}:8095/api/v1/tracks/{track_id}/stream?fmt=mp3"
-    log.info(f"[roku.music] Using MA stream URL: {stream_url}")
+    # Call MA's native API directly: player_queues/play_media
+    import httpx
+    ma_api_url = f"http://{ma_server_ip}:8095/api"
+    payload = {
+        "message_id": "1",
+        "command": "player_queues/play_media",
+        "args": {
+            "queue_id": queue_id,
+            "media": ma_media_id,  # Use full library:// URI
+            "radio_mode": False
+        }
+    }
+    log.info(f"[roku.music] Calling MA API: {ma_api_url} queue_id={queue_id} media={ma_media_id}")
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=30) as client:
+            resp = await client.post(ma_api_url, json=payload)
+            log.info(f"[roku.music] MA API response: {resp.status_code} {resp.text[:200]}")
+            if resp.status_code == 200:
+                return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
+    except Exception as e:
+        log.warning(f"[roku.music] MA API call failed: {e}")
     
-    # Use play_announcement to proxy the stream through MA's server (Roku can reach this)
+    # Fallback: try HA service
     result = await ha_client.call_service(
-        ha_url, ha_token, "music_assistant", "play_announcement", ma_entity,
-        {"url": stream_url, "use_pre_announce": False},
+        ha_url, ha_token, "music_assistant", "play_media", ma_entity,
+        {"media_id": ma_media_id, "media_type": ma_media_type, "enqueue": "play"},
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
-    
-    # Fallback: try ECP with stream URL directly
-    if roku_ip:
-        import httpx
-        ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
-        params = {
-            "t": "a",
-            "u": stream_url,
-            "songName": song_name,
-            "songFormat": "mp3",
-            "autoplay": "true"
-        }
-        if artist_name:
-            params["artistName"] = artist_name
-        try:
-            log.info(f"[roku.music] ECP launch with stream URL: {ecp_url}")
-            async with httpx.AsyncClient(verify=False, timeout=15) as client:
-                resp = await client.post(ecp_url, params=params)
-                log.info(f"[roku.music] ECP response: {resp.status_code}")
-                if resp.status_code in (200, 204):
-                    return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
-        except Exception as e:
-            log.warning(f"[roku.music] ECP launch with stream URL failed: {e}")
-    
     return ExecutionResult(status="FAILURE", message=f"Failed to play music on {roku_entity}: {result.get('error')}", service="roku_music", detail=result)
 
 
