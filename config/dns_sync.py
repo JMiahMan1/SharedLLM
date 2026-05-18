@@ -122,7 +122,7 @@ def _print_health_summary():
             print(f"[dns-sync] DNS {hostname}: alive={alive_ips}, dead={dead_ips}", flush=True)
 
 def get_alive_ips(hostname):
-    """Get list of alive IPs for a hostname. Returns all if none alive."""
+    """Get list of alive IPs for a hostname. Only returns alive IPs."""
     with dns_lock:
         all_ips = list(dns_records.get(hostname, []))
     
@@ -132,13 +132,8 @@ def get_alive_ips(hostname):
     with health_lock:
         alive = [ip for ip in all_ips if health_status.get((hostname, ip), False)]
     
-    # If all dead, return all (fallback to configured - let client handle timeout)
-    if not alive:
-        return all_ips
-    
-    # Put alive IPs first, dead IPs after (for clients that try in order)
-    dead = [ip for ip in all_ips if ip not in alive]
-    return alive + dead
+    # Only return alive IPs. If all dead, return all as last resort.
+    return alive if alive else all_ips
 
 def update_dns_records(mappings):
     """Update in-memory DNS records from mappings."""
