@@ -166,6 +166,33 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                 if result.get("ok"):
                     return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
         
+        # Search returned nothing — try get_library random for generic queries
+        log.info(f"[media/play] MASS search empty for '{req.query}', trying library random")
+        library_result = await ha_client.call_service(
+            ctx.ha_url, ctx.ha_token, "music_assistant", "get_library", entity_id="",
+            service_data={
+                "config_entry_id": mass_entry,
+                "media_type": "track",
+                "limit": 1,
+                "order_by": "random",
+            },
+            return_response=True,
+        )
+        
+        if library_result.get("ok") and library_result.get("service_response"):
+            raw = library_result["service_response"]
+            resp = raw.get("service_response", raw)
+            items = resp.get("items", [])
+            if items:
+                uri = items[0].get("uri")
+                log.info(f"[media/play] Library random: {uri}")
+                result = await ha_client.call_service(
+                    ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
+                    {"media_id": uri, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
+                )
+                if result.get("ok"):
+                    return ExecutionResult(status="SUCCESS", message=f"Playing random track on {entity_id}.", service="media_play")
+        
         result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
             {"media_id": req.query, "media_type": "track", "enqueue": "play"},
