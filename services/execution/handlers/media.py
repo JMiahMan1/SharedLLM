@@ -222,9 +222,13 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
     if is_roku:
         log.info("[media.video] Detected Roku device, using Roku ECP handler with progressive download")
+        # Wake up TV in parallel with download
+        wake_task = asyncio.create_task(_wake_roku_device(ctx.ha_url, ctx.ha_token, entity_id))
         media_id, title = await video_handler.download_video_progressive(video_url)
         if not media_id:
             return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
+        # Wait for wake-up to complete
+        await wake_task
         from config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
@@ -232,6 +236,20 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         return await roku_handler.roku_play_video(
             ctx.ha_url, ctx.ha_token, entity_id, stream_url, title or query,
         )
+
+
+async def _wake_roku_device(ha_url, ha_token, entity_id):
+    """Wake up Roku device from idle/off state."""
+    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+    if state:
+        state_value = state.get("state", "")
+        if state_value in ("off", "idle", "unavailable", "unknown"):
+            log.info(f"[media.video] Device is '{state_value}', waking up...")
+            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id)
+            await asyncio.sleep(2)
+            remote_entity = entity_id.replace("media_player.", "remote.")
+            await ha_client.call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
+            await asyncio.sleep(2)
 
     # Cast/Android/WebOS/Samsung: stop active session, ensure TV is on, then play
     # Stop any active session first (e.g., Music Assistant) to prevent conflicts
