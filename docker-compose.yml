@@ -12,7 +12,7 @@ services:
     restart: unless-stopped
     networks:
       sharedllm:
-        ipv4_address: 172.26.0.2
+        ipv4_address: 172.26.0.10
     cap_add:
       - NET_ADMIN
     environment:
@@ -152,7 +152,7 @@ services:
     env_file:
       - .env
     dns:
-      - "172.26.0.2"
+      - "172.26.0.10"
       - "127.0.0.11"
     depends_on:
       - dns-sync
