@@ -22,3 +22,20 @@ services/workspace_runtime/config/
 /data/*
 !/data/phrasebook.json
 !services/gateway/data/
+
+# AI Agent Configs
+AGENTS.md
+.claude/
+.claude.json
+.cursor/
+.cursorrules
+.windsurf/
+.windsurfrules
+.cline/
+.clinerules
+.roo/
+.rooignore
+.aider*
+.bmad/
+.kiro/
+.opencode/
