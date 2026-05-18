@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Callable, Awaitable
+from typing import Dict, List, Optional, Callable, Awaitable, Any
 
 from gateway.config import INTERNAL_SECRET
 from gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
