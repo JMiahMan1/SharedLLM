@@ -1,4 +1,29 @@
+networks:
+  sharedllm:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
+
 services:
+  dns-sync:
+    build:
+      context: .
+      dockerfile: services/dns_sync/Dockerfile
+    container_name: sharedllm_dns_sync
+    restart: unless-stopped
+    networks:
+      sharedllm:
+        ipv4_address: 172.26.0.2
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - IDENTITY_SVC_URL=http://identity:8001
+      - DNS_POLL_INTERVAL=30
+    depends_on:
+      - identity
+
   caddy:
     image: caddy:2-alpine
     container_name: sharedllm_caddy
@@ -14,6 +39,8 @@ services:
       - ui
       - gateway
       - identity
+    networks:
+      - sharedllm
 
   identity:
     build:
@@ -31,6 +58,8 @@ services:
     volumes:
       - identity_db:/data
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - sharedllm
 
   execution:
     build:
@@ -96,6 +125,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 120s
+    networks:
+      - sharedllm
 
   capabilities-sync:
     build:
@@ -110,23 +141,8 @@ services:
       rag:
         condition: service_healthy
     command: python3 scripts/index_capabilities.py
-
-  dns-sync:
-    build:
-      context: .
-      dockerfile: services/dns_sync/Dockerfile
-    container_name: sharedllm_dns_sync
-    restart: unless-stopped
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-    environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - IDENTITY_SVC_URL=http://localhost:8001
-      - DNS_POLL_INTERVAL=30
-      - UPSTREAM_DNS=192.168.1.1
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - sharedllm
 
   gateway:
     build:
@@ -138,7 +154,7 @@ services:
     env_file:
       - .env
     dns:
-      - "192.168.2.205"
+      - "172.26.0.2"
       - "127.0.0.11"
     depends_on:
       - dns-sync
@@ -162,6 +178,8 @@ services:
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - sharedllm
 
   logging:
     build:
@@ -187,6 +205,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
+    networks:
+      - sharedllm
 
   automation:
     build:
@@ -218,6 +238,8 @@ services:
     depends_on:
       - redis
       - execution
+    networks:
+      - sharedllm
 
   storage:
     build:
@@ -240,6 +262,8 @@ services:
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - sharedllm
 
   workspace_runtime:
     build:
@@ -277,6 +301,8 @@ services:
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - sharedllm
 
   ui:
     build: ./services/ui
@@ -286,6 +312,8 @@ services:
       - TZ=America/Phoenix
     depends_on:
       - gateway
+    networks:
+      - sharedllm
 
   redis:
     image: redis:7-alpine
@@ -294,6 +322,8 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    networks:
+      - sharedllm
 
   control_plane:
     build:
@@ -326,6 +356,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - sharedllm
 
 volumes:
   identity_db:
