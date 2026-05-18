@@ -119,7 +119,7 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
         return None, None
 
 
-PROGRESSIVE_THRESHOLD = 10 * 1024 * 1024  # 10 MB
+PROGRESSIVE_THRESHOLD = 5 * 1024 * 1024  # 5 MB
 
 
 async def download_video_progressive(video_url: str, threshold: int = PROGRESSIVE_THRESHOLD) -> tuple[str | None, str | None]:
@@ -298,7 +298,9 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, full_entity_id)
     if is_roku:
         log.info(f"[video/play] Detected Roku device, using Roku video handler")
-        # Use progressive download — returns as soon as 10MB buffered
+        # Wake up TV in parallel with download
+        wake_task = asyncio.create_task(_wake_roku_device(ctx.ha_url, ctx.ha_token, full_entity_id))
+        # Use progressive download — returns as soon as 5MB buffered
         media_id, title = await download_video_progressive(video_url)
         if not media_id:
             return ExecutionResult(
@@ -306,6 +308,8 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
                 message=f"Could not download video from {video_url}.",
                 service="video_play",
             )
+        # Wait for wake-up to complete
+        await wake_task
         from config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             return ExecutionResult(
@@ -317,6 +321,20 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
         return await roku_handler.roku_play_video(
             ctx.ha_url, ctx.ha_token, full_entity_id, stream_url, title or req.query,
         )
+
+
+async def _wake_roku_device(ha_url, ha_token, entity_id):
+    """Wake up Roku device from idle/off state."""
+    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+    if state:
+        state_value = state.get("state", "")
+        if state_value in ("off", "idle", "unavailable", "unknown"):
+            log.info(f"[video/play] Device is '{state_value}', waking up...")
+            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id)
+            await asyncio.sleep(2)
+            remote_entity = entity_id.replace("media_player.", "remote.")
+            await ha_client.call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
+            await asyncio.sleep(2)
 
     # Step 3: Download the video to disk (non-Roku)
     media_id, title = await download_video(video_url)
