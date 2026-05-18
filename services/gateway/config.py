@@ -31,6 +31,20 @@ OLLAMA_TIMEOUT = 600.0
 # --- Constants (not user-configurable) ---
 SYSTEM_IDENTITY = "raven_system"
 
+# --- Raven agent limits (overridable via Identity settings) ---
+RAVEN_MAX_TOTAL_SECONDS = int(os.getenv("RAVEN_MAX_TOTAL_SECONDS", "1800"))
+RAVEN_ITERATION_TIMEOUT = int(os.getenv("RAVEN_ITERATION_TIMEOUT", "600"))
+RAVEN_HEARTBEAT_INTERVAL = int(os.getenv("RAVEN_HEARTBEAT_INTERVAL", "30"))
+RAVEN_HUNG_THRESHOLD = int(os.getenv("RAVEN_HUNG_THRESHOLD", "600"))
+RAVEN_CHECK_INTERVAL = int(os.getenv("RAVEN_CHECK_INTERVAL", "300"))
+RAVEN_ERROR_THRESHOLD = int(os.getenv("RAVEN_ERROR_THRESHOLD", "5"))
+
+# --- Misc ---
+FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+PHRASEBOOK_PATH = os.getenv("PHRASEBOOK_PATH", "")
+TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
+
 # --- CONFIG dict for backward compat (resolved at runtime from Identity) ---
 CONFIG = {
     "assistant_model": "",
