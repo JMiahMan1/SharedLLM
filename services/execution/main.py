@@ -934,6 +934,7 @@ async def execute_announce(req: AnnouncementRequest):
     ma_player_entity = None
     if initial_state:
         attrs = initial_state.get("attributes", {})
+        log.info(f"[announce] Checking for MA-wrapped Roku: app_id={attrs.get('app_id')}, mass_player_type={attrs.get('mass_player_type')}, active_queue={attrs.get('active_queue')}")
         if attrs.get("app_id") == "music_assistant" and attrs.get("mass_player_type") == "player":
             active_queue = (attrs.get("active_queue") or "").lower()
             if "roku" in active_queue:
@@ -948,12 +949,15 @@ async def execute_announce(req: AnnouncementRequest):
                         target_player = eid
                         initial_state = s
                         break
+                else:
+                    log.warning(f"[announce] No Roku entity found in all_states ({len(all_states)} entities)")
     
     # Pass MA player entity in attributes for announce handler
     if ma_player_entity and initial_state:
         if "attributes" not in initial_state:
             initial_state["attributes"] = {}
         initial_state["attributes"]["_ma_player_entity"] = ma_player_entity
+        log.info(f"[announce] Stored _ma_player_entity={ma_player_entity} in initial_state")
     
     # Get loaded components for device type detection
     config = await ha_client.get_config(ha_url, ha_token) or {}
@@ -1043,10 +1047,10 @@ async def execute_announce(req: AnnouncementRequest):
             
             # Get entity attributes for TV type detection
             attrs = initial_state.get("attributes", {}) if initial_state else {}
-            initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
+            initial_state_str = initial_state.get("state", "unknown") if initial_state else ""
             
             # Dispatch to TV-specific handler
-            log.info(f"[announce] Dispatching to TV handler (type detection in progress)")
+            log.info(f"[announce] Dispatching: target={target_player}, state={initial_state_str}, attrs_keys={list(attrs.keys())}, _ma_player={attrs.get('_ma_player_entity')}")
             from announce_handlers import dispatch_announce
             result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume, initial_state_str, attrs, loaded_components)
             log.info(f"[announce] Dispatch result: {result}")
