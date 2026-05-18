@@ -160,6 +160,29 @@ def _make_openai_chunk(content: str, model: str, finish_reason: str = None):
         "choices": [{"delta": {"content": content} if content else {}, "index": 0, "finish_reason": finish_reason}]
     }
 
+def _make_ollama_error(message: str, model: str) -> dict:
+    """Create an Ollama-compatible error response."""
+    return {
+        "model": model,
+        "created_at": datetime.now().isoformat() + "Z",
+        "message": {"role": "assistant", "content": message},
+        "done": True,
+        "status": "ERROR",
+        "error": message
+    }
+
+def _make_openai_error(message: str, model: str) -> dict:
+    """Create an OpenAI-compatible error response."""
+    import time
+    return {
+        "id": f"chatcmpl-{int(time.time())}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [],
+        "error": {"message": message, "type": "model_config_error", "code": 503}
+    }
+
 # --- Imports from internal modules ---
 from gateway.schemas import StorageListRequest, StorageIndexRequest
 from gateway.intent_engine import engine
@@ -1798,8 +1821,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 log.error(f"[ChatHandler] Coding model configuration error: {e}")
                 err_msg = str(e) + " Please configure models in the UI settings."
                 if is_openai:
-                    return _make_openai_response(err_msg, "unknown", "model_config_error")
-                return _make_ollama_response(err_msg, "unknown", "model_config_error")
+                    return JSONResponse(_make_openai_error(err_msg, "unknown"), status_code=503)
+                return JSONResponse(_make_ollama_error(err_msg, "unknown"), status_code=503)
 
     try:
         creds_data = await resolve_identity(body)
