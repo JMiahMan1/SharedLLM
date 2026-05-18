@@ -177,6 +177,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     artist_name = ""
     ma_media_id = query
     ma_media_type = "track"
+    full_library_uri = None
 
     if search_result.get("ok") and search_result.get("service_response"):
         raw = search_result["service_response"]
@@ -188,8 +189,9 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                 song_name = item.get("name", item.get("title", query))
                 artist_name = item.get("artist", {}).get("name", "") if isinstance(item.get("artist"), dict) else ""
                 uri = item.get("uri", query)
-                # Strip library:// prefix to match main branch behavior
+                # Keep full library:// URI for MA services
                 if uri.startswith("library://"):
+                    full_library_uri = uri
                     parts = uri.replace("library://", "").split("/")
                     if len(parts) >= 2:
                         ma_media_type = parts[0]
@@ -208,7 +210,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                         params["albumArt"] = image.get("path", image.get("url", ""))
                     elif isinstance(image, str):
                         params["albumArt"] = image
-                log.info(f"[roku.music] MA search match: {song_name} by {artist_name} (id={ma_media_id}, type={ma_media_type})")
+                log.info(f"[roku.music] MA search match: {song_name} by {artist_name} (uri={full_library_uri or ma_media_id}, type={ma_media_type})")
                 break
     else:
         params["songName"] = song_name
@@ -231,18 +233,21 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     
     # MA 2.7+ natively supports Roku Media Assistant as a player provider.
     # MA handles transcoding and streaming to the Roku automatically.
-    # Use media_player.play_media with the library:// URI (MA translates it internally)
+    # Use music_assistant.play_media with the full library:// URI (MA translates it internally)
+    play_media_id = full_library_uri if full_library_uri else ma_media_id
+    
+    # Primary: use music_assistant.play_media service with library:// URI
     result = await ha_client.call_service(
-        ha_url, ha_token, "media_player", "play_media", ma_entity,
-        {"media_content_id": ma_media_id, "media_content_type": "music"},
+        ha_url, ha_token, "music_assistant", "play_media", ma_entity,
+        {"media_id": play_media_id, "media_type": ma_media_type, "enqueue": "replace"},
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
     
-    # Fallback: try music_assistant.play_media service
+    # Fallback: try core media_player.play_media
     result = await ha_client.call_service(
-        ha_url, ha_token, "music_assistant", "play_media", ma_entity,
-        {"media_id": ma_media_id, "media_type": ma_media_type, "enqueue": "replace"},
+        ha_url, ha_token, "media_player", "play_media", ma_entity,
+        {"media_content_id": play_media_id, "media_content_type": "music"},
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
