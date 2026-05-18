@@ -4,24 +4,34 @@ import logging
 import json
 import asyncio
 import httpx
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
-from typing import Optional, Any, Dict
-from fastapi.responses import JSONResponse, StreamingResponse
 import re
 import traceback
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
+from typing import Optional, Any, Dict
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from gateway.schemas import ResolvedCredentials, StorageListRequest, StorageIndexRequest
+from gateway.agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
+from gateway.config import INTERNAL_SECRET, CONFIG
+from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+from gateway.orchestrator import get_all_settings, _get, SINGLE_TURN_TOOL_GUIDE
+from gateway.config_validator import validate_config
+from gateway.intent_engine import engine
+from gateway.history import update_history, ping_redis
+from gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+from gateway.messaging import InferenceJobQueue, JobStatus
+from gateway.background_worker import worker as raven_worker
 
 # --- Setup Logging IMMEDIATELY ---
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
-from gateway.schemas import ResolvedCredentials
-from gateway.agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
-from gateway.config import INTERNAL_SECRET, CONFIG
-from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-from gateway.orchestrator import get_all_settings, _get
 
 # --- Compatibility layer: service URLs resolved from Identity at import time ---
 # These are lazy-resolved on first use. All code paths that reference these
@@ -70,9 +80,6 @@ QWEN_GROUNDING_INSTRUCTION = """
 
 def _make_ollama_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
-    from fastapi.responses import JSONResponse, StreamingResponse
-    import json
-    
     if not stream:
         res = {
             "model": model,
@@ -81,12 +88,13 @@ def _make_ollama_response(message: str, model: str, intent: str = None, debug_co
             "done": True,
             "status": "SUCCESS"
         }
-        if intent: res["intent"] = intent
-        if debug_context: res["debug_context"] = debug_context
+        if intent:
+            res["intent"] = intent
+        if debug_context:
+            res["debug_context"] = debug_context
         return JSONResponse(res)
 
     async def gen():
-        # Yield the message content chunk
         chunk = {
             "model": model,
             "created_at": datetime.now().isoformat() + "Z",
@@ -94,7 +102,6 @@ def _make_ollama_response(message: str, model: str, intent: str = None, debug_co
             "done": False
         }
         yield json.dumps(chunk) + "\n"
-        # Yield the done chunk
         yield json.dumps({"model": model, "done": True}) + "\n"
     
     return StreamingResponse(gen(), media_type="application/x-ndjson")
@@ -110,25 +117,22 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False):
 
 def _make_openai_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
-    from fastapi.responses import JSONResponse, StreamingResponse
-    import json
-    import time
-    
     if not stream:
         res = {
-            "id": f"chatcmpl-{int(time.time())}", 
-            "object": "chat.completion", 
-            "created": int(time.time()), 
+            "id": f"chatcmpl-{int(time.time())}",
+            "object": "chat.completion",
+            "created": int(time.time()),
             "model": model,
             "choices": [{"message": {"role": "assistant", "content": message}, "finish_reason": "stop", "index": 0}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         }
-        if intent: res["intent"] = intent
-        if debug_context: res["debug_context"] = debug_context
+        if intent:
+            res["intent"] = intent
+        if debug_context:
+            res["debug_context"] = debug_context
         return JSONResponse(res)
 
     async def gen():
-        # Yield the delta chunk
         chunk = {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion.chunk",
@@ -137,7 +141,6 @@ def _make_openai_response(message: str, model: str, intent: str = None, debug_co
             "choices": [{"delta": {"content": message}, "index": 0, "finish_reason": None}]
         }
         yield f"data: {json.dumps(chunk)}\n\n"
-        # Yield the stop chunk
         stop_chunk = {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion.chunk",
@@ -184,12 +187,6 @@ def _make_openai_error(message: str, model: str) -> dict:
     }
 
 # --- Imports from internal modules ---
-from gateway.schemas import StorageListRequest, StorageIndexRequest
-from gateway.intent_engine import engine
-from gateway.history import update_history, ping_redis
-from gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
-from gateway.messaging import InferenceJobQueue, JobStatus
-from gateway.orchestrator import get_all_settings, _get
 
 # REDIS URL resolved at runtime from Identity
 async def _get_redis_url() -> str:
@@ -209,10 +206,10 @@ async def get_job_queue() -> InferenceJobQueue:
 # REDIS moved below imports
 
 # --- Ouroboros Worker ---
-from gateway.background_worker import worker as raven_worker
 log.info("Successfully imported Raven background worker.")
 
 LOGGING_SVC_URL = ""  # Resolved at runtime from Identity
+_DEFAULT_FAST_PATH_THRESHOLD = 0.85
 
 # Global Inference Lock (Strategy 8: Singleton Queue)
 async def fetch_global_setting(key: str, default: str = "") -> str:
@@ -332,7 +329,9 @@ async def get_assistant_model():
     else:
         model = settings.get("ollama_assistant_model") or settings.get("assistant_model")
     if not model:
-        raise RuntimeError("No assistant model configured. Please set ollama_assistant_model in the UI settings.")
+        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
+        log.error(f"[get_assistant_model] No assistant model found. active_provider={active}. Available models: {available_models}")
+        raise RuntimeError(f"No assistant model configured. Set ollama_assistant_model in Identity settings. Available: {available_models}")
     log.info(f"[get_assistant_model] active_provider={active} resolved_model={model}")
     return model
 
@@ -345,7 +344,9 @@ async def get_coding_model():
     else:
         model = settings.get("ollama_coding_model") or settings.get("coding_model")
     if not model:
-        raise RuntimeError("No coding model configured. Please set ollama_coding_model in the UI settings.")
+        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
+        log.error(f"[get_coding_model] No coding model found. active_provider={active}. Available models: {available_models}")
+        raise RuntimeError(f"No coding model configured. Set ollama_coding_model in Identity settings. Available: {available_models}")
     log.info(f"[get_coding_model] active_provider={active} resolved_model={model}")
     return model
 
@@ -359,7 +360,8 @@ async def get_resident_model() -> Optional[str]:
                 models = resp.json().get("models", [])
                 if models:
                     return models[0]["name"]
-    except: pass
+    except Exception:
+        pass
     return None
 
 async def get_librarian_model():
@@ -370,7 +372,9 @@ async def get_librarian_model():
     else:
         model = settings.get("ollama_librarian_model") or settings.get("librarian_model")
     if not model:
-        raise RuntimeError("No librarian model configured. Please set ollama_librarian_model in the UI settings.")
+        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
+        log.error(f"[get_librarian_model] No librarian model found. active_provider={active}. Available models: {available_models}")
+        raise RuntimeError(f"No librarian model configured. Set ollama_librarian_model in Identity settings. Available: {available_models}")
     return model
 
 async def fetch_autonomous_protocols() -> str:
@@ -463,8 +467,12 @@ def get_http_client() -> httpx.AsyncClient:
 async def borrow_http_client():
     yield get_http_client()
 
+# Global config validation state
+_config_validation_result = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _config_validation_result
     log.info("Gateway starting up...")
     engine.load()
     # Initialize the client explicitly on startup
@@ -472,6 +480,20 @@ async def lifespan(app: FastAPI):
     jq = await get_job_queue()
     await jq.connect()
     log.info("Gateway initialized with FIFO Inference Queue")
+    
+    # Validate critical configuration from Identity
+    try:
+        settings = await get_all_settings()
+        _config_validation_result = validate_config(settings)
+        log.info(f"[ConfigValidation] {_config_validation_result.summary()}")
+        if not _config_validation_result.is_functional:
+            log.critical(f"[ConfigValidation] Gateway has critical config failures: {_config_validation_result.critical_failures}")
+        if _config_validation_result.is_degraded:
+            log.warning(f"[ConfigValidation] Gateway is degraded: {_config_validation_result.required_failures}")
+    except Exception as e:
+        log.critical(f"[ConfigValidation] Failed to validate config: {e}")
+        _config_validation_result = None
+    
     if raven_worker:
         await raven_worker.start()
     
@@ -488,7 +510,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
 
-from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -575,6 +596,18 @@ async def readiness():
     else:
       results["services"]["redis"] = "ERROR"
       all_ok = False
+
+    # Include config validation status
+    if _config_validation_result:
+        results["config"] = {
+            "functional": _config_validation_result.is_functional,
+            "degraded": _config_validation_result.is_degraded,
+            "critical_failures": _config_validation_result.critical_failures,
+            "required_failures": _config_validation_result.required_failures,
+            "summary": _config_validation_result.summary(),
+        }
+        if _config_validation_result.is_degraded:
+            all_ok = False
 
     if not all_ok:
       results["status"] = "DEGRADED"
@@ -1137,7 +1170,7 @@ async def generate_workspace_readme_via_coding_model(
       raise HTTPException(status_code=502, detail="Coding model returned an empty README response")
 
     workspace_id = workspace.get("id")
-    write_data = await workspace_runtime_request(
+    await workspace_runtime_request(
       "POST",
       "/files/write",
       json_payload={
@@ -1181,7 +1214,8 @@ async def orchestrate_code_change(
     workspace = await resolve_chat_workspace(body, user_id)
     if not workspace:
         msg = "I could not resolve an available workspace for this code orchestration request."
-        if is_openai: return _make_openai_response(msg, selected_model, stream=should_stream)
+        if is_openai:
+            return _make_openai_response(msg, selected_model, stream=should_stream)
         return _make_ollama_response(msg, selected_model, stream=should_stream)
 
     workspace_id = workspace.get("id")
@@ -1611,7 +1645,8 @@ async def fetch_ha_entities(creds: dict) -> list:
                     try:
                         for e in entities:
                             eid = e.get("entity_id")
-                            if not eid: continue
+                            if not eid:
+                                continue
                             await get_http_client().post(
                                 f"{IDENTITY_SVC}/api/users/devices",
                                 json={"username": user_id, "device_id": eid},
@@ -1716,7 +1751,8 @@ Example: ["Turn on the office light", "Play some jazz music"]
             import json
             try:
                 return json.loads(text[text.find("["):text.rfind("]")+1])
-            except: pass
+            except (json.JSONDecodeError, ValueError):
+                pass
         return [query]
     except Exception as e:
         log.warning(f"Decomposition failed: {e}")
@@ -1766,14 +1802,14 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks: BackgroundTasks = None):
     log.info("Chat handler entered")
-    exec_data = None
     client = get_http_client()
     # 1. Resolve Identity
     try:
         body = await request.json()
-    except:
+    except Exception:
         body = {}
-    if not isinstance(body, dict): body = {}
+    if not isinstance(body, dict):
+        body = {}
     
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -1831,13 +1867,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     except HTTPException as he:
         if he.status_code == 401:
             msg = "Authentication failed. Please log in or provide a valid API key."
-            if is_openai: return _make_openai_response(msg, selected_model, "unauthorized")
+            if is_openai:
+                return _make_openai_response(msg, selected_model, "unauthorized")
             return _make_ollama_response(msg, selected_model, "unauthorized")
         raise he
     except Exception as e:
         log.error(f"Identity resolution crash: {e}")
         msg = "The Identity service is currently unavailable. Please try again later."
-        if is_openai: return _make_openai_response(msg, selected_model, "degraded")
+        if is_openai:
+            return _make_openai_response(msg, selected_model, "degraded")
         return _make_ollama_response(msg, selected_model, "degraded")
     log.info(f"Chat request from {user_id} query='{query}'")
 
@@ -1877,7 +1915,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     threshold_str = await fetch_global_setting("fast_path_threshold", str(_DEFAULT_FAST_PATH_THRESHOLD))
     try:
         engine.FAST_PATH_CONFIDENCE = float(threshold_str)
-    except:
+    except (ValueError, TypeError):
         engine.FAST_PATH_CONFIDENCE = _DEFAULT_FAST_PATH_THRESHOLD
 
     is_fast_path = engine.is_fast_path(intent, confidence)
@@ -1963,7 +2001,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             
             await update_history(user_id, "user", query)
             await update_history(user_id, "assistant", ans)
-            if is_openai: return _make_openai_response(ans, selected_model, intent)
+            if is_openai:
+                return _make_openai_response(ans, selected_model, intent)
             return _make_ollama_response(ans, selected_model, intent)
 
     # 4. Slow Path Execution (FIFO Queue Redirect)
@@ -1999,7 +2038,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 last_keepalive = asyncio.get_event_loop().time()
                 while True:
                     job = await job_queue.get_job_status(job_id)
-                    if not job: break
+                    if not job:
+                        break
                     
                     # Pop and yield chunks
                     chunks = await job_queue.get_chunks(job_id)
@@ -2019,8 +2059,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                     
                     if job["status"] == JobStatus.FAILED:
                         err = job.get("error", "Unknown error")
-                        if is_openai: yield f"data: {json.dumps(_make_openai_chunk(f'[ERROR]: {err}', selected_model, 'stop'))}\n\n"
-                        else: yield json.dumps(_make_ollama_chunk(f"[ERROR]: {err}", selected_model, True)) + "\n"
+                        if is_openai:
+                            yield f"data: {json.dumps(_make_openai_chunk(f'[ERROR]: {err}', selected_model, 'stop'))}\n\n"
+                        else:
+                            yield json.dumps(_make_ollama_chunk(f"[ERROR]: {err}", selected_model, True)) + "\n"
                         break
 
                     if is_openai:
@@ -2048,10 +2090,12 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             # Blocking path
             while True:
                 job = await job_queue.get_job_status(job_id)
-                if not job: break
+                if not job:
+                    break
                 if job["status"] == JobStatus.COMPLETED:
                     ans = job["result"]
-                    if is_openai: return _make_openai_response(ans, selected_model)
+                    if is_openai:
+                        return _make_openai_response(ans, selected_model)
                     return _make_ollama_response(ans, selected_model)
                 if job["status"] == JobStatus.FAILED:
                     raise HTTPException(status_code=500, detail=job.get("error", "Job failed"))
@@ -2523,7 +2567,8 @@ async def global_search(q: str, request: Request):
             )
             if resp.status_code == 200:
                 user_id = resp.json().get("user", "admin")
-        except: pass
+        except Exception:
+            pass
 
     try:
         resp = await get_http_client().post(
@@ -2551,9 +2596,12 @@ async def get_workspaces_proxy(request: Request):
     creds = await _resolve_identity_from_request(request)
     params = {}
     if creds:
-        if creds.get("rag_user"): params["rag_user"] = creds["rag_user"]
-        if creds.get("voice_id"): params["voice_id"] = creds["voice_id"]
-        if creds.get("device_id"): params["device_id"] = creds["device_id"]
+        if creds.get("rag_user"):
+            params["rag_user"] = creds["rag_user"]
+        if creds.get("voice_id"):
+            params["voice_id"] = creds["voice_id"]
+        if creds.get("device_id"):
+            params["device_id"] = creds["device_id"]
         
     try:
         async with borrow_http_client() as client:
@@ -2688,7 +2736,7 @@ async def get_storage_stats(request: Request):
         creds_data = await _resolve_identity_from_request(request)
         jarvis_user = creds_data.get("user", "default")
         nc_user = creds_data.get("nextcloud_user")
-    except:
+    except Exception:
         jarvis_user = "default"
         nc_user = None
 
@@ -2742,7 +2790,7 @@ async def get_collection_docs(collection_name: str, request: Request, limit: int
     try:
         creds_data = await _resolve_identity_from_request(request)
         user_id = request.query_params.get("user_id") or creds_data.get("nextcloud_user") or creds_data.get("user", "default")
-    except:
+    except Exception:
         user_id = "default"
 
     resp = await get_http_client().get(
@@ -2764,7 +2812,7 @@ async def purge_storage_collection(collection_name: str, request: Request):
     try:
         creds_data = await _resolve_identity_from_request(request)
         user_id = creds_data.get("user", "default")
-    except:
+    except Exception:
         user_id = "default"
 
     body = await request.json()
@@ -2818,7 +2866,8 @@ async def proxy_admin_volumes(request: Request):
 @app.get("/api/admin/raven/config")
 async def get_raven_config(request: Request):
     creds = await _resolve_identity_from_request(request)
-    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     
     settings = await get_llm_settings()
     return {
@@ -2833,7 +2882,8 @@ async def get_raven_config(request: Request):
 @app.patch("/api/admin/raven/config")
 async def update_raven_config(request: Request):
     creds = await _resolve_identity_from_request(request)
-    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     body = await request.json()
     
     async with borrow_http_client() as client:
@@ -2848,7 +2898,8 @@ async def update_raven_config(request: Request):
 @app.get("/api/admin/raven/tts/voices")
 async def get_raven_tts_voices(request: Request):
     creds = await _resolve_identity_from_request(request)
-    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -2861,7 +2912,8 @@ async def get_raven_tts_voices(request: Request):
 @app.get("/api/admin/raven/queue")
 async def get_raven_queue(request: Request):
     creds = await _resolve_identity_from_request(request)
-    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -2890,7 +2942,8 @@ async def restart_service(service_name: str, request: Request):
 @app.get("/api/admin/services")
 async def list_services(request: Request):
     creds = await _resolve_identity_from_request(request)
-    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -2939,7 +2992,8 @@ async def list_models(request: Request):
 @app.post("/api/admin/raven/queue/{id}/execute")
 async def execute_raven_mission(id: int, request: Request):
     creds = await _resolve_identity_from_request(request)
-    if not creds.get("is_admin"): raise HTTPException(status_code=403, detail="Admin only")
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     
     async with borrow_http_client() as client:
         # Get mission
@@ -2975,8 +3029,6 @@ async def execute_raven_mission(id: int, request: Request):
     return {"status": "SUCCESS", "message": "Mission dispatched."}
 
 # ---- User Missions Endpoints ----
-from pydantic import BaseModel
-from gateway.orchestrator import SINGLE_TURN_TOOL_GUIDE
 
 class UserMissionRequest(BaseModel):
     query: str
@@ -3295,6 +3347,30 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
             pass
 
 # ---- Config Endpoints ----
+
+@app.get("/api/config/status")
+async def get_config_status():
+    """Return detailed configuration validation status."""
+    global _config_validation_result
+    if not _config_validation_result:
+        # Re-validate on demand if not yet run
+        try:
+            settings = await get_all_settings()
+            _config_validation_result = validate_config(settings)
+        except Exception as e:
+            return {"status": "ERROR", "message": f"Failed to validate config: {e}"}
+    
+    return {
+        "status": "OK" if _config_validation_result.is_functional else "CRITICAL",
+        "functional": _config_validation_result.is_functional,
+        "degraded": _config_validation_result.is_degraded,
+        "summary": _config_validation_result.summary(),
+        "critical_failures": _config_validation_result.critical_failures,
+        "required_failures": _config_validation_result.required_failures,
+        "optional_failures": _config_validation_result.optional_failures,
+        "validated_keys": _config_validation_result.ok,
+    }
+
 
 @app.get("/api/config/models")
 async def get_ollama_models():
