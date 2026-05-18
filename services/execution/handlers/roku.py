@@ -255,6 +255,37 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     return ExecutionResult(status="FAILURE", message=f"Failed to play music on {roku_entity}: {result.get('error')}", service="roku_music", detail=result)
 
 
+async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_url: str,
+                          title: str = "Video") -> ExecutionResult:
+    """
+    Play video on Roku using Media Assistant ECP deeplink.
+    Media Assistant supports video playback via t=v and u=[URL] parameters.
+    """
+    log.info(f"[roku.video] Playing '{title}' on {roku_entity}")
+
+    roku_ip = await get_roku_ip(ha_url, ha_token, roku_entity)
+    if not roku_ip:
+        return ExecutionResult(status="FAILURE", message=f"Could not find Roku IP for {roku_entity}.", service="roku_video")
+
+    import httpx
+    params = {"t": "v", "u": video_url, "autoplay": "true", "songName": title}
+
+    ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
+    try:
+        log.info(f"[roku.video] Launching Media Assistant via ECP: {ecp_url}")
+        async with httpx.AsyncClient(verify=False, timeout=30) as client:
+            resp = await client.post(ecp_url, params=params)
+            log.info(f"[roku.video] ECP response: {resp.status_code}")
+            if resp.status_code in (200, 204):
+                return ExecutionResult(status="SUCCESS", message=f"Now playing: {title} on {roku_entity}.", service="roku_video")
+            log.warning(f"[roku.video] ECP launch returned {resp.status_code}")
+    except Exception as e:
+        log.warning(f"[roku.video] ECP launch failed: {e}")
+        device_registry.invalidate_device(roku_entity)
+
+    return ExecutionResult(status="FAILURE", message=f"Failed to play video on {roku_entity}.", service="roku_video")
+
+
 async def roku_press(ha_url: str, ha_token: str, entity_id: str, key: str) -> ExecutionResult:
     """Send a key press to a Roku device."""
     roku_key = ROKU_KEYS.get(key.lower(), key)
