@@ -321,10 +321,23 @@ async def execute_light(req: LightControlRequest):
 async def execute_media_play(req: MediaPlayRequest):
     if not await verify_entity_access(req.user_context, req.entity_id):
         raise HTTPException(status_code=403, detail="Access denied to this device")
+    # Resolve HA credentials via Identity service if not in context
+    ctx = req.user_context
+    if not ctx.ha_url or not ctx.ha_token:
+        creds = await resolve_internal_user("default")
+        if creds:
+            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
+            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
     return await media.handle_media_play(req)
 
 @app.post("/execute/media/transport", response_model=ExecutionResult)
 async def execute_media_transport(req: MediaTransportRequest):
+    ctx = req.user_context
+    if not ctx.ha_url or not ctx.ha_token:
+        creds = await resolve_internal_user("default")
+        if creds:
+            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
+            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
     return await media.handle_media_transport(req)
 
 @app.post("/execute/tv_cast", response_model=ExecutionResult)
