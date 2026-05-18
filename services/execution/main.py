@@ -1046,7 +1046,9 @@ async def execute_announce(req: AnnouncementRequest):
             log.debug(f"[announce] Logbook check skipped: {e}")
     
     # 6. Restore initial state for ALL devices
-    if was_off and result.get("ok"):
+    # Only turn off if device was truly off/unavailable (not idle/warm standby)
+    truly_off = initial_state and initial_state.get("state") in ("off", "unavailable")
+    if truly_off and result.get("ok"):
         log.info("[announce] Restoring device to previous state (turning off)...")
         await ha_client.call_service(ha_url, ha_token, "media_player", "turn_off", target_player, {})
         await asyncio.sleep(1)
