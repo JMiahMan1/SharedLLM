@@ -203,15 +203,12 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
     })
 
 async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Roku: wake display via ECP Home key, then play media."""
+    """Roku: wake display, launch Media Assistant, delegate audio to MA sibling."""
     from ha_client import call_service, get_state
     
-    # Roku warm standby keeps network active but panel is off.
-    # HA's turn_on returns 200 but doesn't wake the display.
-    # Must send Home key via ECP directly.
+    # 1. Wake display via ECP Home key (Roku warm standby keeps network active but panel off)
     log.info(f"[announce.roku] Waking display for {entity_id}...")
     
-    # Try ECP Home key first (most reliable for warm standby)
     import device_discovery
     roku_result = await device_discovery.discover_device(entity_id, ha_url, ha_token, device_type="roku")
     roku_ip = roku_result.get("ip") if roku_result else None
@@ -226,38 +223,69 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
         except Exception as e:
             log.warning(f"[announce.roku] ECP Home key failed: {e}")
     
-    # Also call HA turn_on (handles non-standby cases)
     await call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
-    await asyncio.sleep(8)
+    await asyncio.sleep(5)
     
-    # Verify TV is actually awake
-    tv_state = await get_state(ha_url, ha_token, entity_id)
-    current_state = tv_state.get("state") if tv_state else "unknown"
-    log.info(f"[announce.roku] TV state after wake: {current_state}")
+    # 2. Launch Media Assistant app via ECP
+    if roku_ip:
+        import httpx
+        try:
+            ecp_launch_url = f"http://{roku_ip}:8060/launch/782875"
+            log.info(f"[announce.roku] Launching Media Assistant via ECP: {ecp_launch_url}")
+            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+                resp = await client.post(ecp_launch_url, params={"t": "a", "autoplay": "true"})
+                log.info(f"[announce.roku] ECP launch response: {resp.status_code}")
+                if resp.status_code in (200, 204):
+                    await asyncio.sleep(3)
+        except Exception as e:
+            log.warning(f"[announce.roku] ECP launch failed: {e}")
     
-    if current_state in ("off", "unavailable"):
-        log.warning(f"[announce.roku] TV still off, trying remote Home key")
-        remote_entity = entity_id.replace("media_player.", "remote.")
-        await call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
-        await asyncio.sleep(8)
+    # 3. Find MA sibling and delegate audio
+    log.info(f"[announce.roku] Finding MA sibling for {entity_id}...")
+    all_states = await get_state(ha_url, ha_token, entity_id)
+    # Get all states to find sibling
+    from ha_client import get_states
+    all_entities = await get_states(ha_url, ha_token) or []
     
-    log.info(f"[announce.roku] Trying play_media on {entity_id}")
-    result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "audio/wav"
-    })
+    roku_friendly = ""
+    for s in all_entities:
+        if s.get("entity_id") == entity_id:
+            roku_friendly = s.get("attributes", {}).get("friendly_name", "").lower()
+            break
     
-    if result.get("ok"):
-        return result
+    ma_entity = None
+    for s in all_entities:
+        eid = s.get("entity_id", "")
+        if not eid.startswith("media_player.") or eid == entity_id:
+            continue
+        attrs = s.get("attributes", {})
+        friendly = attrs.get("friendly_name", "").lower()
+        is_ma = ("music_assistant" in str(attrs.get("integration", "")).lower() or
+                 "active_queue" in attrs or
+                 "mass_player_type" in attrs or
+                 "music_assistant" in attrs.get("source", "").lower())
+        if is_ma and (roku_friendly in friendly or friendly in roku_friendly):
+            ma_entity = eid
+            break
     
-    # Fallback: try launching Media Assistant app via remote entity
-    remote_entity = entity_id.replace("media_player.", "remote.")
-    log.info(f"[announce.roku] Launching Media Assistant via remote on {remote_entity}")
-    await call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {
-        "command": "Home"
-    })
-    await asyncio.sleep(2.0)
+    if ma_entity:
+        log.info(f"[announce.roku] Delegating audio to MA sibling: {ma_entity}")
+        result = await call_service(ha_url, ha_token, "music_assistant", "play_media", ma_entity, {
+            "media_id": media_url,
+            "media_type": "track",
+            "enqueue": "play",
+        })
+        if result.get("ok"):
+            return result
+        log.warning(f"[announce.roku] MA play_media failed: {result.get('error')}, trying play_announcement")
+        result = await call_service(ha_url, ha_token, "music_assistant", "play_announcement", ma_entity, {
+            "message": media_url,
+        })
+        if result.get("ok"):
+            return result
     
+    # Last resort: try direct play_media on Roku entity
+    log.info(f"[announce.roku] Last resort: play_media on {entity_id}")
     return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "audio/wav"
