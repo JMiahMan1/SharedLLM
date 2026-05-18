@@ -150,8 +150,10 @@ async def global_exception_handler(request, exc):
 
 # Transient cache for locally-generated media (TTS announcements)
 TEMP_AUDIO_CACHE: Dict[str, bytes] = {}
-# Video files stored on disk (streamed for large files)
+# Persistent disk cache for TTS files (survives container restarts)
 from config import TEMP_MEDIA_DIR
+TEMP_AUDIO_DIR = os.path.join(TEMP_MEDIA_DIR, "tts")
+os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 TEMP_VIDEO_DIR = TEMP_MEDIA_DIR
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
@@ -1019,7 +1021,8 @@ async def execute_announce(req: AnnouncementRequest):
                 raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
             
             public_host = get_public_host()
-            media_url = f"http://{public_host}:8003/media/{media_id}"
+            # Use Caddy (port 80) for external media access, not direct 8003
+            media_url = f"http://{public_host}/media/{media_id}"
             log.info(f"[announce] Media URL: {media_url}")
             
             # VERIFY: Ensure media endpoint is accessible before dispatching to HA
