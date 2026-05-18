@@ -169,6 +169,18 @@ async def lifespan(app: FastAPI):
                     },
                 )
             
+            # Progressive download: serve .mp4.part files while download is in progress
+            part_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4.part")
+            if os.path.exists(part_path):
+                return FileResponse(
+                    path=part_path,
+                    media_type="video/mp4",
+                    headers={
+                        "Accept-Ranges": "bytes",
+                        "Cache-Control": "no-cache",
+                    },
+                )
+            
             raise HTTPException(status_code=404, detail="Media not found")
         
         def _run():
