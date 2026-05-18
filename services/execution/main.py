@@ -1064,7 +1064,12 @@ async def execute_announce(req: AnnouncementRequest):
     # Fallback: Music Assistant (MASS) play_announcement
     if not result.get("ok") and media_url:
         log.info("[announce] Attempting Music Assistant (MASS) play_announcement...")
-        result = await ha_client.call_service(ha_url, ha_token, "music_assistant", "play_announcement", target_player, {
+        # Resolve to MA player entity if target is a Roku
+        fallback_target = target_player
+        if attrs.get("_ma_player_entity"):
+            fallback_target = attrs["_ma_player_entity"]
+            log.info(f"[announce] Using MA player for fallback: {fallback_target}")
+        result = await ha_client.call_service(ha_url, ha_token, "music_assistant", "play_announcement", fallback_target, {
             "url": media_url,
             "use_pre_announce": False
         })
