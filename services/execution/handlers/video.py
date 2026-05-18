@@ -148,8 +148,13 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
                 service="video_play",
             )
         from config import EXECUTION_EXTERNAL_HOST
-        public_host = EXECUTION_EXTERNAL_HOST or "192.168.2.205"
-        stream_url = f"http://{public_host}:8003/media/{media_id}"
+        if not EXECUTION_EXTERNAL_HOST:
+            return ExecutionResult(
+                status="FAILURE",
+                message="EXECUTION_EXTERNAL_HOST is not configured. Cannot stream video to Roku.",
+                service="video_play",
+            )
+        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8003/media/{media_id}"
         return await roku_handler.roku_play_video(
             ctx.ha_url, ctx.ha_token, full_entity_id, stream_url, title or req.query,
         )

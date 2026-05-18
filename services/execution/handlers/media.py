@@ -196,8 +196,9 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
 
     # Get public host for streaming
     from config import EXECUTION_EXTERNAL_HOST
-    public_host = EXECUTION_EXTERNAL_HOST or "192.168.2.205"
-    stream_url = f"http://{public_host}:8003/media/{media_id}"
+    if not EXECUTION_EXTERNAL_HOST:
+        return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
+    stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8003/media/{media_id}"
 
     # Roku: route through Media Assistant via ECP
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
