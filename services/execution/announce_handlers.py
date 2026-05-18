@@ -203,22 +203,43 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
     })
 
 async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Roku: power on TV first, then play media via Media Assistant."""
-    from ha_client import call_service
+    """Roku: wake display via ECP Home key, then play media."""
+    from ha_client import call_service, get_state
     
-    # Roku warm standby keeps network active but panel is off. Must wake first.
-    log.info(f"[announce.roku] Powering on {entity_id}...")
+    # Roku warm standby keeps network active but panel is off.
+    # HA's turn_on returns 200 but doesn't wake the display.
+    # Must send Home key via ECP directly.
+    log.info(f"[announce.roku] Waking display for {entity_id}...")
+    
+    # Try ECP Home key first (most reliable for warm standby)
+    import device_discovery
+    roku_result = await device_discovery.discover_device(entity_id, ha_url, ha_token, device_type="roku")
+    roku_ip = roku_result.get("ip") if roku_result else None
+    
+    if roku_ip:
+        import httpx
+        try:
+            log.info(f"[announce.roku] Sending Home key via ECP to {roku_ip}")
+            async with httpx.AsyncClient(verify=False, timeout=5) as client:
+                resp = await client.post(f"http://{roku_ip}:8060/keypress/Home")
+                log.info(f"[announce.roku] ECP Home key response: {resp.status_code}")
+        except Exception as e:
+            log.warning(f"[announce.roku] ECP Home key failed: {e}")
+    
+    # Also call HA turn_on (handles non-standby cases)
     await call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
-    await asyncio.sleep(5)
+    await asyncio.sleep(8)
     
     # Verify TV is actually awake
-    from ha_client import get_state
     tv_state = await get_state(ha_url, ha_token, entity_id)
-    if tv_state and tv_state.get("state") in ("off", "unavailable"):
-        log.warning(f"[announce.roku] TV still off after turn_on, trying Home key")
+    current_state = tv_state.get("state") if tv_state else "unknown"
+    log.info(f"[announce.roku] TV state after wake: {current_state}")
+    
+    if current_state in ("off", "unavailable"):
+        log.warning(f"[announce.roku] TV still off, trying remote Home key")
         remote_entity = entity_id.replace("media_player.", "remote.")
         await call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
-        await asyncio.sleep(5)
+        await asyncio.sleep(8)
     
     log.info(f"[announce.roku] Trying play_media on {entity_id}")
     result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
