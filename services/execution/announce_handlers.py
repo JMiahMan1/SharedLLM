@@ -205,18 +205,19 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
     })
 
 async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Roku: wake display via ECP, launch Media Assistant app, play audio URL.
+    """Roku: wake display via ECP, launch Media Assistant app, delegate audio to MA.
     
+    Based on working main branch flow:
     1. Wake display via ECP Home key
-    2. Launch Media Assistant via media_player.play_media with app type
-    3. Pass audio URL via extra params
+    2. Launch Media Assistant app via ECP (t=a for audio mode)
+    3. Delegate audio playback to Music Assistant player entity
     """
     from ha_client import call_service
+    import device_discovery
     
     # 1. Wake display via ECP Home key
     log.info(f"[announce.roku] Waking display for {entity_id}...")
     
-    import device_discovery
     roku_result = await device_discovery.discover_device(entity_id, ha_url, ha_token, device_type="roku")
     roku_ip = roku_result.get("ip") if roku_result else None
     
@@ -233,33 +234,62 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
     await call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
     await asyncio.sleep(3)
     
-    # 2. Launch Media Assistant app via media_player.play_media
-    log.info(f"[announce.roku] Launching Media Assistant App (782875) with URL: {media_url}")
-    result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": "782875",
-        "media_content_type": "app",
-        "extra": {"content_id": media_url, "media_type": "audio/wav"}
+    # 2. Launch Media Assistant app via ECP (t=a for audio mode)
+    if roku_ip:
+        import httpx
+        try:
+            ecp_url = f"http://{roku_ip}:8060/launch/782875"
+            params = {"t": "a", "autoplay": "true"}
+            log.info(f"[announce.roku] ECP launch: {ecp_url} params={params}")
+            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+                resp = await client.post(ecp_url, params=params)
+                log.info(f"[announce.roku] ECP response: {resp.status_code}")
+        except Exception as e:
+            log.warning(f"[announce.roku] ECP launch failed: {e}")
+    
+    await asyncio.sleep(3)
+    
+    # 3. Find the MA player entity for audio delegation
+    ma_player = attributes.get("_ma_player_entity") if attributes else None
+    if not ma_player:
+        # Fallback lookup
+        try:
+            from ha_client import get_states
+            all_states = await get_states(ha_url, ha_token) or []
+            for s in all_states:
+                eid = s.get("entity_id", "")
+                s_attrs = s.get("attributes", {})
+                if (eid != entity_id and 
+                    eid.startswith("media_player.") and
+                    s_attrs.get("app_id") == "music_assistant" and
+                    s_attrs.get("mass_player_type") == "player"):
+                    active_queue = (s_attrs.get("active_queue") or "").lower()
+                    if "roku" in active_queue:
+                        ma_player = eid
+                        log.info(f"[announce.roku] Found MA player: {ma_player}")
+                        break
+        except Exception as e:
+            log.warning(f"[announce.roku] MA player lookup failed: {e}")
+    
+    if not ma_player:
+        ma_player = entity_id
+        log.info(f"[announce.roku] No MA player found, using Roku entity: {ma_player}")
+    
+    # 4. Delegate audio to Music Assistant player
+    log.info(f"[announce.roku] Delegating audio to MA: {ma_player} | URL: {media_url}")
+    result = await call_service(ha_url, ha_token, "media_player", "play_media", ma_player, {
+        "media_content_id": media_url,
+        "media_content_type": "url"
     })
     
     if result.get("ok"):
         return result
     
-    # Fallback: try roku.launch service
-    log.info(f"[announce.roku] Fallback: roku.launch service")
-    result = await call_service(ha_url, ha_token, "roku", "launch", entity_id, {
-        "app_id": "782875"
-    })
-    if result.get("ok"):
-        await asyncio.sleep(3)
-        return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-            "media_content_id": media_url,
-            "media_content_type": "audio/wav"
-        })
-    
-    # Last resort: direct play_media
-    return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "audio/wav"
+    # Fallback: try music_assistant.play_media service
+    log.info(f"[announce.roku] Fallback: music_assistant.play_media")
+    return await call_service(ha_url, ha_token, "music_assistant", "play_media", ma_player, {
+        "media_id": media_url,
+        "media_type": "url"
     })
 
 async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
