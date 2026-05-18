@@ -32,7 +32,7 @@ _DEFAULTS = {
     "raven_hung_threshold": "600",
     "raven_check_interval": "300",
     "raven_error_threshold": "5",
-    "timezone": "America/New_York",
+    "timezone": "America/Phoenix",
     "embedding_model": "BAAI/bge-small-en-v1.5",
 }
 
@@ -182,6 +182,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, str] = {
     "climaterequest": "/execute/climate",
     "securityrequest": "/execute/security",
     "announcementrequest": "/execute/announce",
+    "ttsrequest": "/execute/tts",
     "haservicerequest": "/execute/ha_service",
     "calendarrequest": "/execute/calendar",
     "noterequest": "/execute/note",
@@ -214,6 +215,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, str] = {
     "nightmoderequest": "/execute/composite/night_mode",
     "contextsearchrequest": "/rag/search",
     "haconfigrequest": "/execute/ha_config",
+    "llminforequest": "/execute/llm_info",
 }
 
 # Tool → service mapping (resolved at runtime)
@@ -227,6 +229,7 @@ SINGLE_TURN_TOOL_GUIDE = """
 1. **JSON ONLY**: You MUST output ONLY the JSON block. No preamble, no natural language.
 2. **STRICT SCHEMA**: Your JSON must use lowercase "action" and "payload".
 3. **ONE ACTION**: Only one action per turn.
+4. **NO TOOL CALLS FOR SIMPLE CHAT**: If the user asks a simple question (greeting, math, facts, time, weather), just answer directly. Do NOT call any tools.
 
 # VALID TOOLS (MANDATORY NAMES)
 - Git: GitOperationRequest (actions: status, add, commit, push, pull, diff)
@@ -234,6 +237,9 @@ SINGLE_TURN_TOOL_GUIDE = """
 - File: WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest
 - Storage: StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest
 - Home Assistant: LightControlRequest, MediaPlayRequest, MediaStatusRequest (for "what's playing"), LogbookRequest (for device logs)
+- Announcements: AnnouncementRequest (payload: entity_id, message) - use for TTS announcements on media players
+- Talk: TalkRequest (actions: list, send, messages; payload: message, target_user)
+- LLM Info: LLMInfoRequest (actions: list, ps, version, show)
 - Verification: ExecutionLogRequest (use to verify a task was actually performed - filters by service/keyword)
 
 # OUTPUT FORMAT (MANDATORY)
