@@ -320,8 +320,8 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
             ctx.ha_url, ctx.ha_token, full_entity_id, stream_url, title or req.query,
         )
 
-    # Step 3: Download the video to disk (non-Roku)
-    media_id, title = await download_video(video_url)
+    # Step 3: Download the video to disk with progressive streaming (non-Roku)
+    media_id, title = await download_video_progressive(video_url)
     if not media_id:
         return ExecutionResult(
             status="FAILURE",
