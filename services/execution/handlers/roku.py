@@ -282,7 +282,7 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
             await asyncio.sleep(2)
 
     import httpx
-    params = {"t": "v", "u": video_url, "autoplay": "true", "songName": title, "videoFormat": "mp4"}
+    params = {"t": "v", "u": video_url, "videoName": title, "videoFormat": "mp4"}
 
     ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
     try:
