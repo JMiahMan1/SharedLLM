@@ -68,10 +68,12 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
         return "cast"
     
     # 2. Roku: entity contains 'roku', OR source_list has Roku-specific entries
+    #    OR MA player with Roku active_queue (MA wraps Roku as mass_player_type=player)
     has_roku_sources = bool(ROKU_SOURCES & set(source_list))
-    # Roku typically has many streaming apps as sources
     has_many_streaming = len(ROKU_SOURCES & set(source_list)) >= 1 or len(STREAMING_APPS & set(source_list)) >= 5
-    if "roku" in eid or has_roku_sources or has_many_streaming:
+    active_queue = (attributes.get("active_queue") or "").lower()
+    is_ma_roku = app_id == "music_assistant" and ("roku" in active_queue or "roku" in eid)
+    if "roku" in eid or has_roku_sources or has_many_streaming or is_ma_roku:
         return "roku"
     
     # 3. Android TV: app_id is Android package name, or contains Android indicators
