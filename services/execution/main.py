@@ -1100,7 +1100,7 @@ async def execute_announce(req: AnnouncementRequest):
             # Dispatch to TV-specific handler
             log.info(f"[announce] Dispatching: target={target_player}, state={initial_state_str}, attrs_keys={list(attrs.keys())}, _ma_player={attrs.get('_ma_player_entity')}")
             from announce_handlers import dispatch_announce
-            result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume, initial_state_str, attrs, loaded_components)
+            result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume, initial_state_str, attrs, loaded_components, message=req.message)
             log.info(f"[announce] Dispatch result: {result}")
             
             if req.save_path:
@@ -1171,67 +1171,73 @@ async def execute_announce(req: AnnouncementRequest):
     from announce_handlers import detect_tv_type
     device_type = detect_tv_type(target_player, initial_state.get("state", "unknown") if initial_state else "unknown", initial_state.get("attributes", {}) if initial_state else {}, loaded_components)
     
+    # For Roku: restore the MA player entity (where volume/source/playback state lives)
+    restore_target = target_player
+    if device_type == "roku" and attrs.get("_ma_player_entity"):
+        restore_target = attrs["_ma_player_entity"]
+        log.info(f"[announce] Using MA player for state restoration: {restore_target}")
+    
     # Roku devices: never turn off after announcement (they handle their own power)
     # Other devices: only turn off if truly off/unavailable
     truly_off = initial_state and initial_state.get("state") in ("off", "unavailable")
     if truly_off and result.get("ok") and device_type != "roku":
         log.info("[announce] Restoring device to previous state (turning off)...")
-        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_off", target_player, {})
+        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_off", restore_target, {})
         await asyncio.sleep(1)
     elif initial_state and result.get("ok"):
         # Restore volume, source, and resume playback if device was playing
-        attrs = initial_state.get("attributes", {})
+        init_attrs = initial_state.get("attributes", {})
         initial_state_str = initial_state.get("state", "unknown")
         
         # Restore volume
-        saved_volume = attrs.get("volume_level")
+        saved_volume = init_attrs.get("volume_level")
         if saved_volume is not None:
-            current_state = await ha_client.get_state(ha_url, ha_token, target_player)
+            current_state = await ha_client.get_state(ha_url, ha_token, restore_target)
             if current_state:
                 current_volume = current_state.get("attributes", {}).get("volume_level")
                 if current_volume is not None and abs(current_volume - saved_volume) > 0.01:
                     log.info(f"[announce] Restoring volume from {current_volume} to {saved_volume}")
-                    await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", target_player, {"volume_level": saved_volume})
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", restore_target, {"volume_level": saved_volume})
         
         # Restore source/input
-        saved_source = attrs.get("source")
+        saved_source = init_attrs.get("source")
         if saved_source:
-            current_state = await ha_client.get_state(ha_url, ha_token, target_player)
+            current_state = await ha_client.get_state(ha_url, ha_token, restore_target)
             if current_state:
                 current_source = current_state.get("attributes", {}).get("source")
                 if current_source != saved_source:
                     log.info(f"[announce] Restoring source from '{current_source}' to '{saved_source}'")
-                    await ha_client.call_service(ha_url, ha_token, "media_player", "select_source", target_player, {"source": saved_source})
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "select_source", restore_target, {"source": saved_source})
                     await asyncio.sleep(2)
         
         # Resume playback if device was playing/paused
         if initial_state_str in ("playing", "paused"):
-            saved_media = attrs.get("media_content_id")
-            saved_position = attrs.get("media_position")
+            saved_media = init_attrs.get("media_content_id")
+            saved_position = init_attrs.get("media_position")
             if saved_media:
-                log.info(f"[announce] Resuming previous media on {target_player}")
-                await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", target_player,
-                    {"media_content_id": saved_media, "media_content_type": attrs.get("media_content_type", "url")})
+                log.info(f"[announce] Resuming previous media on {restore_target}")
+                await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", restore_target,
+                    {"media_content_id": saved_media, "media_content_type": init_attrs.get("media_content_type", "url")})
                 if saved_position and initial_state_str == "playing":
                     await asyncio.sleep(2)
-                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_seek", target_player,
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_seek", restore_target,
                         {"seek_position": saved_position})
             else:
                 # No media URL saved, just restore play/pause state
                 if initial_state_str == "playing":
-                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_play", target_player)
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_play", restore_target)
                 elif initial_state_str == "paused":
-                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_pause", target_player)
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "media_pause", restore_target)
         
         # Restore mute state
-        saved_muted = attrs.get("is_volume_muted")
+        saved_muted = init_attrs.get("is_volume_muted")
         if saved_muted is not None:
-            current_state = await ha_client.get_state(ha_url, ha_token, target_player)
+            current_state = await ha_client.get_state(ha_url, ha_token, restore_target)
             if current_state:
                 current_muted = current_state.get("attributes", {}).get("is_volume_muted", False)
                 if current_muted != saved_muted:
                     log.info(f"[announce] Restoring mute state to {saved_muted}")
-                    await ha_client.call_service(ha_url, ha_token, "media_player", "volume_mute", target_player,
+                    await ha_client.call_service(ha_url, ha_token, "media_player", "volume_mute", restore_target,
                         {"is_volume_muted": saved_muted})
 
     if result.get("ok"):
