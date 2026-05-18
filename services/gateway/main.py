@@ -867,9 +867,14 @@ def is_time_or_date_query(query: str) -> bool:
     )
 
 
-def build_time_or_date_response(query: str) -> str:
-    from gateway.config import TIMEZONE
-    tz_name = TIMEZONE
+async def build_time_or_date_response(query: str) -> str:
+    """Get timezone from Identity settings at runtime, not hardcoded."""
+    try:
+        from gateway.orchestrator import get_all_settings
+        settings = await get_all_settings()
+        tz_name = settings.get("timezone", "America/Phoenix")
+    except Exception:
+        tz_name = "America/Phoenix"
     try:
         now = datetime.now(ZoneInfo(tz_name))
     except Exception:
@@ -1880,7 +1885,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     log.info(f"Chat request from {user_id} query='{query}'")
 
     if is_time_or_date_query(query):
-        ans = build_time_or_date_response(query)
+        ans = await build_time_or_date_response(query)
         await update_history(user_id, "user", query)
         await update_history(user_id, "assistant", ans)
         if is_openai:
