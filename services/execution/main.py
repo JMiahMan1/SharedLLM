@@ -1026,7 +1026,7 @@ async def execute_announce(req: AnnouncementRequest):
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
         
         # TVs need longer verification timeout
-        verify_timeout = 30 if device_type in ("samsung", "webos") else 15
+        verify_timeout = 30 if device_type in ("samsung", "webos", "roku") else 15
         
         verification = await verify_playback(ha_url, ha_token, target_player, media_url, timeout=verify_timeout, device_type=device_type)
         if verification["verified"]:

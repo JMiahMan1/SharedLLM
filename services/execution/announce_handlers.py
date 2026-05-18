@@ -203,11 +203,24 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
     })
 
 async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Roku: try media_player.play_media directly, then remote.send_command for Home."""
+    """Roku: power on TV first, then play media via Media Assistant."""
     from ha_client import call_service
-    log.info(f"[announce.roku] Trying play_media on {entity_id}")
     
-    # Roku Media Assistant can play direct URLs via media_player.play_media
+    # Roku warm standby keeps network active but panel is off. Must wake first.
+    log.info(f"[announce.roku] Powering on {entity_id}...")
+    await call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
+    await asyncio.sleep(5)
+    
+    # Verify TV is actually awake
+    from ha_client import get_state
+    tv_state = await get_state(ha_url, ha_token, entity_id)
+    if tv_state and tv_state.get("state") in ("off", "unavailable"):
+        log.warning(f"[announce.roku] TV still off after turn_on, trying Home key")
+        remote_entity = entity_id.replace("media_player.", "remote.")
+        await call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
+        await asyncio.sleep(5)
+    
+    log.info(f"[announce.roku] Trying play_media on {entity_id}")
     result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "audio/wav"
