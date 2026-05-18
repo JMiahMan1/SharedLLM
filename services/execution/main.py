@@ -1004,7 +1004,7 @@ async def execute_announce(req: AnnouncementRequest):
     # Fallback: Music Assistant (MASS) play_announcement
     if not result.get("ok"):
         log.info("[announce] Attempting Music Assistant (MASS) announcement...")
-        result = await ha_client.call_service(ha_url, ha_token, "mass", "play_announcement", target_player, {
+        result = await ha_client.call_service(ha_url, ha_token, "music_assistant", "play_announcement", target_player, {
             "message": req.message,
             "use_pre_announcement_signal": True
         })
