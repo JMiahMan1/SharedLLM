@@ -235,7 +235,12 @@ async def get_temp_media(media_id: str):
             }
         )
     
-    raise HTTPException(status_code=404, detail="Media expired or not found")
+    # Return 503 (Service Unavailable) for media that's being prepared
+    # This tells HA to retry instead of treating it as a permanent 404
+    raise HTTPException(
+        status_code=503,
+        detail="Media not ready or expired"
+    )
 
 def _ok(message: str, service: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service=service, detail=detail)
@@ -962,12 +967,16 @@ async def execute_announce(req: AnnouncementRequest):
     if req.tts_engine == "kokoro":
         from tts import text_to_speech
         try:
+            log.info(f"[announce] Generating TTS audio (engine=kokoro, storybook={req.storybook})")
             audio_bytes = await text_to_speech(req.message, storybook=req.storybook)
             if not audio_bytes:
                 return _fail("Kokoro returned empty audio", "announce")
             
+            log.info(f"[announce] TTS generated: {len(audio_bytes)} bytes")
             media_id = f"tts-{uuid4().hex[:8]}"
             TEMP_AUDIO_CACHE[media_id] = audio_bytes
+            log.info(f"[announce] Audio cached: media_id={media_id}, cache_size={len(TEMP_AUDIO_CACHE)}")
+            
             def get_public_host():
                 from config import EXECUTION_EXTERNAL_HOST
                 env_host = EXECUTION_EXTERNAL_HOST
@@ -982,14 +991,40 @@ async def execute_announce(req: AnnouncementRequest):
             
             public_host = get_public_host()
             media_url = f"http://{public_host}:8003/media/{media_id}"
+            log.info(f"[announce] Media URL: {media_url}")
+            
+            # VERIFY: Ensure media endpoint is accessible before dispatching to HA
+            log.info(f"[announce] Verifying media endpoint accessibility...")
+            media_ready = False
+            for attempt in range(5):
+                try:
+                    async with httpx.AsyncClient(timeout=2.0) as client:
+                        resp = await client.get(media_url)
+                        if resp.status_code == 200 and len(resp.content) > 0:
+                            media_ready = True
+                            log.info(f"[announce] Media endpoint verified: {len(resp.content)} bytes, content-type={resp.headers.get('content-type')}")
+                            break
+                        else:
+                            log.warning(f"[announce] Media check attempt {attempt+1}/5: status={resp.status_code}, size={len(resp.content)}")
+                except Exception as e:
+                    log.warning(f"[announce] Media check attempt {attempt+1}/5 failed: {e}")
+                
+                if attempt < 4:
+                    await asyncio.sleep(0.5)
+            
+            if not media_ready:
+                log.error(f"[announce] Media endpoint not accessible after 5 attempts. URL: {media_url}")
+                return _fail("Media endpoint not accessible - file not served correctly", "announce")
             
             # Get entity attributes for TV type detection
             attrs = initial_state.get("attributes", {}) if initial_state else {}
             initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
             
             # Dispatch to TV-specific handler
+            log.info(f"[announce] Dispatching to TV handler (type detection in progress)")
             from announce_handlers import dispatch_announce
             result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume, initial_state_str, attrs, loaded_components)
+            log.info(f"[announce] Dispatch result: {result}")
             
             if req.save_path:
                 from handlers import storage as storage_handler
