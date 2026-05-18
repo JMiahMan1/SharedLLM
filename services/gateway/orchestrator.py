@@ -1,5 +1,6 @@
 # services/gateway/orchestrator.py
 import asyncio
+import httpx
 import json
 import logging
 import re
@@ -57,8 +58,15 @@ async def get_all_settings() -> Dict[str, str]:
             )
             if resp.status_code == 200:
                 fetched = {item["key"]: item["value"] for item in resp.json()}
-                # Merge with defaults for any missing keys
+                # Merge with defaults for non-model keys only
+                model_keys = {
+                    "active_llm_provider", "ollama_assistant_model", "ollama_coding_model",
+                    "ollama_librarian_model", "cloud_assistant_model", "cloud_coding_model",
+                    "cloud_librarian_model", "assistant_model", "coding_model", "librarian_model",
+                }
                 for key, default in _DEFAULTS.items():
+                    if key in model_keys:
+                        continue
                     if key not in fetched or fetched[key] in ("", "auto"):
                         fetched[key] = default
                 _settings_cache = fetched
@@ -94,10 +102,18 @@ def _sync_main_constants(settings: Dict[str, str]) -> None:
         main_mod.LOGGING_SVC_URL = settings.get("logging_svc_url", main_mod.LOGGING_SVC)
 
 
+_MODEL_KEYS = {
+    "active_llm_provider", "ollama_assistant_model", "ollama_coding_model",
+    "ollama_librarian_model", "cloud_assistant_model", "cloud_coding_model",
+    "cloud_librarian_model", "assistant_model", "coding_model", "librarian_model",
+}
+
 def _get(settings: Dict[str, str], key: str, default: str = "") -> str:
-    """Get setting with fallback to defaults."""
+    """Get setting with fallback to defaults (excludes model keys)."""
     val = settings.get(key, "")
     if val in ("", "auto"):
+        if key in _MODEL_KEYS:
+            return default
         return _DEFAULTS.get(key, default)
     return val
 
@@ -121,7 +137,6 @@ def strip_json_from_response(text: str) -> str:
     # Try to extract natural language that appears BEFORE or AFTER JSON blocks
     # Many models output: "Sure, I'll do that.\n```json{...}```"
     # We want the "Sure, I'll do that." part
-    non_json_parts = []
     # Remove markdown JSON blocks
     cleaned = re.sub(r"```json\s*\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
     # Remove bare JSON objects
@@ -330,7 +345,6 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
     rag_context = ""
     settings = await get_all_settings()
     rag_svc = _get(settings, "rag_svc_url")
-    exec_svc = _get(settings, "execution_svc_url")
     try:
         # Prioritize collections based on query intent
         q = query.lower()
@@ -533,7 +547,6 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
 async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials) -> str:
     """Execute a single tool call and return the result string."""
     settings = await get_all_settings()
-    exec_svc = _get(settings, "execution_svc_url")
     control_plane = _get(settings, "control_plane_url")
     
     # Normalize action: strip underscores/spaces, lowercase → canonical form
