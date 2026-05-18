@@ -131,13 +131,13 @@ async def lifespan(app: FastAPI):
     def run_media_server():
         from http.server import HTTPServer, SimpleHTTPRequestHandler
         import threading
+        import re
         
         class MediaHandler(SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=TEMP_AUDIO_DIR, **kwargs)
             
             def do_GET(self):
-                import re
                 match = re.match(r'/media/([^/]+)', self.path)
                 if match:
                     media_id = match.group(1)
