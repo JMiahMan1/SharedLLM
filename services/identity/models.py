@@ -100,7 +100,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     
     # --- LLM CONFIGURATION (UI MANAGED) ---
     {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, openrouter, openai)"},
-    {"key": "llm_local_url", "value": "http://llama-server:11434", "description": "Base URL for local LLM inference (Ollama, llama.cpp server, or compatible API)"},
+    {"key": "llm_local_url", "value": "http://ollama-server.local:11434", "description": "Base URL for local LLM inference (Ollama, llama.cpp server, or compatible API)"},
     {"key": "llm_local_max_ctx", "value": "4096", "description": "Maximum token context allowed for local inference"},
     {"key": "llm_cloud_api_key", "value": "", "description": "API Key for cloud fallback (OpenRouter, OpenAI, etc.)"},
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
@@ -158,13 +158,13 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "redis_url", "value": "redis://redis:6379/0", "description": "Redis connection URL"},
     {"key": "searxng_url", "value": "", "description": "SearXNG search service URL"},
     {"key": "llama_server_proxy_url", "value": "", "description": "Legacy llama.cpp server proxy URL (deprecated)"},
-    {"key": "timezone", "value": "America/New_York", "description": "System timezone"},
+    {"key": "timezone", "value": "America/Phoenix", "description": "System timezone"},
     {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5", "description": "Embedding model for RAG"},
     {"key": "phrasebook_path", "value": "", "description": "Path to phrasebook file"},
 
     # --- DNS MAPPINGS (multi-IP fallback support) ---
     # Format: {"hostname": ["primary_ip", "fallback_ip", ...]}
     # dnsmasq generates multiple A records; clients try in order
-    {"key": "dns_mappings", "value": "{\"ai.local\": [\"192.168.2.205\"], \"ollama-server.local\": [\"192.168.2.114\", \"192.168.4.179\"], \"llama-server.local\": [\"192.168.2.114\", \"192.168.4.179\"]}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object)"}
+    {"key": "dns_mappings", "value": "{\"ai.local\": [\"192.168.2.205\"], \"ollama-server.local\": [\"192.168.2.114\", \"192.168.4.179\", \"192.168.1.204\"]}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object)"}
 ]
 
