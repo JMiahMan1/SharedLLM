@@ -228,7 +228,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         from config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
-        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8003/media/{media_id}"
+        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
         return await roku_handler.roku_play_video(
             ctx.ha_url, ctx.ha_token, entity_id, stream_url, title or query,
         )
@@ -241,7 +241,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     from config import EXECUTION_EXTERNAL_HOST
     if not EXECUTION_EXTERNAL_HOST:
         return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
-    stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8003/media/{media_id}"
+    stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
 
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
