@@ -120,8 +120,9 @@ services:
     network_mode: host
     cap_add:
       - NET_ADMIN
+    env_file:
+      - .env
     environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
       - IDENTITY_SVC_URL=http://localhost:8001
       - DNS_POLL_INTERVAL=30
       - UPSTREAM_DNS=192.168.1.1
