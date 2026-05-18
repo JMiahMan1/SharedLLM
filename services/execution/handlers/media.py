@@ -176,7 +176,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     return ExecutionResult(status="FAILURE", message=f"Could not play '{req.query}' on {entity_id}.", service="media_play")
 
 async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
-    """Play video via yt-dlp stream. Routes through MASS for Roku devices."""
+    """Play video via yt-dlp stream. Routes through Roku ECP for Roku devices."""
     from handlers import video as video_handler
     from handlers import roku as roku_handler
 
@@ -189,37 +189,31 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         if not video_url:
             return ExecutionResult(status="FAILURE", message=f"Could not find video for '{query}'.", service="media_play")
 
-    # Download and stream
+    # Roku: download optimized format, then launch via ECP
+    is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
+    if is_roku:
+        log.info("[media.video] Detected Roku device, using Roku ECP handler")
+        media_id, title = await video_handler.download_video_for_roku(video_url)
+        if not media_id:
+            return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
+        from config import EXECUTION_EXTERNAL_HOST
+        if not EXECUTION_EXTERNAL_HOST:
+            return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
+        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8003/media/{media_id}"
+        return await roku_handler.roku_play_video(
+            ctx.ha_url, ctx.ha_token, entity_id, stream_url, title or query,
+        )
+
+    # Non-Roku: download and stream via play_media
     media_id, title = await video_handler.download_video(video_url)
     if not media_id:
         return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
 
-    # Get public host for streaming
     from config import EXECUTION_EXTERNAL_HOST
     if not EXECUTION_EXTERNAL_HOST:
         return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
     stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8003/media/{media_id}"
 
-    # Roku: route through Media Assistant via ECP
-    is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
-    if is_roku:
-        roku_ip = await roku_handler.get_roku_ip(ctx.ha_url, ctx.ha_token, entity_id)
-        if roku_ip:
-            import httpx
-            import asyncio
-            params = {"t": "v", "u": stream_url, "autoplay": "true", "videoName": title or query}
-            ecp_url = f"http://{roku_ip}:8060/launch/{roku_handler.MEDIA_ASSISTANT_CHANNEL_ID}"
-            try:
-                log.info(f"[media.video] ECP launch video: {ecp_url}")
-                async with httpx.AsyncClient(verify=False, timeout=15) as client:
-                    resp = await client.post(ecp_url, params=params)
-                    log.info(f"[media.video] ECP response: {resp.status_code}")
-                    if resp.status_code in (200, 204):
-                        return ExecutionResult(status="SUCCESS", message=f"Playing video '{title or query}' on {entity_id}.", service="media_play")
-            except Exception as e:
-                log.warning(f"[media.video] ECP launch failed: {e}")
-
-    # All other devices: direct play_media
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
         {"media_content_id": stream_url, "media_content_type": "video/mp4"},
