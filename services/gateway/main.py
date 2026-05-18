@@ -446,7 +446,8 @@ async def lifespan(app: FastAPI):
     engine.load()
     # Initialize the client explicitly on startup
     get_http_client()
-    await job_queue.connect()
+    jq = await get_job_queue()
+    await jq.connect()
     log.info("Gateway initialized with FIFO Inference Queue")
     if raven_worker:
         await raven_worker.start()
