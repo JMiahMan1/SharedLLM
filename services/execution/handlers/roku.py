@@ -288,9 +288,21 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
     try:
         log.info(f"[roku.video] Launching Media Assistant via ECP: {ecp_url}")
         async with httpx.AsyncClient(verify=False, timeout=30) as client:
-            resp = await client.post(ecp_url, params=params)
+            resp = await client.post(ecp_url, params=params, content=b"")
             log.info(f"[roku.video] ECP response: {resp.status_code}")
             if resp.status_code in (200, 204):
+                await asyncio.sleep(3)
+                state = await ha_client.get_state(ha_url, ha_token, roku_entity)
+                state_value = state.get("state", "unknown") if state else "unknown"
+                log.info(f"[roku.video] Post-launch state: {state_value}")
+                if state_value in ("off", "idle", "unavailable", "unknown"):
+                    log.info(f"[roku.video] Device still '{state_value}', sending Home key to wake display...")
+                    remote_entity = roku_entity.replace("media_player.", "remote.")
+                    await ha_client.call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
+                    await asyncio.sleep(2)
+                    state = await ha_client.get_state(ha_url, ha_token, roku_entity)
+                    state_value = state.get("state", "unknown") if state else "unknown"
+                    log.info(f"[roku.video] After Home key state: {state_value}")
                 return ExecutionResult(status="SUCCESS", message=f"Now playing: {title} on {roku_entity}.", service="roku_video")
             log.warning(f"[roku.video] ECP launch returned {resp.status_code}")
     except Exception as e:

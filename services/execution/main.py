@@ -155,10 +155,10 @@ async def lifespan(app: FastAPI):
                     if os.path.exists(wav_path):
                         self._serve_file(wav_path, 'audio/wav')
                         return
-                    # Video files from disk (.mp4)
+                    # Video files from disk (.mp4) — supports progressive downloads
                     mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
                     if os.path.exists(mp4_path):
-                        self._serve_file_with_range(mp4_path, 'video/mp4')
+                        self._serve_video_progressive(mp4_path, 'video/mp4')
                         return
                 self.send_response(404)
                 self.end_headers()
@@ -172,36 +172,65 @@ async def lifespan(app: FastAPI):
                 with open(path, 'rb') as f:
                     self.wfile.write(f.read())
             
-            def _serve_file_with_range(self, path, content_type):
-                file_size = os.path.getsize(path)
+            def _serve_video_progressive(self, path, content_type):
+                """Serve video file with support for progressive downloads (growing files)."""
                 range_header = self.headers.get('Range')
+                file_size = os.path.getsize(path)
                 
                 if range_header:
                     range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
                     if range_match:
                         start = int(range_match.group(1))
-                        end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
-                        end = min(end, file_size - 1)
+                        requested_end = int(range_match.group(2)) if range_match.group(2) else None
                         
+                        # For progressive downloads, use current file size
+                        current_size = os.path.getsize(path)
+                        end = min(requested_end, current_size - 1) if requested_end else current_size - 1
+                        
+                        if start >= current_size:
+                            self.send_response(416)
+                            self.send_header('Content-Range', f'bytes */{current_size}')
+                            self.end_headers()
+                            return
+                        
+                        content_length = end - start + 1
                         self.send_response(206)
                         self.send_header('Content-Type', content_type)
-                        self.send_header('Content-Length', end - start + 1)
-                        self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
+                        self.send_header('Content-Length', content_length)
+                        self.send_header('Content-Range', f'bytes {start}-{end}/{current_size}')
                         self.send_header('Accept-Ranges', 'bytes')
                         self.end_headers()
                         
                         with open(path, 'rb') as f:
                             f.seek(start)
-                            self.wfile.write(f.read(end - start + 1))
+                            remaining = content_length
+                            while remaining > 0:
+                                chunk = f.read(min(65536, remaining))
+                                if not chunk:
+                                    break
+                                try:
+                                    self.wfile.write(chunk)
+                                    remaining -= len(chunk)
+                                except BrokenPipeError:
+                                    return
                         return
                 
+                # No range request — serve from start with current file size
                 self.send_response(200)
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', file_size)
                 self.send_header('Accept-Ranges', 'bytes')
                 self.end_headers()
+                
                 with open(path, 'rb') as f:
-                    self.wfile.write(f.read())
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        try:
+                            self.wfile.write(chunk)
+                        except BrokenPipeError:
+                            return
             
             def log_message(self, format, *args):
                 pass  # Suppress default logging
