@@ -141,24 +141,67 @@ async def lifespan(app: FastAPI):
                 match = re.match(r'/media/([^/]+)', self.path)
                 if match:
                     media_id = match.group(1)
+                    # TTS audio from memory cache
                     if media_id in TEMP_AUDIO_CACHE:
                         self.send_response(200)
                         self.send_header('Content-Type', 'audio/wav')
                         self.send_header('Content-Length', len(TEMP_AUDIO_CACHE[media_id]))
+                        self.send_header('Accept-Ranges', 'bytes')
                         self.end_headers()
                         self.wfile.write(TEMP_AUDIO_CACHE[media_id])
                         return
+                    # TTS audio from disk (.wav)
                     wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
                     if os.path.exists(wav_path):
-                        self.send_response(200)
-                        self.send_header('Content-Type', 'audio/wav')
-                        self.send_header('Content-Length', os.path.getsize(wav_path))
-                        self.end_headers()
-                        with open(wav_path, 'rb') as f:
-                            self.wfile.write(f.read())
+                        self._serve_file(wav_path, 'audio/wav')
+                        return
+                    # Video files from disk (.mp4)
+                    mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
+                    if os.path.exists(mp4_path):
+                        self._serve_file_with_range(mp4_path, 'video/mp4')
                         return
                 self.send_response(404)
                 self.end_headers()
+            
+            def _serve_file(self, path, content_type):
+                self.send_response(200)
+                self.send_header('Content-Type', content_type)
+                self.send_header('Content-Length', os.path.getsize(path))
+                self.send_header('Accept-Ranges', 'bytes')
+                self.end_headers()
+                with open(path, 'rb') as f:
+                    self.wfile.write(f.read())
+            
+            def _serve_file_with_range(self, path, content_type):
+                file_size = os.path.getsize(path)
+                range_header = self.headers.get('Range')
+                
+                if range_header:
+                    range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+                    if range_match:
+                        start = int(range_match.group(1))
+                        end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+                        end = min(end, file_size - 1)
+                        
+                        self.send_response(206)
+                        self.send_header('Content-Type', content_type)
+                        self.send_header('Content-Length', end - start + 1)
+                        self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
+                        self.send_header('Accept-Ranges', 'bytes')
+                        self.end_headers()
+                        
+                        with open(path, 'rb') as f:
+                            f.seek(start)
+                            self.wfile.write(f.read(end - start + 1))
+                        return
+                
+                self.send_response(200)
+                self.send_header('Content-Type', content_type)
+                self.send_header('Content-Length', file_size)
+                self.send_header('Accept-Ranges', 'bytes')
+                self.end_headers()
+                with open(path, 'rb') as f:
+                    self.wfile.write(f.read())
             
             def log_message(self, format, *args):
                 pass  # Suppress default logging
