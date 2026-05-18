@@ -139,10 +139,11 @@ services:
       - "ollama-server:192.168.4.179"
       - "ai-server:192.168.2.205"
       - "llama-server:192.168.4.179"
+      - "host.docker.internal:host-gateway"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://192.168.2.205:8003
+      - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
