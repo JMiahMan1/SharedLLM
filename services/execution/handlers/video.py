@@ -119,6 +119,98 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
         return None, None
 
 
+PROGRESSIVE_THRESHOLD = 10 * 1024 * 1024  # 10 MB
+
+
+async def download_video_progressive(video_url: str, threshold: int = PROGRESSIVE_THRESHOLD) -> tuple[str | None, str | None]:
+    """
+    Download video with progressive playback support.
+    Returns (media_id, title) as soon as threshold bytes are downloaded,
+    while continuing the download in the background.
+    """
+    import uuid
+    
+    media_id = f"vid-roku-{uuid.uuid4().hex[:8]}"
+    tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
+    
+    try:
+        # Get title first (fast, no download)
+        title = video_url
+        info_proc = await asyncio.create_subprocess_exec(
+            "yt-dlp", "--dump-json", "--no-download",
+            "--no-playlist", video_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        info_out, _ = await info_proc.communicate()
+        if info_out:
+            try:
+                info = json.loads(info_out.decode())
+                if info.get("is_live") or info.get("was_live"):
+                    log.warning(f"[video.roku] Skipping livestream: {video_url}")
+                    return None, None
+                title = info.get("title", video_url)
+            except json.JSONDecodeError:
+                pass
+        
+        # Start download
+        proc = await asyncio.create_subprocess_exec(
+            "yt-dlp",
+            "-f", "22/18/best[ext=mp4][height<=720]",
+            "--no-playlist",
+            "-o", tmp_path,
+            video_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        
+        # Monitor file size until threshold reached
+        while proc.returncode is None:
+            await asyncio.sleep(0.5)
+            if os.path.exists(tmp_path):
+                current_size = os.path.getsize(tmp_path)
+                if current_size >= threshold:
+                    log.info(f"[video.roku] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB — returning control to caller")
+                    # Start background task to wait for download completion
+                    asyncio.create_task(_wait_for_download(proc, tmp_path, media_id))
+                    return media_id, title
+        
+        # Download finished before threshold (small file)
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            log.error(f"[video.roku] yt-dlp download failed: {stderr.decode()[:300]}")
+            return None, None
+        
+        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+            log.error(f"[video.roku] Download produced empty file")
+            return None, None
+        
+        file_size = os.path.getsize(tmp_path)
+        log.info(f"[video.roku] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
+        return media_id, title
+        
+    except Exception as e:
+        log.error(f"[video.roku] Download failed: {e}", exc_info=True)
+        try:
+            os.remove(tmp_path)
+        except:
+            pass
+        return None, None
+
+
+async def _wait_for_download(proc, tmp_path: str, media_id: str):
+    """Background task to wait for download completion and log result."""
+    try:
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            log.error(f"[video.roku] Background download failed for {media_id}: {stderr.decode()[:200]}")
+        else:
+            file_size = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
+            log.info(f"[video.roku] Background download complete for {media_id} ({file_size / 1024 / 1024:.1f} MB)")
+    except Exception as e:
+        log.error(f"[video.roku] Background download monitor failed: {e}")
+
+
 async def download_video_for_roku(video_url: str) -> tuple[str | None, str | None]:
     """
     Download video optimized for Roku using pre-generated H.264/AAC formats.
@@ -206,8 +298,8 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, full_entity_id)
     if is_roku:
         log.info(f"[video/play] Detected Roku device, using Roku video handler")
-        # Use Roku-optimized download (format 22/18, no muxing, livestream check)
-        media_id, title = await download_video_for_roku(video_url)
+        # Use progressive download — returns as soon as 10MB buffered
+        media_id, title = await download_video_progressive(video_url)
         if not media_id:
             return ExecutionResult(
                 status="FAILURE",

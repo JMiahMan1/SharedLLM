@@ -218,11 +218,11 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         if not video_url:
             return ExecutionResult(status="FAILURE", message=f"Could not find video for '{query}'.", service="media_play")
 
-    # Roku: download optimized format, then launch via ECP
+    # Roku: download optimized format with progressive playback, then launch via ECP
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
     if is_roku:
-        log.info("[media.video] Detected Roku device, using Roku ECP handler")
-        media_id, title = await video_handler.download_video_for_roku(video_url)
+        log.info("[media.video] Detected Roku device, using Roku ECP handler with progressive download")
+        media_id, title = await video_handler.download_video_progressive(video_url)
         if not media_id:
             return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
         from config import EXECUTION_EXTERNAL_HOST
