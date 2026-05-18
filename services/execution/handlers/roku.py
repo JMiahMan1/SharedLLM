@@ -267,8 +267,21 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
     if not roku_ip:
         return ExecutionResult(status="FAILURE", message=f"Could not find Roku IP for {roku_entity}.", service="roku_video")
 
+    # Smart Power Sync: Wake device from idle/screensaver
+    state = await ha_client.get_state(ha_url, ha_token, roku_entity)
+    if state:
+        state_value = state.get("state", "")
+        if state_value in ("off", "idle", "unavailable", "unknown"):
+            log.info(f"[roku.video] Device is '{state_value}', waking up...")
+            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", roku_entity)
+            await asyncio.sleep(2)
+            # Send Home key to force display wake from screensaver
+            remote_entity = roku_entity.replace("media_player.", "remote.")
+            await ha_client.call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
+            await asyncio.sleep(2)
+
     import httpx
-    params = {"t": "v", "u": video_url, "autoplay": "true", "songName": title}
+    params = {"t": "v", "u": video_url, "autoplay": "true", "songName": title, "videoFormat": "mp4"}
 
     ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
     try:

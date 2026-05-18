@@ -119,6 +119,72 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
         return None, None
 
 
+async def download_video_for_roku(video_url: str) -> tuple[str | None, str | None]:
+    """
+    Download video optimized for Roku using pre-generated H.264/AAC formats.
+    Uses format 22 (720p) or 18 (360p) which are single-file containers
+    that require no local muxing, ensuring immediate streaming readiness.
+    """
+    import uuid
+    
+    media_id = f"vid-roku-{uuid.uuid4().hex[:8]}"
+    tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
+    
+    try:
+        # Check for livestream first
+        info_proc = await asyncio.create_subprocess_exec(
+            "yt-dlp", "--dump-json", "--no-download",
+            "--no-playlist", video_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        info_out, info_err = await info_proc.communicate()
+        if info_out:
+            try:
+                info = json.loads(info_out.decode())
+                if info.get("is_live") or info.get("was_live"):
+                    log.warning(f"[video.roku] Skipping livestream: {video_url}")
+                    return None, None
+                title = info.get("title", video_url)
+            except json.JSONDecodeError:
+                title = video_url
+        else:
+            title = video_url
+        
+        # Use format 22/18 (pre-generated H.264/AAC, no muxing needed)
+        proc = await asyncio.create_subprocess_exec(
+            "yt-dlp",
+            "-f", "22/18/best[ext=mp4][height<=720]",
+            "--no-playlist",
+            "-o", tmp_path,
+            video_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        
+        if proc.returncode != 0:
+            log.error(f"[video.roku] yt-dlp download failed: {stderr.decode()[:300]}")
+            return None, None
+        
+        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+            log.error(f"[video.roku] Download produced empty file")
+            return None, None
+        
+        file_size = os.path.getsize(tmp_path)
+        log.info(f"[video.roku] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
+        
+        return media_id, title
+        
+    except Exception as e:
+        log.error(f"[video.roku] Download failed: {e}", exc_info=True)
+        try:
+            os.remove(tmp_path)
+        except:
+            pass
+        return None, None
+
+
 async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
     ctx = req.user_context
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
@@ -140,7 +206,8 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, full_entity_id)
     if is_roku:
         log.info(f"[video/play] Detected Roku device, using Roku video handler")
-        media_id, title = await download_video(video_url)
+        # Use Roku-optimized download (format 22/18, no muxing, livestream check)
+        media_id, title = await download_video_for_roku(video_url)
         if not media_id:
             return ExecutionResult(
                 status="FAILURE",
