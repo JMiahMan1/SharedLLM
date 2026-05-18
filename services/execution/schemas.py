@@ -24,6 +24,15 @@ class BaseRequest(BaseModel):
                     data["action"] = data["command"]
                 elif "operation" in data:
                     data["action"] = data["operation"]
+                elif "message" in data:
+                    # TalkRequest: if message is present but no action, default to "send"
+                    data["action"] = "send"
+                elif "text_to_voice" in data:
+                    # TalkRequest: if text_to_voice is present but no action, default to "send"
+                    data["action"] = "send"
+                elif "token" in data:
+                    # TalkRequest: if token is present but no action, default to "messages"
+                    data["action"] = "messages"
 
             # Map 'git_status' to 'status', etc.
             if "action" in data and isinstance(data["action"], str) and data["action"].startswith("git_"):

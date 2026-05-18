@@ -584,6 +584,14 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
             if action == "contextsearchrequest":
                 payload["user_id"] = creds.user or "default"
             
+            if action == "talkrequest" and not payload.get("action"):
+                if payload.get("message") or payload.get("text_to_voice"):
+                    payload["action"] = "send"
+                elif payload.get("token"):
+                    payload["action"] = "messages"
+                else:
+                    payload["action"] = "list"
+            
             if action == "announcementrequest" and not payload.get("entity_id") and not payload.get("device_name"):
                 device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|cast|chrome))", query)
                 if not device_match:
