@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DNS Sync Sidecar - Polls Identity for DNS mappings and runs a built-in DNS server."""
+"""DNS Sync Sidecar - Polls Identity for DNS mappings, health-checks IPs, and serves DNS with automatic failover."""
 import os
 import sys
 import json
@@ -15,11 +15,22 @@ IDENTITY_URL = os.environ.get("IDENTITY_SVC_URL", "http://localhost:8001")
 DNS_POLL_INTERVAL = int(os.environ.get("DNS_POLL_INTERVAL", "30"))
 DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "53"))
 UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "127.0.0.11")
+HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "10"))
+HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", "2"))
+
+# Default health check ports by hostname pattern
+DEFAULT_HEALTH_PORTS = {
+    "ollama-server": 11434,
+    "llama-server": 11434,
+    "ai": 8080,
+}
 
 POLL_INTERVAL = DNS_POLL_INTERVAL
 running = True
-dns_records = {}
+dns_records = {}        # hostname -> list of all configured IPs
+health_status = {}      # (hostname, ip) -> bool (True = alive)
 dns_lock = threading.Lock()
+health_lock = threading.Lock()
 
 def handle_signal(signum, frame):
     global running
@@ -44,6 +55,91 @@ def fetch_dns_mappings():
         print(f"[dns-sync] Error fetching settings: {e}", flush=True)
     return {}
 
+def get_health_port(hostname):
+    """Determine health check port for a hostname."""
+    base = hostname.replace('.local', '')
+    for pattern, port in DEFAULT_HEALTH_PORTS.items():
+        if pattern in base:
+            return port
+    return 80  # default fallback
+
+def check_ip_alive(ip, port):
+    """TCP connect check to see if an IP is reachable."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(HEALTH_CHECK_TIMEOUT)
+        result = sock.connect_ex((ip, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+def health_checker():
+    """Background thread that health-checks all configured IPs."""
+    global health_status
+    print(f"[dns-sync] Health checker started (interval={HEALTH_CHECK_INTERVAL}s, timeout={HEALTH_CHECK_TIMEOUT}s)", flush=True)
+    
+    while running:
+        with dns_lock:
+            current_records = dict(dns_records)
+        
+        new_health = {}
+        changed = False
+        
+        for hostname, ips in current_records.items():
+            port = get_health_port(hostname)
+            for ip in ips:
+                alive = check_ip_alive(ip, port)
+                key = (hostname, ip)
+                with health_lock:
+                    old = health_status.get(key)
+                    if old != alive:
+                        changed = True
+                        status_str = "ALIVE" if alive else "DEAD"
+                        print(f"[dns-sync] HEALTH: {ip}:{port} {hostname} -> {status_str}", flush=True)
+                    health_status[key] = alive
+                new_health[key] = alive
+        
+        if changed:
+            _print_health_summary()
+        
+        for _ in range(HEALTH_CHECK_INTERVAL):
+            if not running:
+                break
+            time.sleep(1)
+
+def _print_health_summary():
+    """Print current health status summary."""
+    with dns_lock:
+        records = dict(dns_records)
+    with health_lock:
+        status = dict(health_status)
+    
+    for hostname, ips in records.items():
+        alive_ips = [ip for ip in ips if status.get((hostname, ip), False)]
+        dead_ips = [ip for ip in ips if not status.get((hostname, ip), False)]
+        if alive_ips:
+            print(f"[dns-sync] DNS {hostname}: alive={alive_ips}, dead={dead_ips}", flush=True)
+
+def get_alive_ips(hostname):
+    """Get list of alive IPs for a hostname. Returns all if none alive."""
+    with dns_lock:
+        all_ips = list(dns_records.get(hostname, []))
+    
+    if not all_ips:
+        return []
+    
+    with health_lock:
+        alive = [ip for ip in all_ips if health_status.get((hostname, ip), False)]
+    
+    # If all dead, return all (fallback to configured - let client handle timeout)
+    if not alive:
+        return all_ips
+    
+    # Put alive IPs first, dead IPs after (for clients that try in order)
+    dead = [ip for ip in all_ips if ip not in alive]
+    return alive + dead
+
 def update_dns_records(mappings):
     """Update in-memory DNS records from mappings."""
     global dns_records
@@ -57,7 +153,8 @@ def update_dns_records(mappings):
             continue
         if not hostname.endswith('.local'):
             hostname = f"{hostname}.local"
-        new_records[hostname.lower()] = [ip for ip in ips if ip]
+        clean_ips = [ip for ip in ips if ip]
+        new_records[hostname.lower()] = clean_ips
     with dns_lock:
         dns_records = new_records
     print(f"[dns-sync] Updated DNS records: {len(new_records)} hostnames", flush=True)
@@ -90,17 +187,17 @@ def parse_dns_query(data):
 
 def build_dns_response(txid, hostname, answers, rcode=0):
     """Build a DNS response packet."""
-    flags = 0x8180 | rcode  # Response, recursion available
+    flags = 0x8180 | rcode
     header = struct.pack('!HHHHHH', txid, flags, 1, len(answers), 0, 0)
     qname = b''
     for label in hostname.split('.'):
         qname += bytes([len(label)]) + label.encode()
     qname += b'\x00'
-    question = qname + struct.pack('!HH', 1, 1)  # Type A, Class IN
+    question = qname + struct.pack('!HH', 1, 1)
     ans = b''
     for ip in answers:
-        ans += b'\xc0\x0c'  # Pointer to name at offset 12
-        ans += struct.pack('!HHIH', 1, 1, 300, 4)  # Type A, Class IN, TTL 300, RDLEN 4
+        ans += b'\xc0\x0c'
+        ans += struct.pack('!HHIH', 1, 1, 5, 4)  # TTL 5s for fast failover
         ans += bytes(int(x) for x in ip.split('.'))
     return header + question + ans
 
@@ -108,8 +205,8 @@ def forward_query(hostname, qtype):
     """Forward query to upstream DNS server."""
     try:
         query = bytearray()
-        query += b'\x00\x01'  # TXID
-        query += b'\x01\x00'  # Flags: RD
+        query += b'\x00\x01'
+        query += b'\x01\x00'
         query += b'\x00\x01\x00\x00\x00\x00\x00\x00'
         for label in hostname.split('.'):
             query += bytes([len(label)]) + label.encode()
@@ -126,7 +223,7 @@ def forward_query(hostname, qtype):
         return None
 
 def dns_server():
-    """Run a simple DNS server."""
+    """Run a simple DNS server with health-aware responses."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('0.0.0.0', DNS_LISTEN_PORT))
@@ -140,22 +237,21 @@ def dns_server():
             if hostname is None:
                 continue
             
-            with dns_lock:
-                answers = dns_records.get(hostname, [])
-            
-            if answers and qtype == 1:  # A record
-                resp = build_dns_response(txid, hostname, answers)
-                sock.sendto(resp, addr)
-                print(f"[dns-sync] DNS: {hostname} -> {answers}", flush=True)
+            if qtype == 1:  # A record
+                answers = get_alive_ips(hostname)
+                if answers:
+                    resp = build_dns_response(txid, hostname, answers)
+                    sock.sendto(resp, addr)
+                    print(f"[dns-sync] DNS: {hostname} -> {answers}", flush=True)
+                else:
+                    resp = build_dns_response(txid, hostname, [], rcode=3)
+                    sock.sendto(resp, addr)
             else:
-                # Forward to upstream
                 resp = forward_query(hostname, qtype or 1)
                 if resp:
-                    # Replace TXID
                     resp = struct.pack('!H', txid) + resp[2:]
                     sock.sendto(resp, addr)
                 else:
-                    # Return NXDOMAIN
                     resp = build_dns_response(txid, hostname, [], rcode=3)
                     sock.sendto(resp, addr)
         except socket.timeout:
@@ -170,7 +266,11 @@ def main():
     global running
     print(f"[dns-sync] Starting DNS sync sidecar (poll every {POLL_INTERVAL}s)", flush=True)
     
-    # Start DNS server in background thread
+    # Start health checker
+    health_thread = threading.Thread(target=health_checker, daemon=True)
+    health_thread.start()
+    
+    # Start DNS server
     dns_thread = threading.Thread(target=dns_server, daemon=True)
     dns_thread.start()
     
