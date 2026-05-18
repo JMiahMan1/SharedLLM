@@ -19,18 +19,9 @@ def _get_history_key(user: str) -> str:
 
 async def fetch_librarian_model() -> str:
     """Fetches the designated Librarian model from Identity Service GlobalSettings."""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                f"{IDENTITY_SVC}/api/settings/librarian_model",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("value", "")
-    except Exception as e:
-        log.warning(f"Failed to fetch librarian_model: {e}")
-    return "" # Safe fallback
+    from gateway.orchestrator import get_all_settings, _get
+    settings = await get_all_settings()
+    return _get(settings, "ollama_librarian_model", "")
 
 async def get_history(user_id: str) -> list:
     """Retrieves conversation history as a list of dicts."""
@@ -68,6 +59,10 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
     """
     Retrieves relevant 'User Facts' from the RAG service to provide semantic memory.
     """
+    from gateway.orchestrator import get_all_settings, _get
+    settings = await get_all_settings()
+    rag_svc = _get(settings, "rag_svc_url")
+    secret = _get(settings, "internal_secret", INTERNAL_SECRET)
     try:
         # We use a dedicated collection for static user facts (Mem0 style)
         payload = {
@@ -77,11 +72,9 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
             "k": 5
         }
         
-        from gateway.config import RAG_SVC, INTERNAL_SECRET
-
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(
-                f"{RAG_SVC}/rag/search",
+                f"{rag_svc}/rag/search",
                 json=payload,
                 headers={"X-Internal-Secret": secret}
             )
@@ -107,8 +100,11 @@ async def extract_and_store_user_facts(user_id: str, history: list):
         return
 
     try:
-        LIBRARIAN_MODEL = await fetch_librarian_model()
-        from gateway.config import OLLAMA_URL
+        from gateway.orchestrator import get_all_settings, _get
+        settings = await get_all_settings()
+        LIBRARIAN_MODEL = _get(settings, "ollama_librarian_model", "")
+        ollama_url = _get(settings, "llm_local_url", OLLAMA_URL)
+        rag_svc = _get(settings, "rag_svc_url")
 
         # Only look at the last turn
         recent_text = ""
@@ -126,7 +122,7 @@ Return ONLY a bulleted list of facts, or 'NONE'.
 """
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
-                f"{OLLAMA_URL}/api/generate",
+                f"{ollama_url}/api/generate",
                 json={"model": LIBRARIAN_MODEL, "prompt": prompt, "stream": False},
             )
             if resp.status_code != 200: return
@@ -139,7 +135,7 @@ Return ONLY a bulleted list of facts, or 'NONE'.
             for f in facts:
                 if len(f) < 5: continue
                 await client.post(
-                    f"{RAG_SVC}/rag/ingest",
+                    f"{rag_svc}/rag/ingest",
                     json={
                         "collection_name": "user_facts",
                         "content": f,
