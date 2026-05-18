@@ -7,7 +7,7 @@ Jarvis OS 2.0 transforms a standard smart home dashboard into an **Ambient Compu
 The system operates on a highly optimized **Dual-Node Architecture**:
 
 1.  **Application Node (`jeremiah@ai`):** An Intel N150 Mini PC (16GB RAM, 512GB NVMe). This node hosts the core Python/FastAPI microservices (Gateway, Execution, Identity, Storage, RAG).
-2.  **Inference Node (LLM Host):** An AMD Ryzen 7 5700G with an NVIDIA RTX 4060 (8GB VRAM) and 32GB RAM. This machine runs the LLM engines as a separate service, reachable at **`192.168.1.216`** (updated from `.204` in latest Raven commit). All SharedLLM microservices connect to it via Docker `extra_hosts` mapping (`ollama-server`, `llama-server`).
+2.  **Inference Node (LLM Host):** An AMD Ryzen 7 5700G with an NVIDIA RTX 4060 (8GB VRAM) and 32GB RAM. This machine runs the LLM engines as a separate service. All SharedLLM microservices resolve it via a **DNS Sync Sidecar** (`config/dns_sync.py`) that exposes the hostname `ollama-server.local` and supports **multi-IP fallback** (e.g., `192.168.2.114`, `192.168.4.179`, `192.168.1.204`). The DNS sidecar performs live health checks on each IP and only advertises alive IPs, automatically failing over if the primary is unreachable.
     *   **Alpaca Wrapper:** Because we run a specialized image for **TurboQuant** (`ghcr.io/thetom/llama-cpp-turboquant@sha256:fe33d9ca6d2331e1af4cde907475b3d3040eb7498e807165ff89db3770dacb04`), we use a custom wrapper service called Alpaca. This allows us to run standard Ollama models alongside the highly-quantized models.
     *   **TurboQuant Settings:** The inference engine runs with specialized flags: `--n-gpu-layers 999`, `--n-cpu-moe 48`, `--no-mmap`, `--cache-type-k turbo4`, and `--cache-type-v turbo3`.
     *   **Source vs Workspace Rule (Critical):** The SharedLLM Server has two distinct path concepts, configured via the workspace registry settings: the **source repo** (the only valid build/deploy context, path defined by `WORKSPACE_HOST_PATH` in the environment) and the **workspace root** (Raven's runtime scratch space — ephemeral, managed by the `workspace_runtime` service, never used as a Docker build context).
@@ -26,7 +26,7 @@ The entire microservice architecture is strictly isolated behind a Caddy reverse
 *   **Frontend Traffic (`/*`)**: Routed to the React `ui:8008` container.
 *   **API Traffic:**
     *   `/api/chat`, `/api/generate`, `/api/admin/raven`: Routed to `gateway:11435`.
-    *   `/execute`: Routed directly to `execution:8003`.
+    *   `/execute`: Routed directly to `execution:8003` (FastAPI API port). **Note:** media files (TTS audio, video) are served on the separate **media port `:8888`** by a lightweight `HTTPServer` thread running inside the execution container. This split was introduced to prevent the FastAPI event loop from blocking on large file transfers.
     *   `/api/auth`, `/api/users`: Routed to `identity:8001`.
     *   `/control_plane`: Routed to `control_plane:8008`.
 This guarantees that frontend developers only ever need to talk to `localhost:80` (or the server's IP) and Caddy securely routes the requests to the Docker internal network.
@@ -128,7 +128,7 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
     *   **Voice ID Security Fallback:** If Voice ID confidence is `< 80%`, the system routes the query to a restricted "Guest" profile.
 
 ### 3.10 Video & YouTube Casting Engine
-*   **Backend Reality:** `execution/handlers/video.py` handles the `videoplayrequest`. It uses `yt-dlp` to search YouTube and extract the most compatible direct MP4 stream (`avc1/mp4a`) for Cast/Roku devices. It temporarily hosts this file on the Execution service (`port 8003`) and natively commands Home Assistant to power on the target TV before pushing the stream URL.
+*   **Backend Reality:** `execution/handlers/video.py` handles the `videoplayrequest`. It uses `yt-dlp` to search YouTube and extract the most compatible direct MP4 stream (`avc1/mp4a`) for Cast/Roku devices. It temporarily hosts this file on the Execution service's **media server (port 8888)** and natively commands Home Assistant to power on the target TV before pushing the stream URL.
 *   **The "Why":** We proxy videos this way because native YouTube apps on smart devices (like Roku) are notoriously difficult to control via APIs. By downloading the direct MP4 and hosting it locally, Jarvis can force *any* media device in the house to play the video or audio, even if that device doesn't have a YouTube app installed.
 *   **Jarvis OS 2.0 Enhancements:**
     *   **Universal Video Cast Widget:** Because the backend proxies the video, the UI can render a specialized video transport widget showing the YouTube thumbnail and providing standard, highly-responsive controls (skip, pause, stop) that work flawlessly across all devices—bypassing clunky native TV interfaces.
@@ -305,6 +305,20 @@ Raven now detects when a mission is failing due to schema/tool-format errors (e.
 
 This is fully self-healing: if you pull a new, larger model on the Inference Node overnight, Raven will automatically discover and prefer it.
 
+### 4.5 DNS Sync Sidecar & Multi-IP Inference Failover
+A lightweight Python sidecar container (`config/dns_sync.py`) provides internal DNS resolution for the Inference Node hostname `ollama-server.local`. It reads the `dns_mappings` setting from the Identity service (a JSON object mapping hostnames to IP lists) and runs a pure-Python DNS server inside the Docker network.
+
+**Health-check behaviour:** The sidecar continuously pings all configured IPs for each hostname. It only advertises **alive IPs** in DNS responses. If the primary IP goes down, DNS automatically returns only the surviving fallback IPs — no config change or container restart required. If all IPs are dead, it returns all of them as a last resort (preserving the old behaviour for unexpected failures).
+
+**Key setting in `identity.db`:**
+```json
+{
+  "ai.local": ["192.168.2.205"],
+  "ollama-server.local": ["192.168.2.114", "192.168.4.179", "192.168.1.204"]
+}
+```
+This replaces the old `extra_hosts` static IP mapping in `docker-compose.yml` and makes the Inference Node address fully dynamic and UI-configurable.
+
 ---
 
 ## 5. Master Implementation Task List
@@ -366,11 +380,18 @@ To bridge the gap between the LLM's raw intent and the UI's state, here is an ex
 
 ### 6.2 Communications & Notifications
 *   **`TalkRequest`**:
-    *   *Options:* `action` (send, send_voice, read), `token`, `message`, `text_to_voice`.
+    *   *Options:* `action` (send, send_voice, read, messages, list), `token`, `message`, `text_to_voice`.
+    *   *Action Auto-Inference (Recent Fix):* The `BaseRequest` validator and the Gateway orchestrator both auto-infer the missing `action` field from payload shape: if `message` or `text_to_voice` is present → `send`; if `token` is present alone → `messages`; otherwise → `list`. This prevents LLM hallucinations where the action field is omitted.
     *   *UI Correlation:* Sends data to Nextcloud Talk. Populates the **Smart Inbox Widget** which can expand into the **Native Chat Client** full-screen app.
 *   **`AnnouncementRequest` / `TTSRequest`**:
     *   *Options:* `message`, `target_device`, `announce_all` (boolean), `recorded_audio_path` (for raw voice notes), `voice` (e.g. `af_heart`), `storybook` (boolean).
+    *   *Single-Turn Routing:* `TTSRequest` is now registered in the Gateway's `SINGLE_TURN_TOOL_ENDPOINTS` map (`ttsrequest → /execute/tts`), meaning the Gateway can dispatch TTS directly without escalating to the full Raven agent loop.
     *   *UI Correlation:* Drives the Dashboard Intercom Widget. If `announce_all` is true, the backend checks the HA entity blacklist before broadcasting. If it's a TTS payload, the backend parses the text for mapped emojis and splices in custom admin-uploaded `.mp3` files (e.g., replacing 🚗 with a honk sound).
+*   **`LLMInfoRequest`** *(New Tool)*:
+    *   *Options:* `action` (list, ps, version, show), `model` (required for `show`).
+    *   *Purpose:* Allows the LLM to introspect the Ollama/Alpaca inference backend — listing available models, checking what is currently loaded in VRAM (`ps`), querying server version, or showing detailed model metadata (parameters, quantization level).
+    *   *Single-Turn Routing:* Registered as `llminforequest → /execute/llm_info` in `SINGLE_TURN_TOOL_ENDPOINTS`.
+    *   *UI Correlation:* Powers the **Model Selector** in Settings, showing which models are currently downloaded and loaded.
 
 ### 6.3 Memory, Notes & Time Management
 *   **`NoteRequest`**:
@@ -452,7 +473,8 @@ User request → /execute/announce (POST)
   │      media_id = "tts-{8 hex chars}"  (e.g. "tts-a3f2b19c")
   │      This is purely in-memory (no disk write for TTS)
   │
-  ├─ 4. Public URL built: http://{EXECUTION_EXTERNAL_HOST}:8003/media/{media_id}
+  ├─ 4. Public URL built: http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}
+  │      Port 8888 = dedicated media HTTPServer (separate from FastAPI on :8003)
   │      EXECUTION_EXTERNAL_HOST is resolved from the .env / Identity config
   │
   ├─ 5. Pre-flight self-check: execution pings its own /media/{media_id} endpoint
@@ -501,7 +523,7 @@ User request → /execute/media/play (VideoPlayRequest)
   │      Second yt-dlp --dump-json call to get the human-readable video title
   │      (used in the ExecutionResult message sent back to the user)
   │
-  ├─ 4. Public URL built: http://{EXECUTION_EXTERNAL_HOST}:8003/media/{media_id}
+  ├─ 4. Public URL built: http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}
   │
   ├─ 5. Device power-on
   │      If entity state is "off" → call media_player.turn_on, wait 2s
@@ -529,7 +551,7 @@ User request → /execute/media/play (VideoPlayRequest)
 | **Generated by** | Kokoro ONNX (local, offline) | yt-dlp CLI download |
 | **Stored as** | RAM (`TEMP_AUDIO_CACHE` dict) | Disk file (`/data/media/*.mp4`) |
 | **Served via** | `Response(bytes, media_type="audio/wav")` | `FileResponse` with `Accept-Ranges` |
-| **URL pattern** | `http://{host}:8003/media/tts-{id}` | `http://{host}:8003/media/vid-{id}` |
+| **URL pattern** | `http://{host}:8888/media/tts-{id}` | `http://{host}:8888/media/vid-{id}` |
 | **Lifetime** | Process lifetime (ephemeral) | Until container restart or manual cleanup |
 | **Auth bypass** | N/A (fully local) | yt-dlp bypasses YouTube/platform auth |
 | **Pre-flight check** | Yes (5-retry self-ping) | No (download is synchronous before URL is built) |
@@ -955,6 +977,10 @@ The backend already detects device brand via `detect_tv_type()`. The remote UI r
 *   **Dynamic Forms:**
     *   *Type:* Auto-generated Form fields based on JSON Schema.
     *   *Controls:* Text inputs for URLs, secure password masking fields for Tokens. Includes a `[Test Connection]` button (calls `/api/auth/test-connection` in Identity) and a `[Save]` button to persist encrypted credentials into `identity.db`.
+
+### 10.8a LLM Settings (`/admin/integrations` → LLM tab)
+*   **Local Inference URL:** Text field for `ollama-server.local:11434` (or any `/api/chat`-compatible endpoint). Default updated from `llama-server` to `ollama-server.local` to reflect DNS sidecar.
+*   **System Timezone Selector *(New)*:** A `<select>` dropdown (powered by `Clock` icon, Lucide) lets admins choose the system timezone stored in `identity.db`. The Gateway reads this at **runtime** via `get_all_settings()` rather than from `.env` or a hardcoded default. The dropdown covers all major US zones plus Europe/Asia/Pacific/UTC. Default: `America/Phoenix` (MST, no DST). This value is used for all time/date queries and log timestamps.
 
 ### 10.9 Admin User Management (`/admin/users`)
 *   **Target Audience:** Admins Only (requires `is_admin=True`)
