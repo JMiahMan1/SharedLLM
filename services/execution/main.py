@@ -126,7 +126,52 @@ async def lifespan(app: FastAPI):
             log.info("Kokoro models downloaded successfully.")
         except Exception as e:
             log.error(f"Failed to auto-download Kokoro models: {e}")
+    
+    # Start lightweight media server on port 8888 for external access
+    def run_media_server():
+        from http.server import HTTPServer, SimpleHTTPRequestHandler
+        import threading
+        
+        class MediaHandler(SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=TEMP_AUDIO_DIR, **kwargs)
+            
+            def do_GET(self):
+                import re
+                match = re.match(r'/media/([^/]+)', self.path)
+                if match:
+                    media_id = match.group(1)
+                    if media_id in TEMP_AUDIO_CACHE:
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'audio/wav')
+                        self.send_header('Content-Length', len(TEMP_AUDIO_CACHE[media_id]))
+                        self.end_headers()
+                        self.wfile.write(TEMP_AUDIO_CACHE[media_id])
+                        return
+                    wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
+                    if os.path.exists(wav_path):
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'audio/wav')
+                        self.send_header('Content-Length', os.path.getsize(wav_path))
+                        self.end_headers()
+                        with open(wav_path, 'rb') as f:
+                            self.wfile.write(f.read())
+                        return
+                self.send_response(404)
+                self.end_headers()
+            
+            def log_message(self, format, *args):
+                pass  # Suppress default logging
+        
+        server = HTTPServer(('0.0.0.0', 8888), MediaHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        log.info("Media server running on port 8888")
+        return server
+    
+    media_server = run_media_server()
     yield
+    media_server.shutdown()
     log.info("Execution Bridge shutting down.")
 
 
@@ -1021,8 +1066,8 @@ async def execute_announce(req: AnnouncementRequest):
                 raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
             
             public_host = get_public_host()
-            # Use Caddy (port 80) for external media access, not direct 8003
-            media_url = f"http://{public_host}/media/{media_id}"
+            # Use dedicated media port 8888 (accessible externally)
+            media_url = f"http://{public_host}:8888/media/{media_id}"
             log.info(f"[announce] Media URL: {media_url}")
             
             # VERIFY: Ensure media endpoint is accessible before dispatching to HA
