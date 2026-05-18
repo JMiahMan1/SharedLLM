@@ -1,20 +1,69 @@
 # services/gateway/orchestrator.py
 import asyncio
 import json
-import re
 import logging
-import httpx
+import asyncio
+import re
+import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Callable, Awaitable
-from gateway.schemas import ResolvedCredentials
-from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-
-from gateway.config import (
-    WORKSPACE_RUNTIME_SVC, INTERNAL_SECRET, EXECUTION_SVC, RAG_SVC,
-    IDENTITY_SVC, STORAGE_SVC, OLLAMA_URL, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
-)
+from typing import Dict, List, Optional, Callable, Awaitable
 
 log = logging.getLogger("gateway.orchestrator")
+
+
+def strip_json_from_response(text: str) -> str:
+    """
+    Robustly extract natural language from LLM output.
+    Handles: pure JSON, markdown-wrapped JSON, thinking tags, tool call artifacts.
+    Returns the most human-readable portion of the text.
+    """
+    if not text or not text.strip():
+        return text
+
+    # Strip thinking tags content
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    # If text doesn't look like JSON at all, return as-is
+    if not text.strip().startswith(("{", "```")):
+        return text.strip()
+
+    # Try to extract natural language that appears BEFORE or AFTER JSON blocks
+    # Many models output: "Sure, I'll do that.\n```json{...}```"
+    # We want the "Sure, I'll do that." part
+    non_json_parts = []
+    # Remove markdown JSON blocks
+    cleaned = re.sub(r"```json\s*\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
+    # Remove bare JSON objects
+    cleaned = re.sub(r"\{[^{}]*\}", "", cleaned, flags=re.DOTALL).strip()
+    # Remove remaining braces-wrapped content
+    cleaned = re.sub(r"\{.*?\}", "", cleaned, flags=re.DOTALL).strip()
+
+    if cleaned.strip():
+        return cleaned.strip()
+
+    # If all we have is JSON, try to extract a human-readable message field
+    try:
+        # Try parsing the whole text as JSON
+        parsed = json.loads(text)
+        for key in ["message", "response", "answer", "text", "content", "reply", "summary"]:
+            if key in parsed and isinstance(parsed[key], str):
+                return parsed[key]
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Try extracting from markdown-wrapped JSON
+    match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group(1))
+            for key in ["message", "response", "answer", "text", "content", "reply"]:
+                if key in parsed and isinstance(parsed[key], str):
+                    return parsed[key]
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Last resort: return text stripped
+    return text.strip()
 
 SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, tuple[str, str]] = {
     "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
@@ -572,14 +621,6 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         if turn == MAX_TURNS - 1:
             return tool_result
 
-    # Final answer processing — strip pure JSON if it wraps a readable field
+    # Final answer processing — strip JSON/thinking artifacts for clean natural language
     log.info(f"[_single_turn_inference] Final answer length: {len(ans)} chars, preview: {ans[:200]}")
-    if ans.strip().startswith("{") and ans.strip().endswith("}"):
-        try:
-            parsed = json.loads(ans)
-            for key in ["response", "answer", "message", "text", "content", "reply"]:
-                if key in parsed and isinstance(parsed[key], str):
-                    return parsed[key]
-        except (json.JSONDecodeError, ValueError):
-            pass
-    return ans
+    return strip_json_from_response(ans)

@@ -330,12 +330,14 @@ class RavenWorker:
             # --- TALK CALLBACK ---
             talk_token = payload.get("_talk_token")
             if talk_token:
-                await self._trigger_talk_callback(payload, str(ans))
+                from gateway.orchestrator import strip_json_from_response
+                await self._trigger_talk_callback(payload, strip_json_from_response(str(ans)))
 
             # --- TTS CALLBACK (for voice clients with device_id) ---
             device_id = payload.get("device_id")
             if device_id:
-                await self._trigger_tts_callback(payload, str(ans))
+                from gateway.orchestrator import strip_json_from_response
+                await self._trigger_tts_callback(payload, strip_json_from_response(str(ans)))
 
             mission_id = payload.get("_mission_id")
             if mission_id:

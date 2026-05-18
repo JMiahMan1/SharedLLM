@@ -1113,15 +1113,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 ans = data.get("message", {}).get("content", ans)
             except Exception as e:
                 log.warning(f"[AgentLoop] Summarization phase failed: {e}")
-                if ans.strip().startswith("{") and ans.strip().endswith("}"):
-                    try:
-                        parsed = json.loads(ans)
-                        for key in ["response", "answer", "message", "text"]:
-                            if key in parsed and isinstance(parsed[key], str):
-                                ans = parsed[key]
-                                break
-                    except (json.JSONDecodeError, ValueError):
-                        pass
+                from gateway.orchestrator import strip_json_from_response
+                ans = strip_json_from_response(ans)
 
     if action_log and not (isinstance(exec_data, dict) and exec_data.get("status") == "ERROR"):
         if should_persist_learning(ans):
