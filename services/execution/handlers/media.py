@@ -17,7 +17,7 @@ except ImportError:
 log = logging.getLogger("execution.media")
 
 # Media type detection patterns
-VIDEO_PATTERNS = [r"youtube\.com", r"youtu\.be", r"vimeo\.com", r"rumble\.com", r"dailymotion\.com", r"tiktok\.com", r"twitch\.tv"]
+VIDEO_PATTERNS = [r"youtube\.com", r"youtu\.be", r"vimeo\.com", r"rumble\.com", r"dailymotion\.com", r"tiktok\.com", r"twitch\.tv", r"\byoutube\b", r"\bvideo\b"]
 AUDIOBOOK_PATTERNS = [r"audiobookshelf", r"abs", r"audiobook", r"book\s+"]
 PODCAST_PATTERNS = [r"podcast", r"episode", r"show\s+", r"itunes\.apple\.com", r"open\.spotify\.com/show"]
 MUSIC_PATTERNS = [r"spotify\.com/track", r"spotify\.com/album", r"soundcloud\.com", r"bandcamp\.com"]
