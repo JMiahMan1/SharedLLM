@@ -137,6 +137,12 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     """
     log.info(f"[roku.music] Playing '{query}' on {roku_entity}")
 
+    # Resolve MA config entry at runtime if not seeded
+    if not mass_config_entry_id:
+        mass_config_entry_id = await ha_client.find_mass_config_entry(ha_url, ha_token)
+        if not mass_config_entry_id:
+            log.warning("[roku.music] No MA config entry found, search will fallback to raw query")
+
     roku_ip = await get_roku_ip(ha_url, ha_token, roku_entity)
     if not roku_ip:
         log.warning("[roku.music] Could not find Roku IP, falling back to MA-only")

@@ -138,6 +138,33 @@ async def get_config(ha_url: str, ha_token: str) -> dict:
             log.error(f"[ha_client] get_config failed: {e}")
             return {}
 
+async def get_config_entries(ha_url: str, ha_token: str, domain: str = "") -> list:
+    """Retrieve config entries from HA, optionally filtered by domain."""
+    if not ha_url:
+        return []
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    url = f"{ha_url.rstrip('/')}/api/config/config_entries/entry"
+    if domain:
+        url += f"?domain={domain}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            log.error(f"[ha_client] get_config_entries failed: {e}")
+            return []
+
+async def find_mass_config_entry(ha_url: str, ha_token: str) -> str:
+    """Find the Music Assistant config entry ID from HA."""
+    entries = await get_config_entries(ha_url, ha_token, "music_assistant")
+    for entry in entries:
+        if entry.get("domain") == "music_assistant":
+            entry_id = entry.get("entry_id", "")
+            log.info(f"[ha_client] Found MA config entry: {entry_id}")
+            return entry_id
+    return ""
+
 async def get_states(ha_url: str, ha_token: str) -> list:
     """Retrieve all states from HA."""
     if not ha_url:
