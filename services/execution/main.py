@@ -930,6 +930,22 @@ async def execute_announce(req: AnnouncementRequest):
             initial_state = s
             break
     
+    # Resolve MA-wrapped Roku players to actual Roku entity
+    if initial_state:
+        attrs = initial_state.get("attributes", {})
+        if attrs.get("app_id") == "music_assistant" and attrs.get("mass_player_type") == "player":
+            active_queue = (attrs.get("active_queue") or "").lower()
+            if "roku" in active_queue:
+                # Find the actual Roku media_player entity
+                for s in all_states:
+                    eid = s.get("entity_id", "")
+                    s_attrs = s.get("attributes", {})
+                    if eid.startswith("media_player.") and "roku" in eid.lower():
+                        log.info(f"[announce] Resolving MA-wrapped Roku: {target_player} -> {eid}")
+                        target_player = eid
+                        initial_state = s
+                        break
+    
     # Get loaded components for device type detection
     config = await ha_client.get_config(ha_url, ha_token) or {}
     loaded_components = set(config.get("components", []))
