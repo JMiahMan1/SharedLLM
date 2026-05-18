@@ -891,12 +891,15 @@ async def execute_announce(req: AnnouncementRequest):
     ctx = req.user_context
     target_player = req.entity_id
     
-    # Fallback to env vars if user context doesn't have HA credentials
-    from config import HA_URL, HA_TOKEN
-    ha_url = ctx.ha_url or HA_URL
-    ha_token = ctx.ha_token or HA_TOKEN
+    # Resolve HA credentials via Identity service
+    ha_url = ctx.ha_url
+    ha_token = ctx.ha_token
     if not ha_url or not ha_token:
-        return _fail("Home Assistant URL or token not configured (check user identity or HA_URL/HA_TOKEN env vars).", "announce")
+        creds = await resolve_internal_user("default")
+        ha_url = ha_url or (creds or {}).get("ha_url", "")
+        ha_token = ha_token or (creds or {}).get("ha_token", "")
+    if not ha_url or not ha_token:
+        return _fail("Home Assistant URL or token not configured (check Identity service).", "announce")
     
     # Entity resolution: if entity_id is missing, resolve from device_name
     if not target_player and req.device_name:
@@ -1044,7 +1047,7 @@ async def execute_announce(req: AnnouncementRequest):
     
     # 6. Restore initial state for ALL devices
     if was_off and result.get("ok"):
-        log.info(f"[announce] Restoring device to previous state (turning off)...")
+        log.info("[announce] Restoring device to previous state (turning off)...")
         await ha_client.call_service(ha_url, ha_token, "media_player", "turn_off", target_player, {})
         await asyncio.sleep(1)
     elif initial_state and result.get("ok"):
@@ -1115,9 +1118,9 @@ async def execute_entity_search(req: EntitySearchRequest):
     ha_token = ctx.ha_token
     
     if not ha_url or not ha_token:
-        from config import HA_URL, HA_TOKEN
-        ha_url = ha_url or HA_URL
-        ha_token = ha_token or HA_TOKEN
+        creds = await resolve_internal_user("default")
+        ha_url = ha_url or (creds or {}).get("ha_url", "")
+        ha_token = ha_token or (creds or {}).get("ha_token", "")
     
     if not ha_url or not ha_token:
         return _fail("Home Assistant URL or token not configured.", "entity_search")
