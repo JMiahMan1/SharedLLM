@@ -59,6 +59,10 @@ async def discover_device(
     if result:
         return result
 
+    result = await _discover_via_homekit_diagnostics(entity_id, ha_url, ha_token)
+    if result:
+        return result
+
     result = await _discover_via_entity_attrs(entity_id, ha_url, ha_token)
     if result:
         return result
@@ -198,6 +202,113 @@ async def _discover_via_ha_registry(
         except Exception as e:
             log.warning(f"[discovery] ESPHome config lookup failed: {e}")
 
+    return None
+
+
+async def _discover_via_homekit_diagnostics(
+    entity_id: str, ha_url: str, ha_token: str
+) -> Optional[dict]:
+    """Get IP from HomeKit controller diagnostics for WebOS TVs.
+
+    WebOS config entries have host/IP redacted in REST API, but HomeKit
+    controller diagnostics expose AccessoryIPs. This bridges the gap by
+    matching webostv devices to their HomeKit sibling entries.
+    """
+    import httpx
+    try:
+        headers = {"Authorization": f"Bearer {ha_token}"}
+        state = await ha_client.get_state(ha_url, ha_token, entity_id)
+        if not state:
+            return None
+
+        friendly_name = state.get("attributes", {}).get("friendly_name", "")
+        entity_lower = entity_id.lower()
+        friendly_lower = friendly_name.lower()
+
+        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+            # Get device registry to find webostv device info
+            dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
+            if dev_resp.status_code != 200:
+                return None
+            device_registry_list = dev_resp.json()
+
+            # Find the webostv device for this entity
+            webos_device = None
+            for dev in device_registry_list:
+                dev_name = (dev.get("name") or "").lower()
+                dev_name_by_user = (dev.get("name_by_user") or "").lower()
+                dev_model = (dev.get("model") or "").lower()
+                if (any(part in dev_name for part in friendly_lower.split() if len(part) > 2) or
+                    any(part in dev_name_by_user for part in friendly_lower.split() if len(part) > 2) or
+                    any(part in dev_name for part in entity_lower.split(".") if len(part) > 2)):
+                    # Check if it's a webostv device
+                    for identifier in dev.get("identifiers", []):
+                        if identifier and identifier[0] == "webostv":
+                            webos_device = dev
+                            break
+                if webos_device:
+                    break
+
+            if not webos_device:
+                return None
+
+            webos_model = (webos_device.get("model") or "").lower()
+            webos_manufacturer = (webos_device.get("manufacturer") or "").lower()
+            webos_serial = (webos_device.get("serial_number") or "").lower()
+
+            # Find matching homekit_controller config entries
+            entries_resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
+            if entries_resp.status_code != 200:
+                return None
+
+            for entry in entries_resp.json():
+                if entry.get("domain") != "homekit_controller":
+                    continue
+
+                entry_id = entry.get("entry_id")
+                if not entry_id:
+                    continue
+
+                # Call diagnostics endpoint
+                diag_resp = await client.get(f"{ha_url}/api/diagnostics/config_entry/{entry_id}", headers=headers)
+                if diag_resp.status_code != 200:
+                    continue
+
+                diag_data = diag_resp.json()
+                config_entry_data = diag_data.get("data", {}).get("config-entry", {})
+                accessory_data = config_entry_data.get("data", {})
+                accessory_ips = accessory_data.get("AccessoryIPs", [])
+
+                if not accessory_ips:
+                    continue
+
+                # Match by model or manufacturer
+                diag_model = (config_entry_data.get("model") or "").lower()
+                diag_manufacturer = (config_entry_data.get("manufacturer") or "").lower()
+                diag_title = (config_entry_data.get("title") or "").lower()
+
+                model_match = webos_model and webos_model in diag_model
+                manufacturer_match = webos_manufacturer and (
+                    webos_manufacturer in diag_manufacturer or
+                    diag_manufacturer in webos_manufacturer
+                )
+                title_match = any(
+                    part in diag_title for part in friendly_lower.split() if len(part) > 2
+                )
+
+                if model_match or manufacturer_match or title_match:
+                    ip = accessory_ips[0]
+                    await device_registry.set_device(
+                        entity_id,
+                        ip=ip,
+                        friendly_name=friendly_name,
+                        integration="webostv",
+                        discovery_method="homekit_diagnostics",
+                    )
+                    log.info(f"[discovery] Found {entity_id} via HomeKit diagnostics: ip={ip}")
+                    return await device_registry.get_device(entity_id)
+    except Exception as e:
+        log.warning(f"[discovery] HomeKit diagnostics lookup failed: {e}")
     return None
 
 
