@@ -92,10 +92,17 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return None
+    
+    atv_exists = False
     for s in all_states:
         if s.get("entity_id") == atv_entity_id:
             atv_friendly = s.get("attributes", {}).get("friendly_name", "")
+            atv_exists = True
             break
+    
+    if not atv_exists:
+        log.debug(f"[android_tv] ATV entity {atv_entity_id} not found in HA states")
+        return None
 
     candidates = []
 
