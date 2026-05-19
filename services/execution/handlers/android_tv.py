@@ -6,6 +6,7 @@ Services:
   - androidtv_remote.send_command: Send remote key (home, back, sleep, etc.)
   - media_player.*: Standard media controls (play, pause, stop, etc.)
 """
+import asyncio
 import logging
 import sys
 import os
