@@ -104,33 +104,40 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
         if not eid.startswith("media_player.") or eid == atv_entity_id:
             continue
         s_attrs = s.get("attributes", {})
-        s_integration = str(s_attrs.get("integration", "")).lower()
+        s_entity_lower = eid.lower()
 
-        # Must be cast integration
-        if "cast" not in s_integration:
+        # Exclude Music Assistant wrappers (primary filter)
+        s_app_id = str(s_attrs.get("app_id", "")).lower()
+        s_mass_type = s_attrs.get("mass_player_type")
+        s_active_queue = s_attrs.get("active_queue")
+        s_device_class = str(s_attrs.get("device_class", "")).lower()
+        
+        # Skip if it's clearly an MA wrapper
+        if s_app_id == "music_assistant" or s_mass_type:
+            continue
+        # Skip if it's a pure speaker (not a Cast display device)
+        if s_device_class == "speaker" and s_active_queue:
             continue
 
-        # Exclude Music Assistant wrappers
-        if ("music_assistant" in s_integration
-                or "mass" in s_integration
-                or "mass_player_type" in str(s_attrs)
-                or "mass_" in eid.lower()):
-            continue
-
-        # Capability checks - must be a real Cast device
+        # Capability checks - must support play_media
         supported_features = int(s_attrs.get("supported_features", 0))
-        has_play_media = bool(supported_features & 8424)
+        has_play_media = bool(supported_features & 8424)  # SUPPORT_PLAY_MEDIA
+        if not has_play_media:
+            continue
 
-        cast_app_id = str(s_attrs.get("app_id", "")).lower()
-        has_cast_app = any(x in cast_app_id for x in [
-            "cast", "cc1ad845", "youtube", "netflix", "plex",
-            "google.ios", "google.android"
-        ])
+        # Cast device signals from attributes
+        s_cast_type = str(s_attrs.get("cast_type", "")).lower()
+        is_cast_type = s_cast_type in ("cast", "audio", "group", "chromecast")
+        
+        # Entity ID hints (chrome, cast, chromecast in the name)
+        has_cast_hint = any(x in s_entity_lower for x in ["_chrome", "_cast", "_chromecast"])
+        
+        # Friendly name hints
+        s_friendly = s_attrs.get("friendly_name", "")
+        has_friendly_cast_hint = "cast" in s_friendly.lower() or "chromecast" in s_friendly.lower() or "chrome" in s_friendly.lower()
 
-        cast_type = str(s_attrs.get("cast_type", "")).lower()
-        is_cast_type = cast_type in ("cast", "audio", "group", "chromecast")
-
-        if not (has_play_media or has_cast_app or is_cast_type):
+        # Must have at least one Cast signal
+        if not (is_cast_type or has_cast_hint or has_friendly_cast_hint):
             continue
 
         # Check device registry for IP/MAC match (strongest signal)
@@ -146,12 +153,11 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
             return eid
 
         # Collect as candidate for name-based matching
-        s_friendly = s_attrs.get("friendly_name", "")
-        candidates.append((eid, s_friendly, s_device))
+        candidates.append((eid, s_friendly))
 
     # Last resort: name-based hints (no manipulation, exact/substring only)
     if atv_friendly:
-        for eid, s_friendly, _ in candidates:
+        for eid, s_friendly in candidates:
             # Exact friendly name match (different integrations, same display name)
             if s_friendly == atv_friendly:
                 log.info(f"[android_tv] Found Cast sibling (exact name) for {atv_entity_id}: {eid}")
@@ -160,6 +166,12 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
             if atv_friendly.lower() in s_friendly.lower() or s_friendly.lower() in atv_friendly.lower():
                 log.info(f"[android_tv] Found Cast sibling (name hint) for {atv_entity_id}: {eid}")
                 return eid
+
+    # If only one candidate passed all capability filters, return it
+    if len(candidates) == 1:
+        eid, _ = candidates[0]
+        log.info(f"[android_tv] Found Cast sibling (single candidate) for {atv_entity_id}: {eid}")
+        return eid
 
     return None
 
