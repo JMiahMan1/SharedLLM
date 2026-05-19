@@ -96,33 +96,18 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
     """Find a non-MA Cast sibling for the given Android TV entity.
     
     Multiple integrations control the same physical device, each with their own entity.
-    Resolution priority:
-    1. IP/MAC match from device registry (same physical device - strongest)
-    2. Capability + metadata verification (Cast device with matching attributes)
-    3. Entity ID / friendly name hints (last resort, no name manipulation)
+    Uses capability-based detection from HA state attributes:
+    1. Exclude MA wrappers (app_id, mass_player_type)
+    2. Require play_media capability (supported_features & 8424)
+    3. Require Cast signals (entity_id hints, friendly name, cast_type)
+    4. Single candidate = confident match
     """
-    import device_registry
-    
-    # Get Android TV device info from registry (with timeout to avoid hangs)
-    atv_ip = None
-    atv_mac = None
-    try:
-        atv_device = await asyncio.wait_for(
-            device_registry.get_device(atv_entity_id), timeout=2.0
-        )
-        if atv_device:
-            atv_ip = atv_device.get("ip")
-            atv_mac = atv_device.get("mac")
-    except (Exception, asyncio.TimeoutError):
-        log.debug(f"[android_tv] Device registry lookup skipped for {atv_entity_id}")
-    
-    # Get ATV friendly name from HA state
-    atv_friendly = ""
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return None
     
     atv_exists = False
+    atv_friendly = ""
     for s in all_states:
         if s.get("entity_id") == atv_entity_id:
             atv_friendly = s.get("attributes", {}).get("friendly_name", "")
@@ -148,67 +133,40 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
         s_active_queue = s_attrs.get("active_queue")
         s_device_class = str(s_attrs.get("device_class", "")).lower()
         
-        # Skip if it's clearly an MA wrapper
         if s_app_id == "music_assistant" or s_mass_type:
             continue
-        # Skip if it's a pure speaker (not a Cast display device)
         if s_device_class == "speaker" and s_active_queue:
             continue
 
         # Capability checks - must support play_media
         supported_features = int(s_attrs.get("supported_features", 0))
-        has_play_media = bool(supported_features & 8424)  # SUPPORT_PLAY_MEDIA
+        has_play_media = bool(supported_features & 8424)
         if not has_play_media:
             continue
 
-        # Cast device signals from attributes
+        # Cast device signals
         s_cast_type = str(s_attrs.get("cast_type", "")).lower()
         is_cast_type = s_cast_type in ("cast", "audio", "group", "chromecast")
-        
-        # Entity ID hints (chrome, cast, chromecast in the name)
         has_cast_hint = any(x in s_entity_lower for x in ["_chrome", "_cast", "_chromecast"])
-        
-        # Friendly name hints
         s_friendly = s_attrs.get("friendly_name", "")
         has_friendly_cast_hint = "cast" in s_friendly.lower() or "chromecast" in s_friendly.lower() or "chrome" in s_friendly.lower()
 
-        # Must have at least one Cast signal
         if not (is_cast_type or has_cast_hint or has_friendly_cast_hint):
             continue
 
-        # Check device registry for IP/MAC match (strongest signal)
-        if atv_ip or atv_mac:
-            try:
-                s_device = await asyncio.wait_for(
-                    device_registry.get_device(eid), timeout=2.0
-                )
-                if s_device:
-                    s_ip = s_device.get("ip")
-                    s_mac = s_device.get("mac")
-                    ip_match = bool(atv_ip and s_ip and s_ip == atv_ip)
-                    mac_match = bool(atv_mac and s_mac and s_mac.lower() == atv_mac.lower())
-                    if ip_match or mac_match:
-                        log.info(f"[android_tv] Found Cast sibling (registry match) for {atv_entity_id}: {eid}")
-                        return eid
-            except (Exception, asyncio.TimeoutError):
-                pass
-
-        # Collect as candidate for name-based matching
         candidates.append((eid, s_friendly))
 
-    # Last resort: name-based hints (no manipulation, exact/substring only)
+    # Name-based matching for disambiguation
     if atv_friendly:
         for eid, s_friendly in candidates:
-            # Exact friendly name match (different integrations, same display name)
             if s_friendly == atv_friendly:
                 log.info(f"[android_tv] Found Cast sibling (exact name) for {atv_entity_id}: {eid}")
                 return eid
-            # One name contains the other (e.g., "Office TV" vs "Office TV Cast")
             if atv_friendly.lower() in s_friendly.lower() or s_friendly.lower() in atv_friendly.lower():
                 log.info(f"[android_tv] Found Cast sibling (name hint) for {atv_entity_id}: {eid}")
                 return eid
 
-    # If only one candidate passed all capability filters, return it
+    # Single candidate = confident match
     if len(candidates) == 1:
         eid, _ = candidates[0]
         log.info(f"[android_tv] Found Cast sibling (single candidate) for {atv_entity_id}: {eid}")
