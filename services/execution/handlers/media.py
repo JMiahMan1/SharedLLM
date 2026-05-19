@@ -237,17 +237,14 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         )
 
     # Cast/Android/WebOS/Samsung: stop active session, ensure TV is on, then play
+    # Note: handle_media_play already handles power-on, so we skip redundant turn_on here
+    # Start download in parallel with HA setup to save time
+    download_task = asyncio.create_task(video_handler.download_video_progressive(video_url))
+
     # Stop any active session first (e.g., Music Assistant) to prevent conflicts
     log.info(f"[media.video] Stopping active session on {entity_id} before video playback")
     await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "media_stop", entity_id)
     await asyncio.sleep(1)
-
-    # Power on device if needed
-    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id)
-    if state and state.get("state") in ("off", "idle", "standby", "unavailable"):
-        log.info(f"[media.video] Device is '{state.get('state')}', turning on...")
-        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "turn_on", entity_id)
-        await asyncio.sleep(3)
 
     # Volume safeguard: unmute and set to safe level
     state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id)
@@ -263,8 +260,8 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", entity_id, {"volume_level": 0.2})
             await asyncio.sleep(1)
 
-    # Download video with progressive streaming (starts after 5MB buffered)
-    media_id, title = await video_handler.download_video_progressive(video_url)
+    # Wait for download to complete (may already be done if HA setup took longer)
+    media_id, title = await download_task
     if not media_id:
         return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
 
@@ -406,7 +403,7 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     
     # Power on if needed
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
-    if state and state.get("state") in ("off", "unavailable", "standby"):
+    if state and state.get("state") in ("off", "unavailable", "standby", "idle"):
         log.info(f"[media/play] Device {entity_id} is {state.get('state')}, turning on...")
         await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id)
         await asyncio.sleep(2)
