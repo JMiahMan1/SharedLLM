@@ -31,28 +31,31 @@ def extract_video_url(query: str) -> str | None:
 
 
 async def search_youtube(query: str) -> str | None:
-    """Search YouTube and return the webpage URL of the top result."""
+    """Search YouTube via SearXNG and return the webpage URL of the top result."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--dump-json", "--no-download",
-            f"ytsearch1:{query}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode == 0 and stdout:
-            lines = stdout.decode().strip().split("\n")
-            for line in lines:
-                try:
-                    info = json.loads(line)
-                    if info.get("webpage_url"):
-                        url = info["webpage_url"]
-                        log.info(f"[video] YouTube search '{query}' -> {url}")
-                        return url
-                except json.JSONDecodeError:
-                    continue
+        from config import SEARXNG_URL
+        import urllib.parse
+        searxng_url = (SEARXNG_URL or "http://localhost:8080").rstrip("/")
+        params = urllib.parse.urlencode({
+            "q": f"site:youtube.com/watch {query}",
+            "format": "json",
+            "categories": "videos",
+            "engines": "youtube",
+        })
+        search_url = f"{searxng_url}/search?{params}"
+        log.info(f"[video] SearXNG YouTube search: {search_url}")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(search_url)
+            resp.raise_for_status()
+            data = resp.json()
+        results = data.get("results", [])
+        for r in results:
+            url = r.get("url", "")
+            if "youtube.com/watch" in url or "youtu.be/" in url:
+                log.info(f"[video] YouTube search '{query}' -> {url}")
+                return url
     except Exception as e:
-        log.error(f"[video] YouTube search failed: {e}")
+        log.error(f"[video] YouTube search via SearXNG failed: {e}")
     return None
 
 
