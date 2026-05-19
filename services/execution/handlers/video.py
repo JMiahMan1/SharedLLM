@@ -103,6 +103,37 @@ async def search_youtube(query: str) -> str | None:
     return None
 
 
+YT_COOKIES_PATH = os.path.join(TEMP_VIDEO_DIR, "youtube_cookies.txt")
+
+async def _ensure_youtube_cookies() -> str | None:
+    """Use Playwright to extract YouTube cookies and save to Netscape format."""
+    if os.path.exists(YT_COOKIES_PATH):
+        return YT_COOKIES_PATH
+    try:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto("https://www.youtube.com/", timeout=15000, wait_until="domcontentloaded")
+            await asyncio.sleep(2)
+            cookies = await context.cookies()
+            await browser.close()
+            if not cookies:
+                return None
+            with open(YT_COOKIES_PATH, "w") as f:
+                f.write("# Netscape HTTP Cookie File\n")
+                for c in cookies:
+                    domain = c.get("domain", ".youtube.com")
+                    if not domain.startswith("."):
+                        domain = "." + domain
+                    f.write(f"{domain}\tTRUE\t{c.get('path', '/')}\t{'TRUE' if c.get('secure') else 'FALSE'}\t{c.get('expirationDate', 0)}\t{c['name']}\t{c['value']}\n")
+            return YT_COOKIES_PATH
+    except Exception as e:
+        log.warning(f"Failed to extract YouTube cookies: {e}")
+        return None
+
+
 async def download_video(video_url: str) -> tuple[str | None, str | None]:
     """
     Download video as MP4 using yt-dlp CLI.
@@ -115,14 +146,13 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
     tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
     
     try:
-        # Download best MP4 with h264+aac for Cast/Roku compatibility
+        cookies_path = await _ensure_youtube_cookies()
+        cmd = ["yt-dlp", "-f", "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best", "--no-playlist", "--merge-output-format", "mp4", "-o", tmp_path]
+        if cookies_path:
+            cmd.extend(["--cookies", cookies_path])
+        cmd.append(video_url)
         proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "-f", "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best",
-            "--no-playlist",
-            "--merge-output-format", "mp4",
-            "-o", tmp_path,
-            video_url,
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -139,12 +169,14 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
         file_size = os.path.getsize(tmp_path)
         log.info(f"[video] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
         
-        # Get title
         title = video_url
         try:
+            info_cmd = ["yt-dlp", "--dump-json", "--no-download", "--no-playlist"]
+            if cookies_path:
+                info_cmd.extend(["--cookies", cookies_path])
+            info_cmd.append(video_url)
             info_proc = await asyncio.create_subprocess_exec(
-                "yt-dlp", "--dump-json", "--no-download",
-                "--no-playlist", video_url,
+                *info_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -181,11 +213,15 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
     tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
     
     try:
-        # Get title first (fast, no download)
+        cookies_path = await _ensure_youtube_cookies()
+        
+        info_cmd = ["yt-dlp", "--dump-json", "--no-download", "--no-playlist"]
+        if cookies_path:
+            info_cmd.extend(["--cookies", cookies_path])
+        info_cmd.append(video_url)
         title = video_url
         info_proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--dump-json", "--no-download",
-            "--no-playlist", video_url,
+            *info_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -200,29 +236,25 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             except json.JSONDecodeError:
                 pass
         
-        # Start download
+        dl_cmd = ["yt-dlp", "-f", "22/18/best[ext=mp4][height<=720]", "--no-playlist", "-o", tmp_path]
+        if cookies_path:
+            dl_cmd.extend(["--cookies", cookies_path])
+        dl_cmd.append(video_url)
         proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "-f", "22/18/best[ext=mp4][height<=720]",
-            "--no-playlist",
-            "-o", tmp_path,
-            video_url,
+            *dl_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         
-        # Monitor file size until threshold reached
         while proc.returncode is None:
             await asyncio.sleep(0.5)
             if os.path.exists(tmp_path):
                 current_size = os.path.getsize(tmp_path)
                 if current_size >= threshold:
                     log.info(f"[video.roku] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB — returning control to caller")
-                    # Start background task to wait for download completion
                     asyncio.create_task(_wait_for_download(proc, tmp_path, media_id))
                     return media_id, title
         
-        # Download finished before threshold (small file)
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             log.error(f"[video.roku] yt-dlp download failed: {stderr.decode()[:300]}")
@@ -270,10 +302,14 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
     tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
     
     try:
-        # Check for livestream first
+        cookies_path = await _ensure_youtube_cookies()
+        
+        info_cmd = ["yt-dlp", "--dump-json", "--no-download", "--no-playlist"]
+        if cookies_path:
+            info_cmd.extend(["--cookies", cookies_path])
+        info_cmd.append(video_url)
         info_proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--dump-json", "--no-download",
-            "--no-playlist", video_url,
+            *info_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -290,13 +326,12 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
         else:
             title = video_url
         
-        # Use format 22/18 (pre-generated H.264/AAC, no muxing needed)
+        dl_cmd = ["yt-dlp", "-f", "22/18/best[ext=mp4][height<=720]", "--no-playlist", "-o", tmp_path]
+        if cookies_path:
+            dl_cmd.extend(["--cookies", cookies_path])
+        dl_cmd.append(video_url)
         proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "-f", "22/18/best[ext=mp4][height<=720]",
-            "--no-playlist",
-            "-o", tmp_path,
-            video_url,
+            *dl_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
