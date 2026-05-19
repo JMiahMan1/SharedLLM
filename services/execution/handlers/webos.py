@@ -167,32 +167,22 @@ async def back(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
 
 
 async def power_on(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
-    """Power on WebOS TV via WOL magic packet."""
-    device_info = await _get_webos_device_info(ha_url, ha_token, entity_id)
-    ip = device_info.get("ip")
-    mac = device_info.get("mac")
-
-    if not mac:
-        return ExecutionResult(
-            status="FAILURE",
-            message=f"Cannot power on {entity_id}: no MAC address found. Ensure HomeKit controller is paired.",
-            service="webos_power",
-        )
-
-    log.info(f"[webos] Sending WOL to {entity_id} (MAC={mac}, IP={ip})")
-    try:
-        _send_wol(mac, ip or "255.255.255.255")
+    """Power on WebOS TV via HA media_player.turn_on service."""
+    log.info(f"[webos] Powering on {entity_id} via HA turn_on")
+    result = await ha_client.call_service(
+        ha_url, ha_token, "media_player", "turn_on", entity_id, {}
+    )
+    if result.get("ok"):
         return ExecutionResult(
             status="SUCCESS",
-            message=f"Sent WOL packet to {entity_id} (WebOS). TV should power on.",
+            message=f"Sent power-on to {entity_id} (WebOS).",
             service="webos_power",
         )
-    except Exception as e:
-        return ExecutionResult(
-            status="FAILURE",
-            message=f"Failed to send WOL to {entity_id}: {e}",
-            service="webos_power",
-        )
+    return ExecutionResult(
+        status="FAILURE",
+        message=f"Failed to power on {entity_id}: {result.get('error')}",
+        service="webos_power",
+    )
 
 
 async def power_off(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
