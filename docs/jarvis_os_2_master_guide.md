@@ -868,7 +868,7 @@ Four new dedicated handler files replace the old catch-all logic in `media.py`:
 | **Roku** | `handlers/roku.py` | `roku` | ECP `launch/{app_id}` + Music Assistant sibling delegation |
 | **Samsung Tizen** | `handlers/samsung.py` | `samsungtv` | `samsungtv.send_key` (e.g., `KEY_POWER`, `KEY_HOME`) |
 | **LG WebOS** | `handlers/webos.py` | `webostv` | `webostv.command` (e.g., `HOME`, `BACK`) |
-| **Android TV** | `handlers/android_tv.py` | `androidtv_remote` | `androidtv_remote.send_command` |
+| **Android TV** | `handlers/android_tv.py` | `androidtv_remote` | `androidtv_remote.send_command` + Cast sibling delegation for video |
 
 Each handler includes `is_<brand>_device()` for runtime platform detection via HA entity attributes (app IDs, source lists).
 
@@ -965,6 +965,60 @@ Netflix `12`, YouTube `837`, Hulu `2285`, Disney+ `291097`, Prime Video `13`, Sp
 ```
 
 **Key distinction from music:** Video uses `t=v` + `videoName` + direct MP4 URL. Music uses `t=a` + `songName` + `artistName` + MA sibling delegation. They never share the same code path.
+
+##### Android TV: Video Delegation Pattern (`handlers/android_tv.py`)
+
+Android TV's native `play_media` with local stream URLs often fails (HA 500 error). The proven approach: detect Android TV, find its Cast sibling, and delegate video playback to the Cast entity.
+
+```
+1. DETECT ANDROID TV
+   is_android_tv(ha_url, ha_token, entity_id) checks:
+   - app_id contains "com.google.android.", "com.google.tv.", "com.android.", "backdrop", "tvlauncher"
+   - device_class == "tv" (when device is off and app_id unavailable)
+   - corresponding remote.office_tv_remote entity exists (androidtv_remote creates both)
+
+2. FIND CAST SIBLING
+   _find_cast_sibling(ha_url, ha_token, atv_entity_id) scans all media_player states:
+   a. Exclude MA wrappers: app_id != "music_assistant", no mass_player_type, no active_queue
+   b. Capability checks:
+      - supported_features & 8424 (SUPPORT_PLAY_MEDIA)
+      - cast_type in ("cast", "audio", "group", "chromecast")
+      - entity_id contains _chrome, _cast, or _chromecast
+      - friendly_name contains "cast" or "chrome"
+   c. IP/MAC match from device_registry (strongest signal, if available)
+   d. Name-based fallback: substring or exact friendly_name match
+   e. Single candidate = confident match
+   → Returns media_player.office_tv_chrome (Cast entity for the same physical TV)
+
+3. POWER ON ANDROID TV
+   media_player.turn_on → asyncio.sleep(2)
+   androidtv_remote.send_command("home") → ensures TV is on home screen
+   (Note: ADB home command may return 400 if device doesn't support it — non-fatal)
+
+4. STOP ACTIVE CAST SESSION
+   media_player.media_stop on the Cast sibling → asyncio.sleep(1)
+   (Prevents session conflicts when switching from music to video)
+
+5. DOWNLOAD VIDEO
+   download_video_progressive(youtube_url) → returns (media_id, title)
+   → yt-dlp format: 22/18/best[ext=mp4][height<=720] (H.264/AAC, single-file)
+   → Returns after 5MB buffered, continues downloading in background
+
+6. CAST TO SIBLING
+   media_player.play_media on Cast entity:
+     media_content_id = http://192.168.2.205:8888/media/{media_id}
+     media_content_type = "video/mp4"
+   → Cast device streams the MP4 from execution service port 8888
+   → HTTP Range headers support progressive streaming
+```
+
+**Why delegation works:** The Cast entity (`media_player.office_tv_chrome`) is a Chromecast built into the Android TV hardware. It handles `video/mp4` URLs natively, while the Android TV remote integration (`androidtv_remote`) only supports transport commands (home, back, power) and app launching — not direct URL playback.
+
+**Failure modes handled:**
+- No Cast sibling found → falls back to direct `play_media` on Android TV entity (may fail)
+- ADB home command returns 400 → logged as warning, non-fatal
+- `media_stop` returns 500 → device was already idle, non-fatal
+- yt-dlp download fails → returns FAILURE with descriptive message
 
 ##### Announcement (`announce_roku` in `announce_handlers.py`)
 
@@ -1064,8 +1118,8 @@ The SharedLLM backend is organized into strictly isolated, purpose-built contain
 
 | Microservice | Current Status & Role | Required Additions / Fixes | Jarvis UI Representation |
 | :--- | :--- | :--- | :--- |
-| **`gateway`** | **Solid.** The central orchestrator routing requests. *Deep-Dive Finding:* It features a **Pre-Flight Capability Check** that evaluates credentials *before* dispatching. If missing, it short-circuits to Identity. It scales VRAM context via `api/ps`, uses aggressive credential sanitization, and has a global `INFERENCE_LOCK`. | **Needs Lock Manager.** Must implement the Redis async preemption logic to manage VRAM constraints on atomic jobs. | *Invisible Brain.* The UI connects to it via `/v1/chat` and `/ws`. It drives all chat interfaces. |
-| **`execution`** | **Greatly Expanded.** Houses 35+ tool handlers. *Deep-Dive Finding (Major):* A fully new **TV Brand Handler** architecture has been introduced with dedicated files for `roku.py`, `samsung.py`, `webos.py`, and `android_tv.py`, each with brand-specific transport command maps and platform detection logic. Roku music now uses a two-part ECP + Music Assistant sibling-delegation pattern. A **multi-strategy Device Discovery Pipeline** (`device_discovery.py`) and persistent **SQLite Device Registry** (`device_registry.py`) have been added, discovering device IPs via 7 ordered strategies (cache → HA registry → entity attrs → ARP → mDNS → SSDP → network scan). Credentials are now resolved from Identity at runtime — `.env` is seed-only. | Subnet (`DEFAULT_SUBNET`) is hardcoded; move to env var. | **Capability Widgets.** Powers Media, Timer, Notes, and Smart Home toggle widgets. |
+| **`gateway`** | **Solid.** The central orchestrator routing requests. *Deep-Dive Finding:* It features a **Pre-Flight Capability Check** that evaluates credentials *before* dispatching. If missing, it short-circuits to Identity. It scales VRAM context via `api/ps`, uses aggressive credential sanitization, and has a global `INFERENCE_LOCK`. Fast-path `turn_on`/`turn_off` now uses `media_type="power"` in `resolve_media_target()`, scoring `device_class=tv` highest (+200) and deprioritizing Cast (-100) and MA wrappers (-200) to ensure power commands target the actual TV entity. | **Needs Lock Manager.** Must implement the Redis async preemption logic to manage VRAM constraints on atomic jobs. | *Invisible Brain.* The UI connects to it via `/v1/chat` and `/ws`. It drives all chat interfaces. |
+| **`execution`** | **Greatly Expanded.** Houses 35+ tool handlers. *Deep-Dive Finding (Major):* A fully new **TV Brand Handler** architecture has been introduced with dedicated files for `roku.py`, `samsung.py`, `webos.py`, and `android_tv.py`, each with brand-specific transport command maps and platform detection logic. Roku music now uses a two-part ECP + Music Assistant sibling-delegation pattern. **Android TV video playback** delegates to Cast sibling via `_find_cast_sibling()` (capability-based detection, not name matching). A **multi-strategy Device Discovery Pipeline** (`device_discovery.py`) and persistent **SQLite Device Registry** (`device_registry.py`) have been added, discovering device IPs via 7 ordered strategies (cache → HA registry → entity attrs → ARP → mDNS → SSDP → network scan). Credentials are now resolved from Identity at runtime — `.env` is seed-only. Gateway's `.env` file removed; all settings come from Identity DB. YouTube search uses `yt-dlp ytsearch:1` for accuracy (SearXNG HTML regex is unreliable). | Subnet (`DEFAULT_SUBNET`) is hardcoded; move to env var. | **Capability Widgets.** Powers Media, Timer, Notes, and Smart Home toggle widgets. |
 | **`identity`** | **Solid.** Manages `identity.db`, user sessions, and heavily encrypts tokens via `crypto.py` Fernet. Acts as the **Triage Queue** for Raven self-repair missions. | Add an explicit device-revocation endpoint for stolen/lost tablets. | **Admin Profiles / Settings.** Renders the user management panel where admins securely inject tokens without touching `.env`. |
 | **`storage`** | **Stubbed.** Meant to abstract file/object storage across local disk, Nextcloud, and S3. | Complete the base class implementations (`providers.py` throws `NotImplementedError`). | **File Manager Widget.** Will allow users to drop files into the chat and have them safely persisted to Nextcloud. |
 | **`rag`** | **Operational.** Manages ChromaDB and `SentenceTransformer` embeddings across 4 collections. *Deep-Dive Finding:* Implements advanced Hybrid Search, combining standard vector querying with keyword `$contains` querying, scored via a Reciprocal Rank Fusion (RRF) algorithm. | Better garbage collection for stale vectors when Nextcloud notes are permanently deleted. | **NotebookLM Indicators.** When the LLM cites a note, a small pill appears in the chat linking to the source document. |
