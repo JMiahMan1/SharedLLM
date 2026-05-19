@@ -102,10 +102,16 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
     """
     import device_registry
     
-    # Get Android TV device info from registry
-    atv_device = await device_registry.get_device(atv_entity_id)
-    atv_ip = (atv_device or {}).get("ip")
-    atv_mac = (atv_device or {}).get("mac")
+    # Get Android TV device info from registry (non-blocking with timeout)
+    atv_ip = None
+    atv_mac = None
+    try:
+        atv_device = await device_registry.get_device(atv_entity_id)
+        if atv_device:
+            atv_ip = atv_device.get("ip")
+            atv_mac = atv_device.get("mac")
+    except Exception as e:
+        log.debug(f"[android_tv] Device registry lookup failed for {atv_entity_id}: {e}")
     
     # Get ATV friendly name from HA state
     atv_friendly = ""
@@ -168,16 +174,19 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
             continue
 
         # Check device registry for IP/MAC match (strongest signal)
-        s_device = await device_registry.get_device(eid)
-        s_ip = (s_device or {}).get("ip")
-        s_mac = (s_device or {}).get("mac")
-        
-        ip_match = bool(atv_ip and s_ip and s_ip == atv_ip)
-        mac_match = bool(atv_mac and s_mac and s_mac.lower() == atv_mac.lower())
-        
-        if ip_match or mac_match:
-            log.info(f"[android_tv] Found Cast sibling (registry match) for {atv_entity_id}: {eid}")
-            return eid
+        if atv_ip or atv_mac:
+            try:
+                s_device = await device_registry.get_device(eid)
+                if s_device:
+                    s_ip = s_device.get("ip")
+                    s_mac = s_device.get("mac")
+                    ip_match = bool(atv_ip and s_ip and s_ip == atv_ip)
+                    mac_match = bool(atv_mac and s_mac and s_mac.lower() == atv_mac.lower())
+                    if ip_match or mac_match:
+                        log.info(f"[android_tv] Found Cast sibling (registry match) for {atv_entity_id}: {eid}")
+                        return eid
+            except Exception as e:
+                log.debug(f"[android_tv] Device registry lookup failed for {eid}: {e}")
 
         # Collect as candidate for name-based matching
         candidates.append((eid, s_friendly))
