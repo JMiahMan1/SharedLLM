@@ -32,8 +32,17 @@ def extract_video_url(query: str) -> str | None:
     return match.group(0) if match else None
 
 
+import time
+
+_SEARXNG_URL_CACHE = None
+_SEARXNG_CACHE_TS = 0.0
+_SEARXNG_CACHE_TTL = 300
+
 async def _get_searxng_url() -> str | None:
-    """Resolve SearXNG URL from Identity service global settings."""
+    """Resolve SearXNG URL from Identity service global settings (cached)."""
+    global _SEARXNG_URL_CACHE, _SEARXNG_CACHE_TS
+    if _SEARXNG_URL_CACHE and (time.time() - _SEARXNG_CACHE_TS) < _SEARXNG_CACHE_TTL:
+        return _SEARXNG_URL_CACHE
     try:
         from main import IDENTITY_SVC_URL, INTERNAL_SECRET
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -47,6 +56,8 @@ async def _get_searxng_url() -> str | None:
                     if item.get("key") == "searxng_url":
                         url = item.get("value", "").rstrip("/")
                         if url:
+                            _SEARXNG_URL_CACHE = url
+                            _SEARXNG_CACHE_TS = time.time()
                             return url
     except Exception:
         pass
