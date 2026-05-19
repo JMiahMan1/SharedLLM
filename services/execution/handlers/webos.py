@@ -166,11 +166,79 @@ async def back(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
     return await send_command(ha_url, ha_token, entity_id, "back")
 
 
+async def _find_homekit_entity(ha_url: str, ha_token: str, entity_id: str) -> str | None:
+    """Find the HomeKit controller sibling for a webostv entity."""
+    import httpx
+    import websockets
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+    if not state:
+        return None
+
+    friendly_name = state.get("attributes", {}).get("friendly_name", "")
+    entity_lower = entity_id.lower()
+    friendly_lower = friendly_name.lower()
+
+    # Get webostv device model via WebSocket device registry
+    webos_model = ""
+    ws_url = ha_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/websocket"
+    try:
+        async with websockets.connect(ws_url, ssl=True) as ws:
+            await ws.send('{"type": "auth", "access_token": "' + ha_token + '"}')
+            await ws.recv()
+            await ws.send('{"id": 1, "type": "config/device_registry/list"}')
+            while True:
+                resp = await ws.recv()
+                data = json.loads(resp)
+                if data.get("id") == 1:
+                    if data.get("success"):
+                        for dev in data.get("result", []):
+                            dev_name = (dev.get("name") or "").lower()
+                            dev_name_by_user = (dev.get("name_by_user") or "").lower()
+                            for identifier in dev.get("identifiers", []):
+                                if identifier and identifier[0] == "webostv":
+                                    if (any(part in dev_name for part in friendly_lower.split() if len(part) > 2) or
+                                        any(part in dev_name_by_user for part in friendly_lower.split() if len(part) > 2) or
+                                        any(part in dev_name for part in entity_lower.split(".") if len(part) > 2)):
+                                        webos_model = (dev.get("model") or "").lower()
+                                    break
+                    break
+    except Exception:
+        pass
+
+    if not webos_model:
+        return None
+
+    # Find HomeKit controller media_player with matching model
+    async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        states = await ha_client.get_states(ha_url, ha_token)
+        for s in states:
+            eid = s.get("entity_id", "")
+            if not eid.startswith("media_player."):
+                continue
+            attrs = s.get("attributes", {})
+            fn = (attrs.get("friendly_name") or "").lower()
+            # Check if this is a HomeKit entity matching our model
+            if webos_model in fn or any(part in fn for part in friendly_lower.split() if len(part) > 2):
+                # Verify it's homekit_controller via entity registry
+                try:
+                    r = await client.get(f"{ha_url}/api/config/entity_registry", headers=headers)
+                    if r.status_code == 200:
+                        for e in r.json():
+                            if e.get("entity_id") == eid and e.get("platform") == "homekit_controller":
+                                return eid
+                except Exception:
+                    pass
+    return None
+
+
 async def power_on(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
-    """Power on WebOS TV via HA media_player.turn_on service."""
-    log.info(f"[webos] Powering on {entity_id} via HA turn_on")
+    """Power on WebOS TV via HomeKit controller or HA turn_on."""
+    hk_entity = await _find_homekit_entity(ha_url, ha_token, entity_id)
+    target = hk_entity or entity_id
+    log.info(f"[webos] Powering on {entity_id} via {target}")
     result = await ha_client.call_service(
-        ha_url, ha_token, "media_player", "turn_on", entity_id, {}
+        ha_url, ha_token, "media_player", "turn_on", target, {}
     )
     if result.get("ok"):
         return ExecutionResult(
@@ -186,5 +254,21 @@ async def power_on(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResul
 
 
 async def power_off(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
-    """Power off WebOS TV."""
-    return await send_command(ha_url, ha_token, entity_id, "power_off")
+    """Power off WebOS TV via HomeKit controller or webostv command."""
+    hk_entity = await _find_homekit_entity(ha_url, ha_token, entity_id)
+    target = hk_entity or entity_id
+    log.info(f"[webos] Powering off {entity_id} via {target}")
+    result = await ha_client.call_service(
+        ha_url, ha_token, "media_player", "turn_off", target, {}
+    )
+    if result.get("ok"):
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"Sent power-off to {entity_id} (WebOS).",
+            service="webos_power",
+        )
+    return ExecutionResult(
+        status="FAILURE",
+        message=f"Failed to power off {entity_id}: {result.get('error')}",
+        service="webos_power",
+    )
