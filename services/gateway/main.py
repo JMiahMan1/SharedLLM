@@ -1334,10 +1334,11 @@ async def orchestrate_code_change(
     return _make_ollama_response(summary, selected_model, stream=should_stream)
 
 
-def resolve_media_target(query: str, entities: list[dict]) -> str:
+def resolve_media_target(query: str, entities: list[dict], media_type: str = None) -> str:
     """
-    Prefer a Music Assistant queue/speaker entity for music playback on named targets.
-    Fall back to the first media_player entity if nothing better is found.
+    Resolve media player entity from query.
+    For video: prefer TV/Chromecast/AndroidTV entities.
+    For music: prefer Music Assistant queue/speaker entities.
     """
     _, requested_device = extract_media_request(query)
     requested_lower = requested_device.lower() if requested_device else ""
@@ -1382,12 +1383,30 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
           score += 80
       elif requested_normalized and friendly_normalized in requested_normalized:
           score += 60
-      if "music assistant queue" in source:
-          score += 200
-      if device_class == "speaker":
-          score += 20
       if state not in {"unavailable", "unknown"}:
           score += 10
+
+      if media_type == "video":
+          # Prefer TV/Chromecast/AndroidTV for video
+          if device_class == "tv":
+              score += 200
+          if "chromecast" in source or "cast" in eid:
+              score += 150
+          if "android" in source or "android" in friendly:
+              score += 100
+          if "roku" in eid or "roku" in friendly:
+              score += 80
+          # Deprioritize speakers/MA queues for video
+          if "music assistant queue" in source:
+              score -= 200
+          if device_class == "speaker":
+              score -= 100
+      else:
+          # Music: prefer MA queues and speakers
+          if "music assistant queue" in source:
+              score += 200
+          if device_class == "speaker":
+              score += 20
       if "chrome" in eid or "cast" in friendly:
           score -= 25
       if "remote" in friendly:
@@ -1416,7 +1435,7 @@ def resolve_media_target(query: str, entities: list[dict]) -> str:
           if requested_normalized == friendly_normalized or requested_normalized in friendly_normalized:
             matching_ma_queues.append(entity)
 
-      if matching_ma_queues:
+      if matching_ma_queues and media_type != "video":
           ranked_queues = sorted((_score(e) for e in matching_ma_queues), reverse=True)
           return ranked_queues[0][1]
 
