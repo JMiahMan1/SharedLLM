@@ -69,3 +69,184 @@ async def back(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
 async def power_off(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
     """Put Android TV to sleep."""
     return await send_command(ha_url, ha_token, entity_id, "power_off")
+
+
+async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> str | None:
+    """Find a non-MA Cast sibling for the given Android TV entity.
+    
+    Multiple integrations control the same physical device, each with their own entity.
+    Resolution priority:
+    1. IP/MAC match from device registry (same physical device - strongest)
+    2. Capability + metadata verification (Cast device with matching attributes)
+    3. Entity ID / friendly name hints (last resort, no name manipulation)
+    """
+    import device_registry
+    
+    # Get Android TV device info from registry
+    atv_device = await device_registry.get_device(atv_entity_id)
+    atv_ip = (atv_device or {}).get("ip")
+    atv_mac = (atv_device or {}).get("mac")
+    
+    # Get ATV friendly name from HA state
+    atv_friendly = ""
+    all_states = await ha_client.get_states(ha_url, ha_token)
+    if not all_states:
+        return None
+    for s in all_states:
+        if s.get("entity_id") == atv_entity_id:
+            atv_friendly = s.get("attributes", {}).get("friendly_name", "")
+            break
+
+    candidates = []
+
+    for s in all_states:
+        eid = s.get("entity_id", "")
+        if not eid.startswith("media_player.") or eid == atv_entity_id:
+            continue
+        s_attrs = s.get("attributes", {})
+        s_integration = str(s_attrs.get("integration", "")).lower()
+
+        # Must be cast integration
+        if "cast" not in s_integration:
+            continue
+
+        # Exclude Music Assistant wrappers
+        if ("music_assistant" in s_integration
+                or "mass" in s_integration
+                or "mass_player_type" in str(s_attrs)
+                or "mass_" in eid.lower()):
+            continue
+
+        # Capability checks - must be a real Cast device
+        supported_features = int(s_attrs.get("supported_features", 0))
+        has_play_media = bool(supported_features & 8424)
+
+        cast_app_id = str(s_attrs.get("app_id", "")).lower()
+        has_cast_app = any(x in cast_app_id for x in [
+            "cast", "cc1ad845", "youtube", "netflix", "plex",
+            "google.ios", "google.android"
+        ])
+
+        cast_type = str(s_attrs.get("cast_type", "")).lower()
+        is_cast_type = cast_type in ("cast", "audio", "group", "chromecast")
+
+        if not (has_play_media or has_cast_app or is_cast_type):
+            continue
+
+        # Check device registry for IP/MAC match (strongest signal)
+        s_device = await device_registry.get_device(eid)
+        s_ip = (s_device or {}).get("ip")
+        s_mac = (s_device or {}).get("mac")
+        
+        ip_match = bool(atv_ip and s_ip and s_ip == atv_ip)
+        mac_match = bool(atv_mac and s_mac and s_mac.lower() == atv_mac.lower())
+        
+        if ip_match or mac_match:
+            log.info(f"[android_tv] Found Cast sibling (registry match) for {atv_entity_id}: {eid}")
+            return eid
+
+        # Collect as candidate for name-based matching
+        s_friendly = s_attrs.get("friendly_name", "")
+        candidates.append((eid, s_friendly, s_device))
+
+    # Last resort: name-based hints (no manipulation, exact/substring only)
+    if atv_friendly:
+        for eid, s_friendly, _ in candidates:
+            # Exact friendly name match (different integrations, same display name)
+            if s_friendly == atv_friendly:
+                log.info(f"[android_tv] Found Cast sibling (exact name) for {atv_entity_id}: {eid}")
+                return eid
+            # One name contains the other (e.g., "Office TV" vs "Office TV Cast")
+            if atv_friendly.lower() in s_friendly.lower() or s_friendly.lower() in atv_friendly.lower():
+                log.info(f"[android_tv] Found Cast sibling (name hint) for {atv_entity_id}: {eid}")
+                return eid
+
+    return None
+
+
+async def _ensure_volume_safe(ha_url: str, ha_token: str, entity_id: str) -> None:
+    """Ensure device is unmuted and volume is at least 20%."""
+    try:
+        state = await ha_client.get_state(ha_url, ha_token, entity_id)
+        if not state:
+            return
+        attrs = state.get("attributes", {})
+        if attrs.get("is_volume_muted"):
+            log.info(f"[android_tv] Device {entity_id} is muted, unmuting")
+            await ha_client.call_service(ha_url, ha_token, "media_player", "volume_mute", entity_id, {"is_volume_muted": False})
+            await __import__("asyncio").sleep(1)
+        vol = attrs.get("volume_level")
+        if vol is not None and vol < 0.2:
+            log.info(f"[android_tv] Volume too low ({vol}), boosting to 20%")
+            await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": 0.2})
+            await __import__("asyncio").sleep(1)
+    except Exception as e:
+        log.warning(f"[android_tv] Volume safeguard failed: {e}")
+
+
+async def play_video(ha_url: str, ha_token: str, entity_id: str, video_url: str, query: str) -> ExecutionResult:
+    """
+    Play video on Android TV by delegating to a Cast sibling.
+
+    Android TV's play_media with local stream URLs often fails (HA 500).
+    The proven approach: download video locally, serve via HTTP, then cast
+    to the Cast sibling (e.g., media_player.office_tv_chrome) which handles
+    video/mp4 streaming reliably.
+    """
+    from handlers import video as video_handler
+
+    log.info(f"[android_tv/video] Delegating video playback for {entity_id}")
+
+    # Power on Android TV
+    try:
+        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id)
+        await __import__("asyncio").sleep(2)
+    except Exception as e:
+        log.warning(f"[android_tv/video] turn_on failed: {e}")
+
+    # Find Cast sibling for actual video playback
+    cast_entity = await _find_cast_sibling(ha_url, ha_token, entity_id)
+    target_entity = cast_entity if cast_entity else entity_id
+
+    if cast_entity:
+        log.info(f"[android_tv/video] Delegating from Android TV {entity_id} to Cast {cast_entity}")
+        # Send nav_home to Android TV to ensure it's on the right screen
+        try:
+            await home(ha_url, ha_token, entity_id)
+            await __import__("asyncio").sleep(1)
+        except Exception:
+            pass
+        # Stop any active session on Cast target
+        try:
+            await ha_client.call_service(ha_url, ha_token, "media_player", "media_stop", cast_entity)
+            await __import__("asyncio").sleep(1)
+        except Exception:
+            pass
+    else:
+        log.warning(f"[android_tv/video] No Cast sibling found for {entity_id}, will attempt direct playback")
+
+    # Download video with progressive streaming
+    media_id, title = await video_handler.download_video_progressive(video_url)
+    if not media_id:
+        return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="android_tv_video")
+
+    from config import EXECUTION_EXTERNAL_HOST
+    if not EXECUTION_EXTERNAL_HOST:
+        return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="android_tv_video")
+
+    stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+    log.info(f"[android_tv/video] Streaming URL: {stream_url} -> {target_entity}")
+
+    # Volume safeguard on target
+    await _ensure_volume_safe(ha_url, ha_token, target_entity)
+
+    # Play video on target entity
+    result = await ha_client.call_service(
+        ha_url, ha_token, "media_player", "play_media", target_entity,
+        {"media_content_id": stream_url, "media_content_type": "video/mp4"},
+    )
+
+    if result.get("ok"):
+        return ExecutionResult(status="SUCCESS", message=f"Playing video '{title or query}' on {entity_id}.", service="android_tv_video")
+
+    return ExecutionResult(status="FAILURE", message=f"Failed to play video on {entity_id}.", service="android_tv_video")
