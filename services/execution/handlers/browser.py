@@ -21,16 +21,21 @@ def _is_testing() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
 
 async def _get_searxng_url() -> str:
-    """Resolve SearXNG URL from Identity service settings, falling back to env for tests."""
+    """Resolve SearXNG URL from Identity service global settings."""
     if _is_testing():
         return os.environ.get("SEARXNG_URL", "http://localhost:8080").rstrip("/")
     try:
-        from main import resolve_internal_user
-        creds = await resolve_internal_user("default")
-        if creds and creds.get("settings"):
-            url = creds["settings"].get("searxng_url", "").rstrip("/")
-            if url:
-                return url
+        from main import IDENTITY_SVC_URL, INTERNAL_SECRET
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/settings",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                settings = resp.json()
+                url = settings.get("searxng_url", "").rstrip("/")
+                if url:
+                    return url
     except Exception:
         pass
     return os.environ.get("SEARXNG_URL", "").rstrip("/") or "http://localhost:8080"

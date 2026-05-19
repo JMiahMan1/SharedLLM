@@ -31,14 +31,19 @@ def extract_video_url(query: str) -> str | None:
 
 
 async def _get_searxng_url() -> str | None:
-    """Resolve SearXNG URL from Identity service settings."""
+    """Resolve SearXNG URL from Identity service global settings."""
     try:
-        from main import resolve_internal_user
-        creds = await resolve_internal_user("default")
-        if creds and creds.get("settings"):
-            url = creds["settings"].get("searxng_url", "").rstrip("/")
-            if url:
-                return url
+        from main import IDENTITY_SVC_URL, INTERNAL_SECRET
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/settings",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                settings = resp.json()
+                url = settings.get("searxng_url", "").rstrip("/")
+                if url:
+                    return url
     except Exception:
         pass
     return None
