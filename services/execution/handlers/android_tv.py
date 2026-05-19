@@ -37,10 +37,30 @@ async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     if not state:
         return False
     attrs = state.get("attributes", {})
+    
+    # Signal 1: app_id contains Android indicators (when device is on)
     app_id = (attrs.get("app_id") or "").lower()
     android_indicators = ("com.google.android.", "com.google.tv.", "com.android.",
                           "mediashell", "backdrop", "tvlauncher", "android.tv")
-    return any(ind in app_id for ind in android_indicators)
+    if any(ind in app_id for ind in android_indicators):
+        return True
+    
+    # Signal 2: device_class == "tv" without Cast/MA attributes
+    # (Cast devices don't have device_class=tv, MA wrappers have device_class=speaker)
+    if attrs.get("device_class") == "tv":
+        if not attrs.get("mass_player_type") and "cast" not in entity_id.lower():
+            return True
+    
+    # Signal 3: corresponding remote entity exists (androidtv_remote creates both)
+    remote_entity = entity_id.replace("media_player.", "remote.")
+    try:
+        remote_state = await ha_client.get_state(ha_url, ha_token, remote_entity)
+        if remote_state and remote_state.get("state") in ("on", "off"):
+            return True
+    except Exception:
+        pass
+    
+    return False
 
 
 async def send_command(ha_url: str, ha_token: str, entity_id: str, command: str) -> ExecutionResult:
