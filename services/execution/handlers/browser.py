@@ -6,7 +6,6 @@ import html2text
 import httpx
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import SEARXNG_URL as _SEARXNG_URL
 from urllib.parse import urlencode
 from playwright.async_api import async_playwright
 from typing import Optional
@@ -21,11 +20,20 @@ log = logging.getLogger("execution.browser")
 def _is_testing() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
 
-if not _SEARXNG_URL and not _is_testing():
-    log.critical("FATAL: SEARXNG_URL environment variable is not set. Refusing to start.")
-    sys.exit(1)
-
-SEARXNG_URL = (_SEARXNG_URL or "http://localhost:8080").rstrip("/")
+async def _get_searxng_url() -> str:
+    """Resolve SearXNG URL from Identity service settings, falling back to env for tests."""
+    if _is_testing():
+        return os.environ.get("SEARXNG_URL", "http://localhost:8080").rstrip("/")
+    try:
+        from main import resolve_internal_user
+        creds = await resolve_internal_user("default")
+        if creds and creds.get("settings"):
+            url = creds["settings"].get("searxng_url", "").rstrip("/")
+            if url:
+                return url
+    except Exception:
+        pass
+    return os.environ.get("SEARXNG_URL", "").rstrip("/") or "http://localhost:8080"
 
 DEFAULT_ENGINES = "google,bing,duckduckgo"
 DEFAULT_LANGUAGE = "en"
@@ -54,6 +62,7 @@ async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
 
 async def _searxng_json_search(req: WebSearchRequest) -> Optional[ExecutionResult]:
     """Primary path: SearXNG native JSON API."""
+    searxng_url = await _get_searxng_url()
     params = {
         "q": req.query,
         "format": "json",
@@ -70,7 +79,7 @@ async def _searxng_json_search(req: WebSearchRequest) -> Optional[ExecutionResul
     if req.pageno:
         params["pageno"] = req.pageno
 
-    search_url = f"{SEARXNG_URL}/search?{urlencode(params)}"
+    search_url = f"{searxng_url}/search?{urlencode(params)}"
     log.info(f"[browser/search] SearXNG JSON API: {search_url}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -117,13 +126,14 @@ async def _searxng_json_search(req: WebSearchRequest) -> Optional[ExecutionResul
 
 async def _playwright_fallback(req: WebSearchRequest) -> ExecutionResult:
     """Fallback: Playwright DOM scraping when JSON API is unavailable."""
+    searxng_url = await _get_searxng_url()
     log.info(f"[browser/search] Playwright fallback for query='{req.query}'")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
-        search_url = f"{SEARXNG_URL}/search?q={req.query}"
+        search_url = f"{searxng_url}/search?q={req.query}"
         await page.goto(search_url, wait_until="networkidle")
 
         results = await page.evaluate("""
