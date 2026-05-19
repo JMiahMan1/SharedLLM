@@ -147,8 +147,6 @@ services:
     container_name: sharedllm_gateway
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
-    env_file:
-      - .env
     dns:
       - "172.26.0.10"
       - "127.0.0.11"
