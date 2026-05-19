@@ -263,7 +263,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             try:
                 info = json.loads(info_out.decode())
                 if info.get("is_live") or info.get("was_live"):
-                    log.warning(f"[video.roku] Skipping livestream: {video_url}")
+                    log.warning(f"[video] Skipping livestream: {video_url}")
                     return None, None
                 title = info.get("title", video_url)
             except json.JSONDecodeError:
@@ -284,25 +284,25 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             if os.path.exists(tmp_path):
                 current_size = os.path.getsize(tmp_path)
                 if current_size >= threshold:
-                    log.info(f"[video.roku] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB — returning control to caller")
+                    log.info(f"[video] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB — returning control to caller")
                     asyncio.create_task(_wait_for_download(proc, tmp_path, media_id))
                     return media_id, title
         
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
-            log.error(f"[video.roku] yt-dlp download failed: {stderr.decode()[:300]}")
+            log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
             return None, None
         
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
-            log.error(f"[video.roku] Download produced empty file")
+            log.error(f"[video] Download produced empty file")
             return None, None
         
         file_size = os.path.getsize(tmp_path)
-        log.info(f"[video.roku] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
+        log.info(f"[video] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
         return media_id, title
         
     except Exception as e:
-        log.error(f"[video.roku] Download failed: {e}", exc_info=True)
+        log.error(f"[video] Download failed: {e}", exc_info=True)
         try:
             os.remove(tmp_path)
         except:
@@ -315,12 +315,12 @@ async def _wait_for_download(proc, tmp_path: str, media_id: str):
     try:
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
-            log.error(f"[video.roku] Background download failed for {media_id}: {stderr.decode()[:200]}")
+            log.error(f"[video] Background download failed for {media_id}: {stderr.decode()[:200]}")
         else:
             file_size = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
-            log.info(f"[video.roku] Background download complete for {media_id} ({file_size / 1024 / 1024:.1f} MB)")
+            log.info(f"[video] Background download complete for {media_id} ({file_size / 1024 / 1024:.1f} MB)")
     except Exception as e:
-        log.error(f"[video.roku] Background download monitor failed: {e}")
+        log.error(f"[video] Background download monitor failed: {e}")
 
 
 async def download_video_for_roku(video_url: str) -> tuple[str | None, str | None]:
@@ -351,7 +351,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
             try:
                 info = json.loads(info_out.decode())
                 if info.get("is_live") or info.get("was_live"):
-                    log.warning(f"[video.roku] Skipping livestream: {video_url}")
+                    log.warning(f"[video] Skipping livestream: {video_url}")
                     return None, None
                 title = info.get("title", video_url)
             except json.JSONDecodeError:
@@ -371,20 +371,20 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
         stdout, stderr = await proc.communicate()
         
         if proc.returncode != 0:
-            log.error(f"[video.roku] yt-dlp download failed: {stderr.decode()[:300]}")
+            log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
             return None, None
         
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
-            log.error(f"[video.roku] Download produced empty file")
+            log.error(f"[video] Download produced empty file")
             return None, None
         
         file_size = os.path.getsize(tmp_path)
-        log.info(f"[video.roku] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
+        log.info(f"[video] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
         
         return media_id, title
         
     except Exception as e:
-        log.error(f"[video.roku] Download failed: {e}", exc_info=True)
+        log.error(f"[video] Download failed: {e}", exc_info=True)
         try:
             os.remove(tmp_path)
         except:
