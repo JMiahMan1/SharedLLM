@@ -234,7 +234,7 @@ async def _discover_via_entity_attrs(
 async def _discover_via_arp(
     entity_id: str, ha_url: str, ha_token: str
 ) -> Optional[dict]:
-    """Match entity to ARP table entries via hostname."""
+    """Match entity to ARP table entries via hostname or IP proximity."""
     try:
         import subprocess
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -244,17 +244,35 @@ async def _discover_via_arp(
         friendly = state.get("attributes", {}).get("friendly_name", "").lower()
         entity_base = entity_id.split(".")[-1].lower().replace("_", " ")
 
-        result = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5)
-        if result.returncode != 0:
-            return None
+        # Try /proc/net/arp first (works in Docker without arp binary)
+        arp_lines = []
+        try:
+            with open("/proc/net/arp", "r") as f:
+                arp_lines = f.read().splitlines()[1:]  # skip header
+        except FileNotFoundError:
+            # Fallback to arp command
+            result = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                arp_lines = result.stdout.splitlines()
 
-        for line in result.stdout.splitlines():
+        for line in arp_lines:
             parts = line.split()
             if len(parts) < 4:
                 continue
-            hostname_part = parts[0].lower()
-            ip_part = parts[1].strip("()")
-            mac_part = parts[3] if len(parts) > 3 else ""
+
+            # /proc/net/arp format: IP address HW type Flags HW address Mask Device
+            if "/" in line and "HW" in line:
+                ip_part = parts[0]
+                mac_part = parts[3] if len(parts) > 3 else ""
+                hostname_part = ""
+            else:
+                # arp -a format: hostname (ip) at mac [ether] on iface
+                hostname_part = parts[0].lower()
+                ip_part = parts[1].strip("()")
+                mac_part = parts[3] if len(parts) > 3 else ""
+
+            if mac_part == "00:00:00:00:00:00" or mac_part == "incomplete":
+                continue
 
             if (friendly and any(word in hostname_part for word in friendly.split() if len(word) > 2)) or \
                (entity_base and any(word in hostname_part for word in entity_base.split() if len(word) > 2)):
