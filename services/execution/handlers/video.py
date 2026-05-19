@@ -65,12 +65,36 @@ async def _get_searxng_url() -> str | None:
 
 
 async def search_youtube(query: str) -> str | None:
-    """Search YouTube via SearXNG HTML search API, with Playwright fallback on empty results."""
+    """Search YouTube via yt-dlp ytsearch: (most reliable), with SearXNG/Playwright fallback."""
+    try:
+        import yt_dlp
+        def _yt_search():
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": True,
+                "playlistend": 1,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+                if info and info.get("entries"):
+                    entry = info["entries"][0]
+                    url = entry.get("url") or entry.get("webpage_url")
+                    if url:
+                        return url
+            return None
+        result = await asyncio.get_running_loop().run_in_executor(None, _yt_search)
+        if result:
+            log.info(f"[video] yt-dlp ytsearch '{query}' -> {result}")
+            return result
+    except Exception as e:
+        log.warning(f"[video] yt-dlp ytsearch failed: {e}")
+
     searxng_url = await _get_searxng_url()
     if searxng_url:
         try:
             params = urllib.parse.urlencode({
-                "q": f"site:youtube.com/watch {query}",
+                "q": f"{query} site:youtube.com",
                 "format": "html",
                 "categories": "videos",
                 "engines": "youtube",
@@ -83,26 +107,6 @@ async def search_youtube(query: str) -> str | None:
                 html = resp.text
 
             youtube_pattern = r'href="(https?://(?:www\.)?youtube\.com/watch\?[^"]+)"'
-            matches = re.findall(youtube_pattern, html)
-            for url in matches:
-                if "v=" in url:
-                    log.info(f"[video] YouTube search '{query}' -> {url}")
-                    return url
-
-            # No results from SearXNG, try without site: restriction
-            log.info(f"[video] No results with site: restriction, retrying without")
-            params = urllib.parse.urlencode({
-                "q": query,
-                "format": "html",
-                "categories": "videos",
-                "engines": "youtube",
-            })
-            search_url = f"{searxng_url}/search?{params}"
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(search_url)
-                resp.raise_for_status()
-                html = resp.text
-
             matches = re.findall(youtube_pattern, html)
             for url in matches:
                 if "v=" in url:
