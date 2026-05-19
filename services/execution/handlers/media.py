@@ -236,7 +236,14 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             ctx.ha_url, ctx.ha_token, entity_id, stream_url, title or query,
         )
 
-    # Cast/Android/WebOS/Samsung: stop active session, ensure TV is on, then play
+    # Android TV: delegate video to Cast sibling (non-MA) for reliable playback
+    from handlers import android_tv as android_tv_handler
+    is_android_tv = await android_tv_handler.is_android_tv(ctx.ha_url, ctx.ha_token, entity_id)
+    if is_android_tv:
+        log.info(f"[media.video] Android TV detected ({entity_id}), delegating to android_tv handler")
+        return await android_tv_handler.play_video(ctx.ha_url, ctx.ha_token, entity_id, video_url, query)
+
+    # Cast/WebOS/Samsung: stop active session, ensure TV is on, then play
     # Note: handle_media_play already handles power-on, so we skip redundant turn_on here
     # Start download in parallel with HA setup to save time
     download_task = asyncio.create_task(video_handler.download_video_progressive(video_url))
@@ -254,7 +261,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     if state:
         attrs = state.get("attributes", {})
         if attrs.get("is_volume_muted"):
-            log.info(f"[media.video] Device is muted, unmuting")
+            log.info("[media.video] Device is muted, unmuting")
             await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_mute", entity_id, {"is_volume_muted": False})
             await asyncio.sleep(1)
         vol = attrs.get("volume_level")
