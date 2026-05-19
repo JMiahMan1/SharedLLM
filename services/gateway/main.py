@@ -1930,7 +1930,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     if is_fast_path:
         media_entities = None
         if intent in ["play_media", "pause_media"]:
-            media_entities = await fetch_ha_entities(creds)
+            media_entities = await fetch_ha_entities(creds.model_dump())
 
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
