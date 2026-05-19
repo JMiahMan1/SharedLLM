@@ -315,6 +315,14 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
             if word in eid_base:
                 score += 2
         
+        # Bonus for device_class match (prefer actual TVs over speakers when searching for TV)
+        attrs = state.get("attributes", {})
+        device_class = attrs.get("device_class", "")
+        if device_class == "tv":
+            score += 200
+        elif device_class == "speaker":
+            score += 50
+        
         # Penalty for numeric suffixes (e.g., "office_tv_3" when searching "office tv")
         if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_"):
             if any(c.isdigit() for c in eid_base.split("_")[-1:]):
