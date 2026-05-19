@@ -8,7 +8,7 @@ import httpx
 log = logging.getLogger("execution.ha_client")
 
 import re
-_TIMEOUT = httpx.Timeout(45.0, connect=5.0)
+_TIMEOUT = httpx.Timeout(45.0, connect=15.0)
 
 def authorize_action(user_context: dict, domain: str, action: str) -> bool:
     """
