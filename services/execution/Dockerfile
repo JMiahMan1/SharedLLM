@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep unz
 RUN wget -q https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip -O /tmp/deno.zip && unzip -o /tmp/deno.zip -d /usr/local/bin && chmod +x /usr/local/bin/deno && rm /tmp/deno.zip
 COPY services/execution/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+RUN playwright install --with-deps chromium
 COPY services/execution/ ./
 COPY services/config.py ./config.py
 COPY services/tests/ ./tests/

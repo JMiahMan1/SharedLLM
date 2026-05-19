@@ -6,6 +6,8 @@ import json
 import re
 import os
 import sys
+import httpx
+import urllib.parse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
@@ -83,16 +85,18 @@ async def search_youtube(query: str) -> str | None:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
             page = await browser.new_page()
-            search_q = urllib.parse.quote(f"site:youtube.com/watch {query}")
-            fallback_url = f"{searxng_url}/search?q={search_q}&format=html&categories=videos&engines=youtube"
-            await page.goto(fallback_url, timeout=15000, wait_until="networkidle")
-            links = await page.query_selector_all("a.result__title, .result a")
+            await page.goto(f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}", timeout=15000, wait_until="domcontentloaded")
+            await page.wait_for_selector("a#video-title", timeout=10000)
+            links = await page.query_selector_all("a#video-title")
             for link in links:
                 href = await link.get_attribute("href")
-                if href and ("youtube.com/watch" in href or "youtu.be/" in href):
-                    log.info(f"[video] YouTube search (Playwright) '{query}' -> {href}")
-                    await browser.close()
-                    return href
+                if href:
+                    if href.startswith("/watch"):
+                        await browser.close()
+                        return f"https://www.youtube.com{href}"
+                    elif href.startswith("http"):
+                        await browser.close()
+                        return href
             await browser.close()
     except Exception as e:
         log.error(f"[video] Playwright YouTube search failed: {e}")
