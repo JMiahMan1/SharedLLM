@@ -54,27 +54,26 @@ async def _get_searxng_url() -> str | None:
 
 
 async def search_youtube(query: str) -> str | None:
-    """Search YouTube via SearXNG with Playwright fallback."""
+    """Search YouTube via SearXNG (HTML) with Playwright fallback."""
     searxng_url = await _get_searxng_url()
     if searxng_url:
         try:
-            import urllib.parse
             params = urllib.parse.urlencode({
                 "q": f"site:youtube.com/watch {query}",
-                "format": "json",
+                "format": "html",
                 "categories": "videos",
                 "engines": "youtube",
             })
             search_url = f"{searxng_url}/search?{params}"
-            log.info(f"[video] SearXNG YouTube search: {search_url}")
+            log.info(f"[video] SearXNG YouTube search (HTML): {search_url}")
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(search_url)
                 resp.raise_for_status()
-                data = resp.json()
-            results = data.get("results", [])
-            for r in results:
-                url = r.get("url", "")
-                if "youtube.com/watch" in url or "youtu.be/" in url:
+                html = resp.text
+            youtube_pattern = r'href="(https?://(?:www\.)?youtube\.com/watch\?[^"]+)"'
+            matches = re.findall(youtube_pattern, html)
+            for url in matches:
+                if "v=" in url:
                     log.info(f"[video] YouTube search '{query}' -> {url}")
                     return url
         except Exception as e:
