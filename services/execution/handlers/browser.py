@@ -1,6 +1,7 @@
 # services/execution/handlers/browser.py
 import logging
 import os
+import re
 import sys
 import html2text
 import httpx
@@ -49,16 +50,16 @@ DEFAULT_SAFESAFERCH = 0
 
 async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
     """
-    Performs a web search via SearXNG JSON API with Playwright fallback.
+    Performs a web search via SearXNG HTML with Playwright fallback.
     """
     log.info(f"[browser/search] query='{req.query}' category='{req.category or DEFAULT_CATEGORY}'")
 
     try:
-        result = await _searxng_json_search(req)
+        result = await _searxng_html_search(req)
         if result:
             return result
     except Exception as e:
-        log.warning(f"[browser/search] SearXNG JSON API failed, falling back to Playwright: {e}")
+        log.warning(f"[browser/search] SearXNG HTML API failed, falling back to Playwright: {e}")
 
     try:
         return await _playwright_fallback(req)
@@ -67,67 +68,52 @@ async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=f"Web search failed: {str(e)}", service="web_search")
 
 
-async def _searxng_json_search(req: WebSearchRequest) -> Optional[ExecutionResult]:
-    """Primary path: SearXNG native JSON API."""
+async def _searxng_html_search(req: WebSearchRequest) -> Optional[ExecutionResult]:
+    """Primary path: SearXNG HTML response parsed with regex."""
     searxng_url = await _get_searxng_url()
     params = {
         "q": req.query,
-        "format": "json",
+        "format": "html",
         "categories": req.category or DEFAULT_CATEGORY,
         "language": req.language or DEFAULT_LANGUAGE,
         "safesearch": req.safesearch if req.safesearch is not None else DEFAULT_SAFESAFERCH,
     }
     if req.engines:
         params["engines"] = req.engines
-    else:
-        params["engines"] = DEFAULT_ENGINES
-    if req.time_range:
-        params["time_range"] = req.time_range
-    if req.pageno:
-        params["pageno"] = req.pageno
 
-    search_url = f"{searxng_url}/search?{urlencode(params)}"
-    log.info(f"[browser/search] SearXNG JSON API: {search_url}")
+    url = f"{searxng_url}/search?{urlencode(params)}"
+    log.info(f"[browser/search] SearXNG HTML search: {url}")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(search_url)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(url)
         resp.raise_for_status()
-        data = resp.json()
+        html = resp.text
 
-    results = data.get("results", [])
+    results = []
+    link_pattern = r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
+    for match in re.finditer(link_pattern, html, re.DOTALL):
+        url = match.group(1)
+        title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+        results.append({"title": title, "url": url})
+
     if not results:
-        return ExecutionResult(
-            status="SUCCESS",
-            message="Search completed but no results were found.",
-            service="web_search",
-            detail={"results": [], "source": "searxng_json"}
-        )
+        title_pattern = r'<a[^>]*href="(https?://[^"]+)"[^>]*class="result__title"[^>]*>(.*?)</a>'
+        for match in re.finditer(title_pattern, html, re.DOTALL):
+            url = match.group(1)
+            title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+            results.append({"title": title, "url": url})
 
-    structured = []
-    for r in results[:10]:
-        structured.append({
-            "title": r.get("title", "No Title"),
-            "url": r.get("url", ""),
-            "snippet": r.get("content", ""),
-            "engine": r.get("engine", "unknown"),
-            "score": r.get("score", 0),
-        })
+    if not results:
+        return None
 
-    formatted = "\n\n".join([
-        f"### {r['title']}\nURL: {r['url']}\n{r['snippet']}\nSource: {r['engine']}"
-        for r in structured if r['url']
-    ])
+    max_results = req.max_results or 5
+    results = results[:max_results]
 
+    summary = "\n".join([f"- {r['title']}: {r['url']}" for r in results])
     return ExecutionResult(
         status="SUCCESS",
-        message=f"Found {len(structured)} search results via SearXNG JSON API.",
+        message=f"Search results for '{req.query}':\n{summary}",
         service="web_search",
-        detail={
-            "results": structured,
-            "formatted_content": formatted,
-            "source": "searxng_json",
-            "total_results": data.get("number_of_results", len(results)),
-        }
     )
 
 
