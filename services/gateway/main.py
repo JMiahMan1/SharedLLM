@@ -1934,12 +1934,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
-            if is_likely_video_request(query):
-                resolved_entity = resolve_video_target(query, media_entities or [])
-                log.info(f"[FastPath] BYPASSED for video-like play request; resolved target='{resolved_entity}' and deferring to full tool path")
-                is_fast_path = False
-            else:
-                resolved_entity = resolve_media_target(query, media_entities or [])
+            resolved_entity = resolve_media_target(query, media_entities or [])
         elif intent == "pause_media":
             resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [])
         else:
@@ -1983,11 +1978,13 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 svc_base = STORAGE_SVC
             elif intent == "play_media":
                 media_query, _ = extract_media_request(query)
+                media_type = "video" if is_likely_video_request(query) else None
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "entity_id": resolved_entity or "auto",
                     "query": media_query or query,
                     "media_content_type": "artist",
+                    "media_type": media_type,
                 }
                 svc_base = EXECUTION_SVC
             elif intent in ["pause_media", "media_transport"]:
