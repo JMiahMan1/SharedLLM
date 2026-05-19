@@ -80,8 +80,9 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
     entity_lower = entity_id.lower()
     friendly_lower = friendly_name.lower()
 
-    # Get webostv device model via WebSocket device registry
+    # Get device registry via WebSocket to find webostv device and its model
     webos_model = ""
+    homekit_entry_ids = []
     ws_url = ha_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/websocket"
     try:
         async with websockets.connect(ws_url, ssl=True) as ws:
@@ -96,32 +97,35 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
                         for dev in data.get("result", []):
                             dev_name = (dev.get("name") or "").lower()
                             dev_name_by_user = (dev.get("name_by_user") or "").lower()
+                            dev_model = (dev.get("model") or "").lower()
+                            
+                            # Check if this is our webostv device
                             for identifier in dev.get("identifiers", []):
                                 if identifier and identifier[0] == "webostv":
                                     if (any(part in dev_name for part in friendly_lower.split() if len(part) > 2) or
                                         any(part in dev_name_by_user for part in friendly_lower.split() if len(part) > 2) or
                                         any(part in dev_name for part in entity_lower.split(".") if len(part) > 2)):
-                                        webos_model = (dev.get("model") or "").lower()
-                                        break
-                            if webos_model:
-                                break
+                                        webos_model = dev_model
+                                    break
+                            
+                            # Collect homekit_controller device entry IDs that share the same model
+                            for identifier in dev.get("identifiers", []):
+                                if identifier and identifier[0].startswith("homekit_controller"):
+                                    if webos_model and dev_model == webos_model:
+                                        for ce_id in dev.get("config_entries", []):
+                                            homekit_entry_ids.append(ce_id)
+                                    break
                     break
     except Exception as e:
         log.warning(f"[webos] Device registry WebSocket failed: {e}")
 
-    # Get all config entries and check homekit_controller diagnostics
-    async with httpx.AsyncClient(verify=False, timeout=10) as client:
-        entries_resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
-        if entries_resp.status_code != 200:
-            return {}
+    if not webos_model:
+        return {}
 
-        for entry in entries_resp.json():
-            if entry.get("domain") != "homekit_controller":
-                continue
-            entry_id = entry.get("entry_id")
-            if not entry_id:
-                continue
-            diag_resp = await client.get(f"{ha_url}/api/diagnostics/config_entry/{entry_id}", headers=headers)
+    # Get HomeKit diagnostics for matching entry IDs
+    async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        for hk_entry_id in homekit_entry_ids:
+            diag_resp = await client.get(f"{ha_url}/api/diagnostics/config_entry/{hk_entry_id}", headers=headers)
             if diag_resp.status_code != 200:
                 continue
             diag_data = diag_resp.json()
@@ -129,23 +133,8 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
             accessory_data = config_entry.get("data", {})
             accessory_ips = accessory_data.get("AccessoryIPs", [])
             pairing_id = accessory_data.get("AccessoryPairingID", "")
-            title = (config_entry.get("title") or "").lower()
 
-            if not accessory_ips:
-                continue
-
-            # Match by model number (most reliable)
-            if webos_model and webos_model in title:
-                return {
-                    "ip": accessory_ips[0],
-                    "mac": pairing_id.replace(":", ""),
-                    "source": "homekit_diagnostics",
-                }
-
-            # Fallback: match by title words (skip short words)
-            title_words = [w for w in title.split() if len(w) > 2]
-            friendly_words = [w for w in friendly_lower.split() if len(w) > 2]
-            if any(w in title for w in friendly_words) or any(w in title for w in entity_lower.split(".") if len(w) > 2):
+            if accessory_ips:
                 return {
                     "ip": accessory_ips[0],
                     "mac": pairing_id.replace(":", ""),
