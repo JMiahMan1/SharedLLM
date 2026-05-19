@@ -71,6 +71,10 @@ async def discover_device(
     if result:
         return result
 
+    result = await _discover_via_snmp(entity_id, ha_url, ha_token)
+    if result:
+        return result
+
     result = await _discover_via_mdns(entity_id, ha_url, ha_token)
     if result:
         return result
@@ -409,6 +413,74 @@ async def _discover_via_arp(
                         pass
     except Exception as e:
         log.warning(f"[discovery] ARP lookup failed: {e}")
+    return None
+
+
+async def _discover_via_snmp(
+    entity_id: str, ha_url: str, ha_token: str, router_ip: str = "192.168.2.1", community: str = "public"
+) -> Optional[dict]:
+    """Get MAC/IP from router ARP table via SNMP walk."""
+    try:
+        import subprocess
+        state = await ha_client.get_state(ha_url, ha_token, entity_id)
+        if not state:
+            return None
+
+        friendly = state.get("attributes", {}).get("friendly_name", "").lower()
+        entity_base = entity_id.split(".")[-1].lower().replace("_", " ")
+
+        # SNMP OID: ipNetToMediaPhysAddress (1.3.6.1.2.1.4.22.1.2)
+        # Returns: ifIndex.IP.OCTET = MAC address
+        result = subprocess.run(
+            ["snmpwalk", "-v2c", "-c", community, router_ip, "1.3.6.1.2.1.4.22.1.2"],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode != 0:
+            return None
+
+        snmp_entries = []
+        for line in result.stdout.splitlines():
+            # Format: iso.3.6.1.2.1.4.22.1.2.<ifIndex>.<ip_octets> = Hex-STRING: <mac_bytes>
+            parts = line.split()
+            if len(parts) >= 4 and parts[-2] == "=":
+                oid_part = parts[0]
+                mac_bytes = parts[-1]
+                # Extract IP from OID (last 4 numbers)
+                oid_nums = oid_part.replace("iso.3.6.1.2.1.4.22.1.2.", "").split(".")
+                if len(oid_nums) >= 5:
+                    ip_part = ".".join(oid_nums[-4:])
+                    # Parse MAC from hex string
+                    mac_hex = mac_bytes.replace(":", "")
+                    if len(mac_hex) == 12:
+                        mac_part = ":".join(mac_hex[i:i+2] for i in range(0, 12, 2))
+                        snmp_entries.append((ip_part, mac_part))
+
+        if not snmp_entries:
+            return None
+
+        # Match by friendly name or entity name in hostname (via reverse DNS)
+        import socket
+        for ip, mac in snmp_entries:
+            hostname = ""
+            try:
+                hostname = socket.gethostbyaddr(ip)[0].lower()
+            except Exception:
+                pass
+            searchable = f"{hostname} {ip} {mac}".lower()
+            if (any(word in searchable for word in friendly.split() if len(word) > 2) or
+                any(word in searchable for word in entity_base.split() if len(word) > 2)):
+                await device_registry.set_device(
+                    entity_id,
+                    ip=ip,
+                    mac=mac,
+                    hostname=hostname,
+                    friendly_name=state["attributes"].get("friendly_name", ""),
+                    discovery_method="snmp",
+                )
+                log.info(f"[discovery] Found {entity_id} via SNMP: ip={ip} mac={mac}")
+                return await device_registry.get_device(entity_id)
+    except Exception as e:
+        log.warning(f"[discovery] SNMP lookup failed: {e}")
     return None
 
 
