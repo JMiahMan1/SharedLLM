@@ -1387,13 +1387,11 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
           score += 10
 
       if media_type == "video":
-          # Prefer TV/Chromecast/AndroidTV for video
-          if device_class == "tv":
-              score += 200
+          # Prefer Chromecast/Cast devices for video (proven to work with play_media + local streams)
           if "chromecast" in source or "cast" in eid:
+              score += 200
+          if device_class == "tv":
               score += 150
-          if "android" in source or "android" in friendly:
-              score += 100
           if "roku" in eid or "roku" in friendly:
               score += 80
           # Deprioritize speakers/MA queues for video
