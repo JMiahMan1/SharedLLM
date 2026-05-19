@@ -243,7 +243,10 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
 
     # Stop any active session first (e.g., Music Assistant) to prevent conflicts
     log.info(f"[media.video] Stopping active session on {entity_id} before video playback")
-    await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "media_stop", entity_id)
+    try:
+        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "media_stop", entity_id)
+    except Exception as e:
+        log.warning(f"[media.video] media_stop failed (device may not be playing): {e}")
     await asyncio.sleep(1)
 
     # Volume safeguard: unmute and set to safe level
