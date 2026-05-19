@@ -71,6 +71,10 @@ async def discover_device(
     if result:
         return result
 
+    result = await _discover_via_arp_scan(entity_id, ha_url, ha_token)
+    if result:
+        return result
+
     result = await _discover_via_snmp(entity_id, ha_url, ha_token)
     if result:
         return result
@@ -413,6 +417,76 @@ async def _discover_via_arp(
                         pass
     except Exception as e:
         log.warning(f"[discovery] ARP lookup failed: {e}")
+    return None
+
+
+async def _discover_via_arp_scan(
+    entity_id: str, ha_url: str, ha_token: str
+) -> Optional[dict]:
+    """Scan subnets with arp-scan, probe for device ports, match by device info."""
+    try:
+        import subprocess
+        import httpx
+        state = await ha_client.get_state(ha_url, ha_token, entity_id)
+        if not state:
+            return None
+
+        friendly = state.get("attributes", {}).get("friendly_name", "").lower()
+        entity_base = entity_id.split(".")[-1].lower().replace("_", " ")
+
+        # Scan common subnets
+        subnets = ["192.168.2.0/24", "192.168.1.0/24"]
+        found_devices = []
+
+        for subnet in subnets:
+            try:
+                result = subprocess.run(
+                    ["arp-scan", "--localnet", "--interface=wlo1", f"--net={subnet}"],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.splitlines()[1:]:  # skip header
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            ip_part = parts[0]
+                            mac_part = parts[1]
+                            vendor = " ".join(parts[2:]).lower() if len(parts) > 2 else ""
+                            if mac_part != "00:00:00:00:00:00":
+                                found_devices.append((ip_part, mac_part, vendor))
+            except subprocess.TimeoutExpired:
+                continue
+            except Exception:
+                continue
+
+        if not found_devices:
+            return None
+
+        # Probe found IPs for WebOS ports
+        webos_ports = [3000, 7676, 1300, 8080]
+        async with httpx.AsyncClient(verify=False, timeout=2) as client:
+            for ip, mac, vendor in found_devices:
+                for port in webos_ports:
+                    try:
+                        resp = await client.get(f"http://{ip}:{port}", timeout=1)
+                        if resp.status_code == 200:
+                            body = resp.text.lower()
+                            searchable = f"{body} {ip} {mac} {vendor}".lower()
+                            if any(word in searchable for word in friendly.split() if len(word) > 2) or \
+                               any(word in searchable for word in entity_base.split() if len(word) > 2) or \
+                               "lg" in searchable or "webos" in searchable or "living" in searchable:
+                                await device_registry.set_device(
+                                    entity_id,
+                                    ip=ip,
+                                    mac=mac,
+                                    friendly_name=state["attributes"].get("friendly_name", ""),
+                                    discovery_method="arp_scan",
+                                )
+                                log.info(f"[discovery] Found {entity_id} via arp-scan: ip={ip} mac={mac}")
+                                return await device_registry.get_device(entity_id)
+                    except Exception:
+                        pass
+    except Exception as e:
+        log.warning(f"[discovery] arp-scan lookup failed: {e}")
     return None
 
 
