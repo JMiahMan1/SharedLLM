@@ -79,31 +79,65 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
     friendly_lower = friendly_name.lower()
 
     async with httpx.AsyncClient(verify=False, timeout=10) as client:
-        # Try to find matching homekit_controller entry
-        entries_resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
-        if entries_resp.status_code == 200:
-            for entry in entries_resp.json():
-                if entry.get("domain") != "homekit_controller":
-                    continue
-                entry_id = entry.get("entry_id")
-                if not entry_id:
-                    continue
-                diag_resp = await client.get(f"{ha_url}/api/diagnostics/config_entry/{entry_id}", headers=headers)
-                if diag_resp.status_code != 200:
-                    continue
-                diag_data = diag_resp.json()
-                config_entry = diag_data.get("data", {}).get("config-entry", {})
-                accessory_data = config_entry.get("data", {})
-                accessory_ips = accessory_data.get("AccessoryIPs", [])
-                pairing_id = accessory_data.get("AccessoryPairingID", "")
-                title = (config_entry.get("title") or "").lower()
+        # Get device registry to find webostv device model
+        dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
+        webos_model = ""
+        if dev_resp.status_code == 200:
+            for dev in dev_resp.json():
+                dev_name = (dev.get("name") or "").lower()
+                dev_name_by_user = (dev.get("name_by_user") or "").lower()
+                for identifier in dev.get("identifiers", []):
+                    if identifier and identifier[0] == "webostv":
+                        # Check if this device matches our entity
+                        if (any(part in dev_name for part in friendly_lower.split() if len(part) > 2) or
+                            any(part in dev_name_by_user for part in friendly_lower.split() if len(part) > 2) or
+                            any(part in dev_name for part in entity_lower.split(".") if len(part) > 2)):
+                            webos_model = (dev.get("model") or "").lower()
+                            break
+                if webos_model:
+                    break
 
-                if accessory_ips and any(part in title for part in friendly_lower.split() if len(part) > 2):
-                    return {
-                        "ip": accessory_ips[0],
-                        "mac": pairing_id.replace(":", ""),
-                        "source": "homekit_diagnostics",
-                    }
+        # Get all config entries
+        entries_resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
+        if entries_resp.status_code != 200:
+            return {}
+
+        for entry in entries_resp.json():
+            if entry.get("domain") != "homekit_controller":
+                continue
+            entry_id = entry.get("entry_id")
+            if not entry_id:
+                continue
+            diag_resp = await client.get(f"{ha_url}/api/diagnostics/config_entry/{entry_id}", headers=headers)
+            if diag_resp.status_code != 200:
+                continue
+            diag_data = diag_resp.json()
+            config_entry = diag_data.get("data", {}).get("config-entry", {})
+            accessory_data = config_entry.get("data", {})
+            accessory_ips = accessory_data.get("AccessoryIPs", [])
+            pairing_id = accessory_data.get("AccessoryPairingID", "")
+            title = (config_entry.get("title") or "").lower()
+
+            if not accessory_ips:
+                continue
+
+            # Match by model number (most reliable)
+            if webos_model and webos_model in title:
+                return {
+                    "ip": accessory_ips[0],
+                    "mac": pairing_id.replace(":", ""),
+                    "source": "homekit_diagnostics",
+                }
+
+            # Fallback: match by title words (skip short words)
+            title_words = [w for w in title.split() if len(w) > 2]
+            friendly_words = [w for w in friendly_lower.split() if len(w) > 2]
+            if any(w in title for w in friendly_words) or any(w in title for w in entity_lower.split(".") if len(w) > 2):
+                return {
+                    "ip": accessory_ips[0],
+                    "mac": pairing_id.replace(":", ""),
+                    "source": "homekit_diagnostics",
+                }
     return {}
 
 
