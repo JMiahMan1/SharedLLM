@@ -32,10 +32,12 @@ async def _get_searxng_url() -> str:
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status_code == 200:
-                settings = resp.json()
-                url = settings.get("searxng_url", "").rstrip("/")
-                if url:
-                    return url
+                settings_list = resp.json()
+                for item in settings_list:
+                    if item.get("key") == "searxng_url":
+                        url = item.get("value", "").rstrip("/")
+                        if url:
+                            return url
     except Exception:
         pass
     return os.environ.get("SEARXNG_URL", "").rstrip("/") or "http://localhost:8080"
