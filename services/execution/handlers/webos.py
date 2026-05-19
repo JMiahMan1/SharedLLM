@@ -8,6 +8,8 @@ Services:
   - webostv.button: Simulate remote button press
 """
 import logging
+import socket
+import struct
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -33,6 +35,21 @@ WEBOS_COMMANDS = {
 }
 
 
+def _send_wol(mac: str, ip: str = "255.255.255.255", port: int = 9) -> bool:
+    """Send Wake-on-LAN magic packet."""
+    if len(mac) == 17:
+        mac = mac.replace(":", "").replace("-", "")
+    mac_bytes = bytes.fromhex(mac)
+    if len(mac_bytes) != 6:
+        raise ValueError(f"Invalid MAC address: {mac}")
+    packet = b"\xff" * 6 + mac_bytes * 16
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.sendto(packet, (ip, port))
+    sock.close()
+    return True
+
+
 async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     """Check if a media_player entity is an LG WebOS TV."""
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -47,6 +64,47 @@ async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     if "webostv" in entity_id_lower:
         return True
     return False
+
+
+async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> dict:
+    """Get WebOS device info (IP, MAC) via HomeKit diagnostics or device registry."""
+    import httpx
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+    if not state:
+        return {}
+
+    friendly_name = state.get("attributes", {}).get("friendly_name", "")
+    entity_lower = entity_id.lower()
+    friendly_lower = friendly_name.lower()
+
+    async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        # Try to find matching homekit_controller entry
+        entries_resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
+        if entries_resp.status_code == 200:
+            for entry in entries_resp.json():
+                if entry.get("domain") != "homekit_controller":
+                    continue
+                entry_id = entry.get("entry_id")
+                if not entry_id:
+                    continue
+                diag_resp = await client.get(f"{ha_url}/api/diagnostics/config_entry/{entry_id}", headers=headers)
+                if diag_resp.status_code != 200:
+                    continue
+                diag_data = diag_resp.json()
+                config_entry = diag_data.get("data", {}).get("config-entry", {})
+                accessory_data = config_entry.get("data", {})
+                accessory_ips = accessory_data.get("AccessoryIPs", [])
+                pairing_id = accessory_data.get("AccessoryPairingID", "")
+                title = (config_entry.get("title") or "").lower()
+
+                if accessory_ips and any(part in title for part in friendly_lower.split() if len(part) > 2):
+                    return {
+                        "ip": accessory_ips[0],
+                        "mac": pairing_id.replace(":", ""),
+                        "source": "homekit_diagnostics",
+                    }
+    return {}
 
 
 async def send_command(ha_url: str, ha_token: str, entity_id: str, command: str) -> ExecutionResult:
@@ -70,6 +128,35 @@ async def home(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
 async def back(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
     """Send back command on WebOS TV."""
     return await send_command(ha_url, ha_token, entity_id, "back")
+
+
+async def power_on(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
+    """Power on WebOS TV via WOL magic packet."""
+    device_info = await _get_webos_device_info(ha_url, ha_token, entity_id)
+    ip = device_info.get("ip")
+    mac = device_info.get("mac")
+
+    if not mac:
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Cannot power on {entity_id}: no MAC address found. Ensure HomeKit controller is paired.",
+            service="webos_power",
+        )
+
+    log.info(f"[webos] Sending WOL to {entity_id} (MAC={mac}, IP={ip})")
+    try:
+        _send_wol(mac, ip or "255.255.255.255")
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"Sent WOL packet to {entity_id} (WebOS). TV should power on.",
+            service="webos_power",
+        )
+    except Exception as e:
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Failed to send WOL to {entity_id}: {e}",
+            service="webos_power",
+        )
 
 
 async def power_off(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
