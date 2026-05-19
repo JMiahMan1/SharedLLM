@@ -264,11 +264,15 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
             return {}
     return {}  # Fallback
 
-async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, domain: str = "media_player") -> str | None:
+async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, domain: str = "media_player", media_type: str = None) -> str | None:
     """
     Resolve a human-readable device name to an HA entity_id.
     Searches all states for entities matching the device_name in their friendly_name or entity_id.
     Prefers exact matches over partial matches.
+    
+    When media_type is provided:
+    - "music": prefers entities with Music Assistant Queue (active_queue attribute)
+    - "video": prefers entities with Cast capability (Default Media Receiver) or Android TV (device_class=tv)
     """
     if not ha_url or not device_name:
         return None
@@ -322,6 +326,22 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
             score += 200
         elif device_class == "speaker":
             score += 50
+        
+        # Context-aware bonuses based on media_type
+        if media_type == "music":
+            # Prefer Music Assistant Queue entities for music playback
+            if attrs.get("active_queue"):
+                score += 500
+            if attrs.get("mass_player_type"):
+                score += 200
+        elif media_type == "video":
+            # Prefer Cast-capable or Android TV entities for video
+            if attrs.get("app_name") == "Default Media Receiver":
+                score += 500
+            if attrs.get("app_name") == "com.google.android.apps.mediashell":
+                score += 400
+            if device_class == "tv":
+                score += 300
         
         # Penalty for numeric suffixes (e.g., "office_tv_3" when searching "office tv")
         if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_"):

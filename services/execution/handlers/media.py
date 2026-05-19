@@ -61,13 +61,13 @@ def detect_media_type(query: str, media_type_hint: str = None) -> str:
     # Default to music
     return "music"
 
-async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str) -> str:
+async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str = None) -> str:
     """Resolve entity_id from device_name if needed."""
     if req.entity_id:
         return ha_client.sanitize_entity_id("media_player", req.entity_id)
     
     if req.device_name:
-        entity_id = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player")
+        entity_id = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player", media_type)
         if entity_id:
             return entity_id
     
@@ -388,17 +388,17 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
     
-    # Resolve entity
+    # Detect media type BEFORE resolving entity (needed for context-aware entity resolution)
+    media_type = detect_media_type(req.query or req.media_content_id or "", req.media_type)
+    log.info(f"[media/play] Detected media type: {media_type}")
+    
+    # Resolve entity with media context
     try:
-        entity_id = await resolve_entity(req, ha_url, ha_token)
+        entity_id = await resolve_entity(req, ha_url, ha_token, media_type)
     except ValueError as e:
         return ExecutionResult(status="FAILURE", message=str(e), service="media_play")
     
     log.info(f"[media/play] user={ctx.user} entity={entity_id} query='{req.query}' type='{req.media_type}'")
-    
-    # Detect media type
-    media_type = detect_media_type(req.query or req.media_content_id or "", req.media_type)
-    log.info(f"[media/play] Detected media type: {media_type}")
     
     # Set volume if requested
     if req.volume is not None:
