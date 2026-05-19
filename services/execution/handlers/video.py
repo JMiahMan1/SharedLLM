@@ -65,7 +65,7 @@ async def _get_searxng_url() -> str | None:
 
 
 async def search_youtube(query: str) -> str | None:
-    """Search YouTube via SearXNG (HTML) with Playwright fallback."""
+    """Search YouTube via SearXNG HTML search API, with Playwright fallback on empty results."""
     searxng_url = await _get_searxng_url()
     if searxng_url:
         try:
@@ -81,12 +81,35 @@ async def search_youtube(query: str) -> str | None:
                 resp = await client.get(search_url)
                 resp.raise_for_status()
                 html = resp.text
+
             youtube_pattern = r'href="(https?://(?:www\.)?youtube\.com/watch\?[^"]+)"'
             matches = re.findall(youtube_pattern, html)
             for url in matches:
                 if "v=" in url:
                     log.info(f"[video] YouTube search '{query}' -> {url}")
                     return url
+
+            # No results from SearXNG, try without site: restriction
+            log.info(f"[video] No results with site: restriction, retrying without")
+            params = urllib.parse.urlencode({
+                "q": query,
+                "format": "html",
+                "categories": "videos",
+                "engines": "youtube",
+            })
+            search_url = f"{searxng_url}/search?{params}"
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(search_url)
+                resp.raise_for_status()
+                html = resp.text
+
+            matches = re.findall(youtube_pattern, html)
+            for url in matches:
+                if "v=" in url:
+                    log.info(f"[video] YouTube search '{query}' -> {url}")
+                    return url
+
+            log.warning(f"[video] SearXNG returned no results, trying Playwright fallback")
         except Exception as e:
             log.warning(f"[video] SearXNG YouTube search failed, trying Playwright fallback: {e}")
 
