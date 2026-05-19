@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import sys
+import time
 import html2text
 import httpx
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -21,8 +22,15 @@ log = logging.getLogger("execution.browser")
 def _is_testing() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
 
+_SEARXNG_URL_CACHE = None
+_SEARXNG_CACHE_TS = 0.0
+_SEARXNG_CACHE_TTL = 300
+
 async def _get_searxng_url() -> str:
-    """Resolve SearXNG URL from Identity service global settings."""
+    """Resolve SearXNG URL from Identity service global settings (cached)."""
+    global _SEARXNG_URL_CACHE, _SEARXNG_CACHE_TS
+    if _SEARXNG_URL_CACHE and (time.time() - _SEARXNG_CACHE_TS) < _SEARXNG_CACHE_TTL:
+        return _SEARXNG_URL_CACHE
     if _is_testing():
         return os.environ.get("SEARXNG_URL", "http://localhost:8080").rstrip("/")
     try:
@@ -38,6 +46,8 @@ async def _get_searxng_url() -> str:
                     if item.get("key") == "searxng_url":
                         url = item.get("value", "").rstrip("/")
                         if url:
+                            _SEARXNG_URL_CACHE = url
+                            _SEARXNG_CACHE_TS = time.time()
                             return url
     except Exception:
         pass
