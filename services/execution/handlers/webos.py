@@ -10,6 +10,7 @@ Services:
 import logging
 import socket
 import struct
+import json
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -69,6 +70,7 @@ async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
 async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> dict:
     """Get WebOS device info (IP, MAC) via HomeKit diagnostics or device registry."""
     import httpx
+    import websockets
     headers = {"Authorization": f"Bearer {ha_token}"}
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:
@@ -78,26 +80,37 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
     entity_lower = entity_id.lower()
     friendly_lower = friendly_name.lower()
 
-    async with httpx.AsyncClient(verify=False, timeout=10) as client:
-        # Get device registry to find webostv device model
-        dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
-        webos_model = ""
-        if dev_resp.status_code == 200:
-            for dev in dev_resp.json():
-                dev_name = (dev.get("name") or "").lower()
-                dev_name_by_user = (dev.get("name_by_user") or "").lower()
-                for identifier in dev.get("identifiers", []):
-                    if identifier and identifier[0] == "webostv":
-                        # Check if this device matches our entity
-                        if (any(part in dev_name for part in friendly_lower.split() if len(part) > 2) or
-                            any(part in dev_name_by_user for part in friendly_lower.split() if len(part) > 2) or
-                            any(part in dev_name for part in entity_lower.split(".") if len(part) > 2)):
-                            webos_model = (dev.get("model") or "").lower()
-                            break
-                if webos_model:
+    # Get webostv device model via WebSocket device registry
+    webos_model = ""
+    ws_url = ha_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/websocket"
+    try:
+        async with websockets.connect(ws_url, ssl=True) as ws:
+            await ws.send('{"type": "auth", "access_token": "' + ha_token + '"}')
+            await ws.recv()
+            await ws.send('{"id": 1, "type": "config/device_registry/list"}')
+            while True:
+                resp = await ws.recv()
+                data = json.loads(resp)
+                if data.get("id") == 1:
+                    if data.get("success"):
+                        for dev in data.get("result", []):
+                            dev_name = (dev.get("name") or "").lower()
+                            dev_name_by_user = (dev.get("name_by_user") or "").lower()
+                            for identifier in dev.get("identifiers", []):
+                                if identifier and identifier[0] == "webostv":
+                                    if (any(part in dev_name for part in friendly_lower.split() if len(part) > 2) or
+                                        any(part in dev_name_by_user for part in friendly_lower.split() if len(part) > 2) or
+                                        any(part in dev_name for part in entity_lower.split(".") if len(part) > 2)):
+                                        webos_model = (dev.get("model") or "").lower()
+                                        break
+                            if webos_model:
+                                break
                     break
+    except Exception as e:
+        log.warning(f"[webos] Device registry WebSocket failed: {e}")
 
-        # Get all config entries
+    # Get all config entries and check homekit_controller diagnostics
+    async with httpx.AsyncClient(verify=False, timeout=10) as client:
         entries_resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
         if entries_resp.status_code != 200:
             return {}
