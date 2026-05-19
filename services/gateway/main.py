@@ -1336,9 +1336,10 @@ async def orchestrate_code_change(
 
 def resolve_media_target(query: str, entities: list[dict], media_type: str = None) -> str:
     """
-    Resolve media player entity from query.
-    For video: prefer TV/Chromecast/AndroidTV entities.
+    Resolve media player entity from query using device capabilities/metadata.
+    For video: prefer Cast/Chromecast devices (support play_media with local streams).
     For music: prefer Music Assistant queue/speaker entities.
+    Names are only used for grouping/matching requested device, not for capability detection.
     """
     _, requested_device = extract_media_request(query)
     requested_lower = requested_device.lower() if requested_device else ""
@@ -1365,14 +1366,39 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
           or friendly_normalized in requested_normalized
       )
 
+    def _is_cast_device(entity: dict) -> bool:
+      """Check if entity is a Chromecast/Cast device based on capabilities."""
+      attrs = entity.get("attributes") or {}
+      app_id = str(attrs.get("app_id") or "").lower()
+      app_name = str(attrs.get("app_name") or "").lower()
+      device_class = str(attrs.get("device_class") or "").lower()
+      # Cast devices: no device_class when idle, or app_id indicates cast
+      if device_class == "speaker":
+          return False
+      if "cast" in app_id or "cast" in app_name:
+          return True
+      if app_id == "cc1ad845" or "default media receiver" in app_name:
+          return True
+      # No device_class and no music_assistant app_id = likely Cast
+      if not device_class and "music_assistant" not in app_id:
+          return True
+      return False
+
+    def _is_ma_speaker(entity: dict) -> bool:
+      """Check if entity is a Music Assistant speaker."""
+      attrs = entity.get("attributes") or {}
+      app_id = str(attrs.get("app_id") or "").lower()
+      source = str(attrs.get("source") or "").lower()
+      device_class = str(attrs.get("device_class") or "").lower()
+      return device_class == "speaker" and ("music_assistant" in app_id or "music assistant" in source)
+
     def _score(entity: dict) -> tuple[int, str]:
       eid = entity.get("entity_id", "")
       attrs = entity.get("attributes") or {}
       friendly = str(attrs.get("friendly_name") or "").lower()
       friendly_normalized = _normalize_name(friendly)
-      source = str(attrs.get("source") or "").lower()
-      device_class = str(attrs.get("device_class") or "").lower()
       state = str(entity.get("state") or "").lower()
+      device_class = str(attrs.get("device_class") or "").lower()
 
       score = 0
       if requested_lower and requested_lower in friendly:
@@ -1387,28 +1413,26 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
           score += 10
 
       if media_type == "video":
-          # Prefer Chromecast/Cast devices for video (proven to work with play_media + local streams)
-          if "chromecast" in source or "cast" in eid:
+          # Use capabilities: prefer Cast devices for video playback
+          if _is_cast_device(entity):
               score += 200
-          if device_class == "tv":
-              score += 150
-          if "roku" in eid or "roku" in friendly:
-              score += 80
-          # Deprioritize speakers/MA queues for video
-          if "music assistant queue" in source:
+          # Deprioritize MA speakers for video
+          if _is_ma_speaker(entity):
               score -= 200
-          if device_class == "speaker":
-              score -= 100
-      else:
-          # Music: prefer MA queues and speakers
-          if "music assistant queue" in source:
+      elif media_type == "power":
+          # Power commands: prefer actual TV entities (device_class=tv)
+          if device_class == "tv":
               score += 200
-          if device_class == "speaker":
-              score += 20
-      if "chrome" in eid or "cast" in friendly:
-          score -= 25
-      if "remote" in friendly:
-          score -= 25
+          # Deprioritize Cast and MA wrappers for power
+          if _is_cast_device(entity):
+              score -= 100
+          if _is_ma_speaker(entity):
+              score -= 200
+      else:
+          # Music: prefer MA speakers/queues
+          if _is_ma_speaker(entity):
+              score += 200
+
       return score, eid
 
     candidates = [e for e in entities if isinstance(e, dict) and e.get("entity_id", "").startswith("media_player.")]
@@ -1421,21 +1445,6 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
           candidates = matched_candidates
       else:
           return fallback
-
-    if requested_normalized:
-      matching_ma_queues = []
-      for entity in candidates:
-          attrs = entity.get("attributes") or {}
-          friendly_normalized = _normalize_name(str(attrs.get("friendly_name") or ""))
-          source = str(attrs.get("source") or "").lower()
-          if "music assistant queue" not in source:
-            continue
-          if requested_normalized == friendly_normalized or requested_normalized in friendly_normalized:
-            matching_ma_queues.append(entity)
-
-      if matching_ma_queues and media_type != "video":
-          ranked_queues = sorted((_score(e) for e in matching_ma_queues), reverse=True)
-          return ranked_queues[0][1]
 
     ranked = sorted((_score(e) for e in candidates), reverse=True)
     best_score, best_eid = ranked[0]
@@ -1946,13 +1955,15 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     
     if is_fast_path:
         media_entities = None
-        if intent in ["play_media", "pause_media"]:
+        if intent in ["play_media", "pause_media", "turn_on", "turn_off"]:
             media_entities = await fetch_ha_entities(creds.model_dump())
 
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
             media_type = "video" if is_likely_video_request(query) else None
             resolved_entity = resolve_media_target(query, media_entities or [], media_type)
+        elif intent in ["turn_on", "turn_off"]:
+            resolved_entity = resolve_media_target(query, media_entities or [], media_type="power")
         elif intent == "pause_media":
             resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [])
         else:
