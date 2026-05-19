@@ -102,16 +102,18 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
     """
     import device_registry
     
-    # Get Android TV device info from registry (non-blocking with timeout)
+    # Get Android TV device info from registry (with timeout to avoid hangs)
     atv_ip = None
     atv_mac = None
     try:
-        atv_device = await device_registry.get_device(atv_entity_id)
+        atv_device = await asyncio.wait_for(
+            device_registry.get_device(atv_entity_id), timeout=2.0
+        )
         if atv_device:
             atv_ip = atv_device.get("ip")
             atv_mac = atv_device.get("mac")
-    except Exception as e:
-        log.debug(f"[android_tv] Device registry lookup failed for {atv_entity_id}: {e}")
+    except (Exception, asyncio.TimeoutError):
+        log.debug(f"[android_tv] Device registry lookup skipped for {atv_entity_id}")
     
     # Get ATV friendly name from HA state
     atv_friendly = ""
@@ -176,7 +178,9 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
         # Check device registry for IP/MAC match (strongest signal)
         if atv_ip or atv_mac:
             try:
-                s_device = await device_registry.get_device(eid)
+                s_device = await asyncio.wait_for(
+                    device_registry.get_device(eid), timeout=2.0
+                )
                 if s_device:
                     s_ip = s_device.get("ip")
                     s_mac = s_device.get("mac")
@@ -185,8 +189,8 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
                     if ip_match or mac_match:
                         log.info(f"[android_tv] Found Cast sibling (registry match) for {atv_entity_id}: {eid}")
                         return eid
-            except Exception as e:
-                log.debug(f"[android_tv] Device registry lookup failed for {eid}: {e}")
+            except (Exception, asyncio.TimeoutError):
+                pass
 
         # Collect as candidate for name-based matching
         candidates.append((eid, s_friendly))
