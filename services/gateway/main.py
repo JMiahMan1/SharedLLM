@@ -1997,7 +1997,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             else:
                 svc_base = EXECUTION_SVC
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            fast_timeout = 120.0 if intent == "play_media" else 30.0
+            async with httpx.AsyncClient(timeout=fast_timeout) as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 ans = exec_resp.json().get("message", "Action completed.")
             
