@@ -30,43 +30,46 @@ def extract_video_url(query: str) -> str | None:
     return match.group(0) if match else None
 
 
-async def _get_searxng_url() -> str:
+async def _get_searxng_url() -> str | None:
     """Resolve SearXNG URL from Identity service settings."""
     try:
         from main import resolve_internal_user
         creds = await resolve_internal_user("default")
         if creds and creds.get("settings"):
-            return creds["settings"].get("searxng_url", "").rstrip("/")
+            url = creds["settings"].get("searxng_url", "").rstrip("/")
+            if url:
+                return url
     except Exception:
         pass
-    return "https://search.sumemail.com"
+    return None
 
 
 async def search_youtube(query: str) -> str | None:
     """Search YouTube via SearXNG with Playwright fallback."""
-    try:
-        searxng_url = await _get_searxng_url()
-        import urllib.parse
-        params = urllib.parse.urlencode({
-            "q": f"site:youtube.com/watch {query}",
-            "format": "json",
-            "categories": "videos",
-            "engines": "youtube",
-        })
-        search_url = f"{searxng_url}/search?{params}"
-        log.info(f"[video] SearXNG YouTube search: {search_url}")
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(search_url)
-            resp.raise_for_status()
-            data = resp.json()
-        results = data.get("results", [])
-        for r in results:
-            url = r.get("url", "")
-            if "youtube.com/watch" in url or "youtu.be/" in url:
-                log.info(f"[video] YouTube search '{query}' -> {url}")
-                return url
-    except Exception as e:
-        log.warning(f"[video] SearXNG YouTube search failed, trying Playwright fallback: {e}")
+    searxng_url = await _get_searxng_url()
+    if searxng_url:
+        try:
+            import urllib.parse
+            params = urllib.parse.urlencode({
+                "q": f"site:youtube.com/watch {query}",
+                "format": "json",
+                "categories": "videos",
+                "engines": "youtube",
+            })
+            search_url = f"{searxng_url}/search?{params}"
+            log.info(f"[video] SearXNG YouTube search: {search_url}")
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(search_url)
+                resp.raise_for_status()
+                data = resp.json()
+            results = data.get("results", [])
+            for r in results:
+                url = r.get("url", "")
+                if "youtube.com/watch" in url or "youtu.be/" in url:
+                    log.info(f"[video] YouTube search '{query}' -> {url}")
+                    return url
+        except Exception as e:
+            log.warning(f"[video] SearXNG YouTube search failed, trying Playwright fallback: {e}")
 
     try:
         from playwright.async_api import async_playwright
@@ -74,7 +77,8 @@ async def search_youtube(query: str) -> str | None:
             browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
             page = await browser.new_page()
             search_q = urllib.parse.quote(f"site:youtube.com/watch {query}")
-            await page.goto(f"https://search.sumemail.com/search?q={search_q}&format=html&categories=videos&engines=youtube", timeout=15000, wait_until="networkidle")
+            fallback_url = f"{searxng_url}/search?q={search_q}&format=html&categories=videos&engines=youtube"
+            await page.goto(fallback_url, timeout=15000, wait_until="networkidle")
             links = await page.query_selector_all("a.result__title, .result a")
             for link in links:
                 href = await link.get_attribute("href")
