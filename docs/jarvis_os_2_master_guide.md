@@ -131,6 +131,13 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
 *   **Backend Reality:** `execution/handlers/video.py` handles the `videoplayrequest`. It uses `yt-dlp` to search YouTube and extract the most compatible direct MP4 stream (`avc1/mp4a`) for Cast/Roku devices. **Progressive download** (`download_video_progressive()`) returns control after 5MB buffered — the file continues downloading in the background while playback starts immediately. The file is hosted on the Execution service's **media server (port 8888)** via FastAPI `FileResponse` with HTTP Range support. Roku devices are launched via ECP to Media Assistant (app 782875); Cast/WebOS/Samsung/Android devices receive the URL via `media_player.play_media`. Wake-up logic for Roku is consolidated in `roku.roku_wake_device()` and called in parallel with download via `asyncio.create_task()`.
 *   **The "Why":** We proxy videos this way because native YouTube apps on smart devices (like Roku) are notoriously difficult to control via APIs. By downloading the direct MP4 and hosting it locally, Jarvis can force *any* media device in the house to play the video or audio, even if that device doesn't have a YouTube app installed.
 *   **CRITICAL:** NEVER use `download_video()` — it waits for full download before returning (causes 3+ minute timeouts). Progressive download is the only supported mode.
+*   **YouTube Search:** Uses `yt-dlp` `ytsearch:1` for accurate results. SearXNG HTML parsing is a fallback only — the regex-based HTML approach is unreliable and often returns sidebar recommendations instead of the actual search result.
+*   **Android TV Video Delegation:** Android TV's `play_media` with local stream URLs often fails (HA 500 error). The proven approach: detect Android TV via `media_player.office_tv` (`device_class=tv`, `app_id` contains `com.google.android.*`), find its Cast sibling via `_find_cast_sibling()` in `handlers/android_tv.py`, and delegate video playback to the Cast entity. The Cast sibling is found by:
+    1.  **Capability checks:** `supported_features & 8424` (SUPPORT_PLAY_MEDIA), `cast_type`, entity ID hints (`_chrome`, `_cast`)
+    2.  **MA exclusion:** `app_id != "music_assistant"`, no `mass_player_type`, no `active_queue`
+    3.  **Name matching:** substring or exact friendly name match (last resort)
+    The Android TV handler powers on the TV, sends `nav_home` via ADB, stops any active Cast session, downloads the video, and casts to the sibling.
+*   **Fast-Path Routing for Power Commands:** `turn_on`/`turn_off` in the gateway fast path now uses `media_type="power"` in `resolve_media_target()`, which scores `device_class=tv` entities highest (+200) and deprioritizes Cast (-100) and MA wrappers (-200). This ensures power commands target the actual TV entity, not a Cast or MA sibling.
 *   **Jarvis OS 2.0 Enhancements:**
     *   **Universal Video Cast Widget:** Because the backend proxies the video, the UI can render a specialized video transport widget showing the YouTube thumbnail and providing standard, highly-responsive controls (skip, pause, stop) that work flawlessly across all devices—bypassing clunky native TV interfaces.
 
@@ -157,6 +164,150 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
     *   **Proactive Energy Management:** Jarvis can detect anomalies (e.g., "The garage heater has been drawing 1500W for 4 hours while no presence is detected") and take autonomous action to suspend the device, simultaneously sending a voice notification via Nextcloud Talk.
     *   **Energy Insights Widget:** A sleek, glowing UI card that visualizes real-time household power draw. Instead of just showing a static number, the LLM generates a dynamic, human-readable summary (e.g., "Power usage is 30% lower than yesterday. Solar production is covering all active loads.").
     *   **Device & Group Telemetry Monitoring:** Devices and groups can be tagged for ongoing telemetry tracking. See **Section 3.15** for the full monitoring and LLM pattern analysis system.
+
+### 3.16 Household Intercom System
+
+The intercom system provides two distinct communication modes depending on device type:
+- **True two-way voice** (tablet ↔ tablet, web browser ↔ web browser) — requires a dedicated real-time audio server
+- **One-way broadcast** (tablet/speaker → TV or smart speaker) — handled by the existing `announce_handlers.py` pipeline
+
+> [!NOTE]
+> **Why not Nextcloud Talk?** Although Nextcloud Talk is already in the stack, its WebRTC layer is not programmatically accessible from Python. The signaling protocol (Spreed/NATS) is internal-only and not a supported integration surface. Nextcloud Talk can only be used as a **chat notification bridge** (sending a message that a call is coming in), not for audio streaming.
+
+---
+
+#### Recommended Backend: LiveKit (Primary Recommendation)
+
+**[LiveKit](https://docs.livekit.io/)** is an open-source, self-hosted WebRTC SFU (Selective Forwarding Unit) written in Go. It is the most capable option and the best fit for the existing architecture because it has a **first-class Python SDK and AI Agents framework** — meaning it can be integrated directly with our Kokoro TTS and Kokoro STT pipelines.
+
+| Property | Details |
+| :--- | :--- |
+| **License** | Apache 2.0 (fully open source) |
+| **Self-hosted** | Yes — single Docker container |
+| **Python SDK** | `pip install livekit livekit-agents` |
+| **Latency** | Sub-100ms (true WebRTC SFU) |
+| **AI Agent support** | Native — STT/TTS/LLM pipeline integration |
+| **Docs** | [docs.livekit.io](https://docs.livekit.io/) |
+| **GitHub** | [github.com/livekit/agents](https://github.com/livekit/agents) |
+
+**Docker deployment (add to `docker-compose.yml`):**
+```yaml
+livekit:
+  image: livekit/livekit-server:latest
+  ports:
+    - "7880:7880"   # HTTP API + WebSocket signaling
+    - "7881:7881"   # TURN/TLS
+    - "7882:7882/udp"  # RTP media
+  environment:
+    - LIVEKIT_KEYS=devkey:secret
+  networks:
+    - sharedllm_default
+```
+
+**How two-way intercom works with LiveKit:**
+1. User A taps `[Call Room: Kitchen]` in the Jarvis UI.
+2. Gateway calls LiveKit API to create a **Room** (`kitchen-intercom-{session_id}`).
+3. Gateway issues a short-lived **JWT token** to User A's browser and to User B's wall tablet (both in the same room).
+4. Both browsers join the room via the LiveKit JS client SDK — WebRTC negotiation is handled automatically.
+5. **Audio flows directly peer-to-peer** (or via the SFU if behind NAT) — full duplex, sub-100ms latency.
+6. When the session ends, the room is destroyed. No audio is stored unless explicitly recorded.
+
+**Jarvis integration hooks:**
+- The Gateway exposes `POST /api/intercom/start` → creates LiveKit room, returns tokens for both parties.
+- The Gateway exposes `POST /api/intercom/end` → terminates the LiveKit room.
+- A **LiveKit Python Agent** can optionally join the room as a silent listener to transcribe the conversation (via Kokoro STT) for Jarvis context — useful for voice-commanded actions during a call (e.g., "Jarvis, turn on the kitchen lights" said during an intercom session).
+
+---
+
+#### Simpler Fallback: Mumble + pymumble
+
+For installations that don't need AI agent integration or low-latency WebRTC, **[Mumble](https://www.mumble.info/)** (server: Murmur) is a battle-tested, extremely low-resource open-source voice chat server with a Python client library.
+
+| Property | Details |
+| :--- | :--- |
+| **License** | BSD/GPL |
+| **Python client** | `pip install pymumble-py3` + `libopus` |
+| **Latency** | ~20–60ms (Opus codec) |
+| **Headless clients** | Yes — runs on Raspberry Pi, wall tablets, etc. |
+| **Resource usage** | Very low (~10MB RAM for server) |
+| **Best for** | Always-on whole-house intercom without WebRTC complexity |
+
+**Mumble intercom pattern:**
+- Murmur server runs as a Docker sidecar.
+- Each wall tablet or smart display runs a headless `pymumble` client auto-connecting to a room matching its room name (e.g., `kitchen`, `bedroom`).
+- Pressing `[Talk]` in the UI triggers the `pymumble` client to start transmitting microphone audio.
+- All other connected clients in the same channel hear it in real time.
+
+> [!IMPORTANT]
+> **Echo cancellation is critical for Mumble.** Without hardware or software AEC (Acoustic Echo Cancellation), speaker feedback creates an unusable loop. For wall tablets with both a speaker and mic, use `webrtcvad` + `speexdsp` for software AEC, or use hardware that includes it (e.g., ReSpeaker mic arrays).
+
+---
+
+#### One-Way TV Overlay Intercom
+
+TVs cannot respond (no mic), so the intercom is strictly one-way. Audio is delivered via the **existing `announce_handlers.dispatch_announce()` pipeline** — no new infrastructure required:
+
+- **Roku:** ECP launch of Media Assistant with `t=a`, sender name as `songName` — already implemented in `announce_roku`.
+- **Cast/Android TV/WebOS/Samsung:** `media_player.play_media` with the audio URL.
+- **Visual overlay (future):** Android TV via ADB intent, WebOS via `webostv.command` notification banner.
+
+---
+
+#### Intercom Session Mode Comparison
+
+| Mode | Technology | Direction | Devices |
+| :--- | :--- | :--- | :--- |
+| **True two-way call** | LiveKit (WebRTC SFU) | Full duplex | Browser ↔ Browser / Tablet ↔ Tablet |
+| **Always-on intercom** | Mumble + pymumble | Full duplex | Any device with mic + speaker |
+| **Broadcast / PA** | `announce_handlers` | One-way out | All speakers + TVs |
+| **TV announcement** | `announce_handlers` | One-way | TVs (Roku/Cast/WebOS/Samsung) |
+
+#### ESPresense Integration
+If BLE presence is enabled, the intercom defaults the **target** to the room where the recipient was last seen (resolved via ESPresense MQTT → `ha:presence:{user_id}` Redis key), rather than requiring manual device selection.
+
+#### Two-Way Voice Intercom (Speaker ↔ Speaker / Tablet ↔ Tablet)
+
+**How it works:**
+1. User holds `[Talk]` on the Jarvis UI (web or Ionic app) → browser `MediaRecorder` API captures raw audio in real time.
+2. On release, the WAV blob is `POST`-ed to a new endpoint: `POST /execute/intercom/send` (multipart, `audio_file` + `target_entity_ids[]` + `user_context`).
+3. The execution service saves the blob to `TEMP_AUDIO_CACHE` (same as TTS), generating a `media_id`.
+4. The audio is dispatched in parallel via `asyncio.gather()` to all target devices using the **existing `announce_handlers.dispatch_announce()` pipeline** — Roku, Cast, WebOS, Samsung, speaker all already supported.
+5. **For two-way:** The receiving device plays the audio. If the receiving device is a wall tablet running the Jarvis UI, the browser's `<audio>` element plays the incoming clip automatically via a WebSocket push (`/ws/capabilities` channel). The recipient can respond using the same hold-to-talk flow.
+
+**Backend Schema Addition:**
+```python
+class IntercomRequest(BaseRequest):
+    action: Literal["send", "broadcast", "call"]  
+    # send = one clip to target(s)
+    # broadcast = send to all non-blacklisted players (like announce_all)
+    # call = open a persistent two-way session (future)
+    target_entity_ids: Optional[List[str]] = None  # None = broadcast
+    group_id: Optional[str] = None                 # use a media group
+    audio_data: Optional[bytes] = None             # raw WAV bytes
+    audio_url: Optional[str] = None               # if pre-uploaded
+    message: Optional[str] = None                 # fallback: TTS text if no audio
+```
+
+**Storage:** Audio clips are ephemeral by default (same `TEMP_AUDIO_CACHE` lifecycle as TTS). Optionally, the user can enable `save_to_nextcloud=True` to persist the clip in their Nextcloud Talk history.
+
+#### One-Way TV Overlay Intercom
+
+TVs cannot respond (no mic), so the intercom is strictly one-way. However, the audio plays and optionally a **visual overlay** is triggered:
+
+- **Audio:** Uses the existing Roku/Cast/WebOS/Samsung/Android TV announcement path in `announce_handlers.py` — no changes needed.
+- **Visual Overlay (future enhancement):** On supported TVs (Android TV via ADB, WebOS via `webostv.command`), a brief notification banner with the sender's name and a waveform icon can be pushed alongside the audio. On Roku, the Media Assistant screen simply shows the sender name as the `songName` ECP parameter (already implemented in `announce_roku`).
+
+#### Intercom Session Modes
+
+| Mode | Devices | Direction | Notes |
+| :--- | :--- | :--- | :--- |
+| **Quick Clip** | Speaker ↔ Speaker | Two-way | Hold-to-talk, releases and sends |
+| **Broadcast** | All speakers | One-way out | Like an intercom PA system |
+| **TV Announcement** | TV + optional speakers | One-way | Audio plays; visual banner where supported |
+| **Persistent Session** *(future)* | Tablet ↔ Tablet | Full duplex | WebRTC or chunked streaming — not yet implemented |
+
+#### ESPresense Integration
+If the user has BLE presence enabled, the intercom defaults the **target** to the room where the recipient was last seen (resolved via ESPresense MQTT → `ha:presence:{user_id}` Redis key), rather than requiring manual device selection.
 
 ### 3.14 Device & Light Grouping System
 
@@ -567,6 +718,85 @@ User request → /execute/media/play (VideoPlayRequest)
 - Wake-up logic consolidated in `roku.roku_wake_device()` — called in parallel with download via `asyncio.create_task()`.
 - Device IP discovered via 7-strategy pipeline (registry → HA attrs → ARP → mDNS → SSDP → port scan).
 - Video titles are sanitized to remove emojis (prevents URL encoding issues on Roku ECP).
+
+#### How to Check What's Playing on Roku (State Verification)
+
+Roku state is reported through **two independent channels**. Always cross-reference both for accurate status:
+
+**1. Home Assistant `media_player` entity** (`media_player.28_tcl_roku_tv`):
+```
+State: "playing" | "on" | "idle" | "off" | "unavailable"
+Key attributes:
+  - app_id: "782875" (Media Assistant) or other app ID
+  - app_name: "Media Assistant", "YouTube", "Netflix", etc.
+  - source: "Media Assistant" (matches app_name)
+  - media_content_type: "app" | "video" | "music"
+  - media_duration: total duration in seconds
+  - media_position: current playback position in seconds
+  - media_position_updated_at: timestamp of last position update
+  - source_list: all installed apps on the Roku
+```
+**Limitation:** HA polls the Roku every ~10-30 seconds. `media_position` can be stale. The `state` field is reliable for "playing" vs "idle" vs "off" but doesn't tell you *what* is playing beyond the app name.
+
+**2. Roku ECP `/query/media-player` endpoint** (`http://<roku_ip>:8060/query/media-player`):
+```xml
+<player state="play" error="false">
+  <plugin id="782875" name="Media Assistant" bandwidth="13214901 bps" />
+  <format audio="aac" video="mpeg4_15" ... container="mp4" />
+  <buffering target="0" max="1000" current="1000" />
+  <position>253617 ms</position>
+  <duration>43643994 ms</duration>
+  <is_live>false</is_live>
+</player>
+```
+**This is the ground truth.** The `state="play"` attribute is real-time (not polled). `position` and `duration` are in milliseconds. `error="false"` confirms no playback errors.
+
+**3. Roku ECP `/query/active-app` endpoint** (`http://<roku_ip>:8060/query/active-app`):
+```xml
+<active-app>
+  <app id="782875" type="appl" version="1.2.1">Media Assistant</app>
+</active-app>
+```
+Confirms which app is currently in the foreground.
+
+**4. Music Assistant sibling player** (`media_player.gracies_tv`):
+For music/announcements routed through MASS, check the sibling MA player:
+```
+State: "playing" | "paused" | "idle"
+Key attributes:
+  - mass_player_type: "player" (confirms it's a real MA output)
+  - active_queue: "ROKU_2N0062385487" (the queue ID for this Roku)
+  - media_content_id: the URI being played (e.g., "library://track/613" or "builtin://track/http://...")
+  - media_title: track title or media_id
+  - media_position: current position in seconds
+  - source: "Music Assistant Queue"
+```
+
+**Quick diagnostic commands:**
+```bash
+# Check HA state (all attributes)
+curl -s -H "Authorization: Bearer <token>" https://ha.sumemail.com/api/states/media_player.28_tcl_roku_tv
+
+# Check ECP media-player (real-time playback state)
+curl -s http://192.168.2.166:8060/query/media-player
+
+# Check ECP active app
+curl -s http://192.168.2.166:8060/query/active-app
+
+# Check MASS sibling
+curl -s -H "Authorization: Bearer <token>" https://ha.sumemail.com/api/states/media_player.gracies_tv
+```
+
+**State interpretation guide:**
+
+| HA State | ECP player state | Active App | Interpretation |
+|---|---|---|---|
+| `playing` | `state="play"` | Media Assistant | Actively playing media via MA |
+| `playing` | `state="play"` | YouTube/Netflix/etc | Playing via native app (not MA) |
+| `on` | `state="stop"` or no media | Any app | App is open but nothing playing |
+| `idle` | N/A | Home | On home screen, no app active. **Note:** "idle" can also mean the TV is on but the screen is off (screensaver/standby). The Roku is powered on but not actively playing media. |
+| `off` | N/A | N/A | TV is powered off (black screen, no response to remote) |
+| `unavailable` | Connection refused | N/A | Roku unreachable (network/power issue) |
 
 ---
 
@@ -981,6 +1211,34 @@ The backend already detects device brand via `detect_tv_type()`. The remote UI r
 | **Samsung / WebOS / Bravia** | D-Pad (HA service) | ✅ | ✅ | ✅ (source_list) |
 | **Android TV** | D-Pad (ADB) | ✅ | ✅ | ✅ (source_list) |
 | **Cast / Speaker** | Play controls only | ✅ | ❌ | ❌ |
+
+### 10.5b Intercom (`/intercom`)
+*   **Target Audience:** Standard Users (shown only if user has ≥1 assigned media device)
+*   **Purpose:** Room-to-room voice communication. Sends raw voice clips from the browser microphone directly to any speaker, tablet, or TV in the house. No phone call infrastructure required — built entirely on the existing announcement pipeline.
+
+#### Contact List
+*   *Type:* Grid of avatar cards — one per household user or room.
+*   *Each card shows:* User avatar + name + current room (from ESPresense) + whether their device is online.
+*   *Tapping a card* selects that user/room as the target.
+
+#### Hold-to-Talk Button
+*   *Type:* Large central push-to-talk button (microphone icon, pulses red while recording).
+*   *Behaviour:*
+    - `pointerdown` / `touchstart` → `MediaRecorder.start()` → green recording ring animates.
+    - `pointerup` / `touchend` → `MediaRecorder.stop()` → blob assembled → `POST /execute/intercom/send`.
+    - Max clip duration: 30 seconds (client-enforced). Countdown ring appears at 25s.
+    - If released before 0.5s: clip discarded, toast shows "Too short".
+*   *Fallback:* `[Record]` toggle button for devices without reliable pointer events (tablets).
+
+#### Target Selector
+*   *Type:* Multi-select chip row below the contact grid.
+*   *Options:* Individual users, rooms, device groups, or `[Broadcast All]` (maps to `action="broadcast"`).
+*   TV-class devices in the list are tagged with a 📺 icon to indicate one-way only.
+
+#### Incoming Clip Player
+*   *Type:* Floating toast + inline audio player.
+*   *Behaviour:* When another user sends a clip and the current user's tablet is the target, a WebSocket push (`/ws/capabilities`) triggers a toast: "📣 [Name] from [Room]" with auto-play enabled.
+*   The clip plays immediately. The user can tap `[Reply]` to open hold-to-talk targeted back at the sender.
 
 ### 10.6 Personal Calendar (`/calendar`)
 *   **Target Audience:** Standard Users
