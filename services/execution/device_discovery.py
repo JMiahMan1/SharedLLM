@@ -234,9 +234,10 @@ async def _discover_via_entity_attrs(
 async def _discover_via_arp(
     entity_id: str, ha_url: str, ha_token: str
 ) -> Optional[dict]:
-    """Match entity to ARP table entries via hostname or IP proximity."""
+    """Get IPs from ARP table, probe for device ports, match by device info."""
     try:
         import subprocess
+        import httpx
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
         if not state:
             return None
@@ -244,48 +245,57 @@ async def _discover_via_arp(
         friendly = state.get("attributes", {}).get("friendly_name", "").lower()
         entity_base = entity_id.split(".")[-1].lower().replace("_", " ")
 
-        # Try /proc/net/arp first (works in Docker without arp binary)
-        arp_lines = []
+        # Get IPs from ARP table
+        arp_ips = []
         try:
             with open("/proc/net/arp", "r") as f:
-                arp_lines = f.read().splitlines()[1:]  # skip header
+                lines = f.read().splitlines()[1:]  # skip header
+            for line in lines:
+                parts = line.split()
+                if len(parts) >= 4:
+                    ip_part = parts[0]
+                    mac_part = parts[3]
+                    if mac_part != "00:00:00:00:00:00" and mac_part != "incomplete":
+                        arp_ips.append((ip_part, mac_part))
         except FileNotFoundError:
-            # Fallback to arp command
             result = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
-                arp_lines = result.stdout.splitlines()
+                for line in result.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        ip_part = parts[1].strip("()")
+                        mac_part = parts[3]
+                        if mac_part != "00:00:00:00:00:00" and mac_part != "incomplete":
+                            arp_ips.append((ip_part, mac_part))
 
-        for line in arp_lines:
-            parts = line.split()
-            if len(parts) < 4:
-                continue
+        if not arp_ips:
+            return None
 
-            # /proc/net/arp format: IP address HW type Flags HW address Mask Device
-            if "/" in line and "HW" in line:
-                ip_part = parts[0]
-                mac_part = parts[3] if len(parts) > 3 else ""
-                hostname_part = ""
-            else:
-                # arp -a format: hostname (ip) at mac [ether] on iface
-                hostname_part = parts[0].lower()
-                ip_part = parts[1].strip("()")
-                mac_part = parts[3] if len(parts) > 3 else ""
-
-            if mac_part == "00:00:00:00:00:00" or mac_part == "incomplete":
-                continue
-
-            if (friendly and any(word in hostname_part for word in friendly.split() if len(word) > 2)) or \
-               (entity_base and any(word in hostname_part for word in entity_base.split() if len(word) > 2)):
-                await device_registry.set_device(
-                    entity_id,
-                    ip=ip_part,
-                    mac=mac_part,
-                    hostname=hostname_part.rstrip("."),
-                    friendly_name=state["attributes"].get("friendly_name", ""),
-                    discovery_method="arp",
-                )
-                log.info(f"[discovery] Found {entity_id} via ARP: ip={ip_part} mac={mac_part}")
-                return await device_registry.get_device(entity_id)
+        # Probe ARP IPs for WebOS ports
+        webos_ports = [3000, 7676, 1300, 8080]
+        async with httpx.AsyncClient(verify=False, timeout=2) as client:
+            for ip, mac in arp_ips:
+                for port in webos_ports:
+                    try:
+                        resp = await client.get(f"http://{ip}:{port}", timeout=1)
+                        if resp.status_code == 200:
+                            # Check if device info matches entity
+                            body = resp.text.lower()
+                            searchable = f"{body} {ip} {mac}".lower()
+                            if any(word in searchable for word in friendly.split() if len(word) > 2) or \
+                               any(word in searchable for word in entity_base.split() if len(word) > 2) or \
+                               "lg" in searchable or "webos" in searchable or "living" in searchable:
+                                await device_registry.set_device(
+                                    entity_id,
+                                    ip=ip,
+                                    mac=mac,
+                                    friendly_name=state["attributes"].get("friendly_name", ""),
+                                    discovery_method="arp",
+                                )
+                                log.info(f"[discovery] Found {entity_id} via ARP+port scan: ip={ip} mac={mac}")
+                                return await device_registry.get_device(entity_id)
+                    except Exception:
+                        pass
     except Exception as e:
         log.warning(f"[discovery] ARP lookup failed: {e}")
     return None
