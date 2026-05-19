@@ -1953,7 +1953,8 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
 
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
-            resolved_entity = resolve_media_target(query, media_entities or [])
+            media_type = "video" if is_likely_video_request(query) else None
+            resolved_entity = resolve_media_target(query, media_entities or [], media_type)
         elif intent == "pause_media":
             resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [])
         else:
