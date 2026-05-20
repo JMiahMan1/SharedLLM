@@ -689,4 +689,54 @@ export const api = {
     const resp = await apiClient.post(`/api/raven/missions/${id}/resume`);
     return resp.data;
   },
+
+  async getMediaGroups(): Promise<any[]> {
+    const resp = await apiClient.get('/api/groups/media');
+    return resp.data.groups || [];
+  },
+
+  async createMediaGroup(data: { name: string; member_entity_ids: string[]; sync_state?: boolean }): Promise<any> {
+    const resp = await apiClient.post('/api/groups/media', data);
+    return resp.data;
+  },
+
+  async deleteMediaGroup(name: string): Promise<any> {
+    const resp = await apiClient.delete(`/api/groups/media/${encodeURIComponent(name)}`);
+    return resp.data;
+  },
+
+  async getLightClusters(): Promise<any[]> {
+    const resp = await apiClient.get('/api/groups/lights');
+    return resp.data.clusters || [];
+  },
+
+  async createLightCluster(data: { name: string; member_entity_ids: string[]; default_brightness?: number; default_color_temp?: number }): Promise<any> {
+    const resp = await apiClient.post('/api/groups/lights', data);
+    return resp.data;
+  },
+
+  async deleteLightCluster(name: string): Promise<any> {
+    const resp = await apiClient.delete(`/api/groups/lights/${encodeURIComponent(name)}`);
+    return resp.data;
+  },
+
+  async getLightPatterns(): Promise<any[]> {
+    const resp = await apiClient.get('/api/groups/patterns');
+    return resp.data.patterns || [];
+  },
+
+  async createLightPattern(data: { name: string; steps: Array<{ brightness?: number; color_temp?: number; rgb_color?: number[]; transition?: number; delay?: number }> }): Promise<any> {
+    const resp = await apiClient.post('/api/groups/patterns', data);
+    return resp.data;
+  },
+
+  async deleteLightPattern(name: string): Promise<any> {
+    const resp = await apiClient.delete(`/api/groups/patterns/${encodeURIComponent(name)}`);
+    return resp.data;
+  },
+
+  async executeLightPattern(data: { pattern_name: string; target_cluster?: string; target_entity_ids?: string[] }): Promise<any> {
+    const resp = await apiClient.post('/execute/groups/lights', data);
+    return resp.data;
+  },
 };
