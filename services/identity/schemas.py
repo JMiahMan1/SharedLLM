@@ -137,8 +137,11 @@ class LoginResponse(BaseModel):
 
 class DiscoverUser(BaseModel):
     username: str
-    source: str  # e.g. "Home Assistant", "Nextcloud"
+    source: str  # e.g. "Home Assistant", "Nextcloud", "Home Assistant + Nextcloud"
     display_name: Optional[str] = None
+    email: Optional[str] = None
+    ha_person_id: Optional[str] = None
+    nc_username: Optional[str] = None
 
 class GlobalSettingRead(BaseModel):
     key: str

@@ -804,11 +804,10 @@ def revoke_key(key_id: int, session: Session = Depends(get_session), user: User 
 
 @app.get("/api/auth/discover", response_model=List[DiscoverUser])
 async def discover_users(session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
-    """Scan Home Assistant and Nextcloud for users to import."""
+    """Scan Home Assistant and Nextcloud for users to import.
+    Merges users found in both sources into a single entry with combined data."""
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
-    
-    discovered = []
     
     # Resolve credentials to use (prefer admin's, fallback to default)
     default_user = session.exec(select(User).where(User.username == "default")).first()
@@ -821,6 +820,10 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     nc_pass_enc = admin.nextcloud_pass_enc or (default_user.nextcloud_pass_enc if default_user else None)
 
     log.info(f"[discovery] Starting scan. HA_URL: {ha_url}, NC_URL: {nc_url}")
+
+    # Collect users from each source into dicts keyed by username
+    ha_users: dict[str, dict] = {}
+    nc_users: dict[str, dict] = {}
 
     # 1. Scan Home Assistant (Person entities)
     if ha_url and ha_token_enc:
@@ -835,13 +838,10 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                     for state in resp.json():
                         if state['entity_id'].startswith('person.'):
                             username = state['entity_id'].split('.')[1]
-                            existing = session.exec(select(User).where(User.username == username)).first()
-                            if not existing:
-                                discovered.append(DiscoverUser(
-                                    username=username,
-                                    source="Home Assistant",
-                                    display_name=state.get('attributes', {}).get('friendly_name', username)
-                                ))
+                            ha_users[username] = {
+                                "display_name": state.get('attributes', {}).get('friendly_name', username),
+                                "entity_id": state['entity_id'],
+                            }
         except Exception as e:
             log.error(f"[discovery] HA Error: {str(e)}")
 
@@ -857,17 +857,59 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    users = data.get('ocs', {}).get('data', {}).get('users', [])
-                    for username in users:
-                        existing = session.exec(select(User).where(User.username == username.lower())).first()
-                        if not existing:
-                            discovered.append(DiscoverUser(
-                                username=username.lower(),
-                                source="Nextcloud",
-                                display_name=username.capitalize()
-                            ))
+                    usernames = data.get('ocs', {}).get('data', {}).get('users', [])
+                    for username in usernames:
+                        nc_users[username.lower()] = {"nc_username": username}
+                        # Fetch detailed info for each user
+                        try:
+                            detail_resp = await client.get(
+                                f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users/{username}",
+                                headers={"OCS-APIRequest": "true", "Accept": "application/json"},
+                                auth=(nc_user, nc_pass),
+                                params={"format": "json"}
+                            )
+                            if detail_resp.status_code == 200:
+                                nc_data = detail_resp.json().get("ocs", {}).get("data", {})
+                                nc_users[username.lower()]["display_name"] = nc_data.get("display-name") or nc_data.get("displayname")
+                                nc_users[username.lower()]["email"] = nc_data.get("email")
+                        except Exception:
+                            pass
         except Exception as e:
             log.error(f"[discovery] Nextcloud Error: {str(e)}")
+
+    # 3. Merge users — combine HA and NC data when usernames match
+    all_usernames = set(ha_users.keys()) | set(nc_users.keys())
+    discovered = []
+    for username in sorted(all_usernames):
+        existing = session.exec(select(User).where(User.username == username)).first()
+        if existing:
+            continue
+        
+        in_ha = username in ha_users
+        in_nc = username in nc_users
+        ha_data = ha_users.get(username, {})
+        nc_data = nc_users.get(username, {})
+        
+        # Determine source label
+        if in_ha and in_nc:
+            source = "Home Assistant + Nextcloud"
+        elif in_ha:
+            source = "Home Assistant"
+        else:
+            source = "Nextcloud"
+        
+        # Prefer NC display_name (usually more accurate), fall back to HA
+        display_name = nc_data.get("display_name") or ha_data.get("display_name") or username.capitalize()
+        email = nc_data.get("email")
+        
+        discovered.append(DiscoverUser(
+            username=username,
+            source=source,
+            display_name=display_name,
+            email=email,
+            ha_person_id=ha_data.get("entity_id"),
+            nc_username=nc_data.get("nc_username"),
+        ))
             
     log.info(f"[discovery] Discovery complete. Found {len(discovered)} users.")
     return discovered
@@ -1033,64 +1075,156 @@ def delete_mission_by_id(mission_id: int, session: Session = Depends(get_session
 
 @app.post("/api/auth/import/nextcloud")
 async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(default=None)):
+    """Import users from Nextcloud and Home Assistant, merging by username.
+    Generates temp passwords and pre-fills all available user data."""
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
     
-    # 1. Get Nextcloud config from the default admin user
     with Session(engine) as session:
-        admin = session.exec(select(User).where(User.is_admin == True)).first()
+        admin = session.exec(select(User).where(User.is_admin)).first()
+        default_user = session.exec(select(User).where(User.username == "default")).first()
+        
+        # Resolve Nextcloud credentials
         if not admin or not admin.nextcloud_url:
-            # Try global settings
-            nc_url = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_URL")).first()
-            nc_user = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_USER")).first()
-            nc_pass = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_PASS")).first()
-            
+            nc_url_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_URL")).first()
+            nc_user_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_USER")).first()
+            nc_pass_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_PASS")).first()
             from config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
-            url = nc_url.value if nc_url else NEXTCLOUD_URL
-            user = nc_user.value if nc_user else NEXTCLOUD_USER
-            password = nc_pass.value if nc_pass else NEXTCLOUD_PASS
+            nc_url = nc_url_setting.value if nc_url_setting else NEXTCLOUD_URL
+            nc_admin_user = nc_user_setting.value if nc_user_setting else NEXTCLOUD_USER
+            nc_admin_pass = nc_pass_setting.value if nc_pass_setting else NEXTCLOUD_PASS
         else:
-            url = admin.nextcloud_url
-            user = admin.nextcloud_user
-            password = decrypt(admin.nextcloud_pass_enc) if admin.nextcloud_pass_enc else None
+            nc_url = admin.nextcloud_url
+            nc_admin_user = admin.nextcloud_user
+            nc_admin_pass = decrypt(admin.nextcloud_pass_enc) if admin.nextcloud_pass_enc else None
 
-        if not url or not user or not password:
+        # Resolve Home Assistant credentials
+        ha_url = admin.ha_url or (default_user.ha_url if default_user else None)
+        ha_token_enc = admin.ha_token_enc or (default_user.ha_token_enc if default_user else None)
+        ha_token = decrypt(ha_token_enc) if ha_token_enc else None
+
+        if not nc_url or not nc_admin_user or not nc_admin_pass:
             raise HTTPException(status_code=400, detail="Nextcloud configuration missing")
 
-        # 2. Fetch users from Nextcloud OCS API
+        # Collect data from both sources
+        ha_users: dict[str, dict] = {}
+        nc_users: dict[str, dict] = {}
+
+        # Fetch HA person entities
+        if ha_url and ha_token:
+            try:
+                async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+                    resp = await client.get(
+                        f"{ha_url.rstrip('/')}/api/states",
+                        headers={"Authorization": f"Bearer {ha_token}"}
+                    )
+                    if resp.status_code == 200:
+                        for state in resp.json():
+                            if state['entity_id'].startswith('person.'):
+                                username = state['entity_id'].split('.')[1]
+                                attrs = state.get('attributes', {})
+                                ha_users[username] = {
+                                    "display_name": attrs.get('friendly_name', username),
+                                    "entity_id": state['entity_id'],
+                                    "user_id": attrs.get('user_id'),
+                                    "device_trackers": attrs.get('device_trackers', []),
+                                }
+            except Exception as e:
+                log.error(f"[import] HA Error: {str(e)}")
+
+        # Fetch Nextcloud users with detailed info
         try:
             async with httpx.AsyncClient(verify=False) as client:
                 resp = await client.get(
-                    f"{url.rstrip('/')}/ocs/v1.php/cloud/users",
-                    auth=(user, password),
+                    f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users",
+                    auth=(nc_admin_user, nc_admin_pass),
                     headers={"OCS-APIRequest": "true", "Accept": "application/json"},
                     params={"format": "json"}
                 )
                 if resp.status_code != 200:
                     raise HTTPException(status_code=resp.status_code, detail=f"Nextcloud API error: {resp.text}")
                 
-                data = resp.json().get("ocs", {}).get("data", {}).get("users", [])
+                usernames = resp.json().get("ocs", {}).get("data", {}).get("users", [])
                 
-                count = 0
-                for nc_username in data:
-                    existing = session.exec(select(User).where(User.username == nc_username)).first()
-                    if not existing:
-                        new_user = User(
-                            username=nc_username,
-                            display_name=nc_username.capitalize(),
-                            is_admin=False,
-                            nextcloud_url=url,
-                            nextcloud_user=nc_username,
-                            # We don't have their password, so they must use another method or admin must set it
+                for nc_username in usernames:
+                    nc_data = {"nc_username": nc_username}
+                    try:
+                        detail_resp = await client.get(
+                            f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users/{nc_username}",
+                            auth=(nc_admin_user, nc_admin_pass),
+                            headers={"OCS-APIRequest": "true", "Accept": "application/json"},
+                            params={"format": "json"}
                         )
-                        session.add(new_user)
-                        count += 1
-                
-                session.commit()
-                return {"status": "SUCCESS", "message": f"Imported {count} users from Nextcloud"}
+                        if detail_resp.status_code == 200:
+                            udata = detail_resp.json().get("ocs", {}).get("data", {})
+                            nc_data["display_name"] = udata.get("display-name") or udata.get("displayname")
+                            nc_data["email"] = udata.get("email")
+                            nc_data["phone"] = udata.get("phone")
+                            nc_data["address"] = udata.get("address")
+                            nc_data["website"] = udata.get("website")
+                            nc_data["twitter"] = udata.get("twitter")
+                            nc_data["groups"] = udata.get("groups", [])
+                            nc_data["language"] = udata.get("language")
+                            nc_data["locale"] = udata.get("locale")
+                            nc_data["quota"] = udata.get("quota")
+                            nc_data["enabled"] = udata.get("enabled")
+                    except Exception:
+                        pass
+                    nc_users[nc_username.lower()] = nc_data
         except Exception as e:
-            log.error(f"Nextcloud import failed: {e}")
+            log.error(f"[import] Nextcloud Error: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
+
+        # Merge and import users
+        all_usernames = set(ha_users.keys()) | set(nc_users.keys())
+        imported = []
+        for username in sorted(all_usernames):
+            existing = session.exec(select(User).where(User.username == username)).first()
+            if existing:
+                continue
+            
+            in_ha = username in ha_users
+            in_nc = username in nc_users
+            ha_data = ha_users.get(username, {})
+            nc_data = nc_users.get(username, {})
+            
+            # Determine source label
+            source = "Home Assistant + Nextcloud" if (in_ha and in_nc) else ("Home Assistant" if in_ha else "Nextcloud")
+            
+            # Prefer NC display_name (usually more accurate), fall back to HA
+            display_name = nc_data.get("display_name") or ha_data.get("display_name") or username.capitalize()
+            email = nc_data.get("email")
+            
+            # Generate a secure random password for the imported user
+            temp_password = os.urandom(16).hex()
+            
+            new_user = User(
+                username=username,
+                display_name=display_name,
+                is_admin=False,
+                password_hash=pwd_context.hash(temp_password),
+                nextcloud_url=nc_url if in_nc else None,
+                nextcloud_user=nc_data.get("nc_username") if in_nc else None,
+                ha_url=ha_url if in_ha else None,
+            )
+            session.add(new_user)
+            imported.append({
+                "username": username,
+                "display_name": display_name,
+                "email": email,
+                "source": source,
+                "temp_password": temp_password,
+                "nextcloud_groups": nc_data.get("groups", []),
+                "ha_entity_id": ha_data.get("entity_id"),
+                "ha_device_trackers": ha_data.get("device_trackers", []),
+            })
+        
+        session.commit()
+        return {
+            "status": "SUCCESS", 
+            "message": f"Imported {len(imported)} users",
+            "imported_users": imported,
+        }
 
 
 # ─── Device & Light Grouping (Section 3.14) ───────────────────────────────────
