@@ -72,7 +72,10 @@ export default function EntitySearchDropdown({
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const dropdownEl = document.querySelector('.entity-dropdown-portal');
+      if (dropdownEl && dropdownEl.contains(target)) return;
+      if (containerRef.current && !containerRef.current.contains(target)) {
         setIsOpen(false);
       }
     };
@@ -97,7 +100,7 @@ export default function EntitySearchDropdown({
 
   const dropdown = isOpen ? (
     <div
-      className="fixed z-[100] max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+      className="entity-dropdown-portal fixed z-[100] max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
       style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
     >
       {filtered.length === 0 ? (
