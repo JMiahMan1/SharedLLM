@@ -14,15 +14,15 @@ from typing import Any, Optional
 
 try:
     from .indexer import (
-        build_content_index, summarize_index, extract_and_chunk_contents, 
-        set_indexer_pause, CheckpointManager
+        build_content_index, summarize_index, extract_and_chunk_contents,
+        set_indexer_pause, is_indexer_paused, CheckpointManager
     )
     from .providers import build_provider, ProviderConfig
     from .models import ProviderWriteRequest, ProviderMirrorRequest
 except (ImportError, ValueError):
     from indexer import (
-        build_content_index, summarize_index, extract_and_chunk_contents, 
-        set_indexer_pause, CheckpointManager
+        build_content_index, summarize_index, extract_and_chunk_contents,
+        set_indexer_pause, is_indexer_paused, CheckpointManager
     )
     from providers import build_provider, ProviderConfig
     from models import ProviderWriteRequest, ProviderMirrorRequest
@@ -46,8 +46,6 @@ def health():
 @app.get("/status")
 async def get_storage_status():
     """Retrieves the current indexing status and file counts."""
-    from storage.indexer import is_indexer_paused, CheckpointManager
-
     indexer_state = "PAUSED" if is_indexer_paused() else "IDLE"
 
     rag_stats = {}
