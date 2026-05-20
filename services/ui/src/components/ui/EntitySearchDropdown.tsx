@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import { api } from '../../services/api';
+import { createPortal } from 'react-dom';
 
 interface EntitySearchDropdownProps {
   value: string;
@@ -20,6 +21,7 @@ export default function EntitySearchDropdown({
 }: EntitySearchDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -44,6 +46,30 @@ export default function EntitySearchDropdown({
     ).slice(0, 50);
   }, [entities, search, domainFilter]);
 
+  const updateDropdownPosition = useCallback(() => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      updateDropdownPosition();
+      const handleResize = () => updateDropdownPosition();
+      window.addEventListener('resize', handleResize);
+      window.addEventListener('scroll', handleResize, true);
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        window.removeEventListener('scroll', handleResize, true);
+      };
+    }
+  }, [isOpen, updateDropdownPosition]);
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -53,12 +79,6 @@ export default function EntitySearchDropdown({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  useEffect(() => {
-    if (isOpen && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [isOpen]);
 
   const handleSelect = (entityId: string) => {
     onChange(entityId);
@@ -74,6 +94,43 @@ export default function EntitySearchDropdown({
   const displayValue = value
     ? entities.find((e) => e.entity_id === value)?.friendly_name || value
     : '';
+
+  const dropdown = isOpen ? (
+    <div
+      className="fixed z-[100] max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+      style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+    >
+      {filtered.length === 0 ? (
+        <div className="px-4 py-3 text-sm text-slate-500">No entities found</div>
+      ) : (
+        <ul className="py-1">
+          {filtered.map((entity) => (
+            <li key={entity.entity_id}>
+              <button
+                type="button"
+                onClick={() => handleSelect(entity.entity_id)}
+                className={`w-full px-4 py-2 text-left transition hover:bg-white/10 ${
+                  entity.entity_id === value ? 'bg-white/10' : ''
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-indigo-400/70 w-24 truncate">
+                    {entity.domain}
+                  </span>
+                  <span className="text-sm text-white truncate flex-1">
+                    {entity.friendly_name || entity.entity_id}
+                  </span>
+                  <span className="text-xs text-slate-500 truncate max-w-[120px]">
+                    {entity.entity_id}
+                  </span>
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  ) : null;
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
@@ -107,40 +164,7 @@ export default function EntitySearchDropdown({
           </button>
         )}
       </div>
-
-      {isOpen && (
-        <div className="absolute z-50 mt-1 w-full max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-900/95 backdrop-blur-xl shadow-2xl">
-          {filtered.length === 0 ? (
-            <div className="px-4 py-3 text-sm text-slate-500">No entities found</div>
-          ) : (
-            <ul className="py-1">
-              {filtered.map((entity) => (
-                <li key={entity.entity_id}>
-                  <button
-                    type="button"
-                    onClick={() => handleSelect(entity.entity_id)}
-                    className={`w-full px-4 py-2 text-left transition hover:bg-white/10 ${
-                      entity.entity_id === value ? 'bg-white/10' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-indigo-400/70 w-24 truncate">
-                        {entity.domain}
-                      </span>
-                      <span className="text-sm text-white truncate flex-1">
-                        {entity.friendly_name || entity.entity_id}
-                      </span>
-                      <span className="text-xs text-slate-500 truncate max-w-[120px]">
-                        {entity.entity_id}
-                      </span>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      {typeof document !== 'undefined' && dropdown && createPortal(dropdown, document.body)}
     </div>
   );
 }

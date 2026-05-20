@@ -154,10 +154,13 @@ const Admin = () => {
     queryFn: () => api.getUsers(),
   });
 
-  const { data: discoveredUsers = [], refetch: refetchDiscoveredUsers, isFetching: isDiscovering } = useQuery<DiscoveredUser[]>({
+  const { data: discoveryData, refetch: refetchDiscoveredUsers, isFetching: isDiscovering } = useQuery<{ users: DiscoveredUser[]; warnings: string[]; errors: string[] }>({
     queryKey: ['discovered-users'],
     queryFn: () => api.discoverUsers(),
   });
+  const discoveredUsers = discoveryData?.users ?? [];
+  const discoveryWarnings = discoveryData?.warnings ?? [];
+  const discoveryErrors = discoveryData?.errors ?? [];
 
   const { data: devices = [] } = useQuery<DeviceAssignment[]>({
     queryKey: ['devices'],
@@ -639,6 +642,28 @@ const Admin = () => {
                 placeholder="Filter discovered users"
                 className="glass-input mb-4 w-full"
               />
+
+              {discoveryWarnings.length > 0 && (
+                <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-300">Discovery Warnings</p>
+                  <ul className="mt-1 space-y-1">
+                    {discoveryWarnings.map((w, i) => (
+                      <li key={i} className="text-xs text-amber-200/80">• {w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {discoveryErrors.length > 0 && (
+                <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
+                  <p className="text-sm font-semibold text-red-300">Discovery Errors</p>
+                  <ul className="mt-1 space-y-1">
+                    {discoveryErrors.map((e, i) => (
+                      <li key={i} className="text-xs text-red-200/80">• {e}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               <div className="space-y-3">
                 {filteredDiscoveredUsers.map((user) => (

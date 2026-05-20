@@ -20,7 +20,7 @@ try:
         ResolveRequest, ResolvedCredentials, 
         UserCreate, UserRead, UserUpdate,
         DeviceAssignmentRead, DeviceAssignmentCreate,
-        LoginRequest, LoginResponse, DiscoverUser,
+        LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportUserResult, ImportResponse,
         GlobalSettingRead, GlobalSettingUpdate
     )
     from .crypto import encrypt, decrypt, digest_secret
@@ -802,12 +802,15 @@ def revoke_key(key_id: int, session: Session = Depends(get_session), user: User 
     session.commit()
     return {"success": True}
 
-@app.get("/api/auth/discover", response_model=List[DiscoverUser])
+@app.get("/api/auth/discover", response_model=DiscoverResponse)
 async def discover_users(session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     """Scan Home Assistant and Nextcloud for users to import.
     Merges users found in both sources into a single entry with combined data."""
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
+    
+    warnings: list[str] = []
+    errors: list[str] = []
     
     # Resolve credentials to use (prefer admin's, fallback to default)
     default_user = session.exec(select(User).where(User.username == "default")).first()
@@ -860,7 +863,10 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                     # Handle Nextcloud API error responses
                     meta = data.get("ocs", {}).get("meta", {})
                     if meta.get("status") == "failure":
-                        log.warning(f"[discovery] Nextcloud API error: {meta.get('message', 'Unknown')}")
+                        msg = meta.get("message", "Unknown error")
+                        warn_text = f"Nextcloud: {msg}"
+                        log.warning(f"[discovery] {warn_text}")
+                        warnings.append(warn_text)
                     else:
                         usernames = data.get("ocs", {}).get("data", {}).get("users", [])
                         for username in usernames:
@@ -917,7 +923,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
         ))
             
     log.info(f"[discovery] Discovery complete. Found {len(discovered)} users.")
-    return discovered
+    return DiscoverResponse(users=discovered, warnings=warnings, errors=errors)
 
 # ─── Admin ─────────────────────────────────────────────────────────────────────
 
@@ -1078,12 +1084,14 @@ def delete_mission_by_id(mission_id: int, session: Session = Depends(get_session
     return {"status": "SUCCESS"}
 
 
-@app.post("/api/auth/import/nextcloud")
+@app.post("/api/auth/import/nextcloud", response_model=ImportResponse)
 async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(default=None)):
     """Import users from Nextcloud and Home Assistant, merging by username.
     Generates temp passwords and pre-fills all available user data."""
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
+    
+    warnings: list[str] = []
     
     with Session(engine) as session:
         admin = session.exec(select(User).where(User.is_admin)).first()
@@ -1153,7 +1161,10 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                 # Handle Nextcloud API error responses (e.g., 403 for non-admin users)
                 meta = nc_resp.get("ocs", {}).get("meta", {})
                 if meta.get("status") == "failure":
-                    log.warning(f"[import] Nextcloud API error: {meta.get('message', 'Unknown')}")
+                    msg = meta.get("message", "Unknown error")
+                    warn_text = f"Nextcloud: {msg}"
+                    log.warning(f"[import] {warn_text}")
+                    warnings.append(warn_text)
                     usernames = []
                 else:
                     usernames = nc_resp.get("ocs", {}).get("data", {}).get("users", [])
