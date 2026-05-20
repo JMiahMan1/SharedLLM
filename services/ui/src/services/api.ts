@@ -743,4 +743,30 @@ export const api = {
     const resp = await apiClient.post('/execute/groups/lights', data);
     return resp.data;
   },
+
+  async getTelemetryEnrollments(): Promise<any[]> {
+    const resp = await apiClient.get('/api/telemetry/enroll');
+    return resp.data.enrollments || [];
+  },
+
+  async enrollTelemetry(data: { entity_id: string; offline_alert_threshold_minutes: number }): Promise<any> {
+    const resp = await apiClient.post('/api/telemetry/enroll', {
+      entity_id: data.entity_id,
+      power_tracking: true,
+      availability_tracking: true,
+      usage_tracking: true,
+      offline_alert_threshold_minutes: data.offline_alert_threshold_minutes,
+    });
+    return resp.data;
+  },
+
+  async unenrollTelemetry(entity_id: string): Promise<any> {
+    const resp = await apiClient.delete(`/api/telemetry/enroll/${encodeURIComponent(entity_id)}`);
+    return resp.data;
+  },
+
+  async analyzeTelemetry(): Promise<any> {
+    const resp = await apiClient.post('/api/telemetry/analyze', { hours: 168 });
+    return resp.data;
+  },
 };
