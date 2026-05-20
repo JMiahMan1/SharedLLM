@@ -23,6 +23,10 @@ import {
   Activity,
   TrendingUp,
   AlertTriangle,
+  Mic,
+  Radio,
+  Megaphone,
+  Phone,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -40,12 +44,13 @@ import HelpTooltip from '../components/ui/HelpTooltip';
 import LLMSettings from '../components/settings/LLMSettings';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 
-type AdminTab = 'users' | 'groups' | 'telemetry' | 'raven' | 'settings' | 'database';
+type AdminTab = 'users' | 'groups' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield },
   { id: 'groups', label: 'Device Groups', icon: Layers },
   { id: 'telemetry', label: 'Telemetry', icon: Activity },
+  { id: 'intercom', label: 'Intercom', icon: Phone },
   { id: 'raven', label: 'Raven Ops', icon: ShieldAlert },
   { id: 'settings', label: 'LLM & Settings', icon: Code2 },
   { id: 'database', label: 'Database & Audit', icon: BarChart3 },
@@ -136,6 +141,11 @@ const Admin = () => {
   const [executeTargetCluster, setExecuteTargetCluster] = useState('');
   const [telemetryEntityId, setTelemetryEntityId] = useState('');
   const [telemetryOfflineThreshold, setTelemetryOfflineThreshold] = useState(30);
+  const [intercomTab, setIntercomTab] = useState<'sessions' | 'broadcast' | 'announce' | 'config'>('sessions');
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastTargets, setBroadcastTargets] = useState('');
+  const [announceMessage, setAnnounceMessage] = useState('');
+  const [announceTargets, setAnnounceTargets] = useState('');
 
   const { data: users = [] } = useQuery<UserProfile[]>({
     queryKey: ['users'],
@@ -426,6 +436,55 @@ const Admin = () => {
       toast.success('Telemetry analysis queued');
     },
     onError: (error: Error) => toast.error(error.message || 'Failed to trigger analysis'),
+  });
+
+  const { data: intercomSessions = [] } = useQuery<any[]>({
+    queryKey: ['intercom-sessions'],
+    queryFn: () => api.getIntercomSessions(),
+  });
+
+  const { data: intercomConfig } = useQuery<any>({
+    queryKey: ['intercom-config'],
+    queryFn: () => api.getIntercomConfig(),
+  });
+
+  const startIntercomMutation = useMutation({
+    mutationFn: (data: { target_user_id?: string; target_room?: string; target_entity_ids?: string[] }) =>
+      api.startIntercomSession(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['intercom-sessions'] });
+      toast.success('Intercom session started');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to start intercom'),
+  });
+
+  const endIntercomMutation = useMutation({
+    mutationFn: (session_id: string) => api.endIntercomSession(session_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['intercom-sessions'] });
+      toast.success('Intercom session ended');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to end intercom'),
+  });
+
+  const broadcastMutation = useMutation({
+    mutationFn: (data: { message: string; target_entity_ids: string[] }) => api.intercomBroadcast(data),
+    onSuccess: () => {
+      setBroadcastMessage('');
+      setBroadcastTargets('');
+      toast.success('Broadcast sent');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to send broadcast'),
+  });
+
+  const announceMutation = useMutation({
+    mutationFn: (data: { message: string; target_devices: string[] }) => api.intercomAnnounce(data),
+    onSuccess: () => {
+      setAnnounceMessage('');
+      setAnnounceTargets('');
+      toast.success('Announcement sent');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to send announcement'),
   });
 
   const filteredDiscoveredUsers = useMemo(() => {
@@ -1074,6 +1133,175 @@ const Admin = () => {
               )}
             </div>
           </section>
+        </div>
+      )}
+
+      {activeTab === 'intercom' && (
+        <div className="space-y-6">
+          <div className="flex gap-2 border-b border-white/10 pb-2">
+            {(['sessions', 'broadcast', 'announce', 'config'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setIntercomTab(tab)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition ${
+                  intercomTab === tab
+                    ? 'bg-violet-600/30 text-white border border-violet-500/30'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                {tab === 'sessions' ? <Phone size={14} /> : tab === 'broadcast' ? <Radio size={14} /> : tab === 'announce' ? <Megaphone size={14} /> : <Settings2 size={14} />}
+                {tab === 'sessions' ? 'Sessions' : tab === 'broadcast' ? 'Broadcast' : tab === 'announce' ? 'Announce' : 'Config'}
+              </button>
+            ))}
+          </div>
+
+          {intercomTab === 'sessions' && (
+            <div className="space-y-6">
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Phone size={20} className="text-violet-400" />
+                  Active Intercom Sessions
+                </h3>
+                <div className="space-y-3">
+                  {intercomSessions.filter((s) => s.status === 'active').map((session) => (
+                    <div key={session.session_id} className="glass-card flex items-center justify-between p-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-white">Session: {session.session_id}</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          Caller: {session.caller_user_id} | Target: {session.target_user_id || session.target_room || 'All'} | Type: {session.session_type}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => endIntercomMutation.mutate(session.session_id)}
+                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                        aria-label={`End session ${session.session_id}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {!intercomSessions.filter((s) => s.status === 'active').length && (
+                    <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                      No active intercom sessions.
+                    </p>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {intercomTab === 'broadcast' && (
+            <section className="glass-panel p-6">
+              <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                <Radio size={20} className="text-amber-400" />
+                Broadcast Message
+              </h3>
+              <div className="space-y-3">
+                <textarea
+                  value={broadcastMessage}
+                  onChange={(e) => setBroadcastMessage(e.target.value)}
+                  placeholder="Message to broadcast..."
+                  className="glass-input w-full min-h-[80px]"
+                />
+                <input
+                  type="text"
+                  value={broadcastTargets}
+                  onChange={(e) => setBroadcastTargets(e.target.value)}
+                  placeholder="Target entity IDs (comma-separated) or leave empty for all"
+                  className="glass-input w-full"
+                />
+                <button
+                  onClick={() => {
+                    if (!broadcastMessage.trim()) {
+                      toast.error('Enter a message to broadcast');
+                      return;
+                    }
+                    broadcastMutation.mutate({
+                      message: broadcastMessage.trim(),
+                      target_entity_ids: broadcastTargets.split(',').map((s) => s.trim()).filter(Boolean),
+                    });
+                  }}
+                  disabled={broadcastMutation.isPending}
+                  className="glass-button px-4 py-3 bg-amber-600/30 border-amber-500/30 text-[10px] font-black uppercase tracking-widest text-amber-300"
+                >
+                  <Radio size={14} />
+                  Broadcast
+                </button>
+              </div>
+            </section>
+          )}
+
+          {intercomTab === 'announce' && (
+            <section className="glass-panel p-6">
+              <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                <Megaphone size={20} className="text-cyan-400" />
+                TV / Speaker Announcement
+              </h3>
+              <div className="space-y-3">
+                <textarea
+                  value={announceMessage}
+                  onChange={(e) => setAnnounceMessage(e.target.value)}
+                  placeholder="Announcement message..."
+                  className="glass-input w-full min-h-[80px]"
+                />
+                <input
+                  type="text"
+                  value={announceTargets}
+                  onChange={(e) => setAnnounceTargets(e.target.value)}
+                  placeholder="Target devices (comma-separated: media_player.living_room, media_player.kitchen)"
+                  className="glass-input w-full"
+                />
+                <button
+                  onClick={() => {
+                    if (!announceMessage.trim()) {
+                      toast.error('Enter an announcement message');
+                      return;
+                    }
+                    announceMutation.mutate({
+                      message: announceMessage.trim(),
+                      target_devices: announceTargets.split(',').map((s) => s.trim()).filter(Boolean),
+                    });
+                  }}
+                  disabled={announceMutation.isPending}
+                  className="glass-button px-4 py-3 bg-cyan-600/30 border-cyan-500/30 text-[10px] font-black uppercase tracking-widest text-cyan-300"
+                >
+                  <Megaphone size={14} />
+                  Announce
+                </button>
+              </div>
+            </section>
+          )}
+
+          {intercomTab === 'config' && (
+            <section className="glass-panel p-6">
+              <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                <Settings2 size={20} className="text-slate-400" />
+                Intercom Configuration
+              </h3>
+              {intercomConfig ? (
+                <div className="space-y-3">
+                  <div className="glass-card p-4">
+                    <p className="text-xs text-slate-400">Default TTS Engine</p>
+                    <p className="font-mono text-sm text-white">{intercomConfig.default_tts_engine || 'kokoro'}</p>
+                  </div>
+                  <div className="glass-card p-4">
+                    <p className="text-xs text-slate-400">Default Voice</p>
+                    <p className="font-mono text-sm text-white">{intercomConfig.default_voice || 'af_heart'}</p>
+                  </div>
+                  <div className="glass-card p-4">
+                    <p className="text-xs text-slate-400">Default Volume</p>
+                    <p className="font-mono text-sm text-white">{intercomConfig.default_volume ?? 0.8}</p>
+                  </div>
+                  <div className="glass-card p-4">
+                    <p className="text-xs text-slate-400">ESPresense Routing</p>
+                    <p className="font-mono text-sm text-white">{intercomConfig.enable_espresense_routing !== false ? 'Enabled' : 'Disabled'}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">Loading configuration...</p>
+              )}
+            </section>
+          )}
         </div>
       )}
 
