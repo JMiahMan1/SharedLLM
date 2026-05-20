@@ -417,7 +417,7 @@ async def _probe_esphome(ip: str, timeout: float) -> Optional[dict]:
     """Probe ESPHome device via native API."""
     try:
         import aioesphomeapi
-        client = aioesphomeapi.APIClient(ip, 6053, noise_psk="")
+        client = aioesphomeapi.APIClient(ip, 6053, "")
         await asyncio.wait_for(client.connect(login=True), timeout=timeout)
         try:
             device_info = await client.device_info()
@@ -443,9 +443,22 @@ async def _probe_esphome(ip: str, timeout: float) -> Optional[dict]:
                 "entity_count": len(entities),
                 "entity_types": sorted(entity_types),
                 "service_count": len(services),
+                "encryption_required": False,
             }
         finally:
             await client.disconnect()
     except Exception as e:
+        error_type = type(e).__name__
+        if "RequiresEncryption" in error_type or "encryption" in str(e).lower():
+            return {
+                "ip": ip,
+                "type": "esphome",
+                "friendly_name": "",
+                "model": "",
+                "manufacturer": "ESPHome",
+                "software_version": "",
+                "encryption_required": True,
+                "note": "Device requires noise encryption key",
+            }
         log.debug(f"[network_scan] ESPHome probe failed for {ip}: {e}")
     return None
