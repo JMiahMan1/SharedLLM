@@ -115,6 +115,8 @@ class IntentEngine:
             "turn_on": [r"turn on (?:the )?(.+)", r"power on (?:the )?(.+)", r"switch on (?:the )?(.+)"],
             "turn_off": [r"turn off (?:the )?(.+)", r"power off (?:the )?(.+)", r"switch off (?:the )?(.+)"],
             "play_media": [r"play (?:the )?(.+)", r"start (?:the )?(.+)", r"put on (?:the )?(.+)"],
+            "pause_media": [r"pause (?:the )?(?:music|video|media )?(?:on )?(.+)", r"stop (?:the )?(?:music|video|media )?(?:on )?(.+)"],
+            "media_transport": [r"(?:pause|stop|resume|skip|next|rewind|fast forward).*(?:on|in|at) (.+)", r"(?:pause|stop|resume).*(?:the )?(.+)", r"(?:skip|next|rewind|fast forward).*(?:the )?(.+)"],
         }
 
         if intent in patterns:
