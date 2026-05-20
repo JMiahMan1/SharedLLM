@@ -718,6 +718,21 @@ class NightModeRequest(BaseRequest):
     media_query: Optional[str] = Field(None, description="Search query for sleep sounds/audiobook")
 
 
+class NetworkDeviceScanRequest(BaseRequest):
+    """
+    Scans the local network for devices by probing known ports (Roku ECP, webOS,
+    Samsung, Chromecast, ESPHome, etc.) and enriches results with device info
+    (model, serial, MAC address, friendly name).
+    
+    Returns a list of all discovered devices with their IP, type, and metadata.
+    Use this to find devices when you don't know their IP or entity_id.
+    """
+    user_context: UserContext
+    subnet: Optional[str] = Field(None, description="Subnet to scan (e.g. '192.168.2.0/24'). Auto-detected from host network if omitted.")
+    device_type: Optional[str] = Field(None, description="Filter by device type: 'roku', 'webos', 'samsung', 'cast', 'androidtv', 'esphome', 'all'")
+    include_mac: Optional[bool] = Field(True, description="Include MAC address lookup from ARP cache")
+
+
 class HAConfigRequest(BaseRequest):
     """
     Inspects Home Assistant integration configurations via WebSocket API.

@@ -25,7 +25,7 @@ try:
         WebSearchRequest, WebReadRequest, ExecutionResult,
         DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-          SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest
+          SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest
     )
     from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
     from handlers import docker_logs as docker_logs_handler
@@ -1445,7 +1445,7 @@ async def discovery_device_refresh(entity_id: str, request: Request):
     import device_discovery
     body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     device_type = body.get("device_type")
-    subnet = body.get("subnet", "192.168.2.0/24")
+    subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
     
     creds = await resolve_internal_user("default")
     ha_url = (creds or {}).get("ha_url", "")
@@ -1467,7 +1467,7 @@ async def discovery_bulk_scan(request: Request):
     """Bulk network scan for all media devices."""
     import device_discovery
     body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
-    subnet = body.get("subnet", "192.168.2.0/24")
+    subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
     
     creds = await resolve_internal_user("default")
     ha_url = (creds or {}).get("ha_url", "")
@@ -1488,28 +1488,63 @@ async def discovery_device_remove(entity_id: str):
     return {"status": "FAILURE", "message": f"Device {entity_id} not found"}
 
 @app.get("/discovery/profile/{entity_id}")
-async def discovery_device_profile(entity_id: str, subnet: str = "192.168.2.0/24"):
+async def discovery_device_profile(entity_id: str, subnet: str = None):
     """Generate a complete device profile with network info, HA data, and control methods."""
+    import device_discovery
     import device_profiler
     creds = await resolve_internal_user("default")
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
         return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
+    subnet = subnet or device_discovery.DEFAULT_SUBNET
     profile = await device_profiler.profile_device(entity_id, ha_url, ha_token, subnet)
     return profile
 
 @app.get("/discovery/profile")
-async def discovery_profile_all(subnet: str = "192.168.2.0/24"):
+async def discovery_profile_all(subnet: str = None):
     """Profile all media_player entities."""
+    import device_discovery
     import device_profiler
     creds = await resolve_internal_user("default")
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
         return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
+    subnet = subnet or device_discovery.DEFAULT_SUBNET
     profiles = await device_profiler.profile_all_media_devices(ha_url, ha_token, subnet)
     return {"profiles": profiles, "count": len(profiles)}
+
+@app.post("/discovery/network_scan", response_model=ExecutionResult)
+async def discovery_network_scan(req: NetworkDeviceScanRequest):
+    """
+    Comprehensive network scan for smart TVs and media devices.
+    Auto-detects local subnet if not specified.
+    """
+    from handlers.network_scan import scan_network
+    ctx = req.user_context
+    log.info(f"[network_scan] user={ctx.user} subnet={req.subnet} type={req.device_type}")
+    
+    devices = await scan_network(
+        subnet=req.subnet,
+        device_type=req.device_type,
+        include_mac=req.include_mac,
+    )
+    
+    if devices:
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"Found {len(devices)} device(s) on network.",
+            service="network_scan",
+            detail={"devices": devices, "count": len(devices)},
+        )
+    return ExecutionResult(
+        status="FAILURE",
+        message="No devices found on network.",
+        service="network_scan",
+        detail={"devices": [], "count": 0},
+    )
+
 
 @app.get("/discovery/control_methods")
 async def discovery_control_methods():

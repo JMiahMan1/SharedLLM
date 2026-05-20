@@ -968,6 +968,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
                 "ttsrequest": (EXECUTION_SVC, "/execute/tts"),
                 "storagetexttorequest": (STORAGE_SVC, "/text_to_audio"),
+                "networkdevicescanrequest": (EXECUTION_SVC, "/execute/network_scan"),
             }
 
             lookup_action = action.lower().strip() if action else ""

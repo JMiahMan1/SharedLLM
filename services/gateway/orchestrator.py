@@ -216,6 +216,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, str] = {
     "contextsearchrequest": "/rag/search",
     "haconfigrequest": "/execute/ha_config",
     "llminforequest": "/execute/llm_info",
+    "networkdevicescanrequest": "/execute/network_scan",
 }
 
 # Tool → service mapping (resolved at runtime)

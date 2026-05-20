@@ -15,6 +15,7 @@ Each strategy is independent and can be called individually or as a pipeline.
 Discovered info is automatically persisted to the device registry.
 """
 import asyncio
+import ipaddress
 import logging
 import os
 import socket
@@ -25,7 +26,47 @@ import ha_client
 
 log = logging.getLogger("execution.discovery")
 
-DEFAULT_SUBNET = "192.168.2.0/24"
+
+def get_local_subnet() -> str:
+    """Auto-detect the local subnet from host network interfaces."""
+    # Try env var first
+    env_subnet = os.environ.get("SCAN_SUBNET") or os.environ.get("LOCAL_SUBNET")
+    if env_subnet:
+        return env_subnet
+
+    # Try to get from routing table
+    try:
+        with open("/proc/net/route") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3 and parts[1] == "00000000":
+                    iface = parts[0]
+                    # Get IP for this interface
+                    result = os.popen(f"ip -j addr show {iface}").read()
+                    import json
+                    data = json.loads(result)
+                    for addr_info in data[0].get("addr_info", []):
+                        if addr_info.get("family") == "inet":
+                            ip = addr_info.get("local")
+                            prefix = addr_info.get("prefixlen", 24)
+                            network = ipaddress.IPv4Network(f"{ip}/{prefix}", strict=False)
+                            return str(network)
+    except Exception:
+        pass
+
+    # Fallback: get IP from socket and assume /24
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
+        return str(network)
+    except Exception:
+        return "192.168.1.0/24"
+
+
+DEFAULT_SUBNET = get_local_subnet()
 
 DEVICE_PORTS = {
     "roku": [(8060, "roku:ecp")],
@@ -434,8 +475,18 @@ async def _discover_via_arp_scan(
         friendly = state.get("attributes", {}).get("friendly_name", "").lower()
         entity_base = entity_id.split(".")[-1].lower().replace("_", " ")
 
-        # Scan common subnets
-        subnets = ["192.168.2.0/24", "192.168.1.0/24"]
+        # Scan common subnets (local + adjacent)
+        local_subnet = get_local_subnet()
+        # Also scan adjacent /24 in case device moved subnets
+        try:
+            net = ipaddress.IPv4Network(local_subnet, strict=False)
+            subnets = [local_subnet]
+            # Add adjacent subnet (e.g., if on 192.168.2.0/24, also scan 192.168.1.0/24)
+            adjacent = list(net.network_address)
+            adjacent[2] = (adjacent[2] + 1) % 256
+            subnets.append(f"{adjacent[0]}.{adjacent[1]}.{adjacent[2]}.0/24")
+        except Exception:
+            subnets = [local_subnet]
         found_devices = []
 
         for subnet in subnets:
