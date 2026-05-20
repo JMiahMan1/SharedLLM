@@ -89,7 +89,7 @@ DEVICE_PORTS = {
     "chromecast": [8009],
     "androidtv": [5555],
     "dlna": [9197, 8200],
-    "esphome": [80, 8080],
+    "esphome": [6053],
 }
 
 ALL_TV_PORTS = sorted(set(
@@ -227,6 +227,10 @@ async def _enrich_devices(
             # DLNA (port 9197)
             elif port == 9197:
                 device = await _probe_dlna(client, ip, timeout)
+
+            # ESPHome (port 6053)
+            elif port == 6053:
+                device = await _probe_esphome(ip, timeout)
 
             if device:
                 # Add MAC from ARP cache
@@ -406,4 +410,42 @@ async def _probe_dlna(client: httpx.AsyncClient, ip: str, timeout: float) -> Opt
             }
     except Exception:
         pass
+    return None
+
+
+async def _probe_esphome(ip: str, timeout: float) -> Optional[dict]:
+    """Probe ESPHome device via native API."""
+    try:
+        import aioesphomeapi
+        client = aioesphomeapi.APIClient(ip, 6053, noise_psk="")
+        await asyncio.wait_for(client.connect(login=True), timeout=timeout)
+        try:
+            device_info = await client.device_info()
+            entities, services = await client.list_entities_services()
+
+            entity_types = set()
+            for entity in entities:
+                if hasattr(entity, "type_"):
+                    entity_types.add(entity.type_)
+                elif hasattr(entity, "__class__"):
+                    entity_types.add(entity.__class__.__name__)
+
+            return {
+                "ip": ip,
+                "type": "esphome",
+                "friendly_name": getattr(device_info, "name", "") or getattr(device_info, "friendly_name", ""),
+                "model": getattr(device_info, "model", ""),
+                "manufacturer": getattr(device_info, "manufacturer", "ESPHome"),
+                "software_version": getattr(device_info, "esphome_version", ""),
+                "platform": getattr(device_info, "compile_platform", ""),
+                "board": getattr(device_info, "board", ""),
+                "mac_address": getattr(device_info, "mac_address", ""),
+                "entity_count": len(entities),
+                "entity_types": sorted(entity_types),
+                "service_count": len(services),
+            }
+        finally:
+            await client.disconnect()
+    except Exception as e:
+        log.debug(f"[network_scan] ESPHome probe failed for {ip}: {e}")
     return None
