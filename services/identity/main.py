@@ -31,7 +31,7 @@ except (ImportError, ModuleNotFoundError):
         ResolveRequest, ResolvedCredentials, 
         UserCreate, UserRead, UserUpdate,
         DeviceAssignmentRead, DeviceAssignmentCreate,
-        LoginRequest, LoginResponse, DiscoverUser,
+        LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportUserResult, ImportResponse,
         GlobalSettingRead, GlobalSettingUpdate
     )
     from crypto import encrypt, decrypt, digest_secret
