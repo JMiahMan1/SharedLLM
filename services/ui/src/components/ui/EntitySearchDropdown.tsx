@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
-import { api } from '../services/api';
+import { api } from '../../services/api';
 
 interface EntitySearchDropdownProps {
   value: string;
