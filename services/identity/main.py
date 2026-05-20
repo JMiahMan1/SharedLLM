@@ -48,6 +48,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import INTERNAL_SECRET, OLLAMA_URL, IDENTITY_DATABASE_URL
 
+def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
 DATABASE_URL = IDENTITY_DATABASE_URL
 
 engine = create_engine(
@@ -1107,25 +1111,28 @@ def list_media_groups(x_internal_secret: str = Header(...)):
 @app.post("/api/groups/media")
 def create_media_group(group_data: dict, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
-    key = f"media_group:{group_data['group_id']}"
+    group_id = group_data.get("group_id") or group_data.get("name")
+    if not group_id:
+        raise HTTPException(status_code=400, detail="group_id or name is required")
+    key = f"media_group:{group_id}"
     with Session(engine) as session:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if existing:
-            raise HTTPException(status_code=409, detail=f"Media group '{group_data['group_id']}' already exists")
+            raise HTTPException(status_code=409, detail=f"Media group '{group_id}' already exists")
         group = GlobalSetting(
             key=key,
             value=json.dumps({
-                "group_id": group_data["group_id"],
-                "group_name": group_data.get("group_name", group_data["group_id"]),
+                "group_id": group_id,
+                "group_name": group_data.get("group_name") or group_data.get("name", group_id),
                 "member_entity_ids": group_data.get("member_entity_ids", []),
                 "scope": group_data.get("scope", "user"),
                 "owner_user_id": group_data.get("owner_user_id", "system"),
             }),
-            description=f"Media group: {group_data.get('group_name', '')}",
+            description=f"Media group: {group_data.get('group_name') or group_data.get('name', '')}",
         )
         session.add(group)
         session.commit()
-        return {"status": "SUCCESS", "message": f"Media group '{group_data['group_id']}' created"}
+        return {"status": "SUCCESS", "message": f"Media group '{group_id}' created"}
 
 
 @app.delete("/api/groups/media/{group_id}")
@@ -1191,26 +1198,29 @@ def list_light_clusters(x_internal_secret: str = Header(...)):
 @app.post("/api/groups/lights")
 def create_light_cluster(cluster_data: dict, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
-    key = f"light_cluster:{cluster_data['cluster_id']}"
+    cluster_id = cluster_data.get("cluster_id") or cluster_data.get("name")
+    if not cluster_id:
+        raise HTTPException(status_code=400, detail="cluster_id or name is required")
+    key = f"light_cluster:{cluster_id}"
     with Session(engine) as session:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if existing:
-            raise HTTPException(status_code=409, detail=f"Light cluster '{cluster_data['cluster_id']}' already exists")
+            raise HTTPException(status_code=409, detail=f"Light cluster '{cluster_id}' already exists")
         cluster = GlobalSetting(
             key=key,
             value=json.dumps({
-                "cluster_id": cluster_data["cluster_id"],
-                "cluster_name": cluster_data.get("cluster_name", cluster_data["cluster_id"]),
+                "cluster_id": cluster_id,
+                "cluster_name": cluster_data.get("cluster_name") or cluster_data.get("name", cluster_id),
                 "member_entity_ids": cluster_data.get("member_entity_ids", []),
                 "room": cluster_data.get("room"),
                 "scope": cluster_data.get("scope", "room"),
                 "owner_user_id": cluster_data.get("owner_user_id", "system"),
             }),
-            description=f"Light cluster: {cluster_data.get('cluster_name', '')}",
+            description=f"Light cluster: {cluster_data.get('cluster_name') or cluster_data.get('name', '')}",
         )
         session.add(cluster)
         session.commit()
-        return {"status": "SUCCESS", "message": f"Light cluster '{cluster_data['cluster_id']}' created"}
+        return {"status": "SUCCESS", "message": f"Light cluster '{cluster_id}' created"}
 
 
 @app.delete("/api/groups/lights/{cluster_id}")
@@ -1276,26 +1286,29 @@ def list_light_patterns(x_internal_secret: str = Header(...)):
 @app.post("/api/groups/patterns")
 def create_light_pattern(pattern_data: dict, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
-    key = f"light_pattern:{pattern_data['pattern_id']}"
+    pattern_id = pattern_data.get("pattern_id") or pattern_data.get("name")
+    if not pattern_id:
+        raise HTTPException(status_code=400, detail="pattern_id or name is required")
+    key = f"light_pattern:{pattern_id}"
     with Session(engine) as session:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if existing:
-            raise HTTPException(status_code=409, detail=f"Light pattern '{pattern_data['pattern_id']}' already exists")
+            raise HTTPException(status_code=409, detail=f"Light pattern '{pattern_id}' already exists")
         pattern = GlobalSetting(
             key=key,
             value=json.dumps({
-                "pattern_id": pattern_data["pattern_id"],
-                "pattern_name": pattern_data.get("pattern_name", pattern_data["pattern_id"]),
+                "pattern_id": pattern_id,
+                "pattern_name": pattern_data.get("pattern_name") or pattern_data.get("name", pattern_id),
                 "cluster_id": pattern_data.get("cluster_id"),
                 "steps": pattern_data.get("steps", []),
                 "loop": pattern_data.get("loop", False),
                 "transition_ms": pattern_data.get("transition_ms", 500),
             }),
-            description=f"Light pattern: {pattern_data.get('pattern_name', '')}",
+            description=f"Light pattern: {pattern_data.get('pattern_name') or pattern_data.get('name', '')}",
         )
         session.add(pattern)
         session.commit()
-        return {"status": "SUCCESS", "message": f"Light pattern '{pattern_data['pattern_id']}' created"}
+        return {"status": "SUCCESS", "message": f"Light pattern '{pattern_id}' created"}
 
 
 @app.patch("/api/groups/patterns/{pattern_id}")

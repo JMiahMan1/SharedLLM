@@ -265,49 +265,127 @@ TVs cannot respond (no mic), so the intercom is strictly one-way. Audio is deliv
 #### ESPresense Integration
 If BLE presence is enabled, the intercom defaults the **target** to the room where the recipient was last seen (resolved via ESPresense MQTT → `ha:presence:{user_id}` Redis key), rather than requiring manual device selection.
 
-#### Two-Way Voice Intercom (Speaker ↔ Speaker / Tablet ↔ Tablet)
+### 3.17 Native Android Mobile App (Ionic Capacitor)
 
-**How it works:**
-1. User holds `[Talk]` on the Jarvis UI (web or Ionic app) → browser `MediaRecorder` API captures raw audio in real time.
-2. On release, the WAV blob is `POST`-ed to a new endpoint: `POST /execute/intercom/send` (multipart, `audio_file` + `target_entity_ids[]` + `user_context`).
-3. The execution service saves the blob to `TEMP_AUDIO_CACHE` (same as TTS), generating a `media_id`.
-4. The audio is dispatched in parallel via `asyncio.gather()` to all target devices using the **existing `announce_handlers.dispatch_announce()` pipeline** — Roku, Cast, WebOS, Samsung, speaker all already supported.
-5. **For two-way:** The receiving device plays the audio. If the receiving device is a wall tablet running the Jarvis UI, the browser's `<audio>` element plays the incoming clip automatically via a WebSocket push (`/ws/capabilities` channel). The recipient can respond using the same hold-to-talk flow.
+To support hands-free operations, persistent whole-house voice integration, and lower intercom latencies on Android phones and wall tablets, the React frontend is wrapped in a native **Ionic Capacitor** container (`@capacitor/android`).
 
-**Backend Schema Addition:**
-```python
-class IntercomRequest(BaseRequest):
-    action: Literal["send", "broadcast", "call"]  
-    # send = one clip to target(s)
-    # broadcast = send to all non-blacklisted players (like announce_all)
-    # call = open a persistent two-way session (future)
-    target_entity_ids: Optional[List[str]] = None  # None = broadcast
-    group_id: Optional[str] = None                 # use a media group
-    audio_data: Optional[bytes] = None             # raw WAV bytes
-    audio_url: Optional[str] = None               # if pre-uploaded
-    message: Optional[str] = None                 # fallback: TTS text if no audio
+#### Core Mobile App Stack & Project Structure
+
+- **WebView Core:** Vite + React + TypeScript + TailwindCSS compiled to static web assets in `services/ui/dist/`
+- **Native Bridge:** Capacitor Core (`@capacitor/core`) and CLI (`@capacitor/cli`)
+- **Android Target:** Android Studio Gradle project located in `/services/ui/android/`
+- **Config file (`capacitor.config.json`):**
+  ```json
+  {
+    "appId": "com.jarvisos.app",
+    "appName": "Jarvis OS",
+    "webDir": "dist",
+    "bundledWebRuntime": false
+  }
+  ```
+
+---
+
+#### 1. Native Foreground Service (Persistent Connectivity)
+
+To prevent Android's strict Doze Mode or App Standby from killing websocket streams and the local wake-word listener, the app implements a custom **Android Foreground Service** via a Capacitor plugin wrapper (`@capawesome-team/capacitor-background-task` or custom local Java implementation).
+
+- **How it works:** Spawns a persistent notification in Android's system tray detailing active local network connectivity status.
+- **Background Tasks:** Keeps the global WebSocket (`/ws/capabilities`) and live telemetry listener actively streaming when the device's screen is locked or the app is minimized.
+- **Wakelock:** Acquires a `WAKE_LOCK` (partial CPU wake lock) during active voice intercom calls or audio streaming sessions.
+
+---
+
+#### 2. Local Wake-Word Engine (Picovoice Porcupine)
+
+The app leverages `@picovoice/porcupine-capacitor` to perform **on-device local wake-word processing** (Keyword: `"Jarvis"`).
+
+- **Zero Network Overhead:** The microphone stream is processed locally inside a Web Worker/Native thread via Porcupine. Raw audio is never sent over the network until keyword matches occur.
+- **Wake & Haptic Feedback:** Once matched:
+  1. The tablet/phone fires native haptic feedback (`@capacitor/haptic` vibration).
+  2. The screen is forced on via window flags (`FLAG_KEEP_SCREEN_ON`).
+  3. The app displays the dynamic Voice Assistant overlay widget (live audio visualizer).
+  4. Triggers native audio capture for the user's intent.
+
+---
+
+#### 3. Native Audio Intercom Pipeline (Two-Way Voice Intercom)
+
+To bypass web browser limits on raw audio recording when the app is backgrounded, the intercom hold-to-talk feature is backed by the Capacitor native microphone interface:
+
+- **WebRTC Full-Duplex:** Incorporates native WebRTC bindings or LiveKit native wrapper. Spawns direct UDP media streams to the SFU when an intercom session goes live.
+- **Background Wakeup (FCM Data Pushes):** Leverages Firebase Cloud Messaging (FCM) high-priority data messages. When another room or user triggers an intercom call, the background FCM payload wakes the Foreground Service, initializes the WebRTC peer connection, and plays active voice streams over the system's active alarm/notification channel—even if the screen is off or the phone is locked.
+- **Microphone Plugin:** `@capacitor-community/media` or custom native PCM buffer recorder.
+- **Output:** Encodes raw recording into standard high-fidelity `16kHz mono WAV` files locally for quick clips.
+- **Upload:** Sends the WAV blob directly to `POST /execute/intercom/send` via native HTTP requests (bypassing browser CORS and fetch buffer overheads).
+
+---
+
+#### 4. Background Location Tracking & Geofencing
+
+To feed the ESPresense RAG model and the home automation proximity engine, the mobile application maintains real-time background location updates:
+
+- **Geolocation Core:** `@capacitor/geolocation` resolves current coordinates when the app is active.
+- **Background Location Daemon:** Backed by native Android location providers (`FusedLocationProviderClient`), the app continues tracking location in the background.
+- **Adaptive Reporting Intervals:** To balance precise home proximity against battery longevity, tracking intervals scale dynamically:
+  - *Stationary:* Reports location every 15 minutes or when exiting a 100m geofence circle.
+  - *In Transit (High Velocity):* Reports location every 30 seconds when driving or moving, enabling the LLM context to pre-heat the climate control or open the garage gate as the user enters the neighborhood.
+- **Gateway Sync Endpoint:** Geolocation coordinates (`latitude`, `longitude`, `speed`, `bearing`, `accuracy`, and `timestamp`) are sent to:
+  `POST /api/identity/users/location` (fully encrypted via the user's secure token).
+
+---
+
+#### 5. Deep Mobile Integration Features
+
+The app bridges device-level capabilities into the unified web dashboard shell:
+
+- **Dark Mode Sync:** Listens to native OS theme updates via `@capacitor/device` to dynamically sync the "Neon Glass" Tailwind styling between system light/dark settings.
+- **Biometric Lock & Admin PIN Bypass:** Enforces `@capacitor/preferences` tied to native Android biometric prompts (`BiometricPrompt` framework) to allow rapid biometric authorization instead of entering a manual PIN when accessing sensitive admin panels or triggering security locks.
+- **ESPresense BLE Pairing:** Integrates the phone's native Bluetooth transmitter as an active BLE beacon, allowing local ESPresense sensors placed around the home to track room-level presence without requiring separate physical tracking tags.
+- **NFC Tag Macros:** Employs NFC reading capabilities. Tapping physical NFC stickers placed on desks or walls instantly triggers mapped Jarvis macros (e.g. tapping a bedtime NFC sticker executes `NightModeRequest` on the room's clusters).
+
+---
+
+#### 6. Network Security & SSL Certificate Trust (Self-Signed LAN Routing)
+
+Since Jarvis OS is hosted on local networks using custom `.local` domains (e.g. `https://ollama-server.local` or the standard gateway IP), Android's default security configuration blocks untrusted self-signed SSL certificates.
+
+The app includes a custom Network Security Configuration file (`services/ui/android/app/src/main/res/xml/network_security_config.xml`):
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">local</domain>
+        <domain includeSubdomains="true">192.168.1.0/24</domain>
+        <domain includeSubdomains="true">192.168.2.0/24</domain>
+        <!-- Trust user-installed CA root certificates for local HTTPS -->
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>
 ```
 
-**Storage:** Audio clips are ephemeral by default (same `TEMP_AUDIO_CACHE` lifecycle as TTS). Optionally, the user can enable `save_to_nextcloud=True` to persist the clip in their Nextcloud Talk history.
+---
 
-#### One-Way TV Overlay Intercom
+#### 7. Native Android Permissions Map
 
-TVs cannot respond (no mic), so the intercom is strictly one-way. However, the audio plays and optionally a **visual overlay** is triggered:
+The app requests the following critical permission groups in `/services/ui/android/app/src/main/AndroidManifest.xml`:
 
-- **Audio:** Uses the existing Roku/Cast/WebOS/Samsung/Android TV announcement path in `announce_handlers.py` — no changes needed.
-- **Visual Overlay (future enhancement):** On supported TVs (Android TV via ADB, WebOS via `webostv.command`), a brief notification banner with the sender's name and a waveform icon can be pushed alongside the audio. On Roku, the Media Assistant screen simply shows the sender name as the `songName` ECP parameter (already implemented in `announce_roku`).
-
-#### Intercom Session Modes
-
-| Mode | Devices | Direction | Notes |
-| :--- | :--- | :--- | :--- |
-| **Quick Clip** | Speaker ↔ Speaker | Two-way | Hold-to-talk, releases and sends |
-| **Broadcast** | All speakers | One-way out | Like an intercom PA system |
-| **TV Announcement** | TV + optional speakers | One-way | Audio plays; visual banner where supported |
-| **Persistent Session** *(future)* | Tablet ↔ Tablet | Full duplex | WebRTC or chunked streaming — not yet implemented |
-
-#### ESPresense Integration
-If the user has BLE presence enabled, the intercom defaults the **target** to the room where the recipient was last seen (resolved via ESPresense MQTT → `ha:presence:{user_id}` Redis key), rather than requiring manual device selection.
+| Android Permission | Feature / Role |
+| :--- | :--- |
+| `android.permission.RECORD_AUDIO` | Wake-word detection and two-way intercom recording |
+| `android.permission.FOREGROUND_SERVICE` | Persistent WebSocket sync and back-channel voice streaming |
+| `android.permission.WAKE_LOCK` | Holds CPU wake state during active intercom sessions |
+| `android.permission.CAMERA` | Scan QR codes for initial Gateway pairing / Admin profile photos |
+| `android.permission.USE_BIOMETRIC` | Instant passcode/fingerprint bypass for Admin PIN override screens |
+| `android.permission.ACCESS_FINE_LOCATION` | Precise GPS tracking for home automation proximity engines |
+| `android.permission.ACCESS_COARSE_LOCATION` | Low-accuracy cell tower location tracking for battery savings |
+| `android.permission.ACCESS_BACKGROUND_LOCATION` | Background proximity tracking when app is closed (Requires Android 10+) |
+| `android.permission.POST_NOTIFICATIONS` | Displays persistent foreground status and incoming intercom call banners |
 
 ### 3.14 Device & Light Grouping System
 
