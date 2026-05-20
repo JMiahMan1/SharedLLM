@@ -52,7 +52,7 @@ def test_workspace_lifecycle(api_client):
     
     resp = api_client.post(f"{WORKSPACE_RUNTIME_URL}/workspaces", json=ws_data)
     assert resp.status_code == 200, f"Failed to create workspace: {resp.text}"
-    print(f"   - Created successfully.")
+    print("   - Created successfully.")
 
     # 2. Trigger Git Pull (Webhook)
     # We use the internal secret since we didn't set a webhook_token
@@ -63,7 +63,7 @@ def test_workspace_lifecycle(api_client):
     )
     assert resp.status_code == 200, f"Git pull failed: {resp.text}"
     assert resp.json()["status"] == "SUCCESS"
-    print(f"   - Pull triggered successfully.")
+    print("   - Pull triggered successfully.")
 
     # 3. Verify Directory Creation (Via Workspace API)
     # We'll list files to see if it was cloned
