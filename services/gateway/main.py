@@ -50,7 +50,7 @@ def _svc(key: str, default: str) -> str:
             "logging_svc_url": "http://logging:8006",
             "workspace_runtime_svc_url": "http://workspace_runtime:8007",
             "control_plane_url": "http://control_plane:8008",
-            "llm_local_url": "http://ollama:11434",
+            "llm_local_url": "http://ollama-server.local:11434",
             "redis_url": "redis://redis:6379/0",
             "ollama_timeout": "600",
         })
@@ -64,7 +64,7 @@ STORAGE_SVC = "http://storage:8005"
 LOGGING_SVC = "http://logging:8006"
 WORKSPACE_RUNTIME_SVC = "http://workspace_runtime:8007"
 CONTROL_PLANE_URL = "http://control_plane:8008"
-OLLAMA_URL = "http://ollama:11434"
+OLLAMA_URL = "http://ollama-server.local:11434"
 OLLAMA_TIMEOUT = 600.0
 LOGGING_SVC_URL = LOGGING_SVC
 
@@ -245,7 +245,7 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
         )
     else:
         return OllamaProvider(
-            base_url=_get(settings, "llm_local_url", "http://ollama:11434"),
+            base_url=_get(settings, "llm_local_url", "http://ollama-server.local:11434"),
             timeout=timeout
         )
 
