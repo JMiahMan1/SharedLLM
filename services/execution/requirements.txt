@@ -30,3 +30,4 @@ pybravia>=0.4.0
 pychromecast>=13.0.0
 androidtv>=0.0.75
 wakeonlan>=3.0.0
+aioesphomeapi>=28.0.0
