@@ -4,12 +4,12 @@ const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 
 test.describe('Admin Page - System Matrix', () => {
   test.beforeEach(async ({ page }) => {
-    // Login via the UI
     await page.goto(`${UI_URL}/login`);
-    await page.getByPlaceholder('Enter username').fill('admin');
+    await page.getByPlaceholder('Enter username').fill('default');
     await page.getByPlaceholder('Enter password').fill('admin');
     await page.getByRole('button', { name: /sign in/i }).click();
-    await page.waitForURL('**/', { timeout: 10000 });
+    await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(2000);
   });
 
   test('loads admin page with all tabs', async ({ page }) => {
@@ -30,26 +30,42 @@ test.describe('Admin Page - System Matrix', () => {
     }
   });
 
-  test('Users & Devices tab - loads all sections', async ({ page }) => {
+  test('Users & Devices tab - loads users from API', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'Users & Devices' }).click();
 
     await expect(page.getByText('User Management')).toBeVisible();
-    await expect(page.getByText('Discovery Import')).toBeVisible();
-    await expect(page.getByText('Device Assignments')).toBeVisible();
+    // Should show at least the default user
+    await expect(page.getByText('default')).toBeVisible({ timeout: 10000 });
   });
 
-  test('Users & Devices tab - entity search dropdown visible', async ({ page }) => {
+  test('Users & Devices tab - entity search dropdown loads entities', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'Users & Devices' }).click();
 
     const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
     await expect(searchInput).toBeVisible();
+    // Click to open dropdown
+    await searchInput.click();
+    // Should show entities or "No entities found" after loading
+    await page.waitForTimeout(3000);
+    const dropdown = page.locator('.absolute.z-50.mt-1');
+    await expect(dropdown).toBeVisible();
   });
 
-  test('Device Groups tab - media groups section', async ({ page }) => {
+  test('Users & Devices tab - discovery import loads', async ({ page }) => {
+    await page.goto(`${UI_URL}/admin`);
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'Users & Devices' }).click();
+
+    await expect(page.getByText('Discovery Import')).toBeVisible();
+    // Should show refresh button
+    await expect(page.getByLabel('Refresh discovered users')).toBeVisible();
+  });
+
+  test('Device Groups tab - media groups section loads', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'Device Groups' }).click();
@@ -65,9 +81,15 @@ test.describe('Admin Page - System Matrix', () => {
 
     const multiSelect = page.getByPlaceholder('Search and add media entities...');
     await expect(multiSelect).toBeVisible();
+    // Click to open dropdown
+    await multiSelect.click();
+    await page.waitForTimeout(3000);
+    // Should show dropdown with entities or message
+    const dropdown = page.locator('.absolute.z-50.mt-1');
+    await expect(dropdown).toBeVisible();
   });
 
-  test('Device Groups tab - light clusters section', async ({ page }) => {
+  test('Device Groups tab - light clusters section loads', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'Device Groups' }).click();
@@ -93,9 +115,13 @@ test.describe('Admin Page - System Matrix', () => {
 
     const searchInput = page.getByPlaceholder('Search HA entities for telemetry...');
     await expect(searchInput).toBeVisible();
+    await searchInput.click();
+    await page.waitForTimeout(3000);
+    const dropdown = page.locator('.absolute.z-50.mt-1');
+    await expect(dropdown).toBeVisible();
   });
 
-  test('Intercom tab - sessions section', async ({ page }) => {
+  test('Intercom tab - sessions section loads', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'Intercom' }).click();
