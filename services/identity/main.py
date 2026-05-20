@@ -286,7 +286,7 @@ def require_admin_or_internal(
         raise HTTPException(status_code=401, detail="Missing authorization")
     
     token = authorization.split(" ")[1]
-    user = session.exec(select(User).where(User.api_key_hash == digest_secret(token))).first()
+    user = _find_user_for_api_key(session, token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API key")
     if not user.is_admin:
