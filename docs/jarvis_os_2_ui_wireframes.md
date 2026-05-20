@@ -46,8 +46,13 @@ The OS utilizes a Fluid Grid that gracefully scales from an Android smartphone t
 *   `/` (Home Dashboard)
 *   `/chat` (Native Nextcloud Talk Client)
 *   `/media` (Full-screen MASS/ABS browser)
+*   `/remote` (Universal Remote Control Panel)
+*   `/intercom` (Two-Way Voice Intercom System)
+*   `/chores` (Chore Management & Rewards Dashboard)
 *   `/admin/ops` (Raven Operations Panel & Control Plane)
 *   `/admin/integrations` (Dynamic Plugin Configs)
+*   `/admin/groups` (Group Manager & Pattern Customization)
+*   `/admin/monitor` (Device Telemetry & Insights Dashboard)
 
 ---
 
@@ -110,6 +115,58 @@ Widgets are designed to be "auto-mounted" via the Zustand store whenever the bac
     *   🔵 `[14:10]` Commit Ready: "Fixed Auth Bug" -> **[Review Diff]** button.
 *   Control Plane Header: Live Docker status dots with one-tap **[Restart]** icons.
 
+### 3.8 Universal Remote Panel (`/remote`)
+**State:** Accessed via Bottom Nav or dynamic entity card tap.
+**Content & Visual Layout:**
+*   **Media Target Sheet (Top):** Horizontal scrolling list of glowing cyan cards representing active media playback hardware (e.g., *Living Room TV (Roku)*, *Master Bed (WebOS)*, *Family Room (Samsung)*).
+*   **Aesthetic Branding Accents:** The UI adapts its layout and brand logos dynamically depending on the selected hardware type (e.g., Roku External Control Protocol indicators, LG WebOS app selectors, or Samsung Tizen controls).
+*   **Unified Directional Pad:** A prominent, frosted-glass circular control surface (`backdrop-blur-xl` + soft drop shadow) containing:
+    *   Arrow directions (Up, Down, Left, Right) with a central glowing **[OK]** button.
+    *   Symmetrical surrounding secondary control keys: **[Back]**, **[Home]**, **[Menu]**, **[Option]**.
+*   **Quick-Access Action Strips:**
+    *   *Volume Control:* vertical slider or side-by-side floating action buttons (+ / - / Mute).
+    *   *Channel Controls:* dynamic scroll sheet or numeric overlays (+ / - / Source selection list).
+    *   *Power Panel:* Dedicated glowing Rose toggle (`#f43f5e`) that resolves target power state (`turn_on` / `turn_off`) directly.
+
+### 3.9 Two-Way Intercom Panel (`/intercom`)
+**State:** Accessed via `/intercom` route.
+**Content & Visual Layout:**
+*   **Intercom Target Matrix (Left Column / Grid):** List of available household communication zones (e.g., *Kitchen Tablet*, *Bedroom Wall Pad*, *Living Room Display*, *Broadcast All*). Each target has a small presence indicator dot (glowing Green if a user was recently seen by ESPresense).
+*   **Calling / Streaming Portal (Center Stage):**
+    *   *WebRTC Connection State:* Spinner indicating `Connecting` or `Negotiating` transitioning to a neon green `LIVE` connection state banner.
+    *   *Voice Audio Visualizer:* A premium CSS-animated spline waveform that pulses and glows in real time reflecting outgoing mic input or incoming streams.
+    *   *Direct Controls:* Symmetrical circular buttons: Rose **[End Call]** and Amber **[Mute Microphone]**.
+*   **Text/One-Way Overlay fallback:** If the target device lacks audio input (e.g., a TV or basic speaker), the UI shifts to **One-Way Broadcast Mode**. Features an interactive text field that lets the user type a text announcement which is dispatched via Kokoro TTS, alongside a checkbox toggle to *Push Visual Banner Overlay* (which displays a message overlay on the target display).
+
+### 3.10 Group Manager Dashboard (`/admin/groups`)
+**State:** Accessed via `/admin/groups` route (Admin only).
+**Content & Visual Layout:**
+*   **Logical Groups Creator (Left Column):** Creation sheets for Media Groups and Light Clusters. Includes fuzzy-search filters to select and assign Home Assistant entities dynamically.
+*   **Drag-and-Drop Mapping Canvas (Center):** Interactive grid where admins can easily drag lights/speakers to assign them to logical collections (e.g., dragging 6 spotlights to map the `Kitchen Cluster`).
+*   **Light Pattern Sequence Editor (Right Column):**
+    *   *Step Designer:* Ordered list of pattern steps. Admins can click a step to customize position ordering, RGB color mapping (`colorpicker`), transition speeds, and brightness variables.
+    *   *Live Pattern Canvas Preview:* A horizontal bar containing active preview indicators that loop and render the custom lighting pattern sequence visually on screen in real time using CSS transitions, before writing it to the SQLite db.
+
+### 3.11 Device Telemetry Dashboard (`/admin/monitor`)
+**State:** Accessed via `/admin/monitor` route (Admin only).
+**Content & Visual Layout:**
+*   **System Telemetry Stream (Grid Layout):** Cards showing real-time connectivity status, peak power usage, and uptime graphs for enrolled hardware.
+*   **Dynamic Energy Sparklines:** Miniature chart overlays showing historical power draws (KwH) per device.
+*   **LLM Learned Insights Feed:** A timeline panel showing autonomous lessons parsed by the Raven RAG engine (e.g., *"Living Room TV was left in standby drawing 15W for 6 hours. NightModeRequest has been optimized to force complete power cuts at 11:30 PM."*).
+
+### 3.12 Chore & Rewards Dashboard (`/chores`)
+**State:** Dynamically mounts in the Shell Nav if the Skylight integration is enabled for the active profile.
+**Content & Visual Layout:**
+*   **Family Scoreboard Panel (Top Banner):**
+    *   Horizontal scrolling list of family member avatar cards. Each avatar is surrounded by an active **Emerald daily chore progress ring** (`#10b981`) and a glowing star indicator displaying their accumulated **Star Points balance** (e.g., `⭐ 120 XP`).
+*   **Daily Chores Grid (Left Panel / Center Stage):**
+    *   Responsive card grid showcasing assigned daily tasks (e.g., *Make Bed*, *Feed Dogs*, *Empty Dishwasher*, *Clean Room*).
+    *   **Aesthetic Controls:** Cards are large, touch-friendly, and glow Cyan (`#06b6d4`) when pending. Tap-and-hold (with micro-pulsing feedback animation) or direct checkmarks triggers an automated checkoff sequence.
+    *   **Complete Animation:** Completed chore cards slide to a dedicated *Completed* tab, turning solid Emerald with a pleasant chime and haptic feedback.
+*   **Gamified Reward Vault (Right Panel):**
+    *   Grid of redeemable items configured by parents (e.g., *1 Hour Video Games (50★)*, *Weekend Sleep-in (100★)*, *Ice Cream Treat (30★)*).
+    *   **Action Flow:** Tapping a reward card prompts a frosted glass modal requesting parent verification (Admin PIN or biometric face unlock prompt) to instantly authorize and log the redemption.
+
 ---
 
 ## 4. Interaction Modals
@@ -122,3 +179,30 @@ If the LLM attempts to unlock a door, a stark red modal drops down:
 *   Header: "SECURITY OVERRIDE REQUIRED"
 *   Text: "Jarvis requested to unlock the Front Door. You must authenticate."
 *   Input: Admin PIN pad or biometric prompt.
+
+---
+
+## 5. Native Android Mobile UI Enhancements
+
+To deliver a premium mobile experience, the Capacitor-wrapped web layout adapts dynamically when running on native Android devices.
+
+### 5.1 Real-Time Proximity & Proximity Tracking Panel
+**State:** Located inside `/settings` or accessible via user profile toggle.
+**Content & Visual Layout:**
+*   **Proximity Tracking Switch:** Custom HSL Amber slider showing active status (*"Sharing precise background GPS"* vs *"Location paused"*).
+*   **Adaptive Sparkline Interval Visualizer:** Shows the current battery consumption profile based on movement velocity (e.g. renders a glowing green battery icon and states *"Low power sleep mode active. Geofence reporting locked"* or a cyan motion wave showing *"Active road tracking. Sending telemetry updates every 30 seconds"*).
+
+### 5.2 Biometric Lock & PIN Prompt Integration
+**State:** Auto-mounts when attempting to access security logs, admin control settings, or executing override tasks.
+**Content & Visual Layout:**
+*   Instead of rendering a standard web form input, the UI instantly triggers the Android OS native biometric prompt modal.
+*   **Visual Fallback UI:** A beautiful glowing fingerprint glyph with backdrop-blur. Features an **[Authenticate via Fingerprint/Face ID]** button or a subtle secondary link to **[Use Master PIN Code]** if biometric recognition fails.
+
+### 5.3 NFC Tag Macro Programmer UI
+**State:** Located under `/admin/integrations/nfc`.
+**Content & Visual Layout:**
+*   **Aesthetic Configuration Canvas:** Minimalist glowing cards representing active Jarvis action triggers (e.g., *Activate Night Mode*, *Toggle Kitchen Lights*, *Pair room speaker as dynamic intercom*).
+*   **Action Flow:**
+    1. Admin taps **[Program Action to NFC Sticker]**.
+    2. A dynamic slide-up panel appears with an animation showing a phone scanning a glowing card, stating: *"Bring the back of your device close to the NFC sticker..."*
+    3. Triggers native NFC scanning APIs to write the encrypted JSON action payload directly to the tag. Successful writes pulse with a vibrant Emerald checkbox checkmark (`#10b981`).
