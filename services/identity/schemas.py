@@ -143,6 +143,28 @@ class DiscoverUser(BaseModel):
     ha_person_id: Optional[str] = None
     nc_username: Optional[str] = None
 
+class DiscoverResponse(BaseModel):
+    users: list[DiscoverUser]
+    warnings: list[str] = []
+    errors: list[str] = []
+
+class ImportUserResult(BaseModel):
+    username: str
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    source: str
+    temp_password: Optional[str] = None
+    nextcloud_groups: list[str] = []
+    ha_entity_id: Optional[str] = None
+    ha_device_trackers: list[str] = []
+
+class ImportResponse(BaseModel):
+    status: str
+    message: str
+    imported_users: list[ImportUserResult] = []
+    warnings: list[str] = []
+    errors: list[str] = []
+
 class GlobalSettingRead(BaseModel):
     key: str
     value: str

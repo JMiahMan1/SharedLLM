@@ -291,7 +291,7 @@ export const api = {
     return normalizeUser(resp.data);
   },
 
-  async discoverUsers(): Promise<DiscoveredUser[]> {
+  async discoverUsers(): Promise<{ users: DiscoveredUser[]; warnings: string[]; errors: string[] }> {
     const resp = await apiClient.get('/api/auth/discover');
     return resp.data;
   },
