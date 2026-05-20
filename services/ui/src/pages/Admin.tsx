@@ -16,6 +16,10 @@ import {
   ShieldAlert,
   Code2,
   BarChart3,
+  Layers,
+  Lightbulb,
+  Play,
+  Plus,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -33,10 +37,11 @@ import HelpTooltip from '../components/ui/HelpTooltip';
 import LLMSettings from '../components/settings/LLMSettings';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 
-type AdminTab = 'users' | 'raven' | 'settings' | 'database';
+type AdminTab = 'users' | 'groups' | 'raven' | 'settings' | 'database';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield },
+  { id: 'groups', label: 'Device Groups', icon: Layers },
   { id: 'raven', label: 'Raven Ops', icon: ShieldAlert },
   { id: 'settings', label: 'LLM & Settings', icon: Code2 },
   { id: 'database', label: 'Database & Audit', icon: BarChart3 },
@@ -118,6 +123,13 @@ const Admin = () => {
   const [newPassword, setNewPassword] = useState('');
   const [inspectingCollection, setInspectingCollection] = useState<string | null>(null);
   const [inspectLimit, setInspectLimit] = useState(50);
+  const [groupTab, setGroupTab] = useState<'media' | 'lights' | 'patterns'>('media');
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupMembers, setNewGroupMembers] = useState('');
+  const [newPatternName, setNewPatternName] = useState('');
+  const [newPatternSteps, setNewPatternSteps] = useState('');
+  const [executePatternName, setExecutePatternName] = useState('');
+  const [executeTargetCluster, setExecuteTargetCluster] = useState('');
 
   const { data: users = [] } = useQuery<UserProfile[]>({
     queryKey: ['users'],
@@ -293,6 +305,89 @@ const Admin = () => {
       toast.success(data.message || 'Users imported from Nextcloud');
     },
     onError: (error: Error) => toast.error(error.message || 'Nextcloud import failed'),
+  });
+
+  const { data: mediaGroups = [] } = useQuery<any[]>({
+    queryKey: ['media-groups'],
+    queryFn: () => api.getMediaGroups(),
+  });
+
+  const { data: lightClusters = [] } = useQuery<any[]>({
+    queryKey: ['light-clusters'],
+    queryFn: () => api.getLightClusters(),
+  });
+
+  const { data: lightPatterns = [] } = useQuery<any[]>({
+    queryKey: ['light-patterns'],
+    queryFn: () => api.getLightPatterns(),
+  });
+
+  const createMediaGroupMutation = useMutation({
+    mutationFn: (data: { name: string; member_entity_ids: string[] }) => api.createMediaGroup(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['media-groups'] });
+      setNewGroupName('');
+      setNewGroupMembers('');
+      toast.success('Media group created');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to create media group'),
+  });
+
+  const deleteMediaGroupMutation = useMutation({
+    mutationFn: (name: string) => api.deleteMediaGroup(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['media-groups'] });
+      toast.success('Media group deleted');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to delete media group'),
+  });
+
+  const createLightClusterMutation = useMutation({
+    mutationFn: (data: { name: string; member_entity_ids: string[] }) => api.createLightCluster(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['light-clusters'] });
+      setNewGroupName('');
+      setNewGroupMembers('');
+      toast.success('Light cluster created');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to create light cluster'),
+  });
+
+  const deleteLightClusterMutation = useMutation({
+    mutationFn: (name: string) => api.deleteLightCluster(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['light-clusters'] });
+      toast.success('Light cluster deleted');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to delete light cluster'),
+  });
+
+  const createLightPatternMutation = useMutation({
+    mutationFn: (data: { name: string; steps: any[] }) => api.createLightPattern(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['light-patterns'] });
+      setNewPatternName('');
+      setNewPatternSteps('');
+      toast.success('Light pattern created');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to create light pattern'),
+  });
+
+  const deleteLightPatternMutation = useMutation({
+    mutationFn: (name: string) => api.deleteLightPattern(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['light-patterns'] });
+      toast.success('Light pattern deleted');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to delete light pattern'),
+  });
+
+  const executePatternMutation = useMutation({
+    mutationFn: (data: { pattern_name: string; target_cluster?: string }) => api.executeLightPattern(data),
+    onSuccess: () => {
+      toast.success('Pattern execution started');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to execute pattern'),
   });
 
   const filteredDiscoveredUsers = useMemo(() => {
@@ -552,6 +647,306 @@ const Admin = () => {
               ))}
             </div>
           </section>
+        </div>
+      )}
+
+      {activeTab === 'groups' && (
+        <div className="space-y-6">
+          <div className="flex gap-2 border-b border-white/10 pb-2">
+            {(['media', 'lights', 'patterns'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setGroupTab(tab)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition ${
+                  groupTab === tab
+                    ? 'bg-emerald-600/30 text-white border border-emerald-500/30'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                {tab === 'media' ? <Cpu size={14} /> : tab === 'lights' ? <Lightbulb size={14} /> : <Play size={14} />}
+                {tab === 'media' ? 'Media Groups' : tab === 'lights' ? 'Light Clusters' : 'Light Patterns'}
+              </button>
+            ))}
+          </div>
+
+          {groupTab === 'media' && (
+            <div className="space-y-6">
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Plus size={20} className="text-emerald-400" />
+                  Create Media Group
+                </h3>
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[1fr_2fr_auto]">
+                  <input
+                    type="text"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    placeholder="Group name (e.g., Living Room TVs)"
+                    className="glass-input"
+                  />
+                  <input
+                    type="text"
+                    value={newGroupMembers}
+                    onChange={(e) => setNewGroupMembers(e.target.value)}
+                    placeholder="Entity IDs (comma-separated: media_player.living_room, media_player.kitchen)"
+                    className="glass-input"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!newGroupName.trim() || !newGroupMembers.trim()) {
+                        toast.error('Enter a name and member entity IDs');
+                        return;
+                      }
+                      createMediaGroupMutation.mutate({
+                        name: newGroupName.trim(),
+                        member_entity_ids: newGroupMembers.split(',').map((s) => s.trim()).filter(Boolean),
+                      });
+                    }}
+                    disabled={createMediaGroupMutation.isPending}
+                    className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    <Save size={14} />
+                    Create
+                  </button>
+                </div>
+              </section>
+
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Cpu size={20} className="text-orange-300" />
+                  Media Groups
+                </h3>
+                <div className="space-y-3">
+                  {mediaGroups.map((group) => (
+                    <div key={group.name} className="glass-card flex items-center justify-between p-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-white">{group.name}</p>
+                        <p className="mt-1 text-xs text-slate-400 truncate">
+                          {group.member_entity_ids?.join(', ') || 'No members'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => deleteMediaGroupMutation.mutate(group.name)}
+                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                        aria-label={`Delete ${group.name}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {!mediaGroups.length && (
+                    <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                      No media groups configured.
+                    </p>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {groupTab === 'lights' && (
+            <div className="space-y-6">
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Plus size={20} className="text-yellow-400" />
+                  Create Light Cluster
+                </h3>
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[1fr_2fr_auto]">
+                  <input
+                    type="text"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    placeholder="Cluster name (e.g., Kitchen Lights)"
+                    className="glass-input"
+                  />
+                  <input
+                    type="text"
+                    value={newGroupMembers}
+                    onChange={(e) => setNewGroupMembers(e.target.value)}
+                    placeholder="Entity IDs (comma-separated: light.kitchen_1, light.kitchen_2)"
+                    className="glass-input"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!newGroupName.trim() || !newGroupMembers.trim()) {
+                        toast.error('Enter a name and member entity IDs');
+                        return;
+                      }
+                      createLightClusterMutation.mutate({
+                        name: newGroupName.trim(),
+                        member_entity_ids: newGroupMembers.split(',').map((s) => s.trim()).filter(Boolean),
+                      });
+                    }}
+                    disabled={createLightClusterMutation.isPending}
+                    className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    <Save size={14} />
+                    Create
+                  </button>
+                </div>
+              </section>
+
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Lightbulb size={20} className="text-yellow-300" />
+                  Light Clusters
+                </h3>
+                <div className="space-y-3">
+                  {lightClusters.map((cluster) => (
+                    <div key={cluster.name} className="glass-card flex items-center justify-between p-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-white">{cluster.name}</p>
+                        <p className="mt-1 text-xs text-slate-400 truncate">
+                          {cluster.member_entity_ids?.join(', ') || 'No members'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => deleteLightClusterMutation.mutate(cluster.name)}
+                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                        aria-label={`Delete ${cluster.name}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {!lightClusters.length && (
+                    <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                      No light clusters configured.
+                    </p>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {groupTab === 'patterns' && (
+            <div className="space-y-6">
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Plus size={20} className="text-purple-400" />
+                  Create Light Pattern
+                </h3>
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={newPatternName}
+                    onChange={(e) => setNewPatternName(e.target.value)}
+                    placeholder="Pattern name (e.g., Movie Night)"
+                    className="glass-input w-full"
+                  />
+                  <textarea
+                    value={newPatternSteps}
+                    onChange={(e) => setNewPatternSteps(e.target.value)}
+                    placeholder='JSON steps: [{"brightness": 255, "color_temp": 300, "transition": 5}, {"brightness": 50, "delay": 30}]'
+                    className="glass-input w-full min-h-[100px] font-mono text-xs"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!newPatternName.trim() || !newPatternSteps.trim()) {
+                        toast.error('Enter a name and pattern steps (JSON)');
+                        return;
+                      }
+                      try {
+                        const steps = JSON.parse(newPatternSteps);
+                        if (!Array.isArray(steps)) {
+                          toast.error('Steps must be a JSON array');
+                          return;
+                        }
+                        createLightPatternMutation.mutate({
+                          name: newPatternName.trim(),
+                          steps,
+                        });
+                      } catch {
+                        toast.error('Invalid JSON in steps');
+                      }
+                    }}
+                    disabled={createLightPatternMutation.isPending}
+                    className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    <Save size={14} />
+                    Create Pattern
+                  </button>
+                </div>
+              </section>
+
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Play size={20} className="text-cyan-400" />
+                  Execute Pattern
+                </h3>
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[1fr_1fr_auto]">
+                  <select
+                    value={executePatternName}
+                    onChange={(e) => setExecutePatternName(e.target.value)}
+                    className="glass-input bg-black/30"
+                  >
+                    <option value="">Select pattern</option>
+                    {lightPatterns.map((p) => (
+                      <option key={p.name} value={p.name}>{p.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={executeTargetCluster}
+                    onChange={(e) => setExecuteTargetCluster(e.target.value)}
+                    className="glass-input bg-black/30"
+                  >
+                    <option value="">Target cluster (optional)</option>
+                    {lightClusters.map((c) => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => {
+                      if (!executePatternName) {
+                        toast.error('Select a pattern to execute');
+                        return;
+                      }
+                      executePatternMutation.mutate({
+                        pattern_name: executePatternName,
+                        target_cluster: executeTargetCluster || undefined,
+                      });
+                    }}
+                    disabled={executePatternMutation.isPending}
+                    className="glass-button px-4 py-3 bg-cyan-600/30 border-cyan-500/30 text-[10px] font-black uppercase tracking-widest text-cyan-300"
+                  >
+                    <Play size={14} />
+                    Execute
+                  </button>
+                </div>
+              </section>
+
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Lightbulb size={20} className="text-purple-300" />
+                  Light Patterns
+                </h3>
+                <div className="space-y-3">
+                  {lightPatterns.map((pattern) => (
+                    <div key={pattern.name} className="glass-card flex items-center justify-between p-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-white">{pattern.name}</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {pattern.steps?.length || 0} step(s)
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => deleteLightPatternMutation.mutate(pattern.name)}
+                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                        aria-label={`Delete ${pattern.name}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {!lightPatterns.length && (
+                    <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                      No light patterns configured. System defaults will be seeded on first use.
+                    </p>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
         </div>
       )}
 
