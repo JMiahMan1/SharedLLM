@@ -3415,9 +3415,9 @@ async def get_ollama_models():
                 data = resp.json()
                 models = sorted(list(set(m["name"] for m in data.get("models", []))))
                 return {"status": "SUCCESS", "models": models}
-            return {"status": "ERROR", "message": f"Ollama returned {resp.status_code}"}
+            return {"status": "ERROR", "message": f"Ollama returned {resp.status_code}", "models": []}
     except Exception as e:
-        return {"status": "ERROR", "message": str(e)}
+        return {"status": "ERROR", "message": str(e), "models": []}
 
 @app.get("/api/config")
 async def get_gateway_config():

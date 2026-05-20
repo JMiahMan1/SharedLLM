@@ -350,6 +350,10 @@ export const api = {
 
   async getAvailableModels(): Promise<string[]> {
     const resp = await apiClient.get('/api/config/models');
+    if (resp.data.status === 'ERROR' || !resp.data.models) {
+      console.warn('Failed to fetch available models:', resp.data.message || 'No models returned');
+      return [];
+    }
     return resp.data.models;
   },
 
