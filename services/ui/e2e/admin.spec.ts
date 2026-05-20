@@ -37,7 +37,7 @@ test.describe('Admin Page - System Matrix', () => {
 
     await expect(page.getByText('User Management')).toBeVisible();
     // Should show at least the default user
-    await expect(page.getByText('default')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('@default', { exact: true })).toBeVisible({ timeout: 10000 });
   });
 
   test('Users & Devices tab - entity search dropdown loads entities', async ({ page }) => {
