@@ -258,23 +258,19 @@ def _migrate_api_key_material(session: Session) -> None:
         session.commit()
 
 @app.post("/api/users/{username}/password")
-def admin_set_password(username: str, req: dict, x_internal_secret: Optional[str] = Header(default=None)):
-    if x_internal_secret != INTERNAL_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden: Admin secret required")
-    
+def admin_set_password(username: str, req: dict, session: Session = Depends(get_session), admin: User = Depends(require_admin_or_internal)):
     new_password = req.get("new_password")
     if not new_password:
         raise HTTPException(status_code=400, detail="new_password is required")
 
-    with Session(engine) as session:
-        user = session.exec(select(User).where(User.username == username)).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        user.password_hash = pwd_context.hash(new_password)
-        session.add(user)
-        session.commit()
-        return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.password_hash = pwd_context.hash(new_password)
+    session.add(user)
+    session.commit()
+    return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
 
 def require_internal(authorization: str = Header(None), x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
     if x_internal_secret == INTERNAL_SECRET:
