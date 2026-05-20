@@ -206,3 +206,169 @@ To deliver a premium mobile experience, the Capacitor-wrapped web layout adapts 
     1. Admin taps **[Program Action to NFC Sticker]**.
     2. A dynamic slide-up panel appears with an animation showing a phone scanning a glowing card, stating: *"Bring the back of your device close to the NFC sticker..."*
     3. Triggers native NFC scanning APIs to write the encrypted JSON action payload directly to the tag. Successful writes pulse with a vibrant Emerald checkbox checkmark (`#10b981`).
+
+---
+
+## 6. End-to-End UI & Integration Workflows
+
+This section outlines the exact step-by-step user interactions and backend data flows for critical system actions in the Jarvis OS 2.0 interface.
+
+### 6.1 User Creation & Integration Import Flow
+
+This workflow defines how administrators manage family member profiles, both manually and through external provider batch imports (Nextcloud, Home Assistant, Skylight).
+
+```text
+[Manual Flow]
+Admin Panel (/settings) -> [Add User] Button -> Renders Profile Creation Modal -> Inputs Name/PIN
+                                                                                        |
+                                      DB Sync: identity.db <- API (POST /api/users) <---+
+
+[Import Flow]
+Admin Panel (/settings) -> [Import family] Button -> Choose Source (Nextcloud / HA / Skylight)
+                                                                |
+    Identity API queries Provider API (Nextcloud / HA config) <-+
+                                |
+    UI displays "Mapping Grid" (Merge existing / Match entries) -> Tap [Confirm Import]
+                                                                            |
+                            Profiles created in bulk with tokens resolved --+
+```
+
+#### Step-by-Step UI Experience:
+1. **Accessing the Portal:** The admin navigates to Settings -> User Profiles.
+2. **Direct Manual Input:**
+   * Tapping **[Create User Profile]** slides open a frosted glass sheet.
+   * Input fields: Name, Role selection (Admin, Standard, Child), Home Room assignment (used for fallback localization), and static numeric PIN code.
+   * Clicking **[Save]** triggers an instant `POST /api/users/create` request, animating a spinner before returning a "User Created Successfully" banner.
+3. **Dynamic Provider Import:**
+   * Tapping **[Batch Import family]** presents three prominent card nodes: Nextcloud, Home Assistant, and Skylight.
+   * Selecting **[Nextcloud]** triggers a dynamic modal query displaying: *"Querying Nextcloud OCS User directories..."*
+   * The UI renders a **Mapping Grid Table**:
+     - *Column 1:* Nextcloud User ID (`jeremiah`).
+     - *Column 2:* Matched Local Identity (Auto-matched if exact substring found).
+     - *Column 3:* Import Action Toggle (Checkbox to Import vs. Ignore).
+   * Selecting **[Confirm Mapping & Import]** dispatches the mapped JSON in a single batch request to `/api/identity/users/import`, which populates user profiles and returns active completion tick marks.
+
+---
+
+### 6.2 Music & Audiobookshelf Casting Flow
+
+This workflow illustrates how a user casts a song or audiobook to target room players.
+
+```text
+Browse Library -> Tap Song/Book Card -> Active Player bar slides up -> Tap [Cast Output] Icon
+                                                                                |
+    API resolves target IP (10-strategy pipeline) <- Web Socket push triggers --+
+                                |
+    Fast Progressive Buffer (download_video_progressive 5MB) -> Playback initializes
+                                |
+    UI verification loop starts -> Verification polling verifies status on /ws/capabilities
+```
+
+#### Step-by-Step UI Experience:
+1. **Selecting Content:** A user browses the Music Assistant or Audiobookshelf dashboards, tapping a song or book card.
+2. **Triggering Cast:** Tapping a floating **[Play on...]** button on the cover art pops open a bottom sheet displaying room-based output targets (*Kitchen Speaker*, *Living Room TV*, *Main Floor Group*).
+3. **Dynamic Discovery:**
+   * Upon target selection, the UI displays a subtle pulsing cyan outline around the target name.
+   * The backend executes `device_discovery.discover_device(entity_id)`, querying the 10-strategy pipeline (Cache -> HA -> HomeKit -> ARP -> SNMP -> mDNS -> SSDP -> Port Scan).
+4. **Playback & Verification:**
+   * Once resolved, the media server streams progressive chunks immediately.
+   * The dashboard mounts the **Active Media Widget**, displaying a sweeping cyan progress ring and active play/pause/track controls.
+
+---
+
+### 6.3 Universal Remote Control Routing Flow
+
+This workflow describes how the UI acts as a dynamic remote for smart TVs.
+
+```text
+Tap Media Device on Grid -> Slides open Unified Remote Card -> Resolves Target Brand & IP
+                                                                        |
+    Aesthetic adapts (Roku D-pad vs Tizen menu strip) <- Web Socket pushes --+
+                                |
+    User taps [Arrow Keys] or [Volume Slider] -> Executes HTTP ECP / Web Socket request
+                                |
+    Verification returns status -> UI updates glowing slider state / Verification logs
+```
+
+#### Step-by-Step UI Experience:
+1. **Launching the Controller:** The user taps a TV entity icon on the Dashboard Grid or navigates to `/remote`.
+2. **Dynamic UI Adaptation:** The remote panel reads the target's profiler capabilities (e.g. `brand="roku"`, `brand="webos"`). If Roku is targeted, the layout instantly displays an Amber-outlined Roku logo with a dedicated ECP directional keys panel.
+3. **Command Execution:**
+   * Tapping the frosted D-Pad sends instant API calls: `POST /execute/remote/keypress` with key details (`Home`, `Left`, `Select`).
+   * The UI shows active micro-scale pulsing animations on the tapped button to denote low-latency network responses.
+
+---
+
+### 6.4 Two-Way Real-Time Intercom Flow
+
+This workflow details how the system establishes persistent WebRTC audio channels.
+
+```text
+User holds [Talk] on Intercom tab (/intercom) -> Spawns outbound connection portal in UI
+                                                                |
+    LiveKit SFU allocates channel room (or Mumble Fallback) <---+
+                                |
+    FCM background push wakes recipient client device -> WebSocket streams active call frame
+                                |
+    Full duplex WebRTC Audio stream establishes -> Voice spline waveform visualizes in CSS
+```
+
+#### Step-by-Step UI Experience:
+1. **Initiating the Call:** The user navigates to `/intercom` and selects a room (e.g., *Kitchen Tablet*).
+2. **Establishing Connection:**
+   * The user clicks **[Start Live Call]**. The UI replaces the screen frame with a sweeping blur backdrop and displays a spinning neon green circle stating: *"Negotiating WebRTC Connection..."*
+   * The backend routes tokens via LiveKit SFU. An FCM push wakes up the target wall tablet, which automatically accepts the connection.
+3. **Live Calling Stream:**
+   * The screen lights up with a vibrant `LIVE` neon banner. A central spline wave visualizes outgoing and incoming audio.
+   * Tapping **[Mute]** turns the waveform red. Tapping **[End Call]** drops the WebRTC connection, fading back to the room grid view.
+
+---
+
+### 6.5 Gamified Chores & Rewards Sync Flow
+
+This workflow describes the gamified kids' experience for clearing daily tasks.
+
+```text
+Child taps Daily Chore card -> Cards plays a 3D pulse wave -> Webhook triggers physical board sync
+                                                                        |
+    Daily Progress Ring advances in visual gradient <- Star points balance updates +5★ --+
+                                |
+    Child taps Reward (1 hr Screen Time) -> Frosted overlay prompts: "Parent check"
+                                |
+    Parent scans finger (biometrics) or inputs PIN -> Reward authorizes -> Stars deducted
+```
+
+#### Step-by-Step UI Experience:
+1. **Completing a Task:**
+   * A child opens the `/chores` tab and checks off a completed task (*Feed Dogs*).
+   * The card plays a 3D scale pulse, turns Emerald, and automatically slides to the *Completed* tab.
+   * The child's profile card updates with a sparkling star effect, adding `+5★` to their vault balance. The outer circular progress ring advances.
+2. **Redeeming a Reward:**
+   * The child selects a reward (*Ice Cream (30★)*) in the vault section.
+   * Tapping **[Redeem]** brings up a frosted-glass overlay stating: *"Parent confirmation required..."*
+   * The parent taps their finger on the device's fingerprint scanner. Successful authentication plays a rewarding chime, deducts 30 Star Points, and displays a glowing green checkmark with the message: *"Reward Approved! Enjoy your treat!"*
+
+---
+
+### 6.6 Raven Autonomous Ops & Commit Review Flow
+
+This workflow outlines how admins verify autonomous coding repairs performed by the Raven engine.
+
+```text
+Raven encounters a repair mission -> Streams reasoning timeline via PubSub to UI (/admin/ops)
+                                                                        |
+    Linter (Ruff) auto-checks file patches <- Auto-write sync finishes -+
+                                |
+    Timeline displays Commit Card -> Admin taps [Review Diff] to inspect modifications
+                                |
+    One-tap [Approve & Merge] button triggers -> DB logs sync -> RAG persists coding learnings
+```
+
+#### Step-by-Step UI Experience:
+1. **Observing the Loop:** An administrator accesses `/admin/ops`. The screen shows a chronological log of active Raven diagnostics.
+2. **Reviewing Code Patches:**
+   * When a file patch completes, the timeline mounts a beautifully styled **Commit Card** showing details: *"Repair complete: resolved IndentationError in timer.py"* and a glowing Cyan **[Review Diff]** button.
+   * Tapping **[Review Diff]** slides open a side-by-side git diff drawer detailing code lines added (green) or removed (red).
+3. **Finalizing and Persisting:**
+   * The admin taps **[Approve & Merge]**. The system immediately commits the changes, runs the pytest suite, and merges to the local branch.
+   * A success banner animates, and the RAG engine logs the coding summary, permanently persisting the lesson for future autonomous runs.
