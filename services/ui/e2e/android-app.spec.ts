@@ -4,6 +4,8 @@ const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 const ADMIN_USER = 'default';
 const ADMIN_PASS = 'admin';
 
+test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
+
 async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.goto(`${UI_URL}/login`);
   await page.getByPlaceholder('Enter username').fill(ADMIN_USER);
