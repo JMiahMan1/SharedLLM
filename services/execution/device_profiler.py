@@ -235,7 +235,7 @@ async def profile_device(
     entity_id: str,
     ha_url: str,
     ha_token: str,
-    subnet: str = "192.168.2.0/24",
+    subnet: str = None,
 ) -> dict:
     """
     Generate a complete device profile.
@@ -258,6 +258,11 @@ async def profile_device(
             "recommendations": ["Use ECP for media playback", "WOL available for power-on"],
         }
     """
+    # Resolve subnet
+    if not subnet:
+        import device_discovery
+        subnet = device_discovery.DEFAULT_SUBNET
+
     # 1. Get HA entity info
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     ha_info = {}
@@ -353,9 +358,12 @@ async def profile_device(
 
 
 async def profile_all_media_devices(
-    ha_url: str, ha_token: str, subnet: str = "192.168.2.0/24"
+    ha_url: str, ha_token: str, subnet: str = None
 ) -> list[dict]:
     """Profile all media_player entities concurrently."""
+    if not subnet:
+        import device_discovery
+        subnet = device_discovery.DEFAULT_SUBNET
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return []
@@ -377,7 +385,7 @@ async def profile_all_media_devices(
 
 
 async def build_capability_map(
-    ha_url: str, ha_token: str, subnet: str = "192.168.2.0/24"
+    ha_url: str, ha_token: str, subnet: str = None
 ) -> dict:
     """
     Build a friendly-name -> capability lookup for all media devices.
@@ -400,6 +408,9 @@ async def build_capability_map(
             ...
         }
     """
+    if not subnet:
+        import device_discovery
+        subnet = device_discovery.DEFAULT_SUBNET
     profiles = await profile_all_media_devices(ha_url, ha_token, subnet)
     cap_map = {}
     for p in profiles:
