@@ -25,6 +25,7 @@ from gateway.orchestrator import get_all_settings, _get, SINGLE_TURN_TOOL_GUIDE
 from gateway.config_validator import validate_config
 from gateway.intent_engine import engine
 from gateway.history import update_history, ping_redis
+from gateway.media_device_cache import get_last_used_device, set_last_used_device
 from gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 from gateway.messaging import InferenceJobQueue, JobStatus
 from gateway.background_worker import worker as raven_worker
@@ -1335,16 +1336,16 @@ async def orchestrate_code_change(
     return _make_ollama_response(summary, selected_model, stream=should_stream)
 
 
-def resolve_media_target(query: str, entities: list[dict], media_type: str = None) -> str:
+def resolve_media_target(query: str, entities: list[dict], media_type: str = None, cached_device: str | None = None) -> str | None:
     """
     Resolve media player entity from query using device capabilities/metadata.
     For video: prefer Cast/Chromecast devices (support play_media with local streams).
     For music: prefer Music Assistant queue/speaker entities.
     Names are only used for grouping/matching requested device, not for capability detection.
+    Returns None when no entity can be confidently resolved.
     """
     _, requested_device = extract_media_request(query)
     requested_lower = requested_device.lower() if requested_device else ""
-    fallback = "auto"
 
     def _normalize_name(value: str) -> str:
       cleaned = re.sub(r"[^a-z0-9]+", " ", (value or "").lower())
@@ -1354,18 +1355,21 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
     requested_normalized = _normalize_name(requested_lower)
 
     def _matches_requested_device(entity: dict) -> bool:
-      if not requested_normalized:
+      eid = entity.get("entity_id", "")
+      if requested_normalized:
+          attrs = entity.get("attributes") or {}
+          friendly = str(attrs.get("friendly_name") or "")
+          friendly_normalized = _normalize_name(friendly)
+          if not friendly_normalized:
+              return False
+          return (
+              friendly_normalized == requested_normalized
+              or requested_normalized in friendly_normalized
+              or friendly_normalized in requested_normalized
+          )
+      if cached_device and eid == cached_device:
           return True
-      attrs = entity.get("attributes") or {}
-      friendly = str(attrs.get("friendly_name") or "")
-      friendly_normalized = _normalize_name(friendly)
-      if not friendly_normalized:
-          return False
-      return (
-          friendly_normalized == requested_normalized
-          or requested_normalized in friendly_normalized
-          or friendly_normalized in requested_normalized
-      )
+      return False
 
     def _is_cast_device(entity: dict) -> bool:
       """Check if entity is a Chromecast/Cast device based on capabilities."""
@@ -1373,14 +1377,12 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
       app_id = str(attrs.get("app_id") or "").lower()
       app_name = str(attrs.get("app_name") or "").lower()
       device_class = str(attrs.get("device_class") or "").lower()
-      # Cast devices: no device_class when idle, or app_id indicates cast
       if device_class == "speaker":
           return False
       if "cast" in app_id or "cast" in app_name:
           return True
       if app_id == "cc1ad845" or "default media receiver" in app_name:
           return True
-      # No device_class and no music_assistant app_id = likely Cast
       if not device_class and "music_assistant" not in app_id:
           return True
       return False
@@ -1412,25 +1414,22 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
           score += 60
       if state not in {"unavailable", "unknown"}:
           score += 10
+      if cached_device and eid == cached_device:
+          score += 50
 
       if media_type == "video":
-          # Use capabilities: prefer Cast devices for video playback
           if _is_cast_device(entity):
               score += 200
-          # Deprioritize MA speakers for video
           if _is_ma_speaker(entity):
               score -= 200
       elif media_type == "power":
-          # Power commands: prefer actual TV entities (device_class=tv)
           if device_class == "tv":
               score += 200
-          # Deprioritize Cast and MA wrappers for power
           if _is_cast_device(entity):
               score -= 100
           if _is_ma_speaker(entity):
               score -= 200
       else:
-          # Music: prefer MA speakers/queues
           if _is_ma_speaker(entity):
               score += 200
 
@@ -1438,29 +1437,37 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
 
     candidates = [e for e in entities if isinstance(e, dict) and e.get("entity_id", "").startswith("media_player.")]
     if not candidates:
-      return fallback
+      return None
 
     if requested_normalized:
       matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
       if matched_candidates:
           candidates = matched_candidates
       else:
-          return fallback
+          return None
+    elif cached_device:
+      matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
+      if matched_candidates:
+          candidates = matched_candidates
+      else:
+          return None
+    else:
+      return None
 
     ranked = sorted((_score(e) for e in candidates), reverse=True)
     best_score, best_eid = ranked[0]
-    return best_eid if best_score > 0 else candidates[0]["entity_id"]
+    return best_eid if best_score > 0 else None
 
 
-def resolve_video_target(query: str, entities: list[dict]) -> str:
+def resolve_video_target(query: str, entities: list[dict], cached_device: str | None = None) -> str | None:
     """
     Resolve a cast/video-capable media target for video-like requests.
     Prefer entities whose friendly name matches the requested device and avoid
     Music Assistant queues for video playback.
+    Returns None when no entity can be confidently resolved.
     """
     _, requested_device = extract_media_request(query)
     requested_lower = requested_device.lower() if requested_device else ""
-    fallback = "auto"
 
     def _normalize_name(value: str) -> str:
       cleaned = re.sub(r"[^a-z0-9]+", " ", (value or "").lower())
@@ -1470,18 +1477,21 @@ def resolve_video_target(query: str, entities: list[dict]) -> str:
     requested_normalized = _normalize_name(requested_lower)
 
     def _matches_requested_device(entity: dict) -> bool:
-      if not requested_normalized:
+      eid = entity.get("entity_id", "")
+      if requested_normalized:
+          attrs = entity.get("attributes") or {}
+          friendly = str(attrs.get("friendly_name") or "")
+          friendly_normalized = _normalize_name(friendly)
+          if not friendly_normalized:
+              return False
+          return (
+              friendly_normalized == requested_normalized
+              or requested_normalized in friendly_normalized
+              or friendly_normalized in requested_normalized
+          )
+      if cached_device and eid == cached_device:
           return True
-      attrs = entity.get("attributes") or {}
-      friendly = str(attrs.get("friendly_name") or "")
-      friendly_normalized = _normalize_name(friendly)
-      if not friendly_normalized:
-          return False
-      return (
-          friendly_normalized == requested_normalized
-          or requested_normalized in friendly_normalized
-          or friendly_normalized in requested_normalized
-      )
+      return False
 
     def _score(entity: dict) -> tuple[int, str]:
       eid = entity.get("entity_id", "")
@@ -1511,22 +1521,32 @@ def resolve_video_target(query: str, entities: list[dict]) -> str:
           score += 30
       if state not in {"unavailable", "unknown"}:
           score += 10
+      if cached_device and eid == cached_device:
+          score += 50
       return score, eid
 
     candidates = [e for e in entities if isinstance(e, dict) and e.get("entity_id", "").startswith("media_player.")]
     if not candidates:
-      return fallback
+      return None
 
     if requested_normalized:
       matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
       if matched_candidates:
           candidates = matched_candidates
       else:
-          return fallback
+          return None
+    elif cached_device:
+      matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
+      if matched_candidates:
+          candidates = matched_candidates
+      else:
+          return None
+    else:
+      return None
 
     ranked = sorted((_score(e) for e in candidates), reverse=True)
     best_score, best_eid = ranked[0]
-    return best_eid if best_score > 0 else fallback
+    return best_eid if best_score > 0 else None
 
 
 
@@ -1984,26 +2004,44 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
     is_fast_path = engine.is_fast_path(intent, confidence)
     log.info(f"[FastPath] is_fast_path={is_fast_path} for intent='{intent}'")
     resolved_entity = None
+    cached_device_unavailable = False
     
     if is_fast_path:
         media_entities = None
-        if intent in ["play_media", "pause_media", "turn_on", "turn_off"]:
+        cached_device_info = None
+        cached_device_id = None
+        if intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
             media_entities = await fetch_ha_entities(creds.model_dump())
+            cached_device_info = get_last_used_device(user_id)
+            if cached_device_info:
+                cached_device_id = cached_device_info.get("entity_id")
+                entity_states = {e.get("entity_id"): e.get("state") for e in media_entities or []}
+                cached_state = entity_states.get(cached_device_id, "unknown")
+                if cached_state in {"unavailable", "unknown", "off"}:
+                    log.info(f"[FastPath] Cached device {cached_device_id} is {cached_state}, bypassing to LLM")
+                    cached_device_unavailable = True
+                    cached_device_id = None
+                else:
+                    log.info(f"[FastPath] Using cached device: {cached_device_id} (state={cached_state})")
 
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
             media_type = "video" if is_likely_video_request(query) else None
-            resolved_entity = resolve_media_target(query, media_entities or [], media_type)
+            resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
         elif intent in ["turn_on", "turn_off"]:
-            resolved_entity = resolve_media_target(query, media_entities or [], media_type="power")
-        elif intent == "pause_media":
-            resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [])
+            resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device_id=cached_device_id)
+        elif intent in ["pause_media", "media_transport"]:
+            resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [], cached_device=cached_device_id)
         else:
             resolved_entity = engine.extract_entity(query, intent)
         
-        # If the intent requires an entity (light, media) but we couldn't resolve one,
-        # fallback to the slow-path (LLM) to avoid 'light.auto' errors.
-        if intent in ["turn_on", "turn_off", "play_media"] and not resolved_entity:
+        # If cached device was unavailable, bypass to LLM to ask user
+        if cached_device_unavailable and not resolved_entity:
+            log.info(f"[FastPath] BYPASSED for {intent}: Cached device unavailable, LLM should ask for target")
+            is_fast_path = False
+        # If the intent requires an entity (light, media, transport) but we couldn't resolve one,
+        # fallback to the slow-path (LLM) to avoid executing without a target.
+        elif intent in ["turn_on", "turn_off", "play_media", "pause_media", "media_transport"] and not resolved_entity:
             log.info(f"[FastPath] BYPASSED for {intent}: Could not resolve entity from '{query}'")
             is_fast_path = False
         else:
@@ -2027,7 +2065,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             exec_payload = {
                 "user_context": creds.model_dump(),
                 "action": "turn_on" if intent == "turn_on" else ("turn_off" if intent == "turn_off" else "play"),
-                "entity_id": resolved_entity or "auto"
+                "entity_id": resolved_entity
             }
 
             # Add specialized payload for storage/ha
@@ -2042,7 +2080,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                 media_type = "video" if is_likely_video_request(query) else None
                 exec_payload = {
                     "user_context": creds.model_dump(),
-                    "entity_id": resolved_entity or "auto",
+                    "entity_id": resolved_entity,
                     "query": media_query or query,
                     "media_content_type": "artist",
                     "media_type": media_type,
@@ -2051,7 +2089,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             elif intent in ["pause_media", "media_transport"]:
                 exec_payload = {
                     "user_context": creds.model_dump(),
-                    "entity_id": resolved_entity or "auto",
+                    "entity_id": resolved_entity,
                     "command": "pause",
                 }
                 svc_base = EXECUTION_SVC
@@ -2062,6 +2100,17 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             async with httpx.AsyncClient(timeout=fast_timeout) as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 ans = exec_resp.json().get("message", "Action completed.")
+            
+            if resolved_entity and intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
+                entity_map = {e.get("entity_id"): e for e in media_entities or []}
+                entity = entity_map.get(resolved_entity, {})
+                attrs = entity.get("attributes", {})
+                set_last_used_device(
+                    user_id,
+                    resolved_entity,
+                    friendly_name=attrs.get("friendly_name", ""),
+                    state=entity.get("state", ""),
+                )
             
             await update_history(user_id, "user", query)
             await update_history(user_id, "assistant", ans)
