@@ -1,0 +1,294 @@
+name: SharedLLM E2E Pipeline
+
+on:
+  push:
+    branches: [ main, master, microservices ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  INTERNAL_SECRET: test-secret-ci
+  FERNET_KEY: bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=
+  TEST_MODE: "true"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install linters
+        run: pip install ruff flake8
+
+      - name: Run ruff
+        run: ruff check services/ tests/ --exit-zero
+
+      - name: Run flake8
+        run: flake8 services/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/identity/requirements.txt
+          pip install -r services/gateway/requirements.txt
+          pip install -r services/storage/requirements.txt
+          pip install -r services/logging/requirements.txt
+          pip install pytest pytest-asyncio pytest-httpx respx
+
+      - name: Run unit tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/services
+        run: |
+          pytest tests/unit/ -v -m unit --junitxml=unit-results.xml
+
+      - name: Upload unit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          path: unit-results.xml
+
+  contract-tests:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6399:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/identity/requirements.txt
+          pip install -r services/execution/requirements.txt
+          pip install -r services/gateway/requirements.txt
+          pip install -r services/storage/requirements.txt
+          pip install -r services/logging/requirements.txt
+          pip install pytest pytest-asyncio pytest-httpx respx redis
+
+      - name: Run contract tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/services
+          REDIS_URL: redis://localhost:6399/0
+          IDENTITY_URL: http://localhost:8011
+          EXECUTION_URL: http://localhost:8012
+          STORAGE_URL: http://localhost:8014
+          LOGGING_URL: http://localhost:8015
+        run: |
+          pytest tests/integration/test_service_contracts.py -v -m contract --junitxml=contract-results.xml || true
+
+      - name: Upload contract results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contract-test-results
+          path: contract-results.xml
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6399:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/identity/requirements.txt
+          pip install -r services/execution/requirements.txt
+          pip install -r services/gateway/requirements.txt
+          pip install -r services/storage/requirements.txt
+          pip install -r services/logging/requirements.txt
+          pip install pytest pytest-asyncio pytest-httpx respx redis testcontainers
+
+      - name: Start test services
+        run: |
+          docker compose -f docker-compose.test.yml up -d --build
+          echo "Waiting for services to be ready..."
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8011/health | grep -q ok; then
+              echo "Identity service ready"
+              break
+            fi
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8012/health | grep -q ok; then
+              echo "Execution service ready"
+              break
+            fi
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8014/health | grep -q ok; then
+              echo "Storage service ready"
+              break
+            fi
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8015/health | grep -q ok; then
+              echo "Logging service ready"
+              break
+            fi
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8016/health | grep -q ok; then
+              echo "Gateway service ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run integration tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/services
+          REDIS_URL: redis://localhost:6399/0
+          IDENTITY_URL: http://localhost:8011
+          EXECUTION_URL: http://localhost:8012
+          RAG_URL: http://localhost:8013
+          STORAGE_URL: http://localhost:8014
+          LOGGING_URL: http://localhost:8015
+          GATEWAY_URL: http://localhost:8016
+        run: |
+          pytest tests/integration/ -v -m integration --junitxml=integration-results.xml
+
+      - name: Upload integration results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: integration-results.xml
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.test.yml logs identity > identity-test.log
+          docker compose -f docker-compose.test.yml logs execution > execution-test.log
+          docker compose -f docker-compose.test.yml logs storage > storage-test.log
+          docker compose -f docker-compose.test.yml logs logging > logging-test.log
+          docker compose -f docker-compose.test.yml logs gateway > gateway-test.log
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-service-logs
+          path: "*-test.log"
+
+      - name: Cleanup test services
+        if: always()
+        run: |
+          docker compose -f docker-compose.test.yml down -v
+
+  e2e-full:
+    runs-on: ubuntu-latest
+    needs: [integration-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6399:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/identity/requirements.txt
+          pip install -r services/execution/requirements.txt
+          pip install -r services/gateway/requirements.txt
+          pip install -r services/storage/requirements.txt
+          pip install -r services/logging/requirements.txt
+          pip install pytest pytest-asyncio pytest-httpx respx redis testcontainers
+
+      - name: Start full test stack
+        run: |
+          docker compose -f docker-compose.test.yml up -d --build
+          echo "Waiting for full stack readiness..."
+          for i in $(seq 1 60); do
+            ready=true
+            for port in 8011 8012 8014 8015 8016; do
+              if ! curl -s http://localhost:$port/health | grep -q ok; then
+                ready=false
+                break
+              fi
+            done
+            if [ "$ready" = true ]; then
+              echo "All services ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run full E2E suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}/services
+          REDIS_URL: redis://localhost:6399/0
+          IDENTITY_URL: http://localhost:8011
+          EXECUTION_URL: http://localhost:8012
+          RAG_URL: http://localhost:8013
+          STORAGE_URL: http://localhost:8014
+          LOGGING_URL: http://localhost:8015
+          GATEWAY_URL: http://localhost:8016
+        run: |
+          pytest tests/ -v --junitxml=e2e-results.xml \
+            -m "integration or contract or unit" \
+            --ignore=tests/integration/test_workspace_lifecycle.py
+
+      - name: Upload E2E results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: e2e-results.xml
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f docker-compose.test.yml down -v

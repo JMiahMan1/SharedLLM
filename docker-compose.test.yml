@@ -1,0 +1,160 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: sharedllm_test_redis
+    ports:
+      - "6399:6379"
+    command: redis-server --appendonly no
+
+  identity:
+    build:
+      context: .
+      dockerfile: services/identity/Dockerfile
+    container_name: sharedllm_test_identity
+    ports:
+      - "8011:8001"
+    environment:
+      - IDENTITY_DATABASE_URL=sqlite:////tmp/identity_test.db
+      - INTERNAL_SECRET=test-secret
+      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - INIT_DB=true
+      - TEST_MODE=true
+
+  execution:
+    build:
+      context: .
+      dockerfile: services/execution/Dockerfile
+    container_name: sharedllm_test_execution
+    ports:
+      - "8012:8003"
+    environment:
+      - INTERNAL_SECRET=test-secret
+      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - REDIS_URL=redis://redis:6379/0
+      - SEARXNG_URL=http://searxng_mock:8080
+      - EXECUTION_EXTERNAL_HOST=127.0.0.1
+      - TEST_MODE=true
+      - HOME=/home/sharedllm
+      - WORKSPACE_ROOT=/tmp/workspaces
+    volumes:
+      - test_execution_data:/data
+
+  rag:
+    build:
+      context: .
+      dockerfile: services/rag/Dockerfile
+    container_name: sharedllm_test_rag
+    ports:
+      - "8013:8004"
+    environment:
+      - INTERNAL_SECRET=test-secret
+      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - OLLAMA_URL=http://ollama_mock:11434
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - CHROMA_PERSIST_DIR=/tmp/chroma_test
+      - TEST_MODE=true
+    volumes:
+      - test_chroma_data:/tmp/chroma_test
+
+  storage:
+    build:
+      context: .
+      dockerfile: services/storage/Dockerfile
+    container_name: sharedllm_test_storage
+    ports:
+      - "8014:8005"
+    environment:
+      - INTERNAL_SECRET=test-secret
+      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - IDENTITY_SVC_URL=http://identity:8001
+      - TEST_MODE=true
+
+  logging:
+    build:
+      context: .
+      dockerfile: services/logging/Dockerfile
+    container_name: sharedllm_test_logging
+    ports:
+      - "8015:8006"
+    environment:
+      - INTERNAL_SECRET=test-secret
+      - REDIS_URL=redis://redis:6379/0
+      - TEST_MODE=true
+    depends_on:
+      - redis
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: sharedllm_test_gateway
+    ports:
+      - "8016:8000"
+    environment:
+      - INTERNAL_SECRET=test-secret
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - CONTROL_PLANE_URL=http://control_plane:8008
+      - REDIS_URL=redis://redis:6379/0
+      - TEST_MODE=true
+    depends_on:
+      - identity
+      - redis
+
+  ollama_mock:
+    image: python:3.11-slim
+    container_name: sharedllm_test_ollama_mock
+    command: >
+      python -c "
+      from fastapi import FastAPI;
+      from fastapi.responses import JSONResponse;
+      app = FastAPI();
+      @app.get('/api/tags');
+      async def tags(): return JSONResponse({'models':[]});
+      @app.post('/api/generate');
+      @app.post('/api/chat');
+      async def generate(): return JSONResponse({'response':'ok','done':True});
+      @app.get('/health');
+      async def health(): return JSONResponse({'status':'ok'});
+      import uvicorn;
+      uvicorn.run(app, host='0.0.0.0', port=11434)
+      "
+    ports:
+      - "11444:11434"
+
+  searxng_mock:
+    image: python:3.11-slim
+    container_name: sharedllm_test_searxng_mock
+    command: >
+      python -c "
+      from fastapi import FastAPI, Request;
+      from fastapi.responses import HTMLResponse, JSONResponse;
+      app = FastAPI();
+      @app.get('/search');
+      async def search(q: str): return HTMLResponse('<html></html>');
+      @app.get('/health');
+      async def health(): return JSONResponse({'status':'ok'});
+      import uvicorn;
+      uvicorn.run(app, host='0.0.0.0', port=8080)
+      "
+    ports:
+      - "8090:8080"
+
+volumes:
+  test_execution_data:
+  test_chroma_data:
