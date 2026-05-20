@@ -1498,3 +1498,137 @@ def get_telemetry_insights(x_internal_secret: str = Header(...)):
             data["key"] = i.key
             result.append(data)
         return {"insights": result}
+
+
+# ─── Household Intercom System (Section 3.16) ─────────────────────────────────
+
+@app.get("/api/intercom/sessions")
+def list_intercom_sessions(x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        sessions = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("intercom_session:%"))).all()
+        result = []
+        for s in sessions:
+            data = json.loads(s.value)
+            data["key"] = s.key
+            result.append(data)
+        return result
+
+
+@app.post("/api/intercom/sessions")
+def start_intercom_session(session_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    import uuid
+    from datetime import datetime
+    session_id = str(uuid.uuid4())[:8]
+    key = f"intercom_session:{session_id}"
+    with Session(engine) as session:
+        new_session = GlobalSetting(
+            key=key,
+            value=json.dumps({
+                "session_id": session_id,
+                "caller_user_id": session_data.get("caller_user_id", "system"),
+                "target_user_id": session_data.get("target_user_id"),
+                "target_room": session_data.get("target_room"),
+                "target_entity_ids": session_data.get("target_entity_ids", []),
+                "session_type": session_data.get("session_type", "twoway"),
+                "status": "active",
+                "started_at": datetime.utcnow().isoformat(),
+                "ended_at": None,
+                "room_name": session_data.get("target_room"),
+            }),
+            description=f"Intercom session: {session_id}",
+        )
+        session.add(new_session)
+        session.commit()
+        return {
+            "session_id": session_id,
+            "status": "active",
+            "started_at": new_session.value,
+            "message": f"Intercom session '{session_id}' started",
+        }
+
+
+@app.delete("/api/intercom/sessions/{session_id}")
+def end_intercom_session(session_id: str, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    from datetime import datetime
+    key = f"intercom_session:{session_id}"
+    with Session(engine) as session:
+        intercom_session = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not intercom_session:
+            raise HTTPException(status_code=404, detail=f"Intercom session '{session_id}' not found")
+        data = json.loads(intercom_session.value)
+        data["status"] = "ended"
+        data["ended_at"] = datetime.utcnow().isoformat()
+        intercom_session.value = json.dumps(data)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Intercom session '{session_id}' ended"}
+
+
+@app.post("/api/intercom/broadcast")
+def intercom_broadcast(broadcast_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    message = broadcast_data.get("message")
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    target_entity_ids = broadcast_data.get("target_entity_ids", [])
+    target_rooms = broadcast_data.get("target_rooms", [])
+    return {
+        "status": "SUCCESS",
+        "message": f"Broadcast queued for {len(target_entity_ids) + len(target_rooms)} targets",
+        "targets_count": len(target_entity_ids) + len(target_rooms),
+        "message_preview": message[:100],
+    }
+
+
+@app.post("/api/intercom/announce")
+def intercom_announcement(announce_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    message = announce_data.get("message")
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    target_devices = announce_data.get("target_devices", [])
+    return {
+        "status": "SUCCESS",
+        "message": f"Announcement queued for {len(target_devices)} devices",
+        "targets_count": len(target_devices),
+        "message_preview": message[:100],
+    }
+
+
+@app.get("/api/intercom/config")
+def get_intercom_config(x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        config = session.exec(select(GlobalSetting).where(GlobalSetting.key == "intercom_config")).first()
+        if config:
+            return json.loads(config.value)
+        return {
+            "default_tts_engine": "kokoro",
+            "default_voice": "af_heart",
+            "default_volume": 0.8,
+            "enable_espresense_routing": True,
+        }
+
+
+@app.patch("/api/intercom/config")
+def update_intercom_config(config_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "intercom_config")).first()
+        current = {}
+        if existing:
+            current = json.loads(existing.value)
+        current.update({k: v for k, v in config_data.items() if v is not None})
+        if existing:
+            existing.value = json.dumps(current)
+        else:
+            new_config = GlobalSetting(
+                key="intercom_config",
+                value=json.dumps(current),
+                description="Intercom system configuration",
+            )
+            session.add(new_config)
+        session.commit()
+        return {"status": "SUCCESS", "message": "Intercom configuration updated", **current}

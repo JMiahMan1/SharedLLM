@@ -769,4 +769,37 @@ export const api = {
     const resp = await apiClient.post('/api/telemetry/analyze', { hours: 168 });
     return resp.data;
   },
+
+  async getIntercomSessions(): Promise<any[]> {
+    const resp = await apiClient.get('/api/intercom/sessions');
+    return resp.data || [];
+  },
+
+  async startIntercomSession(data: { target_user_id?: string; target_room?: string; target_entity_ids?: string[] }): Promise<any> {
+    const resp = await apiClient.post('/api/intercom/sessions', {
+      caller_user_id: 'admin',
+      ...data,
+    });
+    return resp.data;
+  },
+
+  async endIntercomSession(session_id: string): Promise<any> {
+    const resp = await apiClient.delete(`/api/intercom/sessions/${encodeURIComponent(session_id)}`);
+    return resp.data;
+  },
+
+  async intercomBroadcast(data: { message: string; target_entity_ids: string[] }): Promise<any> {
+    const resp = await apiClient.post('/api/intercom/broadcast', data);
+    return resp.data;
+  },
+
+  async intercomAnnounce(data: { message: string; target_devices: string[] }): Promise<any> {
+    const resp = await apiClient.post('/api/intercom/announce', data);
+    return resp.data;
+  },
+
+  async getIntercomConfig(): Promise<any> {
+    const resp = await apiClient.get('/api/intercom/config');
+    return resp.data;
+  },
 };
