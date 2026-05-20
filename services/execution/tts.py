@@ -6,8 +6,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import DEFAULT_TTS_VOICE, MODELS_DIR
-from uuid import uuid4
-from typing import Optional, Protocol, List, Dict
+from typing import Optional, Protocol, List
 import numpy as np
 
 log = logging.getLogger("execution.tts")

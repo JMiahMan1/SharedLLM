@@ -7,9 +7,9 @@ import os
 import sys
 import logging
 from contextlib import asynccontextmanager
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Dict
 
-from fastapi import FastAPI, Depends, HTTPException, Header, Request, status, File, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, Header, File, UploadFile
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -43,11 +43,9 @@ import httpx
 log = logging.getLogger("identity")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-import sys
-import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import INTERNAL_SECRET, FERNET_KEY, OLLAMA_URL, IDENTITY_DATABASE_URL
+from config import INTERNAL_SECRET, OLLAMA_URL, IDENTITY_DATABASE_URL
 
 DATABASE_URL = IDENTITY_DATABASE_URL
 

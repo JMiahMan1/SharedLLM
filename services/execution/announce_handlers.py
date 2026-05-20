@@ -255,7 +255,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
             log.warning(f"[announce.roku] ECP launch failed: {e}")
     
     # Fallback: try media_player.play_media
-    log.info(f"[announce.roku] Fallback: play_media with URL")
+    log.info("[announce.roku] Fallback: play_media with URL")
     return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "url"

@@ -26,7 +26,7 @@ import shlex
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
-from typing import Optional, Dict
+from typing import Optional
 try:
     from schemas import GitOperationRequest, GitExecutionResult
 except ImportError:
@@ -210,7 +210,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     
     # Hardened Pivot: If we are on microservices but agent says main, it is likely a hallucination
     if current_branch == "microservices" and branch == "main":
-        log.info(f"[Git] Pivoting hallucinated branch 'main' to active branch 'microservices'")
+        log.info("[Git] Pivoting hallucinated branch 'main' to active branch 'microservices'")
         branch = "microservices"
 
     log_count: int = int(getattr(req, "log_count", 10) or 10)
@@ -370,7 +370,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         return _ok("fetch", r)
 
     elif action == "log":
-        r = await _run_git(["log", f"--oneline", f"-{log_count}"], cwd=workspace_path)
+        r = await _run_git(["log", "--oneline", f"-{log_count}"], cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("log", r)
         return _ok("log", {"commits": r["stdout"].splitlines(), **r})

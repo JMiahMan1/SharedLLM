@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, AsyncMock
 
 from gateway.main import select_model_for_query, select_system_instruction_for_query
-from gateway.prompts import AUTONOMOUS_EVOLUTION_AGENT_PROMPT, CODE_HELPER_SYSTEM_INSTRUCTION, RAVEN_AUTONOMOUS_PROTOCOL
+from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, RAVEN_AUTONOMOUS_PROTOCOL
 
 
 @pytest.mark.asyncio

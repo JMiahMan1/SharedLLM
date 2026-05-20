@@ -15,7 +15,7 @@ try:
     from .models import User, GlobalSetting, DeviceAssignment, APIKey, DEFAULT_GLOBAL_SETTINGS
     from .crypto import encrypt
 except ImportError:
-    from models import User, GlobalSetting, DeviceAssignment, APIKey, DEFAULT_GLOBAL_SETTINGS
+    from models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
     from crypto import encrypt
 
 from passlib.context import CryptContext
