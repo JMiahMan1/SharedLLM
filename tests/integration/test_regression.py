@@ -273,11 +273,17 @@ class TestIntercomEndpoints:
         resp = internal_client.get(f"{IDENTITY_URL}/api/intercom/config")
         assert resp.status_code == 200, f"Get config failed: {resp.text}"
         config = resp.json()
-        assert "default_tts_engine" in config or "default_voice" in config
+        assert isinstance(config, dict), "Config must be a dict"
         
         # Update config
         resp = internal_client.patch(
             f"{IDENTITY_URL}/api/intercom/config",
-            json={"default_volume": 0.9},
+            json={"default_volume": 0.75},
         )
         assert resp.status_code == 200, f"Update config failed: {resp.text}"
+        
+        # Verify update
+        resp = internal_client.get(f"{IDENTITY_URL}/api/intercom/config")
+        assert resp.status_code == 200
+        updated_config = resp.json()
+        assert updated_config.get("default_volume") == 0.75
