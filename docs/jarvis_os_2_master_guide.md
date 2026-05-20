@@ -90,10 +90,27 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
     *   `handlers/note.py` directly interfaces with Nextcloud WebDAV to execute the `noterequest` tool. Crucially, it features a `sync_rag` action that recursively walks note directories and pipes them into the local RAG indexing pipeline.
     *   `handlers/calendar.py` directly interfaces with Nextcloud CalDAV (via `calendarrequest`) to parse dates (`dateparser`) and inject events.
     *   *Deep-Dive Architecture Finding:* The system also runs an asynchronous background task (`extract_user_facts`) that continuously monitors conversation history in Redis. It autonomously extracts durable preferences and saves them into a specialized `user_facts` ChromaDB collection.
+
+#### Per-User RAG Isolation (Critical Security Model)
+
+RAG collections are strictly scoped. A user's Nextcloud files are **only ever ingested into that user's own personal RAG collection** — never into the shared system RAG. This applies to all roles including admins.
+
+| RAG Collection | Scope | What Goes In | Who Can Query |
+| :--- | :--- | :--- | :--- |
+| `system_tools` | System | Tool schemas, capability definitions (seeded by `capabilities-sync`) | All users (read-only, auto-injected into LLM system prompt) |
+| `system_learnings` | System | Raven's autonomous coding lessons (`_persist_learning()`) | All users (enriches LLM context) |
+| `user_notes:{user_id}` | Per-user | That user's Nextcloud Notes (via `sync_rag`) | Only the owning user |
+| `user_facts:{user_id}` | Per-user | Extracted preferences from that user's conversation history | Only the owning user |
+
+**Key Rules:**
+*   When User A runs `sync_rag`, their Nextcloud notes are indexed into `user_notes:A` — User B's LLM context never sees them.
+*   Even an admin running `sync_rag` on their own Nextcloud files only populates `user_notes:{admin_id}`, not the system collections.
+*   The system RAG (`system_tools`, `system_learnings`) is populated exclusively by automated pipelines (capabilities-sync, Raven learning hooks) — not by manual user file ingestion.
+
 *   **Jarvis OS 2.0 Enhancements:**
-    *   **Long-Term "NotebookLM" Memory:** Jarvis treats Nextcloud Notes as its dynamic brain. The LLM can autonomously execute an `/execute/note` action (`action="append"`) to write a short "memory" file about user preferences (e.g., "User prefers 70-degree climate at night"). Through the `sync_rag` pipeline, this becomes instant semantic context for all future conversations.
-    *   **Autonomous Calendar Parsing:** If Jarvis generates or reads a note that contains temporal context (e.g., "Dentist appointment next Tuesday at 4pm"), it possesses the agency to immediately extract that date and execute an `/execute/calendar` (`action="add"`) request to permanently lock it into the user's CalDAV calendar.
-    *   **Quick Notes Widget (Yellow Glow):** Tapping a note widget seamlessly expands it into a full-screen markdown editor.
+    *   **Long-Term "NotebookLM" Memory:** Jarvis treats each user's Nextcloud Notes as that user's dynamic brain. The LLM can autonomously execute an `/execute/note` action (`action="append"`) to write a short "memory" file about user preferences (e.g., "User prefers 70-degree climate at night"). Through the `sync_rag` pipeline, this becomes instant semantic context for that user's future conversations only.
+    *   **Autonomous Calendar Parsing:** If Jarvis generates or reads a note that contains temporal context (e.g., "Dentist appointment next Tuesday at 4pm"), it possesses the agency to immediately extract that date and execute an `/execute/calendar` (`action="add"`) request to permanently lock it into the user's own CalDAV calendar.
+    *   **Quick Notes Widget (Yellow Glow):** Tapping a note widget seamlessly expands it into a full-screen markdown editor. Notes are always read/written to the authenticated user's own Nextcloud account.
 
 ### 3.6 Alarms, Timers & Announcements
 *   **Backend Reality:** 
@@ -159,9 +176,26 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
     2.  **Device ID:** The MAC/UUID of the wall-mounted tablet requesting the action.
     3.  **API Key:** Standard web token.
     4.  **Fallback:** If all fail, defaults to User ID 1 (The generic "Home" System Account).
+
+#### Two-Tier Integration & Credential Model
+
+Jarvis OS distinguishes between **System Integrations** (shared infrastructure) and **Personal Integrations** (per-user accounts):
+
+| Tier | Owner | Examples | Who Can Modify | Who Can Use |
+| :--- | :--- | :--- | :--- | :--- |
+| **System** | Admin | Home Assistant URL & token, MQTT broker, SearXNG instance, Kokoro TTS engine, Music Assistant config, LLM inference endpoint | Admin only (`is_admin=True`) | All authenticated users |
+| **Personal** | Individual user | Nextcloud account (username + app password), Skylight profile, GitHub token, CalDAV calendar URL, Audiobookshelf library token | The owning user (self-service) | Only the owning user |
+
+**Key Rules:**
+*   **System integrations are read-only for standard users.** Standard and Child users consume system services (e.g., play music via MASS, receive announcements, control lights via HA) but cannot view, modify, or delete the underlying system credentials or configuration.
+*   **Personal integrations are self-service.** Each user links their own Nextcloud account, their own Skylight login, their own GitHub token, etc. via a **Personal Settings** page (`/settings/integrations`). These credentials are Fernet-encrypted per-user and isolated — User A's Nextcloud token is never accessible to User B or even visible to admins (admins can see *that* a credential is linked but not the decrypted value).
+*   **RBAC enforcement on system settings:** All `PUT /api/admin/settings` and `DELETE /api/admin/*` endpoints are hard-gated behind `is_admin=True`. Attempts by non-admin users return `403 Forbidden`. The UI hides admin-only routes entirely from the navigation shell for non-admin roles.
+*   **Child role restrictions:** Child accounts have the most restricted view — they see only the Home dashboard, `/chores`, `/media` (with parental content filters if configured), and the intercom. They cannot access `/settings`, `/admin/*`, or any integration configuration.
+
 *   **Jarvis OS 2.0 Enhancements:**
     *   **External User Import:** To prevent manual data entry for large families, Identity can query Nextcloud (`/ocs/v1.php/cloud/users`), Home Assistant (`/api/config/auth/users`), or Skylight APIs to batch-import existing user accounts, automatically creating local profiles and linking their respective authentication tokens.
-    *   **Admin Profiles UI:** The frontend will include an Admin User Management panel to manage these encrypted credentials securely without touching `.env` files.
+    *   **Admin Profiles UI:** The frontend will include an Admin User Management panel to manage system-level credentials securely without touching `.env` files.
+    *   **Personal Settings Page (`/settings/integrations`):** Each user has a self-service page to link/unlink their own Nextcloud account, Skylight profile, GitHub token, and CalDAV calendar. The page uses the same dynamic form generation as the admin integrations page (`GET /api/integrations/available?scope=personal`) but scoped only to the authenticated user's credentials.
 
 ### 3.13 Power Consumption & Energy Intelligence
 *   **Backend Reality:** Jarvis actively ingests telemetry from Home Assistant power sensors (smart plugs, main electrical panels, solar inverters, EV chargers). Because the LLM has access to chronological state history via the RAG system and `ha_client.py` logbook queries, it can analyze power draw over time.
@@ -1244,6 +1278,52 @@ The true power of Jarvis OS 2.0 isn't in isolated widgets—it's how the LLM aut
 ## 10. UI Content Design & Page-by-Page Wireframes
 
 This section breaks down the React/Ionic frontend page by page. It details exactly what UI components exist, their target audience (Standard User vs. Admin), what they control, and how they interact with the backend.
+
+> [!TIP]
+> **For detailed step-by-step task workflows** (creating users, importing from providers, configuring integrations, completing chores, casting media, etc.), see the companion document: `docs/jarvis_os_2_ui_wireframes.md` **§7 (Admin Task Workflows)** and **§8 (Standard User Task Workflows)**. Those sections include exact UI actions → backend API call mappings in tabular format.
+
+#### API Endpoint Quick-Reference (for AI Agents & Frontend Developers)
+
+| Endpoint | Method | Service | Purpose |
+| :--- | :--- | :--- | :--- |
+| `/api/chat` | POST | Gateway | LLM chat inference (tiered routing) |
+| `/api/auth/login` | POST | Identity | User authentication (returns JWT) |
+| `/api/auth/test-connection` | POST | Identity | Test third-party credential connectivity |
+| `/api/users/create` | POST | Identity | Create a new user profile |
+| `/api/users/{id}/credentials` | PUT | Identity | Store encrypted third-party credentials |
+| `/api/users/{id}/devices` | GET/PUT | Identity | Manage device assignments per user |
+| `/api/identity/users/discover` | GET | Identity | Query external providers for importable users |
+| `/api/identity/users/import` | POST | Identity | Batch-import user profiles from providers |
+| `/api/identity/users/location` | POST | Identity | Receive GPS coordinates from mobile app |
+| `/api/integrations/available` | GET | Identity | List configurable integrations with JSON schemas |
+| `/api/admin/settings` | GET/PUT | Identity | Read/write global system settings |
+| `/api/groups/media` | GET/POST/DELETE | Identity | CRUD for media device groups |
+| `/api/groups/lights` | GET/POST/DELETE | Identity | CRUD for light clusters |
+| `/api/groups/patterns` | GET/POST/DELETE | Identity | CRUD for light patterns |
+| `/api/telemetry/enroll` | POST | Identity | Enroll devices in telemetry monitoring |
+| `/api/telemetry/enrolled` | GET | Identity | List enrolled telemetry devices |
+| `/api/raven/missions/{id}/stream` | WS | Gateway | Live mission telemetry via Redis PubSub |
+| `/api/raven/missions/{id}/diff` | GET | Gateway | Retrieve code diff for review |
+| `/api/raven/missions/{id}/approve` | POST | Gateway | Approve and merge autonomous code patch |
+| `/api/raven/missions/{id}/reject` | POST | Gateway | Reject autonomous code patch |
+| `/execute/media/play` | POST | Execution | Cast music/video to target device |
+| `/execute/media/transport` | POST | Execution | Playback controls (play/pause/skip/volume) |
+| `/execute/remote/keypress` | POST | Execution | Send TV remote keypresses (D-pad, Home, etc.) |
+| `/execute/announce` | POST | Execution | TTS announcement to speakers/TVs |
+| `/execute/tts` | POST | Execution | Generate Kokoro TTS audio |
+| `/execute/intercom/send` | POST | Execution | Send voice clip to intercom targets |
+| `/execute/timer` | POST | Execution | Create/manage timers and alarms |
+| `/execute/note` | POST | Execution | CRUD for Nextcloud Notes |
+| `/execute/calendar` | POST | Execution | CRUD for CalDAV calendar events |
+| `/execute/talk` | POST | Execution | Send/read Nextcloud Talk messages |
+| `/execute/emoji-sounds/upload` | POST | Execution | Upload emoji-to-sound mapping |
+| `/execute/emoji-sounds` | GET | Execution | List all emoji sound mappings |
+| `/api/integrations/skylight/*` | various | Execution | Skylight chore and reward management |
+| `/ws/capabilities` | WS | Gateway | Real-time capability/state push to UI |
+| `/control_plane/api/containers` | GET | Control Plane | List Docker container statuses |
+| `/control_plane/api/restart/{name}` | POST | Control Plane | Restart a Docker container |
+| `/control_plane/api/containers/{name}/logs` | GET | Control Plane | Tail container logs |
+| `/media/{media_id}` | GET | Execution (:8888) | Serve TTS audio or video files |
 
 ### 10.1 Global Shell & Navigation (Responsive Layout)
 *   **Target Audience:** Standard Users & Admins
