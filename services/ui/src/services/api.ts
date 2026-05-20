@@ -205,6 +205,13 @@ export interface RavenConfig {
   system_default_tts_engine: string;
 }
 
+export interface MediaGroup { name: string; member_entity_ids?: string[] }
+export interface LightCluster { name: string; member_entity_ids?: string[] }
+export interface LightPattern { name: string; steps?: unknown[] }
+export interface TelemetryEnrollment { entity_id: string; power_tracking: boolean; availability_tracking: boolean; offline_alert_threshold_minutes: number }
+export interface IntercomSessionData { session_id: string; caller_user_id: string; target_user_id?: string; target_room?: string; session_type: string; status: string }
+export interface IntercomConfigData { default_tts_engine?: string; default_voice?: string; default_volume?: number; enable_espresense_routing?: boolean }
+
 const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
   ...raw,
   full_name: raw.full_name ?? raw.display_name ?? '',
@@ -694,62 +701,62 @@ export const api = {
     return resp.data;
   },
 
-  async getMediaGroups(): Promise<any[]> {
+  async getMediaGroups(): Promise<MediaGroup[]> {
     const resp = await apiClient.get('/api/groups/media');
     return resp.data.groups || [];
   },
 
-  async createMediaGroup(data: { name: string; member_entity_ids: string[]; sync_state?: boolean }): Promise<any> {
+  async createMediaGroup(data: { name: string; member_entity_ids: string[]; sync_state?: boolean }): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/groups/media', data);
     return resp.data;
   },
 
-  async deleteMediaGroup(name: string): Promise<any> {
+  async deleteMediaGroup(name: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.delete(`/api/groups/media/${encodeURIComponent(name)}`);
     return resp.data;
   },
 
-  async getLightClusters(): Promise<any[]> {
+  async getLightClusters(): Promise<LightCluster[]> {
     const resp = await apiClient.get('/api/groups/lights');
     return resp.data.clusters || [];
   },
 
-  async createLightCluster(data: { name: string; member_entity_ids: string[]; default_brightness?: number; default_color_temp?: number }): Promise<any> {
+  async createLightCluster(data: { name: string; member_entity_ids: string[]; default_brightness?: number; default_color_temp?: number }): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/groups/lights', data);
     return resp.data;
   },
 
-  async deleteLightCluster(name: string): Promise<any> {
+  async deleteLightCluster(name: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.delete(`/api/groups/lights/${encodeURIComponent(name)}`);
     return resp.data;
   },
 
-  async getLightPatterns(): Promise<any[]> {
+  async getLightPatterns(): Promise<LightPattern[]> {
     const resp = await apiClient.get('/api/groups/patterns');
     return resp.data.patterns || [];
   },
 
-  async createLightPattern(data: { name: string; steps: Array<{ brightness?: number; color_temp?: number; rgb_color?: number[]; transition?: number; delay?: number }> }): Promise<any> {
+  async createLightPattern(data: { name: string; steps: Array<{ brightness?: number; color_temp?: number; rgb_color?: number[]; transition?: number; delay?: number }> }): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/groups/patterns', data);
     return resp.data;
   },
 
-  async deleteLightPattern(name: string): Promise<any> {
+  async deleteLightPattern(name: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.delete(`/api/groups/patterns/${encodeURIComponent(name)}`);
     return resp.data;
   },
 
-  async executeLightPattern(data: { pattern_name: string; target_cluster?: string; target_entity_ids?: string[] }): Promise<any> {
+  async executeLightPattern(data: { pattern_name: string; target_cluster?: string; target_entity_ids?: string[] }): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/execute/groups/lights', data);
     return resp.data;
   },
 
-  async getTelemetryEnrollments(): Promise<any[]> {
+  async getTelemetryEnrollments(): Promise<TelemetryEnrollment[]> {
     const resp = await apiClient.get('/api/telemetry/enroll');
     return resp.data.enrollments || [];
   },
 
-  async enrollTelemetry(data: { entity_id: string; offline_alert_threshold_minutes: number }): Promise<any> {
+  async enrollTelemetry(data: { entity_id: string; offline_alert_threshold_minutes: number }): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/telemetry/enroll', {
       entity_id: data.entity_id,
       power_tracking: true,
@@ -760,22 +767,22 @@ export const api = {
     return resp.data;
   },
 
-  async unenrollTelemetry(entity_id: string): Promise<any> {
+  async unenrollTelemetry(entity_id: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.delete(`/api/telemetry/enroll/${encodeURIComponent(entity_id)}`);
     return resp.data;
   },
 
-  async analyzeTelemetry(): Promise<any> {
+  async analyzeTelemetry(): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/telemetry/analyze', { hours: 168 });
     return resp.data;
   },
 
-  async getIntercomSessions(): Promise<any[]> {
+  async getIntercomSessions(): Promise<IntercomSessionData[]> {
     const resp = await apiClient.get('/api/intercom/sessions');
     return resp.data || [];
   },
 
-  async startIntercomSession(data: { target_user_id?: string; target_room?: string; target_entity_ids?: string[] }): Promise<any> {
+  async startIntercomSession(data: { target_user_id?: string; target_room?: string; target_entity_ids?: string[] }): Promise<{ session_id: string; status: string }> {
     const resp = await apiClient.post('/api/intercom/sessions', {
       caller_user_id: 'admin',
       ...data,
@@ -783,22 +790,22 @@ export const api = {
     return resp.data;
   },
 
-  async endIntercomSession(session_id: string): Promise<any> {
+  async endIntercomSession(session_id: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.delete(`/api/intercom/sessions/${encodeURIComponent(session_id)}`);
     return resp.data;
   },
 
-  async intercomBroadcast(data: { message: string; target_entity_ids: string[] }): Promise<any> {
+  async intercomBroadcast(data: { message: string; target_entity_ids: string[] }): Promise<{ status: string; targets_count: number }> {
     const resp = await apiClient.post('/api/intercom/broadcast', data);
     return resp.data;
   },
 
-  async intercomAnnounce(data: { message: string; target_devices: string[] }): Promise<any> {
+  async intercomAnnounce(data: { message: string; target_devices: string[] }): Promise<{ status: string; targets_count: number }> {
     const resp = await apiClient.post('/api/intercom/announce', data);
     return resp.data;
   },
 
-  async getIntercomConfig(): Promise<any> {
+  async getIntercomConfig(): Promise<IntercomConfigData> {
     const resp = await apiClient.get('/api/intercom/config');
     return resp.data;
   },

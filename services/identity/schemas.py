@@ -50,6 +50,7 @@ class UserCreate(BaseModel):
     is_admin: bool = False
     is_system_default: bool = False
     api_key: Optional[str] = None
+    password: Optional[str] = None
     nextcloud_url: Optional[str] = None
     nextcloud_user: Optional[str] = None
     nextcloud_pass: Optional[str] = None
