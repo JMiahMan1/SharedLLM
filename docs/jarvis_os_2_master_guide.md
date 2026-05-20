@@ -716,7 +716,7 @@ User request → /execute/media/play (VideoPlayRequest)
 - Uses **Media Assistant app (ID 782875)** via ECP — not native Roku media player.
 - ECP param is `videoName` (NOT `songName` — that's for audio).
 - Wake-up logic consolidated in `roku.roku_wake_device()` — called in parallel with download via `asyncio.create_task()`.
-- Device IP discovered via 7-strategy pipeline (registry → HA attrs → ARP → mDNS → SSDP → port scan).
+- Device IP discovered via 10-strategy pipeline (registry → HomeKit diagnostics → HA attrs → ARP → SNMP → mDNS → SSDP → port scan).
 - Video titles are sanitized to remove emojis (prevents URL encoding issues on Roku ECP).
 
 #### How to Check What's Playing on Roku (State Verification)
@@ -899,7 +899,7 @@ Netflix `12`, YouTube `837`, Hulu `2285`, Disney+ `291097`, Prime Video `13`, Sp
 
 2. DISCOVER ROKU IP
    device_discovery.discover_device(entity_id, device_type="roku")
-   → 7-strategy pipeline: registry cache → HA attrs → ARP → mDNS → SSDP → port scan
+   → 10-strategy pipeline: registry cache → HomeKit diagnostics → HA attrs → ARP → SNMP → mDNS → SSDP → port scan
    If IP not found: falls back to MA-only playback (skips ECP step)
 
 3. FIND MA PLAYER SIBLING
@@ -942,7 +942,7 @@ Netflix `12`, YouTube `837`, Hulu `2285`, Disney+ `291097`, Prime Video `13`, Sp
 ##### Video Playback — Four-Step Pipeline (`roku_play_video`)
 
 ```
-1. DISCOVER ROKU IP (same 7-strategy pipeline)
+1. DISCOVER ROKU IP (same 10-strategy pipeline)
 
 2. SMART POWER SYNC (called in parallel with download via asyncio.create_task)
    get_state() checks if entity is "off", "idle", "unavailable", or "unknown"
@@ -1069,17 +1069,22 @@ Before any dispatch, the system runs a 12-priority detection pass on the entity'
 
 
 #### Multi-Strategy Device Discovery Pipeline (`device_discovery.py`)
-To find physical device IPs for ECP/direct API calls, a 7-strategy ordered pipeline runs in sequence — stopping at the first hit:
+To find physical device IPs for direct API and remote control calls, a **10-strategy ordered pipeline** runs in sequence — stopping at the first successful match:
 
-1. **Persistent Registry Cache** (aiosqlite, instant)
-2. **HA Device Registry** (REST API config entries + ESPHome)
-3. **HA Entity Attributes** (`ip_address`, `ip`, `host` fields)
-4. **ARP Table Scan** (`arp -a`, requires host network mode)
-5. **mDNS / Bonjour** (resolves `<friendly_name>.local`)
-6. **SSDP Broadcast** (UDP multicast for Roku/DLNA/Chromecast)
-7. **Batched Network Port Scan** (subnet scan, 30 hosts/batch, slowest fallback)
+1.  **Persistent Registry Cache:** Instant lookup from the local SQLite device registry.
+2.  **HA Device Registry:** Queries HA's configuration entries and matching device IDs to resolve hosts and extract MAC addresses.
+3.  **HomeKit Controller Diagnostics:** Resolves LG WebOS TV host IPs (which HA redact by default) by extracting `AccessoryIPs` from homekit_controller diagnostics.
+4.  **HA Entity Attributes:** Extracts IP/host directly from attributes like `ip_address`, `ip`, or `host`.
+5.  **ARP Table Scan:** Reads `/proc/net/arp` (or standard `arp -a` CLI), probes matching ports, and correlates friendly names.
+6.  **Subnet ARP Scan:** Actively scans the local subnet (and adjacent subnets) using `arp-scan`, probing responsive IPs.
+7.  **Router SNMP Walk:** Queries the local router's `ipNetToMediaPhysAddress` table (via SNMP walk `1.3.6.1.2.1.4.22.1.2`) to fetch the router's current ARP table.
+8.  **mDNS / Bonjour:** Resolves `<friendly_name>.local` or `<entity_id>.local` hostnames.
+9.  **SSDP Broadcast:** Uses UDP multicast (`239.255.255.250:1900`) searching for SSDP targets (Roku, Cast, DLNA).
+10. **Batched Network Port Scan:** Probes a fast parallel TCP scan of common ports across active IPs in the subnet:
+    *   **Port Maps:** Roku `:8060`, WebOS `:3000`/`:3001`/`:9080`, Samsung `:8001`/`:8002`, ADB `:5555`, Cast `:8009`, DLNA `:9197`/`:8200`, ESPHome `:6053` (native API), Tasmota `:80`, MQTT `:1883`/`:8883`.
+    *   **ESPHome Native Integration:** Probes port `6053` using `aioesphomeapi` to retrieve software versions, board compile platform, and identifies if noise encryption keys (`encryption_required` flag) are required.
 
-Device type port maps: Roku `:8060`, WebOS `:3000`, Samsung `:8001`, ADB `:5555`, Cast `:8009`, ESPHome `:80`, Tasmota `:80`, MQTT `:1883`.
+**Dynamic Subnet Resolution:** The pipeline dynamically detects the active local subnet by inspecting the default routing table (`/proc/net/route`) or falling back to local interface IP blocks. The environment variables `SCAN_SUBNET` or `LOCAL_SUBNET` can override this detection block at runtime.
 
 **Execution network mode:** The `execution` container now runs in **host network mode** (required for SSDP multicast and ARP to function correctly across the local network).
 
@@ -1106,9 +1111,8 @@ Based on a deep-dive audit of the `services/execution/handlers/` code, the follo
 3.  **Storage Providers (`storage/providers.py`):**
     *   *Current State:* Contains `NotImplementedError` base stubs for cloud object storage.
     *   *Fix Required:* Build out the concrete Nextcloud/S3 provider classes.
-4.  **Device Registry Subnet Configuration:**
-    *   `device_discovery.py` currently defaults to hardcoded subnet `192.168.2.0/24`.
-    *   *Fix Required:* Move `DEFAULT_SUBNET` to an environment variable (`DISCOVERY_SUBNET`) configurable per deployment.
+4.  **Device Registry Subnet Configuration (Resolved):**
+    *   *Resolution:* Fully resolved in `device_discovery.py` and `handlers/network_scan.py` via dynamic interface and default routing table (`/proc/net/route`) inspection, with optional environment variable overrides (`SCAN_SUBNET` or `LOCAL_SUBNET`). Hardcoded defaults have been completely removed.
 
 ---
 
