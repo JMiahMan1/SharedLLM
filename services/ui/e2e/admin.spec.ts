@@ -47,12 +47,10 @@ test.describe('Admin Page - System Matrix', () => {
 
     const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
     await expect(searchInput).toBeVisible();
-    // Click to open dropdown
     await searchInput.click();
-    // Should show entities or "No entities found" after loading
     await page.waitForTimeout(3000);
-    const dropdown = page.locator('.absolute.z-50.mt-1');
-    await expect(dropdown).toBeVisible();
+    const dropdown = page.locator('.entity-dropdown-portal');
+    await expect(dropdown).toBeVisible({ timeout: 10000 });
   });
 
   test('Users & Devices tab - discovery import loads', async ({ page }) => {
@@ -81,12 +79,10 @@ test.describe('Admin Page - System Matrix', () => {
 
     const multiSelect = page.getByPlaceholder('Search and add media entities...');
     await expect(multiSelect).toBeVisible();
-    // Click to open dropdown
     await multiSelect.click();
     await page.waitForTimeout(3000);
-    // Should show dropdown with entities or message
-    const dropdown = page.locator('.absolute.z-50.mt-1');
-    await expect(dropdown).toBeVisible();
+    const dropdown = page.locator('.entity-dropdown-portal');
+    await expect(dropdown).toBeVisible({ timeout: 10000 });
   });
 
   test('Device Groups tab - light clusters section loads', async ({ page }) => {
@@ -117,8 +113,8 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(searchInput).toBeVisible();
     await searchInput.click();
     await page.waitForTimeout(3000);
-    const dropdown = page.locator('.absolute.z-50.mt-1');
-    await expect(dropdown).toBeVisible();
+    const dropdown = page.locator('.entity-dropdown-portal');
+    await expect(dropdown).toBeVisible({ timeout: 10000 });
   });
 
   test('Intercom tab - sessions section loads', async ({ page }) => {

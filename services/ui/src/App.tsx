@@ -1,8 +1,10 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
+import MobileShell from './components/layout/MobileShell';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import Identity from './pages/Identity';
@@ -17,7 +19,7 @@ import { Toaster } from 'react-hot-toast';
 
 const queryClient = new QueryClient();
 
-const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean }) => {
+const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { children: React.ReactNode, requireAdmin?: boolean, isMobile?: boolean }) => {
   const { token, user, isLoading } = useAuth();
   
   if (isLoading) return (
@@ -31,6 +33,10 @@ const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.Re
   if (requireAdmin && !user?.is_admin) {
     console.warn("RBAC Violation: Admin required for this route.");
     return <Navigate to="/" replace />;
+  }
+
+  if (isMobile) {
+    return <MobileShell>{children}</MobileShell>;
   }
   
   return (
@@ -47,6 +53,8 @@ const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.Re
 };
 
 function App() {
+  const isNative = Capacitor.isNativePlatform();
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
@@ -61,14 +69,14 @@ function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/admin" element={<ProtectedRoute requireAdmin={true}><Admin /></ProtectedRoute>} />
-            <Route path="/identity" element={<ProtectedRoute><Identity /></ProtectedRoute>} />
-            <Route path="/communication" element={<ProtectedRoute><Communication /></ProtectedRoute>} />
-            <Route path="/lab" element={<ProtectedRoute requireAdmin={true}><JarvisLab /></ProtectedRoute>} />
-            <Route path="/knowledge" element={<ProtectedRoute><KnowledgeHub /></ProtectedRoute>} />
-            <Route path="/workspaces" element={<ProtectedRoute><Workspaces /></ProtectedRoute>} />
-            <Route path="/docs" element={<ProtectedRoute><Docs /></ProtectedRoute>} />
+            <Route path="/" element={<ProtectedRoute isMobile={isNative}><Dashboard /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><Admin /></ProtectedRoute>} />
+            <Route path="/identity" element={<ProtectedRoute isMobile={isNative}><Identity /></ProtectedRoute>} />
+            <Route path="/communication" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
+            <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><JarvisLab /></ProtectedRoute>} />
+            <Route path="/knowledge" element={<ProtectedRoute isMobile={isNative}><KnowledgeHub /></ProtectedRoute>} />
+            <Route path="/workspaces" element={<ProtectedRoute isMobile={isNative}><Workspaces /></ProtectedRoute>} />
+            <Route path="/docs" element={<ProtectedRoute isMobile={isNative}><Docs /></ProtectedRoute>} />
           </Routes>
         </Router>
       </AuthProvider>
