@@ -5,6 +5,7 @@ Manages user profiles, device assignments, and secure credential resolution.
 """
 import os
 import sys
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict
@@ -1086,3 +1087,240 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
         except Exception as e:
             log.error(f"Nextcloud import failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Device & Light Grouping (Section 3.14) ───────────────────────────────────
+
+@app.get("/api/groups/media")
+def list_media_groups(x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        groups = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("media_group:%"))).all()
+        result = []
+        for g in groups:
+            data = json.loads(g.value)
+            data["key"] = g.key
+            result.append(data)
+        return result
+
+
+@app.post("/api/groups/media")
+def create_media_group(group_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"media_group:{group_data['group_id']}"
+    with Session(engine) as session:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Media group '{group_data['group_id']}' already exists")
+        group = GlobalSetting(
+            key=key,
+            value=json.dumps({
+                "group_id": group_data["group_id"],
+                "group_name": group_data.get("group_name", group_data["group_id"]),
+                "member_entity_ids": group_data.get("member_entity_ids", []),
+                "scope": group_data.get("scope", "user"),
+                "owner_user_id": group_data.get("owner_user_id", "system"),
+            }),
+            description=f"Media group: {group_data.get('group_name', '')}",
+        )
+        session.add(group)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Media group '{group_data['group_id']}' created"}
+
+
+@app.delete("/api/groups/media/{group_id}")
+def delete_media_group(group_id: str, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"media_group:{group_id}"
+    with Session(engine) as session:
+        group = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not group:
+            raise HTTPException(status_code=404, detail=f"Media group '{group_id}' not found")
+        session.delete(group)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Media group '{group_id}' deleted"}
+
+
+@app.post("/api/groups/media/{group_id}/members")
+def add_media_group_members(group_id: str, member_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"media_group:{group_id}"
+    with Session(engine) as session:
+        group = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not group:
+            raise HTTPException(status_code=404, detail=f"Media group '{group_id}' not found")
+        data = json.loads(group.value)
+        existing = set(data.get("member_entity_ids", []))
+        existing.update(member_data.get("entity_ids", []))
+        data["member_entity_ids"] = list(existing)
+        group.value = json.dumps(data)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Members added to '{group_id}'"}
+
+
+@app.delete("/api/groups/media/{group_id}/members")
+def remove_media_group_members(group_id: str, member_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"media_group:{group_id}"
+    with Session(engine) as session:
+        group = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not group:
+            raise HTTPException(status_code=404, detail=f"Media group '{group_id}' not found")
+        data = json.loads(group.value)
+        existing = set(data.get("member_entity_ids", []))
+        existing -= set(member_data.get("entity_ids", []))
+        data["member_entity_ids"] = list(existing)
+        group.value = json.dumps(data)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Members removed from '{group_id}'"}
+
+
+@app.get("/api/groups/lights")
+def list_light_clusters(x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        clusters = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("light_cluster:%"))).all()
+        result = []
+        for c in clusters:
+            data = json.loads(c.value)
+            data["key"] = c.key
+            result.append(data)
+        return result
+
+
+@app.post("/api/groups/lights")
+def create_light_cluster(cluster_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"light_cluster:{cluster_data['cluster_id']}"
+    with Session(engine) as session:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Light cluster '{cluster_data['cluster_id']}' already exists")
+        cluster = GlobalSetting(
+            key=key,
+            value=json.dumps({
+                "cluster_id": cluster_data["cluster_id"],
+                "cluster_name": cluster_data.get("cluster_name", cluster_data["cluster_id"]),
+                "member_entity_ids": cluster_data.get("member_entity_ids", []),
+                "room": cluster_data.get("room"),
+                "scope": cluster_data.get("scope", "room"),
+                "owner_user_id": cluster_data.get("owner_user_id", "system"),
+            }),
+            description=f"Light cluster: {cluster_data.get('cluster_name', '')}",
+        )
+        session.add(cluster)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Light cluster '{cluster_data['cluster_id']}' created"}
+
+
+@app.delete("/api/groups/lights/{cluster_id}")
+def delete_light_cluster(cluster_id: str, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"light_cluster:{cluster_id}"
+    with Session(engine) as session:
+        cluster = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not cluster:
+            raise HTTPException(status_code=404, detail=f"Light cluster '{cluster_id}' not found")
+        session.delete(cluster)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Light cluster '{cluster_id}' deleted"}
+
+
+@app.post("/api/groups/lights/{cluster_id}/members")
+def add_light_cluster_members(cluster_id: str, member_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"light_cluster:{cluster_id}"
+    with Session(engine) as session:
+        cluster = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not cluster:
+            raise HTTPException(status_code=404, detail=f"Light cluster '{cluster_id}' not found")
+        data = json.loads(cluster.value)
+        existing = set(data.get("member_entity_ids", []))
+        existing.update(member_data.get("entity_ids", []))
+        data["member_entity_ids"] = list(existing)
+        cluster.value = json.dumps(data)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Members added to '{cluster_id}'"}
+
+
+@app.delete("/api/groups/lights/{cluster_id}/members")
+def remove_light_cluster_members(cluster_id: str, member_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"light_cluster:{cluster_id}"
+    with Session(engine) as session:
+        cluster = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not cluster:
+            raise HTTPException(status_code=404, detail=f"Light cluster '{cluster_id}' not found")
+        data = json.loads(cluster.value)
+        existing = set(data.get("member_entity_ids", []))
+        existing -= set(member_data.get("entity_ids", []))
+        data["member_entity_ids"] = list(existing)
+        cluster.value = json.dumps(data)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Members removed from '{cluster_id}'"}
+
+
+@app.get("/api/groups/patterns")
+def list_light_patterns(x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        patterns = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("light_pattern:%"))).all()
+        result = []
+        for p in patterns:
+            data = json.loads(p.value)
+            data["key"] = p.key
+            result.append(data)
+        return result
+
+
+@app.post("/api/groups/patterns")
+def create_light_pattern(pattern_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"light_pattern:{pattern_data['pattern_id']}"
+    with Session(engine) as session:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Light pattern '{pattern_data['pattern_id']}' already exists")
+        pattern = GlobalSetting(
+            key=key,
+            value=json.dumps({
+                "pattern_id": pattern_data["pattern_id"],
+                "pattern_name": pattern_data.get("pattern_name", pattern_data["pattern_id"]),
+                "cluster_id": pattern_data.get("cluster_id"),
+                "steps": pattern_data.get("steps", []),
+                "loop": pattern_data.get("loop", False),
+                "transition_ms": pattern_data.get("transition_ms", 500),
+            }),
+            description=f"Light pattern: {pattern_data.get('pattern_name', '')}",
+        )
+        session.add(pattern)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Light pattern '{pattern_data['pattern_id']}' created"}
+
+
+@app.patch("/api/groups/patterns/{pattern_id}")
+def update_light_pattern(pattern_id: str, pattern_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"light_pattern:{pattern_id}"
+    with Session(engine) as session:
+        pattern = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not pattern:
+            raise HTTPException(status_code=404, detail=f"Light pattern '{pattern_id}' not found")
+        data = json.loads(pattern.value)
+        data.update({k: v for k, v in pattern_data.items() if v is not None})
+        pattern.value = json.dumps(data)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Light pattern '{pattern_id}' updated"}
+
+
+@app.delete("/api/groups/patterns/{pattern_id}")
+def delete_light_pattern(pattern_id: str, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"light_pattern:{pattern_id}"
+    with Session(engine) as session:
+        pattern = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not pattern:
+            raise HTTPException(status_code=404, detail=f"Light pattern '{pattern_id}' not found")
+        session.delete(pattern)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Light pattern '{pattern_id}' deleted"}

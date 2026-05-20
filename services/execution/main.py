@@ -1686,3 +1686,34 @@ async def execute_ha_config(req: "HAConfigRequest"):
     domain = getattr(req, "domain", None)
     log.info(f"[ha_config] user={ctx.user} action={action} domain={domain}")
     return await ha_config_handler.handle_ha_config(req.model_dump())
+
+
+# ─── Device & Light Grouping (Section 3.14) ───────────────────────────────────
+
+@app.post("/execute/groups/media", response_model=ExecutionResult)
+async def execute_media_group(req):
+    """Manage media device groups."""
+    from schemas_groups import MediaGroupRequest
+    parsed = MediaGroupRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
+    ctx = parsed.user_context if hasattr(parsed, 'user_context') else UserContext(user="default")
+    log.info(f"[groups] media_group action={parsed.action} group_id={parsed.group_id}")
+    return await groups.handle_media_group(parsed, ctx)
+
+
+@app.post("/execute/groups/lights", response_model=ExecutionResult)
+async def execute_light_cluster(req):
+    """Manage light clusters."""
+    from schemas_groups import LightClusterRequest
+    parsed = LightClusterRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
+    ctx = parsed.user_context if hasattr(parsed, 'user_context') else UserContext(user="default")
+    log.info(f"[groups] light_cluster action={parsed.action} cluster_id={parsed.cluster_id}")
+    return await groups.handle_light_cluster(parsed, ctx)
+
+
+@app.post("/execute/groups/patterns", response_model=ExecutionResult)
+async def execute_light_pattern(req):
+    """Manage light patterns."""
+    from schemas_groups import LightPatternRequest
+    parsed = LightPatternRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
+    log.info(f"[groups] light_pattern action={parsed.action} pattern_id={parsed.pattern_id}")
+    return await groups.handle_light_pattern(parsed)
