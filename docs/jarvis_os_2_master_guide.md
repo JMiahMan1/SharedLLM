@@ -111,9 +111,14 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
 
 ### 3.7 Skylight (Chore Management)
 *   **Backend Provider:** `ChoreProvider`
-*   **Jarvis OS 2.0 Enhancements:** 
-    *   **Bidirectional Sync:** Completing a task in the UI immediately updates the physical Skylight board API.
-    *   **Child Progress Rings:** Apple Watch-style concentric, glowing rings representing daily chore completion percentage.
+*   **Jarvis OS 2.0 Enhancements & Custom Integration:** 
+    *   **Automated Feature Detection (Dynamic Mounting):** When the Skylight integration is enabled for a user profile in `identity.db`, the main navigation shell automatically updates to include the `/chores` route (and adds a floating **Daily Chores Progress** widget to the Home dashboard). If disabled, the route is dynamically hidden to avoid UI bloat.
+    *   **Bidirectional Real-Time Sync:** Completing a chore in the UI instantly sends a WebSocket/REST sync payload to the physical Skylight board API, turning the board's LED indicators green. Conversely, a child checking a chore off on the physical board triggers a webhook callback (`POST /api/integrations/skylight/webhook`) that immediately updates the React UI Zustand store.
+    *   **Concentric Progress Rings:** The home screen mounts custom progress rings (Emerald glow `#10b981`) for each child showing their chore completion percentage. Completing all daily tasks turns the ring into a rotating rainbow gradient.
+    *   **Gamified Rewards & Points System:** Integrates a reward vault. Completing tasks awards **Star Points** (`★`) which can be redeemed directly in the UI for pre-approved parent rewards (e.g. *"Redeem 50★ for 1 hour of screen time"*).
+    *   **Restricted Child View vs. Parent Admin:** 
+      - *Child Mode:* Large, high-contrast, touch-friendly grid buttons with vivid icons. No configuration settings are exposed. Requires a parental override pin or biometric confirmation to redeem rewards.
+      - *Parent Mode:* Allows creation of custom chore schedules, assigning stars to tasks, and approving reward redemption requests.
 
 ### 3.8 ESPresense (BLE Localization)
 *   **Backend Provider:** `PresenceProvider`
