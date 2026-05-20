@@ -1,5 +1,8 @@
 # Jarvis OS 2.0: UI Content Design & Wireframes
 
+> [!TIP]
+> **For the full architectural breakdown, microservice specifications, and API endpoints**, see the companion document: `docs/jarvis_os_2_master_guide.md`.
+
 This document outlines the content design, visual hierarchy, and component wireframing for the Jarvis OS 2.0 React/Ionic frontend. It translates the backend capabilities into tangible, responsive UI elements utilizing the "Neon Glass" aesthetic.
 
 ---
@@ -369,13 +372,15 @@ Raven encounters a repair mission -> Streams reasoning timeline via PubSub to UI
 ```
 
 #### Step-by-Step UI Experience:
-1. **Observing the Loop:** An administrator accesses `/admin/ops`. The screen shows a chronological log of active Raven diagnostics.
-2. **Reviewing Code Patches:**
+1. **Configuring the Mission:** The administrator navigates to `/admin/ops`. At the top of the panel, they can toggle **[Plan Mode]** (Read-Only triage) or **[Build Mode]** (Read/Write execution) before pasting the prompt.
+2. **Observing the Action-Observation Loop:** The screen shows a chronological log of active Raven diagnostics streaming from Redis. Every LLM decision (Action) and environment response (Observation) is rendered natively in real-time.
+3. **Reviewing Code Patches:**
    * When a file patch completes, the timeline mounts a beautifully styled **Commit Card** showing details: *"Repair complete: resolved IndentationError in timer.py"* and a glowing Cyan **[Review Diff]** button.
    * Tapping **[Review Diff]** slides open a side-by-side git diff drawer detailing code lines added (green) or removed (red).
-3. **Finalizing and Persisting:**
+4. **Finalizing and Persisting:**
    * The admin taps **[Approve & Merge]**. The system immediately commits the changes, runs the pytest suite, and merges to the local branch.
    * A success banner animates, and the RAG engine logs the coding summary, permanently persisting the lesson for future autonomous runs.
+   * *(Optional)* Admins can tap **[Download Trajectory]** to export the `trajectory.jsonl` flight recorder file for debugging or benchmarking.
 
 ---
 
@@ -526,10 +531,12 @@ These workflows are only accessible to users with the Admin role. Each workflow 
 
 | Step | UI Action | Backend Call | Result |
 | :--- | :--- | :--- | :--- |
-| 1 | Navigate to `/admin/ops` → **Operations Timeline** | WebSocket subscription to `raven:mission:stream:{id}` | Live reasoning steps stream in |
-| 2 | When a **Commit Card** appears → Tap **[Review Diff]** | `GET /api/raven/missions/{id}/diff` | Side-by-side diff drawer opens (green adds / red removes) |
-| 3 | Tap **[Approve & Merge]** | `POST /api/raven/missions/{id}/approve` | Pytest runs → commit → push. RAG persists the learning. |
-| 4 | *(Or)* Tap **[Reject]** | `POST /api/raven/missions/{id}/reject` | Changes discarded. Mission marked failed. |
+| 1 | Navigate to `/admin/ops` → Toggle **[Plan/Build Mode]** | — | Sets operational safety limits for the mission |
+| 2 | Watch **Operations Timeline** | WebSocket subscription to `raven:events:{id}` | Live Action-Observation loop streams in |
+| 3 | When a **Commit Card** appears → Tap **[Review Diff]** | `GET /api/raven/missions/{id}/diff` | Side-by-side diff drawer opens (green adds / red removes) |
+| 4 | Tap **[Approve & Merge]** | `POST /api/raven/missions/{id}/approve` | Pytest runs → commit → push. RAG persists the learning. |
+| 5 | *(Or)* Tap **[Reject]** | `POST /api/raven/missions/{id}/reject` | Changes discarded. Mission marked failed. |
+| 6 | Tap **[Download Trajectory]** | `GET /api/raven/missions/{id}/trajectory` | Downloads the `trajectory.jsonl` JSON-lines log |
 
 ---
 
