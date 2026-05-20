@@ -38,6 +38,8 @@ import type {
 } from '../services/api';
 import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
+import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
+import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 
@@ -676,13 +678,10 @@ const Admin = () => {
             </div>
 
             <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_220px_auto]">
-              <input
-                type="text"
+              <EntitySearchDropdown
                 value={deviceId}
-                aria-label="Device ID"
-                onChange={(event) => setDeviceId(event.target.value)}
-                placeholder="Home Assistant entity ID"
-                className="glass-input"
+                onChange={setDeviceId}
+                placeholder="Search Home Assistant entities..."
               />
               <select
                 value={deviceUsername}
@@ -767,12 +766,11 @@ const Admin = () => {
                     placeholder="Group name (e.g., Living Room TVs)"
                     className="glass-input"
                   />
-                  <input
-                    type="text"
-                    value={newGroupMembers}
-                    onChange={(e) => setNewGroupMembers(e.target.value)}
-                    placeholder="Entity IDs (comma-separated: media_player.living_room, media_player.kitchen)"
-                    className="glass-input"
+                  <EntityMultiSelect
+                    values={newGroupMembers.split(',').map((s) => s.trim()).filter(Boolean)}
+                    onChange={(vals) => setNewGroupMembers(vals.join(', '))}
+                    placeholder="Search and add media entities..."
+                    domainFilter="media_player"
                   />
                   <button
                     onClick={() => {
@@ -842,12 +840,11 @@ const Admin = () => {
                     placeholder="Cluster name (e.g., Kitchen Lights)"
                     className="glass-input"
                   />
-                  <input
-                    type="text"
-                    value={newGroupMembers}
-                    onChange={(e) => setNewGroupMembers(e.target.value)}
-                    placeholder="Entity IDs (comma-separated: light.kitchen_1, light.kitchen_2)"
-                    className="glass-input"
+                  <EntityMultiSelect
+                    values={newGroupMembers.split(',').map((s) => s.trim()).filter(Boolean)}
+                    onChange={(vals) => setNewGroupMembers(vals.join(', '))}
+                    placeholder="Search and add light entities..."
+                    domainFilter="light"
                   />
                   <button
                     onClick={() => {
@@ -1055,12 +1052,10 @@ const Admin = () => {
             </div>
 
             <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-[1fr_160px_auto]">
-              <input
-                type="text"
+              <EntitySearchDropdown
                 value={telemetryEntityId}
-                onChange={(e) => setTelemetryEntityId(e.target.value)}
-                placeholder="HA entity ID (e.g., sensor.living_room_power)"
-                className="glass-input"
+                onChange={setTelemetryEntityId}
+                placeholder="Search HA entities for telemetry..."
               />
               <input
                 type="number"
@@ -1232,12 +1227,10 @@ const Admin = () => {
                   placeholder="Message to broadcast..."
                   className="glass-input w-full min-h-[80px]"
                 />
-                <input
-                  type="text"
-                  value={broadcastTargets}
-                  onChange={(e) => setBroadcastTargets(e.target.value)}
-                  placeholder="Target entity IDs (comma-separated) or leave empty for all"
-                  className="glass-input w-full"
+                <EntityMultiSelect
+                  values={broadcastTargets.split(',').map((s) => s.trim()).filter(Boolean)}
+                  onChange={(vals) => setBroadcastTargets(vals.join(', '))}
+                  placeholder="Search and add target entities..."
                 />
                 <button
                   onClick={() => {
@@ -1273,12 +1266,11 @@ const Admin = () => {
                   placeholder="Announcement message..."
                   className="glass-input w-full min-h-[80px]"
                 />
-                <input
-                  type="text"
-                  value={announceTargets}
-                  onChange={(e) => setAnnounceTargets(e.target.value)}
-                  placeholder="Target devices (comma-separated: media_player.living_room, media_player.kitchen)"
-                  className="glass-input w-full"
+                <EntityMultiSelect
+                  values={announceTargets.split(',').map((s) => s.trim()).filter(Boolean)}
+                  onChange={(vals) => setAnnounceTargets(vals.join(', '))}
+                  placeholder="Search and add target devices..."
+                  domainFilter="media_player"
                 />
                 <button
                   onClick={() => {

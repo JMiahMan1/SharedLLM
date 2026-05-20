@@ -387,7 +387,7 @@ To feed the ESPresense RAG model and the home automation proximity engine, the m
 The app bridges device-level capabilities into the unified web dashboard shell:
 
 - **Dark Mode Sync:** Listens to native OS theme updates via `@capacitor/device` to dynamically sync the "Neon Glass" Tailwind styling between system light/dark settings.
-- **Biometric Lock & Admin PIN Bypass:** Enforces `@capacitor/preferences` tied to native Android biometric prompts (`BiometricPrompt` framework) to allow rapid biometric authorization instead of entering a manual PIN when accessing sensitive admin panels or triggering security locks.
+- **Biometric Lock & Admin PIN Bypass:** The 4-digit numeric PIN is the **strict default and primary fallback** for all authentication (login, admin elevation, chore reward redemption). The app optionally enforces `@capacitor/preferences` tied to native Android biometric prompts (`BiometricPrompt` framework) to allow rapid biometric authorization as a convenience bypass over the manual PIN when accessing sensitive admin panels or triggering security locks. If biometrics fail or are disabled, the UI immediately reverts to the 4-digit PIN pad.
 - **ESPresense BLE Pairing:** Integrates the phone's native Bluetooth transmitter as an active BLE beacon, allowing local ESPresense sensors placed around the home to track room-level presence without requiring separate physical tracking tags.
 - **NFC Tag Macros:** Employs NFC reading capabilities. Tapping physical NFC stickers placed on desks or walls instantly triggers mapped Jarvis macros (e.g. tapping a bedtime NFC sticker executes `NightModeRequest` on the room's clusters).
 
@@ -1288,7 +1288,7 @@ The true power of Jarvis OS 2.0 isn't in isolated widgets—it's how the LLM aut
 This section breaks down the React/Ionic frontend page by page. It details exactly what UI components exist, their target audience (Standard User vs. Admin), what they control, and how they interact with the backend.
 
 > [!TIP]
-> **For detailed step-by-step task workflows** (creating users, importing from providers, configuring integrations, completing chores, casting media, etc.), see the companion document: `docs/jarvis_os_2_ui_wireframes.md` **§7 (Admin Task Workflows)** and **§8 (Standard User Task Workflows)**. Those sections include exact UI actions → backend API call mappings in tabular format.
+> **For detailed step-by-step task workflows and mobile-specific UX patterns** (creating users, biometrics, native intercom pushes, background location, etc.), see the companion document: `docs/jarvis_os_2_ui_wireframes.md` **§7 (Admin Workflows)**, **§8 (User Workflows)**, and **§10 (Native Mobile App Experience)**. Those sections include exact UI actions → backend API call mappings in tabular format.
 
 #### API Endpoint Quick-Reference (for AI Agents & Frontend Developers)
 
