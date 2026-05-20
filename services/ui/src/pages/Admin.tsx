@@ -22,8 +22,6 @@ import {
   Plus,
   Activity,
   TrendingUp,
-  AlertTriangle,
-  Mic,
   Radio,
   Megaphone,
   Phone,
@@ -37,7 +35,6 @@ import type {
   LogEntry,
   UserProfile,
   RagStats,
-  GatewayConfig,
 } from '../services/api';
 import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
@@ -60,6 +57,7 @@ type UserFormState = {
   username: string;
   full_name: string;
   is_admin: boolean;
+  password: string;
   ha_url: string;
   ha_token: string;
   nextcloud_url: string;
@@ -80,6 +78,7 @@ const emptyUserForm: UserFormState = {
   username: '',
   full_name: '',
   is_admin: false,
+  password: '',
   ha_url: '',
   ha_token: '',
   nextcloud_url: '',
@@ -100,6 +99,7 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   username: user?.username ?? '',
   full_name: user?.full_name ?? '',
   is_admin: Boolean(user?.is_admin),
+  password: '',
   ha_url: String(user?.ha_url ?? ''),
   ha_token: '',
   nextcloud_url: String(user?.nextcloud_url ?? ''),
@@ -144,8 +144,8 @@ const Admin = () => {
   const [intercomTab, setIntercomTab] = useState<'sessions' | 'broadcast' | 'announce' | 'config'>('sessions');
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastTargets, setBroadcastTargets] = useState('');
-  const [announceMessage, setAnnounceMessage] = useState('');
-  const [announceTargets, setAnnounceTargets] = useState('');
+  const [intercomSessionTarget, setIntercomSessionTarget] = useState('');
+  const [intercomSessionType, setIntercomSessionType] = useState<'twoway' | 'broadcast' | 'announcement'>('twoway');
 
   const { data: users = [] } = useQuery<UserProfile[]>({
     queryKey: ['users'],
@@ -184,33 +184,13 @@ const Admin = () => {
     enabled: !!inspectingCollection,
   });
 
-  const { data: availableModels = [] } = useQuery<string[]>({
-    queryKey: ['available-models'],
-    queryFn: () => api.getAvailableModels(),
-  });
-
-  const { data: modelConfig } = useQuery<GatewayConfig>({
-    queryKey: ['gateway-config'],
-    queryFn: () => api.getGatewayConfig(),
-  });
-
-  const updateConfigMutation = useMutation({
-    mutationFn: (config: Partial<GatewayConfig>) => api.updateGatewayConfig(config),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['gateway-config'] });
-      toast.success('Model configuration updated');
-    },
-    onError: (err: any) => {
-      toast.error(err.message || 'Failed to update models');
-    },
-  });
-
   const saveUserMutation = useMutation({
     mutationFn: async (form: UserFormState) => {
       const payload = {
         username: form.username.trim().toLowerCase(),
         full_name: form.full_name,
         is_admin: form.is_admin,
+        password: form.password || undefined,
         ha_url: form.ha_url,
         ha_token: form.ha_token,
         nextcloud_url: form.nextcloud_url,
@@ -316,24 +296,27 @@ const Admin = () => {
 
   const importNcMutation = useMutation({
     mutationFn: () => api.importNextcloudUsers(),
-    onSuccess: (data) => {
+    onSuccess: (data: { message?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       toast.success(data.message || 'Users imported from Nextcloud');
     },
     onError: (error: Error) => toast.error(error.message || 'Nextcloud import failed'),
   });
 
-  const { data: mediaGroups = [] } = useQuery<any[]>({
+  interface GroupItem { name: string; member_entity_ids?: string[]; steps?: unknown[] }
+  interface IntercomSessionItem { session_id: string; caller_user_id: string; target_user_id?: string; target_room?: string; session_type: string; status: string }
+
+  const { data: mediaGroups = [] } = useQuery<GroupItem[]>({
     queryKey: ['media-groups'],
     queryFn: () => api.getMediaGroups(),
   });
 
-  const { data: lightClusters = [] } = useQuery<any[]>({
+  const { data: lightClusters = [] } = useQuery<GroupItem[]>({
     queryKey: ['light-clusters'],
     queryFn: () => api.getLightClusters(),
   });
 
-  const { data: lightPatterns = [] } = useQuery<any[]>({
+  const { data: lightPatterns = [] } = useQuery<GroupItem[]>({
     queryKey: ['light-patterns'],
     queryFn: () => api.getLightPatterns(),
   });
@@ -378,8 +361,9 @@ const Admin = () => {
     onError: (error: Error) => toast.error(error.message || 'Failed to delete light cluster'),
   });
 
+  interface PatternStep { brightness?: number; color_temp?: number; rgb_color?: number[]; transition?: number; delay?: number }
   const createLightPatternMutation = useMutation({
-    mutationFn: (data: { name: string; steps: any[] }) => api.createLightPattern(data),
+    mutationFn: (data: { name: string; steps: PatternStep[] }) => api.createLightPattern(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['light-patterns'] });
       setNewPatternName('');
@@ -406,7 +390,8 @@ const Admin = () => {
     onError: (error: Error) => toast.error(error.message || 'Failed to execute pattern'),
   });
 
-  const { data: telemetryEnrollments = [] } = useQuery<any[]>({
+  interface TelemetryEnrollmentItem { entity_id: string; power_tracking: boolean; availability_tracking: boolean; offline_alert_threshold_minutes: number }
+  const { data: telemetryEnrollments = [] } = useQuery<TelemetryEnrollmentItem[]>({
     queryKey: ['telemetry-enrollments'],
     queryFn: () => api.getTelemetryEnrollments(),
   });
@@ -438,12 +423,13 @@ const Admin = () => {
     onError: (error: Error) => toast.error(error.message || 'Failed to trigger analysis'),
   });
 
-  const { data: intercomSessions = [] } = useQuery<any[]>({
+  const { data: intercomSessions = [] } = useQuery<IntercomSessionItem[]>({
     queryKey: ['intercom-sessions'],
     queryFn: () => api.getIntercomSessions(),
   });
 
-  const { data: intercomConfig } = useQuery<any>({
+  interface IntercomConfig { default_tts_engine?: string; default_voice?: string; default_volume?: number; enable_espresense_routing?: boolean }
+  const { data: intercomConfig } = useQuery<IntercomConfig>({
     queryKey: ['intercom-config'],
     queryFn: () => api.getIntercomConfig(),
   });
@@ -1160,10 +1146,53 @@ const Admin = () => {
               <section className="glass-panel p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Phone size={20} className="text-violet-400" />
+                  Start Intercom Session
+                </h3>
+                <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-[1fr_160px_auto]">
+                  <input
+                    type="text"
+                    value={intercomSessionTarget}
+                    onChange={(e) => setIntercomSessionTarget(e.target.value)}
+                    placeholder="Target user ID or room name"
+                    className="glass-input"
+                  />
+                  <select
+                    value={intercomSessionType}
+                    onChange={(e) => setIntercomSessionType(e.target.value as 'twoway' | 'broadcast' | 'announcement')}
+                    className="glass-input bg-black/30"
+                  >
+                    <option value="twoway">Two-Way</option>
+                    <option value="broadcast">Broadcast</option>
+                    <option value="announcement">Announcement</option>
+                  </select>
+                  <button
+                    onClick={() => {
+                      if (!intercomSessionTarget.trim()) {
+                        toast.error('Enter a target user or room');
+                        return;
+                      }
+                      startIntercomMutation.mutate({
+                        target_user_id: intercomSessionType === 'twoway' ? intercomSessionTarget.trim() : undefined,
+                        target_room: intercomSessionType !== 'twoway' ? intercomSessionTarget.trim() : undefined,
+                        session_type: intercomSessionType,
+                      });
+                    }}
+                    disabled={startIntercomMutation.isPending}
+                    className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    <Phone size={14} />
+                    Start
+                  </button>
+                </div>
+              </section>
+
+              <section className="glass-panel p-6">
+                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
+                  <Phone size={20} className="text-violet-400" />
                   Active Intercom Sessions
                 </h3>
                 <div className="space-y-3">
-                  {intercomSessions.filter((s) => s.status === 'active').map((session) => (
+                  {intercomSessions.filter((s: IntercomSessionItem) => s.status === 'active').map((session: IntercomSessionItem) => (
                     <div key={session.session_id} className="glass-card flex items-center justify-between p-4">
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-white">Session: {session.session_id}</p>
@@ -1180,7 +1209,7 @@ const Admin = () => {
                       </button>
                     </div>
                   ))}
-                  {!intercomSessions.filter((s) => s.status === 'active').length && (
+                  {!intercomSessions.filter((s: IntercomSessionItem) => s.status === 'active').length && (
                     <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
                       No active intercom sessions.
                     </p>
@@ -1501,6 +1530,23 @@ const Admin = () => {
             </label>
           </div>
 
+          {!editingUser && (
+            <label className="space-y-2">
+              <span className="text-xs font-black uppercase tracking-widest text-slate-500">
+                Password <span className="text-red-400">*</span>
+              </span>
+              <input
+                type="password"
+                value={userForm.password}
+                aria-label="Password"
+                onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))}
+                className="glass-input w-full"
+                placeholder="Required for new users"
+              />
+              <p className="text-[10px] text-slate-500">New users must have a password to log in.</p>
+            </label>
+          )}
+
           <label className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/5 p-4">
             <input
               type="checkbox"
@@ -1645,7 +1691,7 @@ const Admin = () => {
             </div>
           ) : (
             <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-2 custom-scrollbar">
-              {collectionDocs?.items?.map((item: any) => (
+              {collectionDocs?.items?.map((item: { id: string; document: string; metadata?: Record<string, unknown> }) => (
                 <div key={item.id} className="rounded-2xl border border-white/5 bg-black/40 p-4 font-mono text-[11px]">
                   <div className="mb-2 flex items-center justify-between border-b border-white/5 pb-2">
                     <span className="text-indigo-300">ID: {item.id}</span>

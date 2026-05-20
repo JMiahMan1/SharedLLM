@@ -524,6 +524,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         display_name=body.display_name,
         is_admin=body.is_admin,
         is_system_default=body.is_system_default,
+        password_hash=pwd_context.hash(body.password) if body.password else None,
         nextcloud_url=_coerce(body.nextcloud_url),
         nextcloud_user=_coerce(body.nextcloud_user),
         nextcloud_pass_enc=encrypt(_coerce(body.nextcloud_pass)) if _coerce(body.nextcloud_pass) else None,

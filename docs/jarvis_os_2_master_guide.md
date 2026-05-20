@@ -64,14 +64,22 @@ Based on an exhaustive analysis of the `SharedLLM/services/execution/` and `Shar
 *   **Jarvis OS 2.0 Enhancements:** 
     *   **"Continue Reading" Widget:** Leverages the precise tracking in `_handle_progress`. Shows the exact progress percentage and a beautifully formatted `_format_time` string (e.g., "3h 15m remaining") underneath the book cover. Tapping the widget instantly triggers `_handle_resume` on the room's default speaker.
 
-### 3.3 Raven Autonomous Engine, Ops & The Control Plane
-*   **Backend Reality:** 
+### 3.3 Raven Autonomous Engine, Ops & The Control Plane (OpenCode Architecture)
+*   **Backend Reality (The OpenCode Paradigm):** 
+    *   **Isolated Workspace Container:** Borrowing heavily from OpenCode/OpenDevin architecture, Raven does not execute code directly on the host. It operates exclusively inside the `workspace_runtime` Docker container. This creates a reproducible, sandboxed environment. To prevent permission drift, the container runs under a dynamic `USER_ID:GROUP_ID` mapping that matches the host user.
+    *   **Volume Mount Segregation:** To maintain security without forcing re-authentication on every container spin-up, Raven utilizes strict volume mount separation. The project code (`/workspace`) is mounted separately from the authentication configuration (`/root/.local/share/opencode`), ensuring the LLM cannot accidentally commit or leak its own API keys.
+    *   **Stateful Bash Execution (PTY):** Unlike simple `subprocess.run` calls, Raven maintains a persistent pseudoterminal (PTY) session (often via `pexpect` or similar native OS bindings). This means directory changes (`cd`) and exported environment variables persist across sequential tool executions, exactly how a human experiences a terminal.
+    *   **Unified Event Stream (Action-Observation Loop):** The core loop is strictly formalized into an Event Stream. Every LLM decision is an `Action` (e.g., `RunCommand`, `WriteFile`), and the environment's response is an `Observation` (e.g., `CommandOutput`, `FileRead`). These JSON events are piped directly into a Redis PubSub channel (`raven:events:{id}`) to power the frontend UI in real time.
+    *   **Trajectory Logging:** Every mission automatically generates a `trajectory.jsonl` file inside the workspace's hidden folder (e.g., `.raven/`). This JSON-Lines file acts as a black box flight recorder, allowing admins to perfectly replay the LLM's thought process if an autonomous operation fails.
+    *   **Dual Operating Modes (Plan vs. Build):** Raven supports two distinct execution contexts:
+        *   **Plan Mode (Read-Only):** The agent can parse ASTs, run ripgrep (`handle_workspace_search`), and analyze logs, but file writes and shell execution are blocked. Used for triage and scoping.
+        *   **Build Mode (Read/Write):** The agent gains access to `difflib.SequenceMatcher` for fuzzy file patching (`handle_workspace_patch`), shell command execution, and Git controls.
+    *   **Provider-Agnostic Routing:** The engine is not hardcoded to a specific vendor. Via the `LLMInfoRequest` tool and the Gateway router, Raven can seamlessly pivot between local models (TurboQuant/Ollama), OpenRouter, or direct API providers depending on the task complexity and current VRAM availability.
     *   `gateway/agent_loop.py` manages multi-step missions, utilizing Redis Checkpoints (`raven:checkpoint:{mission_id}`) and `_compress_context()` to prevent token bloat. 
-    *   `execution/handlers/workspace.py` handles AST parsing, ripgrep (`handle_workspace_search`), and `difflib.SequenceMatcher` for fuzzy file patching (`handle_workspace_patch`).
     *   `execution/handlers/git.py` securely injects tokens (`github_token`) and dynamically prevents LLM branch hallucinations.
     *   **The Control Plane (`control_plane/main.py`):** Runs on port 8008 and connects directly to the host Docker socket. Secured via `X-Internal-Secret`, it allows the LLM and the UI to securely fetch logs, restart microservices (`/api/restart/sharedllm_gateway`), and execute shell commands inside running containers (`/api/containers/.../exec`).
 *   **Jarvis OS 2.0 Enhancements:** 
-    *   **Raven Ops Panel (Admin Center):** Subscribes to the Redis stream (`raven:mission:stream:{mission_id}`) and transforms raw JSON logs into a sleek, vertical Operations Timeline. It also natively integrates with the **Control Plane**, providing UI buttons for Admins to view live Docker logs or restart crashed services directly from the React dashboard.
+    *   **Raven Ops Panel (Admin Center):** Subscribes to the Redis stream (`raven:mission:stream:{mission_id}`) and transforms raw JSON logs into a sleek, vertical Operations Timeline. It also natively integrates with the **Control Plane**, providing UI buttons for Admins to view live Docker logs or restart crashed services directly from the React dashboard. Admins can toggle Raven between **Plan** and **Build** modes directly from this panel.
     *   **Interactive Commits:** When Raven executes `/execute/git` (`git_commit`), the UI generates a "Commit Card" linking directly to the GitHub PR. Admins can view a visual diff natively before allowing Raven to push.
 
 ### 3.4 Nextcloud Talk, Jarvis Bot & Communications
