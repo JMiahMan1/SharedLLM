@@ -489,6 +489,11 @@ export const api = {
     return resp.data;
   },
 
+  async getEntities(): Promise<{ entity_id: string; friendly_name: string; state: string; domain: string }[]> {
+    const resp = await apiClient.get('/api/entities');
+    return resp.data.entities || [];
+  },
+
   async getTimers(): Promise<TimerRecord[]> {
     const resp = await apiClient.get('/api/communication/timers');
     return resp.data;

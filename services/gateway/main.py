@@ -1726,6 +1726,35 @@ async def discovery_sync(request: Request):
     entities = await fetch_ha_entities(creds)
     return {"status": "SUCCESS", "entities_count": len(entities)}
 
+
+@app.get("/api/entities")
+async def get_entities(request: Request):
+    """Return all Home Assistant entities for searchable dropdowns."""
+    try:
+        resp = await get_http_client().get(
+            f"{EXECUTION_SVC}/discovery/entities",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            return {"entities": []}
+        data = resp.json()
+        entities = data.get("entities", [])
+        # Return lightweight format for UI dropdown
+        return {
+            "entities": [
+                {
+                    "entity_id": e.get("entity_id", ""),
+                    "friendly_name": e.get("attributes", {}).get("friendly_name", ""),
+                    "state": e.get("state", ""),
+                    "domain": e.get("entity_id", "").split(".")[0] if "." in e.get("entity_id", "") else "",
+                }
+                for e in entities
+            ]
+        }
+    except Exception:
+        return {"entities": []}
+
 async def execute_command(endpoint: str, payload: dict) -> dict:
     try:
       resp = await get_http_client().post(
