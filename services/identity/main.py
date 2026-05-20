@@ -257,21 +257,6 @@ def _migrate_api_key_material(session: Session) -> None:
     if dirty:
         session.commit()
 
-@app.post("/api/users/{username}/password")
-def admin_set_password(username: str, req: dict, session: Session = Depends(get_session), admin: User = Depends(require_admin_or_internal)):
-    new_password = req.get("new_password")
-    if not new_password:
-        raise HTTPException(status_code=400, detail="new_password is required")
-
-    user = session.exec(select(User).where(User.username == username)).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    user.password_hash = pwd_context.hash(new_password)
-    session.add(user)
-    session.commit()
-    return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
-
 def require_internal(authorization: str = Header(None), x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
     if x_internal_secret == INTERNAL_SECRET:
         return
@@ -295,15 +280,33 @@ def require_admin_or_internal(
         token = authorization.split(" ")[1]
         if token == INTERNAL_SECRET:
             return True
-            
-    # Trust admin API keys
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
-        user = _find_user_for_api_key(session, token)
-        if user and user.is_admin:
-            return True
-            
-    raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Check if user is admin via API key
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization")
+    
+    token = authorization.split(" ")[1]
+    user = session.exec(select(User).where(User.api_key_hash == digest_secret(token))).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return True
+
+@app.post("/api/users/{username}/password")
+def admin_set_password(username: str, req: dict, session: Session = Depends(get_session), admin: User = Depends(require_admin_or_internal)):
+    new_password = req.get("new_password")
+    if not new_password:
+        raise HTTPException(status_code=400, detail="new_password is required")
+
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.password_hash = pwd_context.hash(new_password)
+    session.add(user)
+    session.commit()
+    return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
 
 def require_api_key(authorization: str = Header(None), session: Session = Depends(get_session)) -> User:
     if not authorization or not authorization.startswith("Bearer "):
