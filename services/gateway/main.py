@@ -50,7 +50,7 @@ def _svc(key: str, default: str) -> str:
             "logging_svc_url": "http://logging:8006",
             "workspace_runtime_svc_url": "http://workspace_runtime:8007",
             "control_plane_url": "http://control_plane:8008",
-            "llm_local_url": "http://ollama-server.local:11434",
+            "llm_local_url": "",
             "redis_url": "redis://redis:6379/0",
             "ollama_timeout": "600",
         })
@@ -64,7 +64,6 @@ STORAGE_SVC = "http://storage:8005"
 LOGGING_SVC = "http://logging:8006"
 WORKSPACE_RUNTIME_SVC = "http://workspace_runtime:8007"
 CONTROL_PLANE_URL = "http://control_plane:8008"
-OLLAMA_URL = "http://ollama-server.local:11434"
 OLLAMA_TIMEOUT = 600.0
 LOGGING_SVC_URL = LOGGING_SVC
 
@@ -245,7 +244,7 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
         )
     else:
         return OllamaProvider(
-            base_url=_get(settings, "llm_local_url", "http://ollama-server.local:11434"),
+            base_url=_get(settings, "llm_local_url"),
             timeout=timeout
         )
 
@@ -354,8 +353,10 @@ async def get_coding_model():
 async def get_resident_model() -> Optional[str]:
     """Check what model is currently in VRAM to avoid unnecessary swaps."""
     try:
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
         async with httpx.AsyncClient(timeout=1.0) as client:
-            resp = await client.get(f"{OLLAMA_URL}/api/ps")
+            resp = await client.get(f"{ollama_url}/api/ps")
             if resp.status_code == 200:
                 models = resp.json().get("models", [])
                 if models:
@@ -1806,6 +1807,8 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         # Strategy 7: Dynamic VRAM Awareness for Shadow Execution
         assistant = await get_assistant_model()
         vram_params = await get_vram_safe_params(assistant)
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
         
         payload = {
             "model": assistant,
@@ -1815,7 +1818,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         }
         log.info(f"[ShadowExecution] Requesting proposal from {assistant} (Timeout: {OLLAMA_TIMEOUT}s)")
         start_t = asyncio.get_event_loop().time()
-        resp = await get_http_client().post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
+        resp = await get_http_client().post(f"{ollama_url}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
         elapsed = asyncio.get_event_loop().time() - start_t
         log.info(f"[ShadowExecution] Ollama responded in {elapsed:.1f}s with status {resp.status_code}")
         
@@ -2550,9 +2553,10 @@ async def proxy_send_talk_voice(request: Request):
 async def proxy_generate(request: Request):
     try:
         body = await request.json()
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
         async with httpx.AsyncClient(timeout=None) as client:
-            # Use httpx.stream to proxy the streaming response
-            req = client.build_request("POST", f"{OLLAMA_URL}/api/generate", json=body)
+            req = client.build_request("POST", f"{ollama_url}/api/generate", json=body)
             resp = await client.send(req, stream=True)
             if resp.status_code != 200:
                 await resp.aread()
@@ -2570,8 +2574,10 @@ async def proxy_generate(request: Request):
 @app.get("/api/tags")
 async def proxy_tags():
     try:
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
         async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status_code != 200:
                 return JSONResponse({"models": []}, status_code=200)
             data = resp.json()
@@ -3407,10 +3413,11 @@ async def get_config_status():
 @app.get("/api/config/models")
 async def get_ollama_models():
     """Proxy to Ollama to list available tags."""
-    from gateway.config import OLLAMA_URL as _OLLAMA_URL
     try:
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{_OLLAMA_URL}/api/tags")
+            resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status_code == 200:
                 data = resp.json()
                 models = sorted(list(set(m["name"] for m in data.get("models", []))))

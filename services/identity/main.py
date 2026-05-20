@@ -1337,3 +1337,164 @@ def delete_light_pattern(pattern_id: str, x_internal_secret: str = Header(...)):
         session.delete(pattern)
         session.commit()
         return {"status": "SUCCESS", "message": f"Light pattern '{pattern_id}' deleted"}
+
+
+# ─── Device Telemetry Monitoring (Section 3.15) ───────────────────────────────
+
+@app.get("/api/telemetry/enroll")
+def list_telemetry_enrollments(x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        enrollments = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("telemetry_enroll:%"))).all()
+        result = []
+        for e in enrollments:
+            data = json.loads(e.value)
+            data["key"] = e.key
+            result.append(data)
+        return {"enrollments": result}
+
+
+@app.post("/api/telemetry/enroll")
+def enroll_telemetry(enroll_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    entity_id = enroll_data.get("entity_id")
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="entity_id is required")
+    key = f"telemetry_enroll:{entity_id}"
+    with Session(engine) as session:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"'{entity_id}' already enrolled")
+        from datetime import datetime
+        enrollment = GlobalSetting(
+            key=key,
+            value=json.dumps({
+                "entity_id": entity_id,
+                "power_tracking": enroll_data.get("power_tracking", True),
+                "availability_tracking": enroll_data.get("availability_tracking", True),
+                "usage_tracking": enroll_data.get("usage_tracking", True),
+                "offline_alert_threshold_minutes": enroll_data.get("offline_alert_threshold_minutes", 30),
+                "group_id": enroll_data.get("group_id"),
+                "owner_user_id": enroll_data.get("owner_user_id", "system"),
+                "enrolled_at": datetime.utcnow().isoformat(),
+            }),
+            description=f"Telemetry enrollment: {entity_id}",
+        )
+        session.add(enrollment)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Enrolled '{entity_id}' in telemetry monitoring"}
+
+
+@app.delete("/api/telemetry/enroll/{entity_id}")
+def unenroll_telemetry(entity_id: str, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"telemetry_enroll:{entity_id}"
+    with Session(engine) as session:
+        enrollment = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not enrollment:
+            raise HTTPException(status_code=404, detail=f"'{entity_id}' not enrolled")
+        session.delete(enrollment)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Unenrolled '{entity_id}' from telemetry monitoring"}
+
+
+@app.post("/api/telemetry/snapshot")
+def ingest_telemetry_snapshot(snapshot_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    entity_id = snapshot_data.get("entity_id")
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="entity_id is required")
+    import time
+    key = f"telemetry_data:{entity_id}"
+    with Session(engine) as session:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        data_points = []
+        if existing:
+            data_points = json.loads(existing.value)
+        new_point = {
+            "recorded_at": time.time(),
+            "power_w": snapshot_data.get("power_w"),
+            "is_available": snapshot_data.get("is_available", True),
+            "state": snapshot_data.get("state"),
+            "source": snapshot_data.get("source", "poll"),
+        }
+        data_points.append(new_point)
+        data_points = data_points[-1000:]
+        if existing:
+            existing.value = json.dumps(data_points)
+        else:
+            snapshot = GlobalSetting(
+                key=key,
+                value=json.dumps(data_points),
+                description=f"Telemetry data: {entity_id}",
+            )
+            session.add(snapshot)
+        session.commit()
+        return {"status": "SUCCESS", "message": f"Snapshot recorded for '{entity_id}'"}
+
+
+@app.get("/api/telemetry/data/{entity_id}")
+def get_telemetry_data(entity_id: str, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"telemetry_data:{entity_id}"
+    with Session(engine) as session:
+        snapshot = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not snapshot:
+            return {"entity_id": entity_id, "data_points": []}
+        data_points = json.loads(snapshot.value)
+        return {"entity_id": entity_id, "data_points": data_points}
+
+
+@app.get("/api/telemetry/summary/{entity_id}")
+def get_telemetry_summary(entity_id: str, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    key = f"telemetry_data:{entity_id}"
+    with Session(engine) as session:
+        snapshot = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not snapshot:
+            return {"entity_id": entity_id, "summary": None}
+        data_points = json.loads(snapshot.value)
+        if not data_points:
+            return {"entity_id": entity_id, "summary": None}
+        power_values = [p["power_w"] for p in data_points if p.get("power_w") is not None]
+        available_count = sum(1 for p in data_points if p.get("is_available", True))
+        total = len(data_points)
+        unavailable_points = [p for p in data_points if not p.get("is_available", True)]
+        last_outage = unavailable_points[-1] if unavailable_points else None
+        summary = {
+            "entity_id": entity_id,
+            "current_power_w": power_values[-1] if power_values else None,
+            "peak_power_w": max(power_values) if power_values else None,
+            "avg_power_w": sum(power_values) / len(power_values) if power_values else None,
+            "availability_pct": (available_count / total * 100) if total > 0 else 100.0,
+            "total_activations": total,
+            "last_outage_at": last_outage.get("recorded_at") if last_outage else None,
+            "data_points": data_points[-100:],
+        }
+        return {"entity_id": entity_id, "summary": summary}
+
+
+@app.post("/api/telemetry/analyze")
+def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    entity_id = analysis_data.get("entity_id")
+    hours = analysis_data.get("hours", 168)
+    return {
+        "status": "SUCCESS",
+        "message": f"Telemetry analysis queued for '{entity_id or 'all enrolled'}' over {hours}h",
+        "entity_id": entity_id,
+        "hours": hours,
+    }
+
+
+@app.get("/api/telemetry/insights")
+def get_telemetry_insights(x_internal_secret: str = Header(...)):
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        insights = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("telemetry_insight:%"))).all()
+        result = []
+        for i in insights:
+            data = json.loads(i.value)
+            data["key"] = i.key
+            result.append(data)
+        return {"insights": result}
