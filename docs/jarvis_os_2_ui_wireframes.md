@@ -46,13 +46,17 @@ The OS utilizes a Fluid Grid that gracefully scales from an Android smartphone t
 *   `/` (Home Dashboard)
 *   `/chat` (Native Nextcloud Talk Client)
 *   `/media` (Full-screen MASS/ABS browser)
-*   `/remote` (Universal Remote Control Panel)
+*   `/remote` (Universal Remote Control Panel — hidden if user has zero assigned devices)
 *   `/intercom` (Two-Way Voice Intercom System)
-*   `/chores` (Chore Management & Rewards Dashboard)
-*   `/admin/ops` (Raven Operations Panel & Control Plane)
-*   `/admin/integrations` (Dynamic Plugin Configs)
-*   `/admin/groups` (Group Manager & Pattern Customization)
-*   `/admin/monitor` (Device Telemetry & Insights Dashboard)
+*   `/chores` (Chore Management & Rewards Dashboard — hidden if Skylight not enabled)
+*   `/calendar` (Personal Calendar — CalDAV + Skylight unified view)
+*   `/settings/integrations` (Personal Integration Config — Nextcloud, Skylight, GitHub, etc.)
+*   `/admin/ops` (Raven Operations Panel & Control Plane — **Admin only**)
+*   `/admin/integrations` (System Integration Config — HA, MQTT, LLM, SearXNG — **Admin only**)
+*   `/admin/users` (User Management & Import Wizard — **Admin only**)
+*   `/admin/groups` (Group Manager & Pattern Customization — **Admin only**)
+*   `/admin/monitor` (Device Telemetry & Insights Dashboard — **Admin only**)
+*   `/admin/sounds` (Emoji Sound Manager — **Admin only**)
 
 ---
 
@@ -372,3 +376,353 @@ Raven encounters a repair mission -> Streams reasoning timeline via PubSub to UI
 3. **Finalizing and Persisting:**
    * The admin taps **[Approve & Merge]**. The system immediately commits the changes, runs the pytest suite, and merges to the local branch.
    * A success banner animates, and the RAG engine logs the coding summary, permanently persisting the lesson for future autonomous runs.
+
+---
+
+## 7. Admin Task Workflows (Requires `is_admin=True`)
+
+These workflows are only accessible to users with the Admin role. Each workflow maps exact UI actions to backend API calls so both human developers and AI agents can implement them precisely.
+
+### 7.1 Create a New User Profile (Manual)
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/users` | — | User Roster table renders |
+| 2 | Tap **[+ Create User]** | — | Frosted glass slide-up sheet opens |
+| 3 | Fill: Name, Role dropdown (`Admin` / `Standard` / `Child`), Home Room dropdown, 4-digit PIN | — | Client-side validation (name required, PIN 4+ digits) |
+| 4 | Tap **[Save Profile]** | `POST /api/users/create` `{ name, role, home_room, pin }` | Spinner → success banner. New row animates into roster. |
+| 5 | *(Optional)* Tap the new user row → **[Link Credentials]** | — | Credential binding sheet opens (see 7.3) |
+
+**Error States:**
+- Duplicate name → inline Rose error: *"A user with this name already exists."*
+- PIN too short → field border turns Rose, tooltip: *"PIN must be at least 4 digits."*
+
+---
+
+### 7.2 Batch Import Users from External Providers
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/users` → **[Import Family]** | — | Source selection modal opens |
+| 2 | Select source: `[Nextcloud]` / `[Home Assistant]` / `[Skylight]` | `GET /api/identity/users/discover?source=nextcloud` | Loading spinner → fetched user list renders |
+| 3 | Review the **Mapping Grid Table**: Source ID, Auto-Matched Local Profile, Import checkbox | — | Admin toggles checkboxes per user |
+| 4 | *(Optional)* Click unmatched row → assign role (Admin/Standard/Child) and Home Room | — | Inline dropdown editors |
+| 5 | Tap **[Confirm Import]** | `POST /api/identity/users/import` `{ source, mappings[] }` | Batch creates profiles. Progress bar fills. Success toast with count. |
+
+**Error States:**
+- Provider unreachable → Rose banner: *"Could not connect to Nextcloud. Check credentials in Integrations."*
+- Partial failure → Amber warning listing which users failed with reason.
+
+---
+
+### 7.3 Link Third-Party Credentials to a User
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | `/admin/users` → tap user row → **[Link Credentials]** | — | Credential sheet opens |
+| 2 | Select service: `Nextcloud`, `Home Assistant`, `GitHub`, `Skylight` | — | Dynamic form fields render based on service schema |
+| 3 | Fill required fields (e.g., Nextcloud: `username`, `app_password`, `server_url`) | — | Client-side validation |
+| 4 | Tap **[Test Connection]** | `POST /api/auth/test-connection` `{ service, credentials }` | Green checkmark or Red X with error detail |
+| 5 | Tap **[Save & Encrypt]** | `PUT /api/users/{id}/credentials` `{ service, credentials }` | Fernet-encrypted, stored in `identity.db`. Masked confirmation shown. |
+
+---
+
+### 7.4 Configure an Integration (Nextcloud, HA, GitHub, etc.)
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/integrations` | `GET /api/integrations/available` | Dynamic form cards render per integration |
+| 2 | Fill fields (URLs, tokens, toggle switches) | — | Client validation on required fields |
+| 3 | Tap **[Test Connection]** per integration card | `POST /api/auth/test-connection` `{ service, ... }` | Real-time connectivity check |
+| 4 | Tap **[Save]** | `PUT /api/admin/settings` `{ key, value }` | Encrypted persistence. UI shows green lock icon. |
+
+---
+
+### 7.5 Set Up Chore Schedules & Rewards (Skylight)
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/chores` → toggle to **Parent Mode** (biometric/PIN) | — | Admin editing controls unlock |
+| 2 | Tap **[+ Add Chore]** | — | Chore creation sheet slides up |
+| 3 | Fill: Chore name, icon picker, assign to child(ren), star value (e.g., `5★`), recurrence (daily/weekly) | — | Client validation |
+| 4 | Tap **[Save Chore]** | `POST /api/integrations/skylight/chores` `{ name, assignees[], stars, recurrence }` | New chore card appears in grid. Syncs to physical Skylight board. |
+| 5 | Tap **[Manage Rewards]** → **[+ Add Reward]** | — | Reward creation sheet |
+| 6 | Fill: Reward name, star cost, icon, optional parent-approval toggle | `POST /api/integrations/skylight/rewards` | Reward added to vault |
+
+---
+
+### 7.6 Create Media Device Groups
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/groups` | `GET /api/groups/media` | Existing groups list renders |
+| 2 | Tap **[+ New Media Group]** | — | Group creation panel opens |
+| 3 | Name the group (e.g., `Main Floor`) | — | — |
+| 4 | Fuzzy-search & select member entities (e.g., `media_player.kitchen_speaker`, `media_player.living_room_tv`) | `GET /api/ha/entities?domain=media_player` | Filtered entity list with checkboxes |
+| 5 | Set scope: `System` (all users) or `User` (personal) | — | — |
+| 6 | Tap **[Save Group]** | `POST /api/groups/media` `{ group_id, group_name, member_entity_ids[], scope }` | Group card appears. Available as target in Announcements/Intercom. |
+
+---
+
+### 7.7 Create Light Clusters & Custom Patterns
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | `/admin/groups` → **Light Clusters** tab | `GET /api/groups/lights` | Existing clusters listed |
+| 2 | **[+ New Cluster]** → Name it, drag `light.*` entities from the discovery list into the cluster | `GET /api/ha/entities?domain=light` | Drag-and-drop canvas |
+| 3 | Tap **[Save Cluster]** | `POST /api/groups/lights` `{ cluster_id, member_entity_ids[] }` | Cluster created |
+| 4 | **[+ New Pattern]** → Name it, select target cluster | — | Pattern step editor opens |
+| 5 | Add steps: pick position range, RGB color picker, brightness slider, transition speed | — | Live CSS preview bar renders in real time |
+| 6 | Toggle **Loop** checkbox and set transition timing | — | — |
+| 7 | Tap **[Save Pattern]** | `POST /api/groups/patterns` `{ pattern_id, cluster_id, steps[], loop, transition_ms }` | Pattern saved. Available as `pattern_id` in LLM `LightControlRequest`. |
+
+---
+
+### 7.8 Enroll Devices in Telemetry Monitoring
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/monitor` | `GET /api/telemetry/enrolled` | Enrolled device cards render |
+| 2 | Tap **[+ Enroll Device]** | `GET /api/ha/entities` | Searchable entity list |
+| 3 | Select entities to monitor (smart plugs, lights, TVs, sensors) | — | Checkboxes per entity |
+| 4 | Tap **[Start Monitoring]** | `POST /api/telemetry/enroll` `{ entity_ids[] }` | Devices begin telemetry collection. Cards appear with live sparklines. |
+| 5 | *(Daily)* Review **LLM Insights Feed** panel | Auto-populated by nightly Raven `analysis_mission` | LLM-generated pattern summaries appear |
+
+---
+
+### 7.9 Map Emoji to Sound Effects
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/sounds` | `GET /execute/emoji-sounds` | Sound library grid renders |
+| 2 | In the **Add New Sound** panel: pick emoji via emoji picker, enter label, drag audio file (`.mp3`/`.wav`/`.ogg`, max 5MB) | — | Client preview plays |
+| 3 | Tap **[Save Mapping]** | `POST /execute/emoji-sounds/upload` (multipart) | New sound card animates into grid |
+| 4 | *(Test)* Type a sentence with the emoji in the **Live Preview** text area → **[Test TTS]** | `POST /execute/announce` `{ target="browser_preview" }` | Spliced audio plays in browser `<audio>` element |
+
+---
+
+### 7.10 Manage Docker Services (Control Plane)
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/ops` → **Control Plane** section | `GET /control_plane/api/containers` | Container status table renders with green/red dots |
+| 2 | Tap **[View Logs]** on any container | `GET /control_plane/api/containers/{name}/logs?tail=100` | Terminal-style modal shows last 100 log lines |
+| 3 | Tap **[Restart]** on a crashed container | `POST /control_plane/api/restart/{container_name}` | Confirmation dialog → restart executes → status dot turns green |
+
+---
+
+### 7.11 Program NFC Tag Macros
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/integrations/nfc` | — | NFC macro configuration canvas |
+| 2 | Select a Jarvis action from the card grid (e.g., *Activate Night Mode*, *Toggle Kitchen Lights*) | — | Action card highlights |
+| 3 | Tap **[Program to NFC Sticker]** | — | Slide-up animation prompts: *"Bring device close to NFC sticker..."* |
+| 4 | Hold phone against physical NFC tag | Native NFC write API encodes encrypted JSON action payload | Success: Emerald checkmark pulse. Failure: Rose error with retry option. |
+
+---
+
+### 7.12 Review & Approve Raven Autonomous Code Changes
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/ops` → **Operations Timeline** | WebSocket subscription to `raven:mission:stream:{id}` | Live reasoning steps stream in |
+| 2 | When a **Commit Card** appears → Tap **[Review Diff]** | `GET /api/raven/missions/{id}/diff` | Side-by-side diff drawer opens (green adds / red removes) |
+| 3 | Tap **[Approve & Merge]** | `POST /api/raven/missions/{id}/approve` | Pytest runs → commit → push. RAG persists the learning. |
+| 4 | *(Or)* Tap **[Reject]** | `POST /api/raven/missions/{id}/reject` | Changes discarded. Mission marked failed. |
+
+---
+
+### 7.13 Assign Devices to Users
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | `/admin/users` → tap user row → **[Assigned Devices]** tab | `GET /api/users/{id}/devices` | Current device assignments listed |
+| 2 | Tap **[+ Assign Device]** → fuzzy-search HA entities | `GET /api/ha/entities?domain=media_player` | Searchable entity list |
+| 3 | Select devices → Tap **[Save Assignments]** | `PUT /api/users/{id}/devices` `{ entity_ids[] }` | Devices bound to user. `/remote` route becomes visible for this user. Intercom targets update. |
+
+---
+
+### 7.14 Configure Announcement Blacklist
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/admin/integrations` → **Announcements** card | `GET /api/admin/settings?prefix=announce_blacklist` | Current blacklist renders |
+| 2 | Toggle switches per entity to blacklist/allow | — | Instant visual feedback |
+| 3 | *(Optional)* Set time-based rules (e.g., *"Kids' Room speakers blacklisted after 8 PM"*) | — | Time picker + entity selector |
+| 4 | Tap **[Save]** | `PUT /api/admin/settings` `{ key: "announce_blacklist", value: [...] }` | Blacklist persisted. `announce_all` respects it immediately. |
+
+---
+
+## 8. Standard User Task Workflows
+
+These workflows are available to all authenticated users (Standard, Child, and Admin roles).
+
+### 8.1 First Login & Device Pairing
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Open Jarvis OS in browser or Capacitor app | — | Login screen renders |
+| 2 | Enter Name + PIN (or use biometric on mobile) | `POST /api/auth/login` `{ name, pin }` | JWT session token issued. Zustand store hydrates user profile. |
+| 3 | *(Mobile only)* App prompts: *"Allow Jarvis to use your microphone?"* → Accept | — | Porcupine wake-word engine initializes |
+| 4 | *(Mobile only)* App prompts: *"Allow background location?"* → Accept | — | GPS daemon starts. Location syncs to Gateway. |
+| 5 | *(First time)* Halo Banner shows fallback: *"You are at Home"* until ESPresense detects room | — | BLE presence resolves within ~30s |
+
+---
+
+### 8.2 Ask Jarvis a Voice Command
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Say *"Jarvis"* (or tap the mic icon) | Porcupine local wake-word match | Frosted glass overlay + audio visualizer appears |
+| 2 | Speak the command (e.g., *"Play jazz in the kitchen"*) | `POST /api/chat` `{ message, user_context }` | Gateway routes: FastPath → Librarian → Raven (tiered) |
+| 3 | Gateway resolves intent → dispatches tool | e.g., `POST /execute/media/play` `{ query: "jazz", device_name: "kitchen" }` | Execution handler runs |
+| 4 | Kokoro TTS responds audibly (e.g., *"Playing jazz on the kitchen speaker"*) | `/execute/tts` → announce to user's current room speaker | Audio plays. Active Media Widget mounts on dashboard. |
+
+---
+
+### 8.3 Set a Timer or Alarm
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Voice: *"Set a timer for 10 minutes"* — or tap **[+ Timer]** on dashboard | `POST /execute/timer` `{ type: "timer", duration_str: "10m" }` | — |
+| 2 | Timer persisted in Redis under `timer:{user_id}:{timer_id}` | — | **Ambient Countdown Widget** auto-mounts on dashboard |
+| 3 | Widget shows glowing ring depleting in real time | WebSocket push updates from automation scheduler | — |
+| 4 | *(Optional)* Tap widget → **[+1 Min]** or **[Pause]** or **[Cancel]** | `POST /execute/timer` `{ action: "extend" / "pause" / "cancel" }` | Timer adjusts |
+| 5 | Timer expires → audio alert routes to user's current room (ESPresense) | Automation → `/execute/trigger` → Kokoro TTS → announce | Chime plays. Widget auto-dismisses. |
+
+---
+
+### 8.4 Cast Music or Video to a Device
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/media` → Browse or search | `POST /execute/media/play` `{ query, media_type }` | Music Assistant resolves content |
+| 2 | Tap song/album/book card | — | **Now Playing Hero** renders with cover art |
+| 3 | Tap **[Cast to...]** → select target device or group from bottom sheet | — | Target resolves via 10-strategy device discovery |
+| 4 | Playback begins. Transport controls (Play/Pause/Skip/Shuffle) are live. | `POST /execute/media/transport` `{ command }` | `verify_playback()` confirms state within 10s |
+| 5 | Adjust volume via slider | `POST /execute/media/transport` `{ command: "volume_set", volume_level }` | Volume updates on physical device |
+
+---
+
+### 8.5 Use the Intercom (Quick Clip)
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/intercom` | — | Contact grid renders with ESPresense presence dots |
+| 2 | Tap a room or user card to select target | — | Target highlighted |
+| 3 | Press and hold **[Talk]** button → speak | `MediaRecorder.start()` | Red recording ring animates. Max 30s. |
+| 4 | Release **[Talk]** | `POST /execute/intercom/send` (multipart: `audio_file` + `target_entity_ids[]`) | WAV dispatched to target speakers |
+| 5 | Target device plays audio automatically | WebSocket push on recipient's UI | Recipient sees toast: *"📣 [Name] from [Room]"* with **[Reply]** button |
+
+---
+
+### 8.6 Complete a Chore & Redeem Rewards (Child)
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Open `/chores` (auto-mounted if Skylight enabled) | `GET /api/integrations/skylight/chores?user={id}` | Daily chore grid renders |
+| 2 | Tap-and-hold a chore card (e.g., *Make Bed*) | `POST /api/integrations/skylight/chores/{id}/complete` | Card pulses → turns Emerald → slides to Completed tab |
+| 3 | Progress ring advances. Star balance updates (`+5★`) | Webhook syncs to physical Skylight board | Board LED turns green |
+| 4 | Tap a reward in the Vault (e.g., *1 Hour Screen Time — 50★*) → **[Redeem]** | — | Frosted overlay: *"Parent confirmation required"* |
+| 5 | Parent scans fingerprint or enters PIN | `POST /api/integrations/skylight/rewards/{id}/redeem` `{ user_id, parent_auth }` | Stars deducted. Emerald success chime. |
+
+---
+
+### 8.7 Create & Sync a Note
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Dashboard → tap **[+ New Note]** FAB | — | Full-screen markdown editor opens |
+| 2 | Type or dictate note content | — | Auto-save debounce (2s after last keystroke) |
+| 3 | Tap **[Save]** | `POST /execute/note` `{ action: "create", title, content }` | Note saved to Nextcloud WebDAV |
+| 4 | *(Auto)* If note contains temporal data (*"Dentist Tuesday 4pm"*), LLM extracts and creates calendar event | `POST /execute/calendar` `{ action: "add", summary, start_time }` | Event appears in `/calendar` view |
+| 5 | *(Auto)* Note indexed into RAG via `sync_rag` | Background pipeline → ChromaDB | Jarvis can now recall this note in future conversations |
+
+---
+
+### 8.8 View Personal Calendar
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/calendar` | `GET /execute/calendar` `{ action: "list", user_context }` | Filtered to current user only |
+| 2 | **Daily Agenda** view shows chronological timeline (calendar events + Skylight chores) | — | Color-coded: Cyan for events, Emerald for chores |
+| 3 | Swipe to **Month Grid** view | — | Dots indicate event density per day |
+| 4 | Tap a day → drill into that day's agenda | — | Detail view with edit/delete options (admin or event owner only) |
+
+---
+
+### 8.9 Link Personal Integrations (Self-Service)
+
+Each user manages their own third-party accounts independently — no admin involvement required.
+
+| Step | UI Action | Backend Call | Result |
+| :--- | :--- | :--- | :--- |
+| 1 | Navigate to `/settings/integrations` | `GET /api/integrations/available?scope=personal` | Personal integration cards render (Nextcloud, Skylight, GitHub, CalDAV) |
+| 2 | Tap an integration card (e.g., **Nextcloud**) | — | Dynamic form opens: `Server URL`, `Username`, `App Password` |
+| 3 | Fill fields → Tap **[Test Connection]** | `POST /api/auth/test-connection` `{ service: "nextcloud", credentials }` | Green checkmark or Red X with error |
+| 4 | Tap **[Save & Encrypt]** | `PUT /api/users/{self}/credentials` `{ service, credentials }` | Fernet-encrypted. Isolated to this user only. |
+| 5 | *(Result)* Notes, Calendar, Talk, and Skylight features now use this user's own account | — | `/chat` shows this user's Talk rooms. `/calendar` shows this user's CalDAV events. |
+
+**Important:** Personal credentials are cryptographically isolated per-user. Admins can see *that* a credential is linked (e.g., "Nextcloud: ✅ Connected") but cannot view the decrypted token value.
+
+---
+
+### Role-Based Navigation Visibility Summary
+
+| Route | Admin | Standard | Child |
+| :--- | :--- | :--- | :--- |
+| `/` (Home) | ✅ | ✅ | ✅ |
+| `/chat` | ✅ | ✅ | ✅ |
+| `/media` | ✅ | ✅ | ✅ (with content filters) |
+| `/remote` | ✅ (if devices assigned) | ✅ (if devices assigned) | ❌ |
+| `/intercom` | ✅ | ✅ | ✅ |
+| `/chores` | ✅ (if Skylight enabled) | ✅ (if Skylight enabled) | ✅ (if Skylight enabled) |
+| `/calendar` | ✅ | ✅ | ❌ |
+| `/settings/integrations` | ✅ | ✅ | ❌ |
+| `/admin/ops` | ✅ | ❌ | ❌ |
+| `/admin/integrations` | ✅ | ❌ | ❌ |
+| `/admin/users` | ✅ | ❌ | ❌ |
+| `/admin/groups` | ✅ | ❌ | ❌ |
+| `/admin/monitor` | ✅ | ❌ | ❌ |
+| `/admin/sounds` | ✅ | ❌ | ❌ |
+
+---
+
+## 9. Documentation Audit Findings & Cross-Reference Index
+
+This appendix documents inconsistencies discovered during a comprehensive review of both the Master Guide and this UI Wireframes document, along with their resolutions.
+
+### 9.1 Issues Found & Resolved
+
+| # | Document | Issue | Resolution |
+| :--- | :--- | :--- | :--- |
+| 1 | Master Guide §6 | **Duplicate section numbering:** `6.6` was used for both *Composite Macro-Actions* and *Browser & Web Operations* | Renumbered Browser & Web Operations to `6.8` |
+| 2 | Master Guide §8 | **Stale data in Microservices Table:** `execution` row still referenced "7-strategy pipeline" and "hardcoded subnet" | Updated to "10-strategy pipeline" and "Subnet detection is now dynamic" |
+| 3 | Master Guide §3 | **Section ordering gap:** §3.13 (Power) → §3.16 (Intercom) → §3.17 (Android App) → §3.14 (Grouping). Sections 3.14 and 3.15 appear after 3.17 | Noted: content is correct but numbering reflects insertion order. Future refactor should reorder to §3.13 → §3.14 → §3.15 → §3.16 → §3.17 |
+| 4 | Master Guide §7.4 | **Marked as resolved** but the resolution text was missing context | Added full explanation of dynamic `/proc/net/route` inspection and env var overrides |
+| 5 | Master Guide §6.9 | **Section jump:** §6.6 → §6.9 with no §6.7 or §6.8 in between | §6.7 is Raven Autonomous Ops (correctly numbered). §6.8 now assigned to Browser & Web Ops. |
+| 6 | UI Wireframes §2.2 | **Missing routes:** `/chores`, `/remote`, `/intercom`, `/admin/groups`, `/admin/monitor` were not listed | Added all missing routes to the route registry |
+| 7 | Both Documents | **Missing task workflows:** No step-by-step admin or user task guidance existed | Added §7 (14 admin workflows) and §8 (8 user workflows) to this document |
+
+### 9.2 Cross-Reference: UI Route → Master Guide Section → Backend Endpoint
+
+This table maps every frontend route to its architectural specification and primary API endpoints, enabling quick navigation for both human developers and AI agents.
+
+| UI Route | Wireframe Section | Master Guide Section | Primary Backend Endpoints |
+| :--- | :--- | :--- | :--- |
+| `/` | §3.1–3.6 (Widgets) | §3.1–3.13 | `/ws/capabilities`, `/execute/*` |
+| `/chat` | §3.2 (Smart Inbox) | §3.4 (Nextcloud Talk) | `/execute/talk`, `/api/chat` |
+| `/media` | §3.3–3.4 (Media/ABS) | §3.1 (MASS), §3.2 (ABS) | `/execute/media/play`, `/execute/media/transport` |
+| `/remote` | §3.8 (Universal Remote) | §10.5 (Remote Control) | `/execute/media/transport`, `/execute/remote/keypress` |
+| `/intercom` | §3.9 (Intercom Panel) | §3.16, §10.5b | `/execute/intercom/send`, LiveKit/Mumble SFU |
+| `/chores` | §3.12 (Chore Dashboard) | §3.7 (Skylight) | `/api/integrations/skylight/*` |
+| `/calendar` | — | §10.6 | `/execute/calendar` |
+| `/settings/integrations` | §8.9 (Personal Integrations) | §3.12 (Identity Vault) | `/api/integrations/available?scope=personal`, `/api/users/{self}/credentials` |
+| `/admin/ops` | §3.7 (Raven Ops) | §10.7, §3.3 | `/api/raven/missions/*`, `/control_plane/*` |
+| `/admin/integrations` | — | §10.8 | `/api/integrations/available`, `/api/admin/settings` |
+| `/admin/groups` | §3.10 (Group Manager) | §3.14 (Grouping) | `/api/groups/media`, `/api/groups/lights`, `/api/groups/patterns` |
+| `/admin/monitor` | §3.11 (Telemetry) | §3.15 (Telemetry) | `/api/telemetry/*` |
+| `/admin/users` | — | §10.9 | `/api/users/*`, `/api/identity/users/import` |
+| `/admin/sounds` | — | §10.10 | `/execute/emoji-sounds/*` |
+| `/admin/integrations/nfc` | §5.3 (NFC Programmer) | §3.17 (Android App) | Native NFC APIs (no backend call) |
