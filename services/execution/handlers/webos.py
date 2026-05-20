@@ -9,7 +9,6 @@ Services:
 """
 import logging
 import socket
-import struct
 import json
 import sys
 import os

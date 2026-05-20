@@ -4,7 +4,6 @@ Home Assistant configuration inspection via WebSocket API.
 Allows diagnosing misconfigured integrations without treating HA as a black box.
 """
 import logging
-import asyncio
 import json
 import sys
 import os

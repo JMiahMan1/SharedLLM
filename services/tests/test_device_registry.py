@@ -4,7 +4,6 @@ import os
 import sys
 import pytest
 import tempfile
-import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "execution"))
 
@@ -18,7 +17,6 @@ def use_tmp_db(monkeypatch):
     tmp.close()
     monkeypatch.setenv("DEVICE_REGISTRY_PATH", tmp.name)
     # Force module-level _db to reset
-    import importlib
     import device_registry as dr
     dr._db = None
     yield

@@ -1,8 +1,6 @@
 """Tests for gateway code orchestration storage search integration."""
 import os
 import pytest
-from unittest.mock import AsyncMock, patch
-from contextlib import asynccontextmanager
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 os.environ.setdefault("INIT_DB", "false")
@@ -12,7 +10,6 @@ os.environ.setdefault("EXECUTION_SVC_URL", "http://localhost:8002")
 os.environ.setdefault("RAG_SVC_URL", "http://localhost:8003")
 os.environ.setdefault("SEARXNG_URL", "http://localhost:8080")
 
-import gateway.main as gateway_main
 
 
 @pytest.fixture

@@ -1,8 +1,7 @@
 import os
 import sys
 import pytest
-import asyncio
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 # Mock soundfile BEFORE importing from tts
 mock_sf = MagicMock()

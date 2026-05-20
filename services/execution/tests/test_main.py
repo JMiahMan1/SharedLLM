@@ -1,6 +1,5 @@
 import os
 import sys
-import pytest
 from fastapi.testclient import TestClient
 
 # Ensure parent directory is in sys.path for imports
@@ -8,7 +7,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
 from main import app
-import main
 
 client = TestClient(app)
 

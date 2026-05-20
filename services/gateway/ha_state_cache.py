@@ -6,9 +6,7 @@ RAG stores static entity metadata (area, device_class, capabilities).
 Redis caches live state with a short TTL.
 entity_id is the stable join key between the two.
 """
-import json
 import logging
-import time
 import httpx
 import redis
 

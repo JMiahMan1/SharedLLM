@@ -8,7 +8,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import LOCAL_NOTES_ROOT as _LOCAL_NOTES_ROOT
 from pathlib import Path
-from typing import Optional
 
 try:
     from schemas import NoteRequest, ExecutionResult

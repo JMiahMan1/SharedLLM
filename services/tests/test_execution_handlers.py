@@ -2,7 +2,6 @@
 import sys
 import os
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 # Add execution service to path for absolute imports (from schemas import ...)
@@ -14,7 +13,7 @@ from services.execution.handlers import light, media, climate, security, talk, v
 from services.execution.personal_data import resolve_personal_data_provider
 # Import ALL models from execution schemas via sys.path to ensure class identity matches handler imports
 from schemas import (
-    UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+    UserContext, LightControlRequest, MediaTransportRequest,
     TVCastRequest, TalkRequest, VolumeInventoryRequest, SecurityRequest
 )
 

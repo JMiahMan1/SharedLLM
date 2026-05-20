@@ -60,7 +60,7 @@ except ImportError:
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
+            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
             SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, HAConfigRequest
         )
@@ -76,8 +76,6 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 log = logging.getLogger("execution")
 
-import sys
-import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import INTERNAL_SECRET, IDENTITY_SVC_URL
@@ -134,7 +132,6 @@ async def lifespan(app: FastAPI):
         from fastapi.responses import FileResponse, Response
         import uvicorn
         import threading
-        import re
         
         media_app = FastAPI(title="Media Server")
         
@@ -1106,7 +1103,7 @@ async def execute_announce(req: AnnouncementRequest):
             log.info(f"[announce] Media URL: {media_url}")
             
             # VERIFY: Ensure media endpoint is accessible before dispatching to HA
-            log.info(f"[announce] Verifying media endpoint accessibility...")
+            log.info("[announce] Verifying media endpoint accessibility...")
             media_ready = False
             for attempt in range(5):
                 try:

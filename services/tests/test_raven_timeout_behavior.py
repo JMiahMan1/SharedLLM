@@ -9,8 +9,6 @@ These tests mock the LLM provider and tool execution to verify:
 """
 
 import asyncio
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # We'll test the timeout logic in isolation by extracting it into a testable function
