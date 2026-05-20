@@ -22,7 +22,7 @@ _DEFAULTS = {
     "logging_svc_url": "http://logging:8006",
     "workspace_runtime_svc_url": "http://workspace_runtime:8007",
     "control_plane_url": "http://control_plane:8008",
-    "llm_local_url": "http://ollama:11434",
+    "llm_local_url": "http://ollama-server.local:11434",
     "redis_url": "redis://redis:6379/0",
     "ollama_timeout": "600",
     "fast_path_threshold": "0.85",
