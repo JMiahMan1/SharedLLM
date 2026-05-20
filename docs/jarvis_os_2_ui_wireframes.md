@@ -733,3 +733,38 @@ This table maps every frontend route to its architectural specification and prim
 | `/admin/users` | — | §10.9 | `/api/users/*`, `/api/identity/users/import` |
 | `/admin/sounds` | — | §10.10 | `/execute/emoji-sounds/*` |
 | `/admin/integrations/nfc` | §5.3 (NFC Programmer) | §3.17 (Android App) | Native NFC APIs (no backend call) |
+
+---
+
+## 10. Native Mobile App Experience (Android/Capacitor)
+
+While the web app is fully responsive, the native Android app (`@capacitor/android`) implements several mobile-exclusive UX patterns to improve usability on phones and wall-mounted tablets.
+
+### 10.1 Mobile Layout & Navigation
+Instead of the desktop's left-hand sidebar, the mobile app utilizes a **Bottom Navigation Bar** that persists across core routes.
+
+*   **Primary Tabs:** Home (`/`), Intercom (`/intercom`), Media (`/media`), Remote (`/remote`), Settings (`/settings`).
+*   **Gestures:** Swipe left/right on the Home Dashboard to switch between personal and system-wide widgets.
+*   **Haptic Feedback:** Every UI interaction (toggling a light, playing a song, completing a chore) triggers a subtle native vibration using `@capacitor/haptic` to simulate tactile hardware buttons.
+
+### 10.2 PIN Pad Defaults & Biometric Workflows (Android Native)
+The **4-digit PIN pad is the universal default and primary fallback** for all authentication gates across Jarvis OS 2.0. However, on mobile devices, the app can optionally intercept these sensitive actions and delegate them to the native Android BiometricPrompt framework for speed and convenience. If a user cancels the biometric prompt or if it fails, the UI gracefully falls back to the standard 4-digit numeric keypad.
+
+| Scenario | UX Flow (Biometrics Enabled) | Native API Call |
+| :--- | :--- | :--- |
+| **Login** | User opens app → Fingerprint prompt bypasses PIN entry → Session restored | `@capacitor/preferences` (encrypted token retrieval) |
+| **Chore Reward** | Child taps "Redeem" → Parent scans fingerprint (instead of typing parent PIN) to approve | `android.hardware.biometrics` via Capacitor |
+| **Admin Route** | Standard user taps `/admin/ops` → Prompts for Admin biometrics (instead of Admin PIN) to temporarily elevate privileges | `auth_bypass` token generation |
+
+### 10.3 Persistent Intercom & Wake-Up Notifications
+To ensure you never miss a call even when the phone is locked in your pocket:
+*   **FCM Data Pushes:** The backend sends high-priority Firebase Cloud Messaging (FCM) payloads.
+*   **Lock Screen Wake:** When an intercom call arrives, the Foreground Service wakes the screen, plays a native ringtone, and drops down a heads-up notification: *"📣 Incoming Call from Kitchen"*.
+*   **Action Buttons:** The notification includes native **[Answer]** and **[Dismiss]** buttons, allowing the user to join the LiveKit audio stream directly from the lock screen without opening the app.
+
+### 10.4 Background Location & Geofencing (Frontend to Backend)
+The mobile app acts as a continuous spatial tracker for the Jarvis ambient intelligence engine.
+
+*   **Status Indicator:** A tiny, subtle satellite icon sits in the top-right of the mobile Home dashboard. A green dot indicates active tracking; red indicates permission denied.
+*   **Adaptive Syncing:** When the user connects to a vehicle Bluetooth or starts moving at high speeds (`>15 mph`), the app seamlessly switches from a 15-minute sync interval to a 30-second interval, blasting `POST /api/identity/users/location` to the Gateway.
+*   **"Arriving Home" Hook:** This tight interval allows the Gateway to execute macros exactly as the user pulls into the neighborhood (e.g., turning on porch lights, unlocking the front door, resuming a podcast via MASS on the living room speakers).
