@@ -857,23 +857,28 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    usernames = data.get('ocs', {}).get('data', {}).get('users', [])
-                    for username in usernames:
-                        nc_users[username.lower()] = {"nc_username": username}
-                        # Fetch detailed info for each user
-                        try:
-                            detail_resp = await client.get(
-                                f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users/{username}",
-                                headers={"OCS-APIRequest": "true", "Accept": "application/json"},
-                                auth=(nc_user, nc_pass),
-                                params={"format": "json"}
-                            )
-                            if detail_resp.status_code == 200:
-                                nc_data = detail_resp.json().get("ocs", {}).get("data", {})
-                                nc_users[username.lower()]["display_name"] = nc_data.get("display-name") or nc_data.get("displayname")
-                                nc_users[username.lower()]["email"] = nc_data.get("email")
-                        except Exception:
-                            pass
+                    # Handle Nextcloud API error responses
+                    meta = data.get("ocs", {}).get("meta", {})
+                    if meta.get("status") == "failure":
+                        log.warning(f"[discovery] Nextcloud API error: {meta.get('message', 'Unknown')}")
+                    else:
+                        usernames = data.get("ocs", {}).get("data", {}).get("users", [])
+                        for username in usernames:
+                            nc_users[username.lower()] = {"nc_username": username}
+                            # Fetch detailed info for each user
+                            try:
+                                detail_resp = await client.get(
+                                    f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users/{username}",
+                                    headers={"OCS-APIRequest": "true", "Accept": "application/json"},
+                                    auth=(nc_user, nc_pass),
+                                    params={"format": "json"}
+                                )
+                                if detail_resp.status_code == 200:
+                                    nc_data = detail_resp.json().get("ocs", {}).get("data", {})
+                                    nc_users[username.lower()]["display_name"] = nc_data.get("display-name") or nc_data.get("displayname")
+                                    nc_users[username.lower()]["email"] = nc_data.get("email")
+                            except Exception:
+                                pass
         except Exception as e:
             log.error(f"[discovery] Nextcloud Error: {str(e)}")
 
@@ -1144,7 +1149,14 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                 if resp.status_code != 200:
                     raise HTTPException(status_code=resp.status_code, detail=f"Nextcloud API error: {resp.text}")
                 
-                usernames = resp.json().get("ocs", {}).get("data", {}).get("users", [])
+                nc_resp = resp.json()
+                # Handle Nextcloud API error responses (e.g., 403 for non-admin users)
+                meta = nc_resp.get("ocs", {}).get("meta", {})
+                if meta.get("status") == "failure":
+                    log.warning(f"[import] Nextcloud API error: {meta.get('message', 'Unknown')}")
+                    usernames = []
+                else:
+                    usernames = nc_resp.get("ocs", {}).get("data", {}).get("users", [])
                 
                 for nc_username in usernames:
                     nc_data = {"nc_username": nc_username}
