@@ -219,3 +219,65 @@ class TestTelemetryEndpoints:
         
         # Clean up
         internal_client.delete(f"{IDENTITY_URL}/api/telemetry/enroll/{entity_id}")
+
+
+# ─── Issue: Intercom endpoints not working ────────────────────────────────────
+
+@pytest.mark.local_only
+class TestIntercomEndpoints:
+    """Regression: Intercom endpoints must work end-to-end with proper auth."""
+
+    def test_intercom_session_lifecycle(self, internal_client):
+        """Full lifecycle: start session, verify, end session."""
+        # Start session
+        resp = internal_client.post(
+            f"{IDENTITY_URL}/api/intercom/sessions",
+            json={"caller_user_id": "test_user", "target_room": "kitchen", "session_type": "twoway"},
+        )
+        assert resp.status_code == 200, f"Start session failed: {resp.text}"
+        session_id = resp.json().get("session_id")
+        assert session_id, "Response must include session_id"
+        
+        # Verify session exists
+        resp = internal_client.get(f"{IDENTITY_URL}/api/intercom/sessions")
+        assert resp.status_code == 200
+        sessions = resp.json()
+        session_ids = [s.get("session_id") for s in sessions]
+        assert session_id in session_ids, f"Session {session_id} should exist"
+        
+        # End session
+        resp = internal_client.delete(f"{IDENTITY_URL}/api/intercom/sessions/{session_id}")
+        assert resp.status_code == 200, f"End session failed: {resp.text}"
+
+    def test_intercom_broadcast(self, internal_client):
+        """Broadcast endpoint must accept message and targets."""
+        resp = internal_client.post(
+            f"{IDENTITY_URL}/api/intercom/broadcast",
+            json={"message": "Test broadcast", "target_entity_ids": ["media_player.test"]},
+        )
+        assert resp.status_code == 200, f"Broadcast failed: {resp.text}"
+        assert resp.json().get("status") == "SUCCESS"
+
+    def test_intercom_announcement(self, internal_client):
+        """Announcement endpoint must accept message and targets."""
+        resp = internal_client.post(
+            f"{IDENTITY_URL}/api/intercom/announce",
+            json={"message": "Test announcement", "target_devices": ["media_player.living_room"]},
+        )
+        assert resp.status_code == 200, f"Announcement failed: {resp.text}"
+        assert resp.json().get("status") == "SUCCESS"
+
+    def test_intercom_config_crud(self, internal_client):
+        """Intercom config must be readable and updatable."""
+        # Read config
+        resp = internal_client.get(f"{IDENTITY_URL}/api/intercom/config")
+        assert resp.status_code == 200, f"Get config failed: {resp.text}"
+        config = resp.json()
+        assert "default_tts_engine" in config or "default_voice" in config
+        
+        # Update config
+        resp = internal_client.patch(
+            f"{IDENTITY_URL}/api/intercom/config",
+            json={"default_volume": 0.9},
+        )
+        assert resp.status_code == 200, f"Update config failed: {resp.text}"
