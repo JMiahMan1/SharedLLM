@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from config import INTERNAL_SECRET, REDIS_URL, LOG_RETENTION_DAYS, LOG_MAX_ENTRIES
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, List, Optional
 
 import redis.asyncio as redis

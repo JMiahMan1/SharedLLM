@@ -2,7 +2,7 @@
 import json
 import time
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 # Test the logging service logic without requiring a real Redis instance
 

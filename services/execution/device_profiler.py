@@ -66,7 +66,6 @@ import logging
 import socket
 import asyncio
 
-import device_discovery
 import ha_client
 
 log = logging.getLogger("execution.profiler")

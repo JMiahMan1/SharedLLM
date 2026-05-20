@@ -1,16 +1,14 @@
 # services/gateway/history.py
-import os
 import json
 import redis
 import logging
 import time
 import httpx
-import asyncio
 
 log = logging.getLogger("gateway.history")
 
 # INTERNAL_SECRET sourced from config.py which enforces fail-secure at gateway startup.
-from gateway.config import IDENTITY_SVC, RAG_SVC, INTERNAL_SECRET, REDIS_URL
+from gateway.config import INTERNAL_SECRET, REDIS_URL
 
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 

@@ -17,7 +17,7 @@ from typing import Tuple
 
 import re
 import difflib
-from typing import Tuple, Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any
 
 log = logging.getLogger("gateway.intent_engine")
 

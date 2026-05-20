@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 import os
 import sys
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 # Ensure parent directory is in sys.path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

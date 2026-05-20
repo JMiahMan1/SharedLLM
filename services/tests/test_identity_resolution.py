@@ -15,7 +15,6 @@ if "INIT_DB" not in os.environ:
 import identity.main as identity_main
 from identity.main import app, get_session, _store_user_api_key
 from identity.models import User, APIKey
-from identity.schemas import ResolveRequest
 from identity.crypto import digest_secret
 
 # Use an in-memory SQLite database for testing

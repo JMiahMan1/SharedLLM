@@ -10,9 +10,8 @@ These tests verify that:
 """
 
 import os
-import json
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, AsyncMock
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
@@ -26,7 +25,7 @@ os.environ.setdefault("CONTROL_PLANE_URL", "http://control_plane:8008")
 os.environ.setdefault("SEARXNG_URL", "http://searxng:8080")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
-from gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL, AUTONOMOUS_EVOLUTION_AGENT_PROMPT, CODE_HELPER_SYSTEM_INSTRUCTION
+from gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL
 from gateway.main import select_model_for_query, select_system_instruction_for_query, AUTONOMOUS_SIGNALS
 from gateway.agent_loop import extract_action_json
 

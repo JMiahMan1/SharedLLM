@@ -2,7 +2,6 @@ import json
 import sys
 import os
 import time
-import importlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

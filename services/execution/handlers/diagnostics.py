@@ -1,6 +1,5 @@
 # services/execution/handlers/diagnostics.py
 import logging
-import asyncio
 import subprocess
 import sys
 import os

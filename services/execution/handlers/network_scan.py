@@ -10,7 +10,6 @@ import asyncio
 import ipaddress
 import logging
 import socket
-import struct
 from typing import Optional
 
 import httpx

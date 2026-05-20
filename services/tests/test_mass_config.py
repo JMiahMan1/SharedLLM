@@ -1,6 +1,4 @@
 """Tests for Music Assistant config_entry_id configuration."""
-import os
-import pytest
 
 
 def test_mass_config_entry_id_from_env(monkeypatch):

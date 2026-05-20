@@ -10,7 +10,7 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import IDENTITY_SVC_URL, INTERNAL_SECRET
-from typing import Dict, Optional
+from typing import Dict
 from fastapi import Security, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 

@@ -7,16 +7,15 @@ Validates:
 """
 import sys
 import os
-import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "execution"))
 
 from announce_handlers import detect_tv_type
-from handlers.media import detect_media_type, handle_media_play
+from handlers.media import detect_media_type
 from handlers.video import handle_video_play
-from schemas import MediaPlayRequest, VideoPlayRequest, UserContext
+from schemas import VideoPlayRequest, UserContext
 
 
 class TestDeviceDetection(unittest.TestCase):

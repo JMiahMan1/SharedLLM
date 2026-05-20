@@ -1,7 +1,6 @@
 # services/execution/handlers/video.py
 import logging
 import asyncio
-import subprocess
 import json
 import re
 import os
@@ -113,7 +112,7 @@ async def search_youtube(query: str) -> str | None:
                     log.info(f"[video] YouTube search '{query}' -> {url}")
                     return url
 
-            log.warning(f"[video] SearXNG returned no results, trying Playwright fallback")
+            log.warning("[video] SearXNG returned no results, trying Playwright fallback")
         except Exception as e:
             log.warning(f"[video] SearXNG YouTube search failed, trying Playwright fallback: {e}")
 
@@ -200,7 +199,7 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
             return None, None
         
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
-            log.error(f"[video] Download produced empty file")
+            log.error("[video] Download produced empty file")
             return None, None
         
         file_size = os.path.getsize(tmp_path)
@@ -298,7 +297,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             return None, None
         
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
-            log.error(f"[video] Download produced empty file")
+            log.error("[video] Download produced empty file")
             return None, None
         
         file_size = os.path.getsize(tmp_path)
@@ -379,7 +378,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
             return None, None
         
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
-            log.error(f"[video] Download produced empty file")
+            log.error("[video] Download produced empty file")
             return None, None
         
         file_size = os.path.getsize(tmp_path)
@@ -416,7 +415,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
     from handlers import roku as roku_handler
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, full_entity_id)
     if is_roku:
-        log.info(f"[video/play] Detected Roku device, using Roku video handler")
+        log.info("[video/play] Detected Roku device, using Roku video handler")
         # Wake device in parallel with download
         wake_task = asyncio.create_task(roku_handler.roku_wake_device(ctx.ha_url, ctx.ha_token, full_entity_id))
         media_id, title = await download_video_progressive(video_url)

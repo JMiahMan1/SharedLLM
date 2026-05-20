@@ -11,10 +11,10 @@ import sys
 # Ensure parent directory is in sys.path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from main import app, engine, require_api_key, require_internal, resolve_identity
-from models import User, DeviceAssignment
+from main import app, require_api_key, require_internal, resolve_identity
+from models import User
 from crypto import encrypt
-from schemas import ResolveRequest, UserCreate
+from schemas import ResolveRequest
 import main
 
 # Setup in-memory database for testing

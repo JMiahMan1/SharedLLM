@@ -4,7 +4,6 @@ Performs end-to-end health checks and basic functional verification across multi
 Usage: python soa_smoke_test.py [BASE_URL] [INTERNAL_SECRET]
 """
 import requests
-import json
 import os
 import sys
 
@@ -21,7 +20,7 @@ def test_health():
         resp = requests.get(f"{BASE_URL}/health/ready", timeout=5)
         if resp.status_code == 200:
             data = resp.json()
-            print(f"  - Global Ready: YES")
+            print("  - Global Ready: YES")
             for svc, status in data.get("services", {}).items():
                 print(f"    - {svc.ljust(10)}: {status}")
         else:

@@ -10,7 +10,6 @@ from config import RAG_SVC_URL, INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Body, Query
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from typing import Any, Optional
 
 try:
     from .indexer import (
@@ -21,7 +20,7 @@ try:
     from .models import ProviderWriteRequest, ProviderMirrorRequest
 except (ImportError, ValueError):
     from indexer import (
-        build_content_index, summarize_index, extract_and_chunk_contents,
+        build_content_index, extract_and_chunk_contents,
         set_indexer_pause, is_indexer_paused, CheckpointManager
     )
     from providers import build_provider, ProviderConfig

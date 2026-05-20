@@ -5,7 +5,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from config import INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, Header, Depends
-from typing import Optional, Dict, Any
 
 import logging
 logging.basicConfig(level=logging.INFO)

@@ -4,7 +4,7 @@ import logging
 import sys
 import os
 import urllib.parse
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

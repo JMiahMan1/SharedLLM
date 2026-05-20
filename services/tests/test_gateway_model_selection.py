@@ -25,7 +25,6 @@ import gateway.orchestrator as gateway_orchestrator
 from gateway.main import app, select_model_for_query, select_system_instruction_for_query
 from gateway.prompts import (
     ASSIST_SYSTEM_INSTRUCTION,
-    AUTONOMOUS_EVOLUTION_AGENT_PROMPT,
     CODE_HELPER_SYSTEM_INSTRUCTION,
     LIBRARIAN_SYSTEM_INSTRUCTION,
     RAVEN_AUTONOMOUS_PROTOCOL,

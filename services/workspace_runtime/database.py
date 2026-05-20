@@ -8,7 +8,7 @@ from sqlalchemy import inspect, text
 try:
     from .models import Workspace
 except (ImportError, ValueError):
-    from models import Workspace
+    pass
 
 DATABASE_URL = WORKSPACE_DATABASE_URL
 engine = create_engine(
