@@ -11,7 +11,7 @@ services:
     container_name: sharedllm_dns_sync
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5353:53/udp"
+      - "127.0.0.1:5354:53/udp"
     volumes:
       - /etc/hosts:/etc/hosts
     networks:
