@@ -50,7 +50,7 @@ class RavenWorker:
     async def _get_coding_model_from_settings(self) -> str:
         """Resolve coding model from Identity settings. Never hardcode."""
         try:
-            from main import get_all_settings
+            from gateway.orchestrator import get_all_settings
             settings = await get_all_settings()
             model = settings.get("ollama_coding_model") or settings.get("coding_model") or settings.get("assistant_model")
             if model:
