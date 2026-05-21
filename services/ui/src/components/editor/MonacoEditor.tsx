@@ -5,6 +5,20 @@ import type { EditorLanguage } from '../../lib/editorLanguages';
 
 export type { EditorLanguage } from '../../lib/editorLanguages';
 
+const LANGUAGE_MAP: Record<EditorLanguage, string> = {
+  markdown: 'markdown',
+  python: 'python',
+  javascript: 'javascript',
+  typescript: 'typescript',
+  typescriptreact: 'typescriptreact',
+  json: 'json',
+  yaml: 'yaml',
+  html: 'html',
+  css: 'css',
+  shell: 'shell',
+  plaintext: 'plaintext',
+};
+
 interface MonacoEditorProps {
   value: string;
   onChange?: (value: string) => void;

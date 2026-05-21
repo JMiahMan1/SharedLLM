@@ -1,36 +1,36 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Play, Pause, SkipForward, SkipBack, Volume2, Cast, Search } from 'lucide-react';
+import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
-
-interface MediaTarget {
-  id: string;
-  name: string;
-  room: string;
-  type: 'speaker' | 'tv';
-  online: boolean;
-}
-
-const MOCK_TARGETS: MediaTarget[] = [
-  { id: 'kitchen_speaker', name: 'Kitchen Speaker', room: 'Kitchen', type: 'speaker', online: true },
-  { id: 'living_tv', name: 'Living Room TV', room: 'Living Room', type: 'tv', online: true },
-  { id: 'bedroom_speaker', name: 'Bedroom Speaker', room: 'Master Bed', type: 'speaker', online: false },
-  { id: 'family_group', name: 'Main Floor Group', room: 'Multiple', type: 'speaker', online: true },
-];
 
 const Media = () => {
   const { trigger } = useHaptics();
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(70);
-  const [selectedTarget, setSelectedTarget] = useState<string>('kitchen_speaker');
-  const [progress, setProgress] = useState(35);
+  const [selectedTarget, setSelectedTarget] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const { data: entities = [] } = useQuery({
+    queryKey: ['media-entities'],
+    queryFn: () => api.getEntities(),
+    select: (data) => data.filter((e) => e.domain === 'media_player'),
+  });
+
+  const mediaTargets = entities.map((entity) => ({
+    id: entity.entity_id,
+    name: entity.friendly_name || entity.entity_id,
+    room: entity.entity_id.split('.')[1]?.replace(/_/g, ' ') || 'Unknown',
+    type: entity.entity_id.includes('tv') ? 'tv' : 'speaker',
+    online: entity.state !== 'unavailable' && entity.state !== 'unknown',
+  }));
 
   const handleTransport = (action: string) => {
     trigger('light');
     if (action === 'play') setPlaying((p) => !p);
   };
 
-  const filteredTargets = MOCK_TARGETS.filter(
+  const filteredTargets = mediaTargets.filter(
     (t) =>
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.room.toLowerCase().includes(searchQuery.toLowerCase())
@@ -53,7 +53,7 @@ const Media = () => {
 
         <div className="mt-6">
           <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-cyan-400 rounded-full transition-all" style={{ width: `${progress}%` }} />
+            <div className="h-full bg-cyan-400 rounded-full transition-all" style={{ width: '35%' }} />
           </div>
           <div className="flex items-center justify-between mt-2">
             <span className="text-xs text-slate-500">1:23</span>
@@ -125,8 +125,11 @@ const Media = () => {
               <div className={`w-2 h-2 rounded-full shrink-0 ${target.online ? 'bg-green-400' : 'bg-slate-600'}`} />
             </button>
           ))}
-          {filteredTargets.length === 0 && (
+          {filteredTargets.length === 0 && mediaTargets.length > 0 && (
             <p className="text-sm text-slate-500 text-center py-4">No devices match "{searchQuery}"</p>
+          )}
+          {mediaTargets.length === 0 && (
+            <p className="text-sm text-slate-500 text-center py-4">No media players found. Check Home Assistant connection.</p>
           )}
         </div>
       </div>

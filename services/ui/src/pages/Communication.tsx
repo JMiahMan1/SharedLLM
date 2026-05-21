@@ -39,7 +39,6 @@ import type {
   TimerRecord,
 } from '../services/api';
 import { MonacoEditor } from '../components/editor';
-import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 
 const EMPTY_ARRAY: any[] = [];
 
@@ -884,12 +883,6 @@ const Communication = () => {
                   className="glass-input flex-1"
                   placeholder="Note title"
                 />
-            <EntitySearchDropdown
-              value={announcementDevice}
-              onChange={setAnnouncementDevice}
-              placeholder="Search media players..."
-              domainFilter="media_player"
-            />
               </div>
               <div className="flex-1 min-h-0 rounded-xl border border-white/10 overflow-hidden">
                 <MonacoEditor
