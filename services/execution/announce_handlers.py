@@ -67,7 +67,21 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
     if "chrome" in eid or "_cast" in eid or app_id in CAST_APP_IDS:
         return "cast"
     
-    # 2. Roku: entity contains 'roku', OR source_list has Roku-specific entries
+    # 2. Samsung Tizen: entity contains 'samsung' or 'tizen' (check BEFORE Roku heuristic)
+    if "samsung" in eid or "tizen" in eid:
+        return "samsung"
+    
+    # 3. webOS (LG): entity contains 'lg' or 'webos'
+    if "lg_" in eid or "webos" in eid or "web_os" in eid:
+        return "webos"
+    
+    # 4. Android TV: app_id is Android package name, or contains Android indicators
+    is_android_app = any(app_id.startswith(pkg) for pkg in ANDROID_PACKAGE_PREFIXES)
+    is_android_indicator = any(ind in app_id for ind in ANDROID_INDICATORS)
+    if is_android_app or is_android_indicator:
+        return "android_tv"
+    
+    # 5. Roku: entity contains 'roku', OR source_list has Roku-specific entries
     #    OR MA player with Roku active_queue (MA wraps Roku as mass_player_type=player)
     has_roku_sources = bool(ROKU_SOURCES & set(source_list))
     has_many_streaming = len(ROKU_SOURCES & set(source_list)) >= 1 or len(STREAMING_APPS & set(source_list)) >= 5
@@ -75,20 +89,6 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
     is_ma_roku = app_id == "music_assistant" and ("roku" in active_queue or "roku" in eid)
     if "roku" in eid or has_roku_sources or has_many_streaming or is_ma_roku:
         return "roku"
-    
-    # 3. Android TV: app_id is Android package name, or contains Android indicators
-    is_android_app = any(app_id.startswith(pkg) for pkg in ANDROID_PACKAGE_PREFIXES)
-    is_android_indicator = any(ind in app_id for ind in ANDROID_INDICATORS)
-    if is_android_app or is_android_indicator:
-        return "android_tv"
-    
-    # 4. webOS (LG): entity contains 'lg' or 'webos'
-    if "lg_" in eid or "webos" in eid or "web_os" in eid:
-        return "webos"
-    
-    # 5. Samsung Tizen: entity contains 'samsung' or 'tizen'
-    if "samsung" in eid or "tizen" in eid:
-        return "samsung"
     
     # 6. Sony Bravia: entity contains 'bravia' or 'sony'
     if "bravia" in eid or "sony" in eid:
@@ -120,14 +120,14 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
     if loaded_components:
         if "cast.media_player" in loaded_components and supported_features & SUPPORT_PLAY_MEDIA:
             return "cast"
-        if "roku" in loaded_components and supported_features & SUPPORT_BROWSE_MEDIA:
-            return "roku"
-        if "webostv.media_player" in loaded_components:
-            return "webos"
         if "samsungtv.media_player" in loaded_components:
             return "samsung"
+        if "webostv.media_player" in loaded_components:
+            return "webos"
         if "androidtv_remote.media_player" in loaded_components:
             return "android_tv"
+        if "roku" in loaded_components and supported_features & SUPPORT_BROWSE_MEDIA:
+            return "roku"
         if "dlna_dmr.media_player" in loaded_components:
             return "dlna"
     
