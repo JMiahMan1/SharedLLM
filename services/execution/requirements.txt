@@ -31,3 +31,5 @@ pychromecast>=13.0.0
 androidtv>=0.0.75
 wakeonlan>=3.0.0
 aioesphomeapi>=28.0.0
+paho-mqtt>=2.0.0
+openai-whisper>=20231117

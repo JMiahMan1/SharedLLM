@@ -3655,3 +3655,110 @@ async def update_dns_config(request: Request):
             )
 
     return {"status": "SUCCESS", "message": "DNS configuration updated"}
+
+
+# --- Presence & Location Endpoints ---
+
+@app.get("/api/presence/{user_id}")
+async def get_user_presence(user_id: str):
+    """Get presence data for a user."""
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/presence/{user_id}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    raise HTTPException(status_code=502, detail="Presence service unavailable")
+
+
+@app.get("/api/presence/all")
+async def get_all_presence():
+    """Get presence data for all users."""
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/presence/all",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    raise HTTPException(status_code=502, detail="Presence service unavailable")
+
+
+@app.get("/api/presence/rooms")
+async def get_presence_rooms():
+    """Get list of all known rooms."""
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/presence/rooms",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    raise HTTPException(status_code=502, detail="Presence service unavailable")
+
+
+@app.post("/api/users/{user_id}/location")
+async def update_user_location(user_id: str, request: Request):
+    """Update user GPS location."""
+    body = await request.json()
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/users/{user_id}/location",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    raise HTTPException(status_code=502, detail="Identity service unavailable")
+
+
+@app.get("/api/users/{user_id}/location")
+async def get_user_location(user_id: str):
+    """Get user GPS location."""
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/users/{user_id}/location",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    raise HTTPException(status_code=404, detail="Location not found")
+
+
+@app.post("/api/stt/transcribe")
+async def transcribe_audio(request: Request):
+    """Transcribe audio using Whisper STT."""
+    form = await request.form()
+    audio_file = form.get("audio")
+    model = form.get("model", "base")
+    language = form.get("language", "en")
+
+    if not audio_file:
+        raise HTTPException(status_code=400, detail="audio file required")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/stt/transcribe",
+            files={"file": (audio_file.filename, audio_file.file, "audio/wav")},
+            data={"model": model, "language": language},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    raise HTTPException(status_code=502, detail="STT service unavailable")
+
+
+@app.post("/api/voice/command")
+async def execute_voice_command(request: Request):
+    """Route voice command to execution service."""
+    body = await request.json()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/voice/command",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    raise HTTPException(status_code=502, detail="Voice command service unavailable")
