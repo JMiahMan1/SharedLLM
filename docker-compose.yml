@@ -10,6 +10,8 @@ services:
       dockerfile: services/dns_sync/Dockerfile
     container_name: sharedllm_dns_sync
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:5353:53/udp"
     networks:
       sharedllm:
         ipv4_address: 172.26.0.10
