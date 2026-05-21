@@ -12,6 +12,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:5353:53/udp"
+    volumes:
+      - /etc/hosts:/etc/hosts
     networks:
       sharedllm:
         ipv4_address: 172.26.0.10
