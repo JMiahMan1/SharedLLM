@@ -1,13 +1,24 @@
-#!/bin/sh
-# Dynamically resolve the docker group GID from the mounted socket
-# This avoids hardcoding DOCKER_GID in .env and works across different systems
-if [ -S /var/run/docker.sock ]; then
-    DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null)
-    if [ -n "$DOCKER_GID" ]; then
-        echo "[entrypoint] Docker socket GID=$DOCKER_GID, adding to supplementary groups"
-        # Use setpriv to run the process with the docker group as a supplementary group
-        exec setpriv --reuid=1000 --regid=1000 --groups=1000,"$DOCKER_GID" -- "$@"
+#!/bin/bash
+set -e
+
+DNS_SYNC_IP="172.26.0.10"
+HOSTNAME="ollama-server.local"
+
+echo "[execution] Resolving $HOSTNAME via DNS-sync ($DNS_SYNC_IP)..."
+
+RESOLVED_IP=$(dig +short +time=2 +tries=1 @$DNS_SYNC_IP $HOSTNAME A 2>/dev/null | head -1)
+
+if [ -n "$RESOLVED_IP" ]; then
+    echo "[execution] Resolved $HOSTNAME -> $RESOLVED_IP"
+    if ! grep -q "$HOSTNAME" /etc/hosts 2>/dev/null; then
+        echo "$RESOLVED_IP $HOSTNAME" >> /etc/hosts
+        echo "[execution] Added $HOSTNAME to /etc/hosts"
+    else
+        sed -i "s/.*$HOSTNAME/$RESOLVED_IP $HOSTNAME/" /etc/hosts
+        echo "[execution] Updated $HOSTNAME in /etc/hosts"
     fi
+else
+    echo "[execution] WARNING: Could not resolve $HOSTNAME via DNS-sync"
 fi
-# Fallback: just drop to the sharedllm user without docker access
-exec setpriv --reuid=1000 --regid=1000 --groups=1000 -- "$@"
+
+exec "$@"
