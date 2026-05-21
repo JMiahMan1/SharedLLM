@@ -67,6 +67,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server.local:11434
       # Host-networked service: use localhost for inter-service communication
       - IDENTITY_SVC_URL=http://localhost:8001
       - EXECUTION_SVC_URL=http://localhost:8003
@@ -157,6 +158,8 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004

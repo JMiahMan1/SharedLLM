@@ -480,6 +480,10 @@ _config_validation_result = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _config_validation_result
+    # Resolve runtime config from Identity service
+    from config import resolve_runtime_config
+    await resolve_runtime_config()
+    
     log.info("Gateway starting up...")
     engine.load()
     # Initialize the client explicitly on startup
@@ -2138,6 +2142,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
         "device_id": body.get("device_id"),
         "rag_user": body.get("rag_user"),
         "show_thinking": show_thinking,
+        "is_openai": is_openai,
     }
     
     job_id = await job_queue.enqueue_job(user_id, job_payload)
@@ -2218,7 +2223,10 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
                         return _make_openai_response(ans, selected_model)
                     return _make_ollama_response(ans, selected_model)
                 if job["status"] == JobStatus.FAILED:
-                    raise HTTPException(status_code=500, detail=job.get("error", "Job failed"))
+                    err_msg = job.get("error", "Job failed")
+                    if is_openai:
+                        return JSONResponse(_make_openai_error(err_msg, selected_model), status_code=500)
+                    return JSONResponse(_make_ollama_error(err_msg, selected_model), status_code=500)
                 await asyncio.sleep(0.2)
 
     # JARVIS-SPECIFIC CLIENTS (202 Accepted + SSE Polling)
@@ -2281,9 +2289,12 @@ async def get_chat_job_status(job_id: str):
         return _make_ollama_response(result, job["payload"]["model"], "completed")
     
     if job["status"] == JobStatus.FAILED:
+        err_msg = job.get("error", "Unknown error during inference")
+        if job["payload"].get("is_openai"):
+            return JSONResponse(_make_openai_error(err_msg, job["payload"].get("model", "unknown")), status_code=500)
         return JSONResponse({
             "status": "FAILED",
-            "error": job.get("error", "Unknown error during inference"),
+            "error": err_msg,
             "job_id": job_id
         }, status_code=500)
     
@@ -3775,3 +3786,57 @@ async def execute_voice_command(request: Request):
         if resp.status_code == 200:
             return resp.json()
     raise HTTPException(status_code=502, detail="Voice command service unavailable")
+
+
+@app.get("/api/media/music-assistant/playlists")
+async def get_ma_playlists():
+    """Get Music Assistant playlists."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/media/music-assistant/playlists",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    return {"status": "SUCCESS", "playlists": []}
+
+
+@app.get("/api/media/music-assistant/recent")
+async def get_ma_recent():
+    """Get Music Assistant recently played items."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/media/music-assistant/recent",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    return {"status": "SUCCESS", "recent": []}
+
+
+@app.get("/api/media/audiobookshelf/libraries")
+async def get_abs_libraries():
+    """Get Audiobookshelf libraries."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/audiobookshelf",
+            params={"action": "libraries"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    return {"status": "SUCCESS", "libraries": []}
+
+
+@app.get("/api/media/audiobookshelf/last-played")
+async def get_abs_last_played():
+    """Get Audiobookshelf last played books."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/audiobookshelf",
+            params={"action": "last_played"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    return {"status": "SUCCESS", "books": []}

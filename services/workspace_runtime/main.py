@@ -358,6 +358,10 @@ def _seed_db_from_json():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Resolve runtime config from Identity service
+    from config import resolve_runtime_config
+    await resolve_runtime_config()
+    
     # Startup logic
     init_db()
     

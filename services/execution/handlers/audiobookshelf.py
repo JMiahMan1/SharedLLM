@@ -69,6 +69,9 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
         elif action == "get_book":
             return await _handle_get_book(abs_url, abs_key, req)
 
+        elif action == "last_played":
+            return await _handle_last_played(abs_url, abs_key)
+
         return ExecutionResult(
             status="FAILURE",
             message=f"Action '{action}' not supported.",
@@ -309,6 +312,40 @@ async def _handle_get_book(abs_url: str, abs_key: str, req) -> ExecutionResult:
             "chapters": len(book.get("media", {}).get("chapters", [])),
         },
     )
+
+
+async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
+    """Get recently played audiobooks from Audiobookshelf."""
+    try:
+        progress = await abs_client.get_progress(abs_url, abs_key)
+        books = []
+        for item in progress.get("mediaItems", []):
+            book = item.get("libraryItem", {})
+            media = book.get("media", {})
+            user_progress = item.get("progress", 0) or 0
+            last_played = item.get("updatedAt", 0) or 0
+            books.append({
+                "id": book.get("id", ""),
+                "title": media.get("title", media.get("name", "")),
+                "author": ", ".join(media.get("authors", []) or []),
+                "progress": user_progress,
+                "last_played": last_played,
+                "library_id": book.get("libraryId", ""),
+            })
+        books.sort(key=lambda b: b["last_played"], reverse=True)
+        return ExecutionResult(
+            status="SUCCESS",
+            message="Recently played audiobooks retrieved.",
+            service="audiobookshelf",
+            detail={"books": books[:20]},
+        )
+    except Exception as e:
+        log.error(f"[abs.last_played] Error: {e}")
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Failed to get last played: {e}",
+            service="audiobookshelf",
+        )
 
 
 async def _roku_play_audiobook(roku_entity: str, stream_url: str, title: str, ha_url: str, ha_token: str) -> ExecutionResult:

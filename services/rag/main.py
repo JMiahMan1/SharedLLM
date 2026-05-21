@@ -38,6 +38,10 @@ embedding_fn = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global chroma_client, embedding_fn
+    # Resolve runtime config from Identity service
+    from config import resolve_runtime_config
+    await resolve_runtime_config()
+    
     log.info(f"Initializing RAG Service. Chroma DB dir: {CHROMA_DIR}")
     
     os.makedirs(CHROMA_DIR, exist_ok=True)
