@@ -23,9 +23,16 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand, userId }: VoiceAssi
       });
     } else {
       stopAudioVisualization();
-      setBars(Array.from({ length: 32 }, () => 0));
     }
   }, [state.isActive, startAudioVisualization, stopAudioVisualization]);
+
+  useEffect(() => {
+    if (isOpen) {
+      activate();
+    } else {
+      deactivate();
+    }
+  }, [isOpen, activate, deactivate]);
 
   useEffect(() => {
     if (isOpen) {
@@ -48,7 +55,7 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand, userId }: VoiceAssi
         }
       }
       onCommand?.(state.transcript);
-    } catch (e) {
+    } catch {
       toast.error('Failed to execute voice command');
     } finally {
       setProcessing(false);
@@ -131,6 +138,7 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand, userId }: VoiceAssi
           {processing ? 'Executing...' : 'Send'}
         </button>
       </div>
+    </div>
     </div>
   );
 };
