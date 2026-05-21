@@ -355,13 +355,19 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
     })
     
     if result.get("ok"):
-        # Verify playback started
-        await asyncio.sleep(3)
+        # Verify playback started or completed
+        await asyncio.sleep(2)
         verify_state = await get_state(ha_url, ha_token, play_target)
-        if verify_state and verify_state.get("state") == "playing":
-            log.info(f"[announce.samsung] Verified announcement playing on {play_target}")
-            return result
-        log.warning(f"[announce.samsung] play_media accepted but state={verify_state.get('state') if verify_state else 'unknown'}")
+        if verify_state:
+            v_state = verify_state.get("state")
+            v_attrs = verify_state.get("attributes", {})
+            v_media = v_attrs.get("media_content_id", "")
+            # Accept playing, idle (finished), or on (TV doesn't report media state)
+            # Also verify media_content_id matches what we sent
+            if v_state in ("playing", "idle", "on") and (media_url in v_media or v_state == "on"):
+                log.info(f"[announce.samsung] Verified announcement on {play_target} (state={v_state})")
+                return result
+            log.warning(f"[announce.samsung] play_media accepted but state={v_state}, media={v_media}")
     
     # Fallback: try the original entity if DLNA failed
     if dlna_entity and dlna_entity != entity_id:
