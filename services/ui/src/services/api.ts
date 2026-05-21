@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { storageGetSync } from '../lib/storage';
 
 const BASE_URL = '';
 
@@ -251,8 +252,8 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('jarvis_api_key');
-  const internalSecret = localStorage.getItem('internal_secret');
+  const token = storageGetSync('jarvis_api_key');
+  const internalSecret = storageGetSync('internal_secret');
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -272,8 +273,10 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401 && !isLoggingOut) {
       isLoggingOut = true;
-      localStorage.removeItem('jarvis_api_key');
-      localStorage.removeItem('jarvis_user');
+      import('../lib/storage').then(({ storageRemove }) => {
+        storageRemove('jarvis_api_key');
+        storageRemove('jarvis_user');
+      });
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -382,7 +385,7 @@ export const api = {
   getLogWebSocket(): WebSocket {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const token = localStorage.getItem('jarvis_api_key') || '';
+    const token = storageGetSync('jarvis_api_key') || '';
     return new WebSocket(`${protocol}//${host}/api/logs/stream?token=${encodeURIComponent(token)}`);
   },
 
