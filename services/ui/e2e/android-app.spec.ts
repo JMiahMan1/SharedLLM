@@ -80,7 +80,7 @@ test.describe('Android App - Authentication & Biometrics', () => {
 
   test('login page is mobile-optimized', async ({ page }) => {
     await page.goto(`${UI_URL}/login`);
-    await expect(page.getByText('Jarvis OS')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Jarvis OS' })).toBeVisible();
     await expect(page.getByPlaceholder('Enter username')).toBeVisible();
     await expect(page.getByPlaceholder('Enter password')).toBeVisible();
   });
