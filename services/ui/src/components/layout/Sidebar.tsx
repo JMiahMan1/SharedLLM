@@ -8,7 +8,10 @@ import {
   Activity,
   HelpCircle,
   Database,
-  Boxes
+  Boxes,
+  Music,
+  Radio,
+  SlidersHorizontal
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -21,9 +24,12 @@ function cn(...inputs: ClassValue[]) {
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
   { icon: Boxes, label: 'My Workspaces', path: '/workspaces' },
-  { icon: UserCircle, label: 'Identity', path: '/identity' },
+  { icon: Music, label: 'Media', path: '/media' },
+  { icon: Radio, label: 'Remote', path: '/remote' },
   { icon: MessageSquare, label: 'Communication', path: '/communication' },
   { icon: Database, label: 'Knowledge Hub', path: '/knowledge' },
+  { icon: UserCircle, label: 'Identity', path: '/identity' },
+  { icon: SlidersHorizontal, label: 'Settings', path: '/settings' },
   { icon: HelpCircle, label: 'Help Hub', path: '/docs' },
   // Admin-only: System Ops & Raven
   { icon: Settings, label: 'System Ops & Raven', path: '/admin', adminOnly: true },
@@ -41,7 +47,7 @@ const Sidebar = () => {
         </h1>
       </div>
       
-      <nav className="flex-1 px-2 md:px-4 space-y-2">
+      <nav className="flex-1 px-2 md:px-4 space-y-2 overflow-y-auto">
         {navItems
           .filter(item => !item.adminOnly || user?.is_admin)
           .map((item) => (
