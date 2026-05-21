@@ -9,7 +9,7 @@ from typing import Optional, Any, Dict, List, Callable, Awaitable
 
 from gateway.history import REDIS_URL
 from gateway.config import (
-    OLLAMA_URL, IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
+    IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
     STORAGE_SVC, RAG_SVC, INTERNAL_SECRET,
     RAVEN_MAX_TOTAL_SECONDS,
     RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
@@ -271,7 +271,7 @@ async def get_dynamic_llm_settings() -> dict:
 
 async def get_vram_safe_params(model: str, settings: dict) -> dict:
     """Dynamically checks VRAM pressure using DB constraints."""
-    local_url = settings.get("llm_local_url", OLLAMA_URL)
+    local_url = settings.get("llm_local_url", "")  # .env is seed-only; runtime resolved from Identity settings
     max_ctx = int(settings.get("llm_local_max_ctx", "4096"))
     params = {
         "num_predict": 1024,  # Allow sufficient tokens for full JSON tool calls
@@ -321,7 +321,7 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
     else:
         # Both ollama and llama_server use the same /api/chat compatible endpoint
         return OllamaProvider(
-            base_url=settings.get("llm_local_url", OLLAMA_URL),
+            base_url=settings.get("llm_local_url", ""),  # .env is seed-only; runtime resolved from Identity settings
             timeout=timeout
         )
 
