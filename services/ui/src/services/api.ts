@@ -1,5 +1,15 @@
 import axios from 'axios';
 import { storageGetSync } from '../lib/storage';
+import { Capacitor } from '@capacitor/core';
+
+const getBaseUrl = (): string => {
+  if (Capacitor.isNativePlatform()) {
+    const serverUrl = storageGetSync('jarvis_server_url');
+    if (serverUrl) return serverUrl;
+    return '';
+  }
+  return '';
+};
 
 const BASE_URL = '';
 
@@ -245,13 +255,19 @@ const normalizeWorkspaces = (data: WorkspaceListResponse): Workspace[] => {
 };
 
 export const apiClient = axios.create({
-  baseURL: BASE_URL,
+  baseURL: getBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
 apiClient.interceptors.request.use((config) => {
+  if (Capacitor.isNativePlatform()) {
+    const serverUrl = storageGetSync('jarvis_server_url');
+    if (serverUrl && !config.baseURL) {
+      config.baseURL = serverUrl;
+    }
+  }
   const token = storageGetSync('jarvis_api_key');
   const internalSecret = storageGetSync('internal_secret');
 

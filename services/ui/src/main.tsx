@@ -56,3 +56,11 @@ createRoot(rootElement).render(
     </ErrorBoundary>
   </StrictMode>,
 );
+
+const splash = document.getElementById('splash');
+if (splash) {
+  requestAnimationFrame(() => {
+    splash.classList.add('hidden');
+    setTimeout(() => splash.remove(), 300);
+  });
+}
