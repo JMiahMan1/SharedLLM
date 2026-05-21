@@ -11,13 +11,21 @@ export default defineConfig({
   esbuild: {
     jsx: 'automatic',
   },
+  optimizeDeps: {
+    esbuildOptions: {
+      jsx: 'automatic',
+    },
+  },
+  build: {
+    minify: 'esbuild',
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
-  },
-  build: {
-    minify: false
   },
   server: {
     proxy: {
