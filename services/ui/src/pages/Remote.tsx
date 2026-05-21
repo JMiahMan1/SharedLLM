@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Power, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home as HomeIcon, Menu, ChevronLeft, Volume2, VolumeX, Tv } from 'lucide-react';
 import { api } from '../services/api';
@@ -10,6 +10,8 @@ const Remote = () => {
   const [volume, setVolume] = useState(50);
   const [muted, setMuted] = useState(false);
   const [powerOn, setPowerOn] = useState(true);
+  const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const { data: entities = [] } = useQuery({
     queryKey: ['media-entities'],
@@ -27,28 +29,94 @@ const Remote = () => {
 
   const currentTarget = mediaTargets.find((t) => t.id === selectedTarget);
 
-  const handleDpad = () => {
+  const sendTransport = useCallback(async (command: string) => {
+    if (!selectedTarget) return;
     trigger('light');
-  };
+    setLoading(command);
+    setError(null);
+    try {
+      const resp = await api.mediaTransport({ entity_id: selectedTarget, command });
+      if (resp.status === 'FAILURE') {
+        setError(resp.message || 'Command failed');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Command failed');
+    } finally {
+      setLoading(null);
+    }
+  }, [selectedTarget, trigger]);
 
-  const handleVolumeChange = (delta: number) => {
+  const handleDpad = useCallback((action: string) => {
+    const commandMap: Record<string, string> = {
+      up: 'home',
+      down: 'home',
+      left: 'back',
+      right: 'home',
+      ok: 'home',
+      back: 'back',
+      home: 'home',
+      menu: 'home',
+    };
+    sendTransport(commandMap[action] || 'home');
+  }, [sendTransport]);
+
+  const handleVolumeChange = useCallback(async (delta: number) => {
+    if (!selectedTarget) return;
     trigger('light');
-    setVolume((v) => Math.min(100, Math.max(0, v + delta)));
-  };
+    const newVolume = Math.min(100, Math.max(0, volume + delta));
+    setVolume(newVolume);
+    setLoading('volume');
+    setError(null);
+    try {
+      await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_set', volume_level: newVolume / 100 });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Volume change failed');
+    } finally {
+      setLoading(null);
+    }
+  }, [selectedTarget, volume, trigger]);
 
-  const handleToggleMute = () => {
+  const handleToggleMute = useCallback(async () => {
+    if (!selectedTarget) return;
     trigger('light');
     setMuted((m) => !m);
-  };
+    setLoading('mute');
+    setError(null);
+    try {
+      await api.mediaTransport({ entity_id: selectedTarget, command: muted ? 'unmute' : 'mute' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Mute toggle failed');
+    } finally {
+      setLoading(null);
+    }
+  }, [selectedTarget, muted, trigger]);
 
-  const handlePower = () => {
+  const handlePower = useCallback(async () => {
+    if (!selectedTarget) return;
     trigger('heavy');
-    setPowerOn((p) => !p);
-  };
+    setLoading('power');
+    setError(null);
+    try {
+      const command = powerOn ? 'power_off' : 'home';
+      await api.mediaTransport({ entity_id: selectedTarget, command });
+      setPowerOn((p) => !p);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Power toggle failed');
+    } finally {
+      setLoading(null);
+    }
+  }, [selectedTarget, powerOn, trigger]);
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold text-white">Remote</h1>
+
+      {error && (
+        <div className="bg-red-500/20 border border-red-500/30 rounded-xl p-3 text-red-400 text-sm">
+          {error}
+          <button onClick={() => setError(null)} className="ml-2 underline">Dismiss</button>
+        </div>
+      )}
 
       <div className="glass-panel rounded-2xl p-4">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Media Targets</h2>
@@ -83,37 +151,42 @@ const Remote = () => {
               <div />
               <button
                 onClick={() => handleDpad('up')}
-                className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95"
+                disabled={loading !== null}
+                className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95 disabled:opacity-50"
               >
-                <ArrowUp size={20} />
+                {loading === 'home' ? <span className="animate-spin">⟳</span> : <ArrowUp size={20} />}
               </button>
               <div />
 
               <button
                 onClick={() => handleDpad('left')}
-                className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95"
+                disabled={loading !== null}
+                className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95 disabled:opacity-50"
               >
-                <ArrowLeft size={20} />
+                {loading === 'back' ? <span className="animate-spin">⟳</span> : <ArrowLeft size={20} />}
               </button>
               <button
                 onClick={() => handleDpad('ok')}
-                className="w-14 h-14 rounded-full bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 hover:bg-purple-500/30 transition-colors active:scale-95"
+                disabled={loading !== null}
+                className="w-14 h-14 rounded-full bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 hover:bg-purple-500/30 transition-colors active:scale-95 disabled:opacity-50"
               >
-                OK
+                {loading === 'home' ? <span className="animate-spin">⟳</span> : 'OK'}
               </button>
               <button
                 onClick={() => handleDpad('right')}
-                className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95"
+                disabled={loading !== null}
+                className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95 disabled:opacity-50"
               >
-                <ArrowRight size={20} />
+                {loading === 'home' ? <span className="animate-spin">⟳</span> : <ArrowRight size={20} />}
               </button>
 
               <div />
               <button
                 onClick={() => handleDpad('down')}
-                className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95"
+                disabled={loading !== null}
+                className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95 disabled:opacity-50"
               >
-                <ArrowDown size={20} />
+                {loading === 'home' ? <span className="animate-spin">⟳</span> : <ArrowDown size={20} />}
               </button>
               <div />
             </div>
@@ -121,21 +194,24 @@ const Remote = () => {
             <div className="flex items-center gap-4 mt-6">
               <button
                 onClick={() => handleDpad('back')}
-                className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+                disabled={loading !== null}
+                className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors disabled:opacity-50"
               >
-                <ChevronLeft size={20} />
+                {loading === 'back' ? <span className="animate-spin">⟳</span> : <ChevronLeft size={20} />}
               </button>
               <button
                 onClick={() => handleDpad('home')}
-                className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+                disabled={loading !== null}
+                className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors disabled:opacity-50"
               >
-                <HomeIcon size={18} />
+                {loading === 'home' ? <span className="animate-spin">⟳</span> : <HomeIcon size={18} />}
               </button>
               <button
                 onClick={() => handleDpad('menu')}
-                className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+                disabled={loading !== null}
+                className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-colors disabled:opacity-50"
               >
-                <Menu size={18} />
+                {loading === 'home' ? <span className="animate-spin">⟳</span> : <Menu size={18} />}
               </button>
             </div>
           </div>
@@ -152,7 +228,8 @@ const Remote = () => {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => handleVolumeChange(-10)}
-                className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors"
+                disabled={loading !== null}
+                className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors disabled:opacity-50"
               >
                 -
               </button>
@@ -166,13 +243,15 @@ const Remote = () => {
               />
               <button
                 onClick={() => handleVolumeChange(10)}
-                className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors"
+                disabled={loading !== null}
+                className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors disabled:opacity-50"
               >
                 +
               </button>
               <button
                 onClick={handleToggleMute}
-                className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors"
+                disabled={loading !== null}
+                className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors disabled:opacity-50"
               >
                 {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
@@ -181,13 +260,14 @@ const Remote = () => {
 
           <button
             onClick={handlePower}
-            className={`w-full py-4 rounded-2xl border transition-colors flex items-center justify-center gap-2 ${
+            disabled={loading !== null}
+            className={`w-full py-4 rounded-2xl border transition-colors flex items-center justify-center gap-2 disabled:opacity-50 ${
               powerOn
                 ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
                 : 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
             }`}
           >
-            <Power size={20} />
+            {loading === 'power' ? <span className="animate-spin">⟳</span> : <Power size={20} />}
             {powerOn ? 'Power Off' : 'Power On'}
           </button>
         </>

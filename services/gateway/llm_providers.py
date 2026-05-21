@@ -65,6 +65,8 @@ class OllamaProvider(BaseLLMProvider):
             log.info(f"[OllamaProvider] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                if resp.status_code >= 400:
+                    raise RuntimeError(f"Ollama HTTP {resp.status_code}: {resp.text}")
                 resp.raise_for_status()
                 
                 # Harden: Strip keep-alive spaces and handle potential multi-line/streamed JSON
@@ -122,6 +124,9 @@ class OllamaProvider(BaseLLMProvider):
 
             # Streaming
             async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise RuntimeError(f"Ollama stream HTTP {response.status_code}: {response.text}")
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     clean_line = line.strip()
@@ -185,6 +190,8 @@ class OpenRouterProvider(BaseLLMProvider):
             log.info(f"[OpenRouterProvider] Calling {self.base_url} for model {model}")
             if not chunk_callback:
                 resp = await client.post(self.base_url, json=payload, headers=headers)
+                if resp.status_code >= 400:
+                    raise RuntimeError(f"OpenRouter HTTP {resp.status_code}: {resp.text}")
                 resp.raise_for_status()
                 data = resp.json()
                 msg = data.get("choices", [{}])[0].get("message", {})
@@ -199,6 +206,9 @@ class OpenRouterProvider(BaseLLMProvider):
             full_content = ""
             full_reasoning = ""
             async with client.stream("POST", self.base_url, json=payload, headers=headers) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise RuntimeError(f"OpenRouter stream HTTP {response.status_code}: {response.text}")
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line:
