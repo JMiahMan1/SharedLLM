@@ -47,6 +47,18 @@ class RavenWorker:
             return True
         return False
 
+    async def _get_coding_model_from_settings(self) -> str:
+        """Resolve coding model from Identity settings. Never hardcode."""
+        try:
+            from main import get_all_settings
+            settings = await get_all_settings()
+            model = settings.get("ollama_coding_model") or settings.get("coding_model") or settings.get("assistant_model")
+            if model:
+                return model
+        except Exception:
+            pass
+        raise RuntimeError("No coding model configured in Identity settings")
+
     async def start(self):
         if self.is_running:
             return
@@ -77,10 +89,11 @@ class RavenWorker:
                 orphans = [m for m in missions if m.get("status") in ("executing", "paused")]
                 for mission in orphans:
                     mid = mission["id"]
-                    # Re-enqueue the mission — AgentLoop will restore from Redis checkpoint
+                    # Resolve model from Identity settings; never hardcode
+                    coding_model = mission.get("coding_model") or await self._get_coding_model_from_settings()
                     payload = {
                         "query": mission["proposed_mission"],
-                        "model": mission.get("coding_model") or "qwen3:8b",
+                        "model": coding_model,
                         "system": f"You are Raven, an autonomous agent executing a user-assigned background mission.\n\nExecute the following task to the best of your ability:\n{mission['proposed_mission']}",
                         "stream": False,
                         "creds": {"user": "default", "is_admin": True},
