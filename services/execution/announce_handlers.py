@@ -307,8 +307,8 @@ async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_
     })
 
 async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
-    """Samsung Tizen TV: wake, set volume, then play TTS announcement with verification."""
-    from ha_client import call_service, get_state
+    """Samsung Tizen TV: wake, set volume, then play TTS announcement via DLNA sibling."""
+    from ha_client import call_service, get_state, get_all_states
     log.info(f"[announce.samsung] Waking {entity_id} for announcement")
     
     # Power on if needed
@@ -330,27 +330,48 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
         await call_service(ha_url, ha_token, "media_player", "volume_mute", entity_id, {"is_volume_muted": False})
         await asyncio.sleep(0.5)
     
-    log.info(f"[announce.samsung] Playing announcement on {entity_id}")
-    result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
+    # Find DLNA sibling for media playback (SamsungTV integration doesn't support URL playback)
+    dlna_entity = None
+    try:
+        all_states = await get_all_states(ha_url, ha_token)
+        for s in all_states:
+            eid = s.get("entity_id", "")
+            if eid.startswith("media_player.tv_") and "samsung" in eid.lower() and eid != entity_id:
+                dlna_entity = eid
+                break
+    except Exception as e:
+        log.warning(f"[announce.samsung] Failed to find DLNA entity: {e}")
+    
+    play_target = dlna_entity or entity_id
+    if dlna_entity:
+        log.info(f"[announce.samsung] Using DLNA entity for playback: {dlna_entity}")
+    else:
+        log.warning(f"[announce.samsung] No DLNA sibling found, falling back to {entity_id}")
+    
+    log.info(f"[announce.samsung] Playing announcement on {play_target}")
+    result = await call_service(ha_url, ha_token, "media_player", "play_media", play_target, {
         "media_content_id": media_url,
-        "media_content_type": "url"
+        "media_content_type": "music"
     })
     
     if result.get("ok"):
         # Verify playback started
         await asyncio.sleep(3)
-        verify_state = await get_state(ha_url, ha_token, entity_id)
+        verify_state = await get_state(ha_url, ha_token, play_target)
         if verify_state and verify_state.get("state") == "playing":
-            log.info(f"[announce.samsung] Verified announcement playing on {entity_id}")
+            log.info(f"[announce.samsung] Verified announcement playing on {play_target}")
             return result
         log.warning(f"[announce.samsung] play_media accepted but state={verify_state.get('state') if verify_state else 'unknown'}")
     
-    # Fallback: use remote.send_command to trigger playback
-    remote_entity = entity_id.replace("media_player.", "remote.")
-    log.info(f"[announce.samsung] Falling back to remote.send_command Play on {remote_entity}")
-    return await call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {
-        "command": "Play"
-    })
+    # Fallback: try the original entity if DLNA failed
+    if dlna_entity and dlna_entity != entity_id:
+        log.info(f"[announce.samsung] DLNA failed, trying original entity {entity_id}")
+        result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
+            "media_content_id": media_url,
+            "media_content_type": "url"
+        })
+    
+    return result
 
 async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
     """Sony Bravia TV."""
