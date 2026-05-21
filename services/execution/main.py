@@ -1612,7 +1612,21 @@ async def execute_diagnostics(req: DiagnosticRequest):
 @app.post("/execute/llm/info", response_model=ExecutionResult)
 async def execute_llm_info(req: LLMInfoRequest):
     """Query Alpaca/Ollama for model and system information."""
-    from config import OLLAMA_URL
+    # Read Ollama URL from Identity settings at runtime
+    from config import IDENTITY_SVC_URL, INTERNAL_SECRET
+    ollama_url = ""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{IDENTITY_SVC_URL}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET})
+            if resp.status_code == 200:
+                for s in resp.json():
+                    if s.get("key") == "llm_local_url" and s.get("value"):
+                        ollama_url = s["value"]
+                        break
+    except Exception:
+        pass
+    if not ollama_url:
+        return _fail("Ollama URL not configured in Identity settings", "llm_info")
     action = req.action.lower()
     
     endpoints = {

@@ -47,7 +47,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import INTERNAL_SECRET, OLLAMA_URL, IDENTITY_DATABASE_URL
+from config import INTERNAL_SECRET, IDENTITY_DATABASE_URL
 
 def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
     if x_internal_secret != INTERNAL_SECRET:
@@ -121,13 +121,17 @@ async def _ensure_default_settings(session: Session) -> None:
     
     # Try to fetch available models from Ollama to provide better 'auto' defaults
     available_models = []
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{OLLAMA_URL}/api/tags")
-            if resp.status_code == 200:
-                available_models = [m["name"] for m in resp.json().get("models", [])]
-    except Exception as e:
-        log.warning(f"Could not reach Ollama to resolve 'auto' defaults: {e}")
+    # Read ollama URL from settings (seeded from .env on first startup, then persisted in DB)
+    llm_local_url_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "llm_local_url")).first()
+    ollama_url = llm_local_url_setting.value if llm_local_url_setting else ""
+    if ollama_url:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{ollama_url}/api/tags")
+                if resp.status_code == 200:
+                    available_models = [m["name"] for m in resp.json().get("models", [])]
+        except Exception as e:
+            log.warning(f"Could not reach Ollama to resolve 'auto' defaults: {e}")
 
     def resolve_best_model(pattern: str, fallback: str) -> str:
         if not available_models: return fallback
