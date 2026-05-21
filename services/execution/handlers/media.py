@@ -120,6 +120,10 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
     
+    # Samsung Tizen TV: use MASS search for music, then play URL via play_media
+    from handlers import samsung as samsung_handler
+    is_samsung = await samsung_handler.is_samsung_tv(ctx.ha_url, ctx.ha_token, entity_id)
+    
     # Resolve MA config entry at runtime if not seeded
     mass_entry = MASS_CONFIG_ENTRY_ID
     if not mass_entry:
@@ -160,6 +164,14 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             
             if uri:
                 log.info(f"[media/play] MASS search found: {uri} ({media_type_label})")
+                
+                # Samsung TV: play the MA URL directly via play_media
+                if is_samsung:
+                    log.info("[media/play] Samsung TV detected, playing MASS URL via play_media")
+                    return await samsung_handler.play_music(
+                        ctx.ha_url, ctx.ha_token, entity_id, uri,
+                    )
+                
                 result = await ha_client.call_service(
                     ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
                     {"media_id": uri, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
@@ -188,6 +200,13 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                 uri = items[0].get("uri")
                 track_name = items[0].get("name", "unknown")
                 log.info(f"[media/play] Library random fallback selected: '{track_name}' ({uri})")
+                
+                # Samsung TV: play the MA URL directly via play_media
+                if is_samsung:
+                    return await samsung_handler.play_music(
+                        ctx.ha_url, ctx.ha_token, entity_id, uri,
+                    )
+                
                 result = await ha_client.call_service(
                     ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
                     {"media_id": uri, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
@@ -243,7 +262,26 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         log.info(f"[media.video] Android TV detected ({entity_id}), delegating to android_tv handler")
         return await android_tv_handler.play_video(ctx.ha_url, ctx.ha_token, entity_id, video_url, query)
 
-    # Cast/WebOS/Samsung: stop active session, ensure TV is on, then play
+    # Samsung Tizen TV: use dedicated handler with WOL wake and play_media
+    from handlers import samsung as samsung_handler
+    is_samsung = await samsung_handler.is_samsung_tv(ctx.ha_url, ctx.ha_token, entity_id)
+    if is_samsung:
+        log.info(f"[media.video] Samsung Tizen TV detected ({entity_id}), using samsung handler")
+        download_task = asyncio.create_task(video_handler.download_video_progressive(video_url))
+        wake_task = asyncio.create_task(samsung_handler.wake_device(ctx.ha_url, ctx.ha_token, entity_id))
+
+        media_id, title = await download_task
+        if not media_id:
+            return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="media_play")
+        await wake_task
+
+        from config import EXECUTION_EXTERNAL_HOST
+        if not EXECUTION_EXTERNAL_HOST:
+            return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
+        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+        return await samsung_handler.play_video(ctx.ha_url, ctx.ha_token, entity_id, stream_url, title or query)
+
+    # Cast/WebOS: stop active session, ensure TV is on, then play
     # Note: handle_media_play already handles power-on, so we skip redundant turn_on here
     # Start download in parallel with HA setup to save time
     download_task = asyncio.create_task(video_handler.download_video_progressive(video_url))

@@ -303,10 +303,30 @@ async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_
     })
 
 async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Samsung Tizen TV: try play_media, then samsungtv.send_key fallback."""
+    """Samsung Tizen TV: wake, set volume, then play TTS announcement."""
     from ha_client import call_service
-    log.info(f"[announce.samsung] Trying play_media on {entity_id}")
+    log.info(f"[announce.samsung] Waking {entity_id} for announcement")
     
+    # Power on if needed
+    if state in ("off", "unavailable", "standby"):
+        log.info(f"[announce.samsung] TV is {state}, turning on...")
+        await call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
+        await asyncio.sleep(15)  # Samsung boot time
+    
+    # Set volume for announcement
+    if volume > 0:
+        log.info(f"[announce.samsung] Setting volume to {volume}")
+        await call_service(ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": volume})
+        await asyncio.sleep(0.5)
+    
+    # Unmute if needed
+    attrs = attributes or {}
+    if attrs.get("is_volume_muted"):
+        log.info("[announce.samsung] Unmuting TV")
+        await call_service(ha_url, ha_token, "media_player", "volume_mute", entity_id, {"is_volume_muted": False})
+        await asyncio.sleep(0.5)
+    
+    log.info(f"[announce.samsung] Playing announcement on {entity_id}")
     result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "url"
