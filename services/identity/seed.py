@@ -168,7 +168,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             gitlab_token_enc=encrypt(udata.get("gitlab_token")),
             audiobookshelf_pass_enc=encrypt(udata.get("audiobookshelf_pass")),
         )
-       session.add(user)
+        session.add(user)
         count += 1
 
     # ── Seed Global Settings ──────────────────────────────────────────────────
