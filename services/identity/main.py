@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from typing import List, Optional, Dict
 
 from fastapi import FastAPI, Depends, HTTPException, Header, File, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -31,7 +32,7 @@ except (ImportError, ModuleNotFoundError):
         ResolveRequest, ResolvedCredentials, 
         UserCreate, UserRead, UserUpdate,
         DeviceAssignmentRead, DeviceAssignmentCreate,
-        LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportUserResult, ImportResponse,
+        LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportResponse,
         GlobalSettingRead, GlobalSettingUpdate
     )
     from crypto import encrypt, decrypt, digest_secret
@@ -1789,3 +1790,78 @@ def update_intercom_config(config_data: dict, x_internal_secret: str = Header(..
             session.add(new_config)
         session.commit()
         return {"status": "SUCCESS", "message": "Intercom configuration updated", **current}
+
+
+# ─── Presence & Location ───────────────────────────────────────────────────────
+
+class LocationUpdate(BaseModel):
+    """GPS location update from mobile app."""
+    latitude: float
+    longitude: float
+    accuracy: Optional[float] = None
+    speed: Optional[float] = None
+    bearing: Optional[float] = None
+    timestamp: Optional[float] = None
+
+
+@app.post("/api/users/{user_id}/location")
+def update_user_location(
+    user_id: str,
+    location: LocationUpdate,
+    x_internal_secret: str = Header(...),
+):
+    """Store user GPS location from mobile app."""
+    _require_internal_secret(x_internal_secret)
+    import time
+    location_data = {
+        "latitude": location.latitude,
+        "longitude": location.longitude,
+        "accuracy": location.accuracy,
+        "speed": location.speed,
+        "bearing": location.bearing,
+        "timestamp": location.timestamp or time.time(),
+        "updated_at": time.time(),
+    }
+    with Session(engine) as session:
+        key = f"user_location:{user_id}"
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if existing:
+            existing.value = json.dumps(location_data)
+        else:
+            new_location = GlobalSetting(
+                key=key,
+                value=json.dumps(location_data),
+                description=f"GPS location for user {user_id}",
+            )
+            session.add(new_location)
+        session.commit()
+    log.info(f"[location] Updated location for {user_id}: ({location.latitude}, {location.longitude})")
+    return {"status": "SUCCESS", "message": "Location updated"}
+
+
+@app.get("/api/users/{user_id}/location")
+def get_user_location(
+    user_id: str,
+    x_internal_secret: str = Header(...),
+):
+    """Get stored GPS location for a user."""
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        key = f"user_location:{user_id}"
+        location = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if location:
+            return json.loads(location.value)
+    raise HTTPException(status_code=404, detail="Location not found")
+
+
+@app.get("/api/users/location/all")
+def get_all_user_locations(x_internal_secret: str = Header(...)):
+    """Get GPS locations for all users."""
+    _require_internal_secret(x_internal_secret)
+    locations = {}
+    with Session(engine) as session:
+        settings = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("user_location:%"))).all()
+        for setting in settings:
+            user_id = setting.key.replace("user_location:", "")
+            locations[user_id] = json.loads(setting.value)
+    return locations

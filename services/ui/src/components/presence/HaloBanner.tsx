@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MapPin, ChevronLeft, ChevronRight, Navigation } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useLocation } from '../../context/LocationContext.types';
+import { api } from '../../services/api';
 
 interface Room {
   id: string;
@@ -11,14 +12,34 @@ interface Room {
 
 interface HaloBannerProps {
   rooms?: Room[];
+  userId?: string;
 }
 
-const HaloBanner = ({ rooms }: HaloBannerProps) => {
+const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
   const { trigger } = useHaptics();
   const locationCtx = useLocation();
   const hasLocation = locationCtx?.latitude !== null;
+  const [presenceRoom, setPresenceRoom] = useState<Room | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const displayRooms = rooms || [];
+  useEffect(() => {
+    if (!userId) return;
+    setLoading(true);
+    api.getUserPresence(userId)
+      .then((data: any) => {
+        if (data?.presence) {
+          setPresenceRoom({
+            id: data.presence.room,
+            name: data.presence.room.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            confidence: data.presence.confidence,
+          });
+        }
+      })
+      .catch(() => setPresenceRoom(null))
+      .finally(() => setLoading(false));
+  }, [userId]);
+
+  const displayRooms = rooms || (presenceRoom ? [presenceRoom] : []);
   const sortedRooms = [...displayRooms].sort((a, b) => b.confidence - a.confidence);
   const bestRoomId = sortedRooms[0]?.id;
   const defaultIdx = displayRooms.findIndex((r) => r.id === bestRoomId);
@@ -36,7 +57,7 @@ const HaloBanner = ({ rooms }: HaloBannerProps) => {
     });
   };
 
-  if (!currentRoom && !hasLocation) return null;
+  if (!currentRoom && !hasLocation && !loading) return null;
 
   return (
     <div className="glass-panel border border-purple-500/20 bg-purple-500/5 px-4 py-3 flex items-center justify-between">
@@ -53,7 +74,9 @@ const HaloBanner = ({ rooms }: HaloBannerProps) => {
       )}
 
       <div className="flex items-center gap-2 flex-1 justify-center">
-        {currentRoom ? (
+        {loading ? (
+          <p className="text-sm text-slate-400">Detecting location...</p>
+        ) : currentRoom ? (
           <>
             <MapPin size={16} className="text-purple-400 shrink-0" />
             <p className="text-sm text-slate-300">

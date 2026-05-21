@@ -8,7 +8,7 @@ import warnings
 from typing import Dict, Any, Optional
 from uuid import uuid4
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Header, Request, File, UploadFile
 from fastapi.responses import JSONResponse
 import traceback
 
@@ -99,6 +99,12 @@ async def require_internal(request: Request, x_internal_secret: str = Header(Non
     if request.url.path == "/health" or request.url.path.startswith("/media/"):
         return
 
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def _check_internal_secret(x_internal_secret: str):
+    """Simple secret check for endpoints without Request dependency."""
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -1718,3 +1724,140 @@ async def execute_light_pattern(req):
     parsed = LightPatternRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
     log.info(f"[groups] light_pattern action={parsed.action} pattern_id={parsed.pattern_id}")
     return await groups.handle_light_pattern(parsed)
+
+
+# ─── Presence Detection (Section 3.8) ─────────────────────────────────────────
+
+@app.get("/execute/presence/{user_id}")
+async def get_user_presence(user_id: str, x_internal_secret: str = Header(None)):
+    """Get current presence data for a user from Redis."""
+    await _check_internal_secret(x_internal_secret)
+    from presence import get_presence_tracker
+    tracker = get_presence_tracker()
+    presence = await tracker.get_user_presence(user_id)
+    if presence:
+        return {"status": "SUCCESS", "user_id": user_id, "presence": presence}
+    return {"status": "SUCCESS", "user_id": user_id, "presence": None, "message": "No presence data"}
+
+
+@app.get("/execute/presence/all")
+async def get_all_presence(x_internal_secret: str = Header(None)):
+    """Get presence data for all tracked users."""
+    await _check_internal_secret(x_internal_secret)
+    from presence import get_presence_tracker
+    tracker = get_presence_tracker()
+    all_presence = await tracker.get_all_presence()
+    return {"status": "SUCCESS", "presence": all_presence}
+
+
+@app.get("/execute/presence/rooms")
+async def get_presence_rooms(x_internal_secret: str = Header(None)):
+    """Get list of all known rooms from presence data."""
+    await _check_internal_secret(x_internal_secret)
+    from presence import get_presence_tracker
+    tracker = get_presence_tracker()
+    rooms = await tracker.get_rooms()
+    return {"status": "SUCCESS", "rooms": rooms}
+
+
+# ─── Speech-to-Text (Section 3.9) ─────────────────────────────────────────────
+
+@app.post("/execute/stt/transcribe")
+async def transcribe_audio(file: UploadFile = File(...), model: str = "base", language: str = "en"):
+    """Transcribe audio file using Whisper STT."""
+    await _check_internal_secret(None)
+    import tempfile
+    import os
+    try:
+        import whisper
+    except ImportError:
+        return JSONResponse(
+            status_code=501,
+            content={"status": "FAILURE", "message": "Whisper not installed. Run: pip install openai-whisper"}
+        )
+
+    try:
+        model_obj = whisper.load_model(model)
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "FAILURE", "message": f"Failed to load Whisper model: {e}"}
+        )
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        result = model_obj.transcribe(tmp_path, language=language)
+        transcript = result.get("text", "").strip()
+        return {"status": "SUCCESS", "transcript": transcript, "language": language, "model": model}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "FAILURE", "message": f"Transcription failed: {e}"}
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+# ─── Voice Command Routing ────────────────────────────────────────────────────
+
+@app.post("/execute/voice/command")
+async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)):
+    """Route voice command transcript to appropriate handler."""
+    await _check_internal_secret(x_internal_secret)
+    from handlers import light, media
+    from schemas import UserContext, LightControlRequest, MediaPlayRequest
+
+    transcript = req.get("transcript", "").strip().lower()
+    user_id = req.get("user_id", "default")
+    ctx = UserContext(user=user_id)
+
+    if not transcript:
+        return {"status": "FAILURE", "message": "Empty transcript"}
+
+    log.info(f"[voice] user={user_id} transcript='{transcript}'")
+
+    # Light commands
+    light_keywords = ["light", "lights", "lamp", "brightness", "dim", "turn on", "turn off"]
+    if any(kw in transcript for kw in light_keywords):
+        entity_id = req.get("entity_id", "")
+        if not entity_id:
+            return {"status": "FAILURE", "message": "entity_id required for light commands"}
+        action = "on" if "turn on" in transcript or "on" in transcript else "off"
+        if "dim" in transcript or "brightness" in transcript:
+            action = "brightness"
+        light_req = LightControlRequest(
+            user_context=ctx,
+            action=action,
+            entity_id=entity_id,
+        )
+        return await light.handle_light(light_req)
+
+    # Media commands
+    media_keywords = ["play", "pause", "stop", "music", "video", "youtube", "spotify"]
+    if any(kw in transcript for kw in media_keywords):
+        entity_id = req.get("entity_id", "")
+        if not entity_id:
+            return {"status": "FAILURE", "message": "entity_id required for media commands"}
+        if "play" in transcript:
+            media_req = MediaPlayRequest(
+                user_context=ctx,
+                action="play",
+                entity_id=entity_id,
+            )
+            return await media.handle_media_play(media_req)
+        elif "pause" in transcript:
+            media_req = MediaPlayRequest(
+                user_context=ctx,
+                action="pause",
+                entity_id=entity_id,
+            )
+            return await media.handle_media_transport(media_req)
+
+    return {"status": "SUCCESS", "message": f"Voice command received: '{transcript}'", "transcript": transcript}
