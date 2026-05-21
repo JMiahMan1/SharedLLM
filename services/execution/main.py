@@ -136,6 +136,7 @@ async def lifespan(app: FastAPI):
         media_app = FastAPI(title="Media Server")
         
         @media_app.get("/media/{media_id}")
+        @media_app.head("/media/{media_id}")
         async def serve_media(media_id: str):
             # TTS audio from memory cache
             if media_id in TEMP_AUDIO_CACHE:

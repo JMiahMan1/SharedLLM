@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, Lock, User, AlertCircle, Fingerprint } from 'lucide-react';
+import { Shield, Lock, User, AlertCircle, Fingerprint, Server } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../context/AuthContext';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
@@ -11,6 +11,7 @@ import { storageGet, storageSet } from '../lib/storage';
 const Login = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [serverUrl, setServerUrl] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [savedUsername, setSavedUsername] = useState<string | null>(null);
@@ -18,6 +19,7 @@ const Login = () => {
   const { isNative, isAvailable, checkAvailability, authenticate } = useBiometricAuth();
   const { trigger } = useHaptics();
   const navigate = useNavigate();
+  const showServerField = Capacitor.isNativePlatform();
 
   useEffect(() => {
     const loadSaved = async () => {
@@ -27,6 +29,9 @@ const Login = () => {
         setUsername(saved);
       }
       if (Capacitor.isNativePlatform()) {
+        const savedServer = await storageGet('jarvis_server_url');
+        if (savedServer) setServerUrl(savedServer);
+        else setServerUrl('https://jarvis.sumemail.com');
         await checkAvailability();
       }
     };
@@ -38,6 +43,9 @@ const Login = () => {
     setError('');
     setIsLoading(true);
     try {
+      if (showServerField && serverUrl) {
+        await storageSet('jarvis_server_url', serverUrl.replace(/\/+$/, ''));
+      }
       await login({ username, password });
       await storageSet('jarvis_last_username', username);
       navigate('/');
@@ -124,6 +132,23 @@ const Login = () => {
 
         {(!showBiometricOption || savedUsername === null) && (
           <form onSubmit={handleSubmit} className="space-y-6">
+            {showServerField && (
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Server URL</label>
+                <div className="relative">
+                  <Server className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                  <input 
+                    type="url"
+                    value={serverUrl}
+                    onChange={(e) => setServerUrl(e.target.value)}
+                    className="glass-input w-full pl-10"
+                    placeholder="http://192.168.1.x:8000"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">Username</label>
               <div className="relative">

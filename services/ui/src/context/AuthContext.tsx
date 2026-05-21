@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
 import axios from 'axios';
-import { storageGet, storageSet, storageRemove } from '../lib/storage';
+import { storageGet, storageSet, storageRemove, storageInit } from '../lib/storage';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -24,6 +24,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const initAuth = async () => {
+      await storageInit();
       const storedToken = await storageGet('jarvis_api_key');
       if (storedToken) {
         setToken(storedToken);

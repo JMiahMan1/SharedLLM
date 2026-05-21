@@ -6,11 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Jarvis OS - The Family AI Home Operating System. Centralized control for identity, storage, automation, and communication." />
     <title>Jarvis OS | Family AI Home</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      body { margin: 0; background: #0f172a; font-family: system-ui, -apple-system, sans-serif; }
+      #splash { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at top left, #1e1b4b, #0f172a); z-index: 9999; transition: opacity 0.3s; }
+      #splash.hidden { opacity: 0; pointer-events: none; }
+      #splash .title { color: #6366f1; font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; animation: pulse 2s ease-in-out infinite; }
+      #splash .bar { width: 12rem; height: 4px; background: rgba(255,255,255,0.1); border-radius: 999px; overflow: hidden; }
+      #splash .bar::after { content: ''; display: block; width: 30%; height: 100%; background: #6366f1; border-radius: 999px; animation: slide 1.5s ease-in-out infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      @keyframes slide { 0% { transform: translateX(-100%); } 50% { transform: translateX(250%); } 100% { transform: translateX(250%); } }
+    </style>
   </head>
   <body>
+    <div id="splash"><div class="title">Initializing Jarvis OS...</div><div class="bar"></div></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

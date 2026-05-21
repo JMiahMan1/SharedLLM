@@ -4,7 +4,11 @@ const config: CapacitorConfig = {
   appId: 'com.jarvisos.app',
   appName: 'Jarvis OS',
   webDir: 'dist',
-  bundledWebRuntime: false
+  bundledWebRuntime: false,
+  server: {
+    androidScheme: 'https',
+    cleartext: true
+  }
 };
 
 export default config;

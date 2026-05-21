@@ -2,15 +2,14 @@ import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 
 const isNative = Capacitor.isNativePlatform();
+const _cache: Record<string, string | null> = {};
 
-let _cache: Record<string, string | null> = {};
-
-export async function storageInit(keys: string[]): Promise<void> {
+export async function storageInit(): Promise<void> {
   if (isNative) {
-    const entries = await Preferences.get({ keys });
-    for (const key of keys) {
-      _cache[key] = entries[key] ?? null;
-    }
+    const { value: apiKey } = await Preferences.get({ key: 'jarvis_api_key' });
+    const { value: internalSecret } = await Preferences.get({ key: 'internal_secret' });
+    _cache['jarvis_api_key'] = apiKey;
+    _cache['internal_secret'] = internalSecret;
   }
 }
 
@@ -49,7 +48,7 @@ export async function storageRemove(key: string): Promise<void> {
 }
 
 export async function storageClear(): Promise<void> {
-  _cache = {};
+  for (const k of Object.keys(_cache)) delete _cache[k];
   if (isNative) {
     await Preferences.clear();
   } else {
