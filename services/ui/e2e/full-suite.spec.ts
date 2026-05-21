@@ -16,7 +16,7 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
 test.describe('Authentication', () => {
   test('login page renders correctly', async ({ page }) => {
     await page.goto(`${UI_URL}/login`);
-    await expect(page.getByText('Jarvis OS')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Jarvis OS' })).toBeVisible();
     await expect(page.getByPlaceholder('Enter username')).toBeVisible();
     await expect(page.getByPlaceholder('Enter password')).toBeVisible();
     await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
