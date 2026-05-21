@@ -25,7 +25,7 @@ FERNET_KEY = _required("FERNET_KEY")
 # --- External service endpoints (bootstrap defaults from .env) ---
 # Runtime values are fetched from Identity settings; these are fallbacks.
 # Services on the Docker network use container names; host-networked services use localhost.
-OLLAMA_URL = _optional("OLLAMA_URL", "http://ollama:11434")
+OLLAMA_URL = _optional("OLLAMA_URL", "")  # Resolved at runtime from Identity settings; .env is seed-only
 IDENTITY_SVC_URL = _optional("IDENTITY_SVC_URL", "http://identity:8001")
 EXECUTION_SVC_URL = _optional("EXECUTION_SVC_URL", "http://execution:8003")
 RAG_SVC_URL = _optional("RAG_SVC_URL", "http://rag:8004")
