@@ -430,7 +430,9 @@ class RavenWorker:
         from gateway.orchestrator import get_all_settings, _get
         try:
             settings = await get_all_settings()
-            ollama_url = _get(settings, "llm_local_url", "")
+            ollama_url = _get(settings, "llm_local_url")
+            if not ollama_url:
+                raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(f"{ollama_url}/api/tags")
                 if resp.status_code != 200:

@@ -101,7 +101,9 @@ async def extract_and_store_user_facts(user_id: str, history: list):
         from gateway.orchestrator import get_all_settings, _get
         settings = await get_all_settings()
         LIBRARIAN_MODEL = _get(settings, "ollama_librarian_model", "")
-        ollama_url = _get(settings, "llm_local_url", "")  # .env is seed-only; runtime resolved from Identity settings
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
         rag_svc = _get(settings, "rag_svc_url")
 
         # Only look at the last turn
