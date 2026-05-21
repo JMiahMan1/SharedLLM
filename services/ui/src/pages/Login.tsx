@@ -17,7 +17,7 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [savedUsername, setSavedUsername] = useState<string | null>(null);
   const [connectivity, setConnectivity] = useState<{ ok: boolean; latency?: number; error?: string } | null>(null);
-  const { login } = useAuth();
+  const { login, initError } = useAuth();
   const { isNative, isAvailable, checkAvailability, authenticate } = useBiometricAuth();
   const { trigger } = useHaptics();
   const navigate = useNavigate();
@@ -32,10 +32,11 @@ const Login = () => {
       }
       if (Capacitor.isNativePlatform()) {
         const savedServer = await storageGet('jarvis_server_url');
-        const url = savedServer || 'https://jarvis.sumemail.com';
-        setServerUrl(url);
-        const result = await checkConnectivity(url);
-        setConnectivity(result);
+        if (savedServer) setServerUrl(savedServer);
+        if (savedServer) {
+          const result = await checkConnectivity(savedServer);
+          setConnectivity(result);
+        }
         await checkAvailability();
       }
     };
@@ -44,8 +45,12 @@ const Login = () => {
 
   const handleTestConnection = async () => {
     if (!serverUrl) return;
+    let url = serverUrl.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'http://' + url;
+    }
     setConnectivity({ ok: false, error: 'Testing...' });
-    const result = await checkConnectivity(serverUrl);
+    const result = await checkConnectivity(url);
     setConnectivity(result);
     trigger('light');
   };
@@ -56,7 +61,12 @@ const Login = () => {
     setIsLoading(true);
     try {
       if (showServerField && serverUrl) {
-        await storageSet('jarvis_server_url', serverUrl.replace(/\/+$/, ''));
+        let normalizedUrl = serverUrl.trim();
+        if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+          normalizedUrl = 'http://' + normalizedUrl;
+        }
+        normalizedUrl = normalizedUrl.replace(/\/+$/, '');
+        await storageSet('jarvis_server_url', normalizedUrl);
       }
       await login({ username, password });
       await storageSet('jarvis_last_username', username);
@@ -119,6 +129,16 @@ const Login = () => {
           <h1 className="text-3xl font-bold text-white tracking-tight">Jarvis OS</h1>
           <p className="text-slate-400 mt-2">Family AI Home Operating System</p>
         </div>
+
+        {initError && (
+          <motion.div 
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2 mb-6"
+          >
+            <AlertCircle size={16} /> {initError}
+          </motion.div>
+        )}
 
         {showBiometricOption && (
           <div className="flex flex-col items-center mb-6">

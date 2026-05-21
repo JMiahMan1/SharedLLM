@@ -19,7 +19,7 @@ interface LocationContextValue extends LocationState {
   stopTracking: () => void;
 }
 
-const LocationContext = createContext<LocationContextValue | null>(null);
+export const LocationContext = createContext<LocationContextValue | null>(null);
 
 const SPEED_THRESHOLD_MPH = 15;
 const GEOFENCE_RADIUS_M = 100;
@@ -52,8 +52,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null) => {
     try {
       const token = await storageGet('jarvis_api_key');
-      if (!token) return;
-      await fetch('/api/identity/users/location', {
+      const serverUrl = await storageGet('jarvis_server_url');
+      if (!token || !serverUrl) return;
+      await fetch(`${serverUrl}/api/identity/users/location`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ latitude: lat, longitude: lng, accuracy, speed, timestamp: Date.now() }),
@@ -143,4 +144,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export { useLocation, useBackgroundLocation } from './LocationContext.types';
+export function useLocation() {
+  const ctx = useContext(LocationContext);
+  if (!ctx) throw new Error('useLocation must be used within a LocationProvider');
+  return ctx;
+}
+
+export function useBackgroundLocation() {
+  return useLocation();
+}

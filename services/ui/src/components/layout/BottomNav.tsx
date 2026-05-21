@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Mic, Music, Radio, Settings } from 'lucide-react';
+import { Home, MessageSquare, Music, Settings, Shield } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -9,27 +9,28 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const allNavItems = [
-  { icon: Home, label: 'Home', path: '/', roles: ['admin', 'user', 'child'] },
-  { icon: Mic, label: 'Intercom', path: '/communication', roles: ['admin', 'user', 'child'] },
-  { icon: Music, label: 'Media', path: '/media', roles: ['admin', 'user', 'child'] },
-  { icon: Radio, label: 'Remote', path: '/remote', roles: ['admin', 'user'] },
-  { icon: Settings, label: 'Settings', path: '/settings', roles: ['admin', 'user'] },
-];
-
 const BottomNav = () => {
   const { trigger } = useHaptics();
   const { user } = useAuth();
 
   const role = user?.is_admin ? 'admin' : (user?.role || 'user');
-  const navItems = allNavItems.filter((item) => item.roles.includes(role));
+
+  const navItems = [
+    { icon: Home, label: 'Home', path: '/', roles: ['admin', 'user', 'child'] },
+    { icon: MessageSquare, label: 'Chat', path: '/communication', roles: ['admin', 'user', 'child'] },
+    { icon: Music, label: 'Media', path: '/media', roles: ['admin', 'user', 'child'] },
+    ...(role === 'admin'
+      ? [{ icon: Shield, label: 'Admin', path: '/admin', roles: ['admin'] as const }]
+      : [{ icon: Settings, label: 'Settings', path: '/settings', roles: ['user'] as const }]
+    ),
+  ];
 
   const handleTap = () => {
     trigger('light');
   };
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 glass-panel border-t border-white/10 safe-area-bottom">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 glass-panel border-t border-white/10" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       <div className="flex items-center justify-around h-16">
         {navItems.map((item) => (
           <NavLink

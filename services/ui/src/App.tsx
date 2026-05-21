@@ -25,7 +25,7 @@ import { Toaster } from 'react-hot-toast';
 const queryClient = new QueryClient();
 
 const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { children: React.ReactNode, requireAdmin?: boolean, isMobile?: boolean }) => {
-  const { token, user, isLoading } = useAuth();
+  const { token, user, isLoading, initError } = useAuth();
   
   if (isLoading) return (
     <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
@@ -38,7 +38,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
     </div>
   );
   
-  if (!token) return <Navigate to="/login" replace />;
+  if (initError || !token) return <Navigate to="/login" replace />;
   
   if (requireAdmin && !user?.is_admin) {
     console.warn("RBAC Violation: Admin required for this route.");

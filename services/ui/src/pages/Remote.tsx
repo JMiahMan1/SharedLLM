@@ -1,31 +1,33 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Power, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home as HomeIcon, Menu, ChevronLeft, Volume2, VolumeX, Tv } from 'lucide-react';
+import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
-
-interface MediaTarget {
-  id: string;
-  name: string;
-  room: string;
-  brand: 'roku' | 'webos' | 'samsung' | 'cast';
-  online: boolean;
-}
-
-const MOCK_TARGETS: MediaTarget[] = [
-  { id: 'living_tv', name: 'Living Room TV', room: 'Living Room', brand: 'roku', online: true },
-  { id: 'bedroom_tv', name: 'Master Bed TV', room: 'Master Bed', brand: 'webos', online: true },
-  { id: 'family_tv', name: 'Family Room TV', room: 'Family Room', brand: 'samsung', online: false },
-];
 
 const Remote = () => {
   const { trigger } = useHaptics();
-  const [selectedTarget, setSelectedTarget] = useState<string>('living_tv');
+  const [selectedTarget, setSelectedTarget] = useState<string>('');
   const [volume, setVolume] = useState(50);
   const [muted, setMuted] = useState(false);
   const [powerOn, setPowerOn] = useState(true);
 
-  const currentTarget = MOCK_TARGETS.find((t) => t.id === selectedTarget);
+  const { data: entities = [] } = useQuery({
+    queryKey: ['media-entities'],
+    queryFn: () => api.getEntities(),
+    select: (data) => data.filter((e) => e.domain === 'media_player'),
+  });
 
-  const handleDpad = (key: string) => {
+  const mediaTargets = entities.map((entity) => ({
+    id: entity.entity_id,
+    name: entity.friendly_name || entity.entity_id,
+    room: entity.entity_id.split('.')[1]?.replace(/_/g, ' ') || 'Unknown',
+    brand: 'cast' as const,
+    online: entity.state !== 'unavailable' && entity.state !== 'unknown',
+  }));
+
+  const currentTarget = mediaTargets.find((t) => t.id === selectedTarget);
+
+  const handleDpad = () => {
     trigger('light');
   };
 
@@ -51,7 +53,7 @@ const Remote = () => {
       <div className="glass-panel rounded-2xl p-4">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Media Targets</h2>
         <div className="flex gap-3 overflow-x-auto pb-2">
-          {MOCK_TARGETS.map((target) => (
+          {mediaTargets.map((target) => (
             <button
               key={target.id}
               onClick={() => { trigger('light'); setSelectedTarget(target.id); }}
@@ -64,10 +66,13 @@ const Remote = () => {
               <Tv size={16} className="text-cyan-400 shrink-0" />
               <div className="text-left min-w-0">
                 <p className="text-white text-sm font-medium truncate">{target.name}</p>
-                <p className="text-xs text-slate-400 uppercase">{target.brand}</p>
+                <p className="text-xs text-slate-400 uppercase">{target.room}</p>
               </div>
             </button>
           ))}
+          {mediaTargets.length === 0 && (
+            <p className="text-sm text-slate-500 py-4">No media players found. Check Home Assistant connection.</p>
+          )}
         </div>
       </div>
 
@@ -191,6 +196,12 @@ const Remote = () => {
       {currentTarget && !currentTarget.online && (
         <div className="glass-panel rounded-2xl p-8 text-center">
           <p className="text-slate-400">{currentTarget.name} is offline</p>
+        </div>
+      )}
+
+      {!selectedTarget && mediaTargets.length > 0 && (
+        <div className="glass-panel rounded-2xl p-8 text-center">
+          <p className="text-slate-400">Select a media player to control</p>
         </div>
       )}
     </div>
