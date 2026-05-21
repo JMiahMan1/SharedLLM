@@ -29,7 +29,12 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
   
   if (isLoading) return (
     <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
-      <div className="animate-pulse text-indigo-500 font-bold text-xl">Initializing Jarvis OS...</div>
+      <div className="flex flex-col items-center gap-4">
+        <div className="animate-pulse text-indigo-500 font-bold text-xl">Initializing Jarvis OS...</div>
+        <div className="w-48 h-1 bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-full bg-indigo-500 animate-[loading_1.5s_ease-in-out_infinite]" style={{width: '30%'}}></div>
+        </div>
+      </div>
     </div>
   );
   

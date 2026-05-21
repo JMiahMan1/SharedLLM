@@ -123,6 +123,25 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
             log.error(f"[ha_client] get_state({entity_id}) failed: {type(e).__name__}: {e}")
             return None
 
+async def get_all_states(ha_url: str, ha_token: str) -> list:
+    """Retrieve all entity states from HA."""
+    if not ha_url:
+        log.error("[ha_client] ha_url is None or empty. Cannot get states.")
+        return []
+        
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    url = f"{ha_url.rstrip('/')}/api/states"
+    
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            log.debug(f"[ha_client] GET {url}")
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            log.error(f"[ha_client] get_all_states failed: {type(e).__name__}: {e}")
+            return []
+
 async def get_config(ha_url: str, ha_token: str) -> dict:
     """Retrieve the core configuration from HA."""
     if not ha_url:
