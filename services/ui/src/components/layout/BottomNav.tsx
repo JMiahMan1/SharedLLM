@@ -3,21 +3,26 @@ import { Home, Mic, Music, Radio, Settings } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useHaptics } from '../../hooks/useHaptics';
+import { useAuth } from '../../context/AuthContext';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const navItems = [
-  { icon: Home, label: 'Home', path: '/' },
-  { icon: Mic, label: 'Intercom', path: '/communication' },
-  { icon: Music, label: 'Media', path: '/' },
-  { icon: Radio, label: 'Remote', path: '/' },
-  { icon: Settings, label: 'Settings', path: '/identity' },
+const allNavItems = [
+  { icon: Home, label: 'Home', path: '/', roles: ['admin', 'user', 'child'] },
+  { icon: Mic, label: 'Intercom', path: '/communication', roles: ['admin', 'user', 'child'] },
+  { icon: Music, label: 'Media', path: '/media', roles: ['admin', 'user', 'child'] },
+  { icon: Radio, label: 'Remote', path: '/remote', roles: ['admin', 'user'] },
+  { icon: Settings, label: 'Settings', path: '/settings', roles: ['admin', 'user'] },
 ];
 
 const BottomNav = () => {
   const { trigger } = useHaptics();
+  const { user } = useAuth();
+
+  const role = user?.is_admin ? 'admin' : (user?.role || 'user');
+  const navItems = allNavItems.filter((item) => item.roles.includes(role));
 
   const handleTap = () => {
     trigger('light');

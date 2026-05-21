@@ -26,6 +26,14 @@ body { font-family: 'Outfit', 'Inter', sans-serif; }
   .glass-button {
     @apply bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/30 rounded-lg px-4 py-2 transition-all duration-300 flex items-center justify-center gap-2;
   }
+
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
 }
 
 /* Custom scrollbar */

@@ -56,7 +56,7 @@ export default function RavenAuditLog({ isOpen, onClose }: RavenAuditLogProps) {
           </div>
         );
       }
-    } catch (e) {
+    } catch {
       // Not JSON, just return raw string
     }
     return <div>{logData}</div>;

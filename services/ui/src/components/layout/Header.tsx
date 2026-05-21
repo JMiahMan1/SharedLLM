@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Search, Bell, LogOut, Trash2 } from 'lucide-react';
+import { Search, Bell, LogOut, Trash2, Satellite } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { LogEntry } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useLocation } from '../../context/LocationContext';
 
 const LEVEL_COLOR: Record<string, string> = {
   ERROR: 'text-red-400',
@@ -15,6 +16,7 @@ const LEVEL_COLOR: Record<string, string> = {
 
 const Header = () => {
   const { user, logout } = useAuth();
+  const { isTracking } = useLocation();
   
   const { data: health, isLoading, error } = useQuery({
     queryKey: ['health'],
@@ -53,8 +55,8 @@ const Header = () => {
   const hasErrors = notifications.some(n => n.level === 'ERROR' || n.level === 'WARNING' || n.level === 'WARN');
 
   return (
-    <header className="h-20 flex items-center justify-between px-4 md:px-8 bg-transparent">
-      <div className="hidden md:flex flex-1 max-w-2xl relative group">
+    <header className="h-14 md:h-20 flex items-center justify-between px-4 md:px-8 bg-transparent">
+      <div className="flex-1 max-w-2xl relative group md:flex hidden">
         <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-purple-400 transition-colors">
           <Search size={20} />
         </div>
@@ -66,6 +68,11 @@ const Header = () => {
       </div>
 
       <div className="flex items-center gap-3 md:gap-6 ml-auto md:ml-0">
+        <div className="hidden md:flex items-center gap-1.5 p-2 rounded-lg" title={isTracking ? 'Location tracking active' : 'Location tracking paused'}>
+          <Satellite size={16} className={isTracking ? 'text-green-400' : 'text-slate-600'} />
+          <div className={`w-1.5 h-1.5 rounded-full ${isTracking ? 'bg-green-400' : 'bg-red-500'}`} />
+        </div>
+
         <div className="hidden sm:flex items-center gap-2 glass-panel px-4 py-2 text-sm">
           <div className={`w-2 h-2 rounded-full ${statusColor} animate-pulse`} />
           <span className="text-slate-300">Pulse:</span>

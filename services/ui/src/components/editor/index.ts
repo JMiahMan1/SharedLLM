@@ -1,2 +1,3 @@
-export { MonacoEditor, detectLanguage } from './MonacoEditor';
-export type { EditorLanguage } from './MonacoEditor';
+export { MonacoEditor } from './MonacoEditor';
+export { detectLanguage } from '../../lib/editorLanguages';
+export type { EditorLanguage } from '../../lib/editorLanguages';

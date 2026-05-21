@@ -1,19 +1,9 @@
 import { useRef, useEffect, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
+import type { EditorLanguage } from '../../lib/editorLanguages';
 
-export type EditorLanguage =
-  | 'markdown'
-  | 'python'
-  | 'javascript'
-  | 'typescript'
-  | 'typescriptreact'
-  | 'json'
-  | 'yaml'
-  | 'html'
-  | 'css'
-  | 'shell'
-  | 'plaintext';
+export type { EditorLanguage } from '../../lib/editorLanguages';
 
 interface MonacoEditorProps {
   value: string;
@@ -25,43 +15,7 @@ interface MonacoEditorProps {
   minimap?: boolean;
   wordWrap?: 'on' | 'off';
   fontSize?: number;
-  showPreview?: boolean;
-  onEditorMount?: (editor: any) => void;
-}
-
-const LANGUAGE_MAP: Record<EditorLanguage, string> = {
-  markdown: 'markdown',
-  python: 'python',
-  javascript: 'javascript',
-  typescript: 'typescript',
-  typescriptreact: 'typescriptreact',
-  json: 'json',
-  yaml: 'yaml',
-  html: 'html',
-  css: 'css',
-  shell: 'shell',
-  plaintext: 'plaintext',
-};
-
-const LANGUAGE_BY_EXT: Record<string, EditorLanguage> = {
-  '.py': 'python',
-  '.js': 'javascript',
-  '.jsx': 'javascript',
-  '.ts': 'typescript',
-  '.tsx': 'typescriptreact',
-  '.json': 'json',
-  '.yaml': 'yaml',
-  '.yml': 'yaml',
-  '.html': 'html',
-  '.css': 'css',
-  '.md': 'markdown',
-  '.sh': 'shell',
-  '.bash': 'shell',
-};
-
-export function detectLanguage(filename: string): EditorLanguage {
-  const ext = '.' + filename.split('.').pop()?.toLowerCase();
-  return LANGUAGE_BY_EXT[ext] || 'plaintext';
+  onEditorMount?: (editor: unknown) => void;
 }
 
 export const MonacoEditor = ({
@@ -74,12 +28,11 @@ export const MonacoEditor = ({
   minimap = false,
   wordWrap = 'on',
   fontSize = 14,
-  showPreview = false,
   onEditorMount,
 }: MonacoEditorProps) => {
-  const editorRef = useRef<any>(null);
+  const editorRef = useRef<unknown>(null);
 
-  const handleEditorDidMount = useCallback((editor: any) => {
+  const handleEditorDidMount = useCallback((editor: unknown) => {
     editorRef.current = editor;
     onEditorMount?.(editor);
   }, [onEditorMount]);
