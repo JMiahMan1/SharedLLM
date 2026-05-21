@@ -8,6 +8,8 @@ import signal
 import socket
 import struct
 import threading
+import tempfile
+import shutil
 from urllib.request import Request, urlopen
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
@@ -17,6 +19,8 @@ DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "53"))
 UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "127.0.0.11")
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "10"))
 HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", "2"))
+HOSTS_FILE = os.environ.get("HOSTS_FILE", "/etc/hosts")
+HOSTS_SYNC = os.environ.get("HOSTS_SYNC", "true").lower() == "true"
 
 # Default health check ports by hostname pattern
 DEFAULT_HEALTH_PORTS = {
@@ -102,6 +106,7 @@ def health_checker():
         
         if changed:
             _print_health_summary()
+            _sync_hosts_file()
         
         for _ in range(HEALTH_CHECK_INTERVAL):
             if not running:
@@ -120,6 +125,78 @@ def _print_health_summary():
         dead_ips = [ip for ip in ips if not status.get((hostname, ip), False)]
         if alive_ips:
             print(f"[dns-sync] DNS {hostname}: alive={alive_ips}, dead={dead_ips}", flush=True)
+
+def _sync_hosts_file():
+    """Write alive IPs to /etc/hosts so host-networked services resolve .local domains."""
+    if not HOSTS_SYNC:
+        return
+    
+    try:
+        with dns_lock:
+            records = dict(dns_records)
+        with health_lock:
+            status = dict(health_status)
+        
+        desired = {}
+        for hostname, ips in records.items():
+            alive = [ip for ip in ips if status.get((hostname, ip), False)]
+            if alive:
+                desired[hostname] = alive[0]
+        
+        current = {}
+        try:
+            with open(HOSTS_FILE, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = line.split()
+                        if len(parts) >= 2 and parts[1].endswith('.local'):
+                            current[parts[1]] = parts[0]
+        except FileNotFoundError:
+            pass
+        
+        if current == desired:
+            return
+        
+        print(f"[dns-sync] Updating {HOSTS_FILE}: {desired}", flush=True)
+        
+        try:
+            with open(HOSTS_FILE, 'r') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            lines = []
+        
+        new_lines = []
+        seen_local = set()
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#'):
+                parts = stripped.split()
+                if len(parts) >= 2 and parts[1].endswith('.local'):
+                    hostname = parts[1]
+                    seen_local.add(hostname)
+                    if hostname in desired:
+                        new_lines.append(f"{desired[hostname]} {hostname}\n")
+                    continue
+            new_lines.append(line)
+        
+        for hostname, ip in desired.items():
+            if hostname not in seen_local:
+                new_lines.append(f"{ip} {hostname}\n")
+        
+        fd, tmp_path = tempfile.mkstemp(dir='/etc')
+        try:
+            with os.fdopen(fd, 'w') as f:
+                f.writelines(new_lines)
+            shutil.move(tmp_path, HOSTS_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except Exception as e:
+        print(f"[dns-sync] Failed to update {HOSTS_FILE}: {e}", flush=True)
 
 def get_alive_ips(hostname):
     """Get list of alive IPs for a hostname. Only returns alive IPs."""
