@@ -264,9 +264,10 @@ export const apiClient = axios.create({
 apiClient.interceptors.request.use((config) => {
   if (Capacitor.isNativePlatform()) {
     const serverUrl = storageGetSync('jarvis_server_url');
-    if (serverUrl && !config.baseURL) {
+    if (serverUrl) {
       config.baseURL = serverUrl;
     }
+    console.log('API request baseURL:', config.baseURL, 'url:', config.url);
   }
   const token = storageGetSync('jarvis_api_key');
   const internalSecret = storageGetSync('internal_secret');

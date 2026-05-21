@@ -332,22 +332,25 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
     
     # Find MA player linked to DLNA renderer or Samsung TV entity
     ma_entity = None
+    dlna_entity = None
     try:
         all_states = await get_all_states(ha_url, ha_token)
         for s in all_states:
             eid = s.get("entity_id", "")
             s_attrs = s.get("attributes", {})
-            # Match MA players where active_queue matches the TV entity or DLNA entity
             active_q = s_attrs.get("active_queue", "")
+            # Match MA players where active_queue matches the TV entity
             if (s_attrs.get("app_id") == "music_assistant" and 
                 s_attrs.get("mass_player_type") == "player" and
-                active_q and 
-                ("loft" in active_q.lower() or "samsung" in active_q.lower()) and
+                active_q == entity_id and
                 eid != entity_id):
                 ma_entity = eid
                 break
+            # Also find DLNA renderer (no app_id) linked via active_queue
+            if active_q == entity_id and not s_attrs.get("app_id"):
+                dlna_entity = eid
     except Exception as e:
-        log.warning(f"[announce.samsung] Failed to find MA entity: {e}")
+        log.warning(f"[announce.samsung] Failed to find MA/DLNA entity: {e}")
     
     play_target = ma_entity or entity_id
     if ma_entity:
@@ -374,27 +377,12 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
             log.warning(f"[announce.samsung] play_media accepted but state={v_state}, media={v_media}")
     
     # Fallback: try DLNA renderer directly
-    if ma_entity:
-        dlna_entity = None
-        try:
-            for s in all_states:
-                eid = s.get("entity_id", "")
-                s_attrs = s.get("attributes", {})
-                if (eid.startswith("media_player.tv_") and 
-                    "samsung" in eid.lower() and 
-                    eid != entity_id and
-                    not s_attrs.get("app_id")):
-                    dlna_entity = eid
-                    break
-        except:
-            pass
-        
-        if dlna_entity:
-            log.info(f"[announce.samsung] MA failed, trying DLNA renderer {dlna_entity}")
-            result = await call_service(ha_url, ha_token, "media_player", "play_media", dlna_entity, {
-                "media_content_id": media_url,
-                "media_content_type": "music"
-            })
+    if ma_entity and dlna_entity:
+        log.info(f"[announce.samsung] MA failed, trying DLNA renderer {dlna_entity}")
+        result = await call_service(ha_url, ha_token, "media_player", "play_media", dlna_entity, {
+            "media_content_id": media_url,
+            "media_content_type": "music"
+        })
     
     return result
 

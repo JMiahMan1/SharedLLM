@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, Lock, User, AlertCircle, Fingerprint, Server } from 'lucide-react';
+import { Shield, Lock, User, AlertCircle, Fingerprint, Server, WifiOff, Wifi } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../context/AuthContext';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import { useHaptics } from '../hooks/useHaptics';
 import { useNavigate } from 'react-router-dom';
 import { storageGet, storageSet } from '../lib/storage';
+import { checkConnectivity } from '../lib/connectivity';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -15,6 +16,7 @@ const Login = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [savedUsername, setSavedUsername] = useState<string | null>(null);
+  const [connectivity, setConnectivity] = useState<{ ok: boolean; latency?: number; error?: string } | null>(null);
   const { login } = useAuth();
   const { isNative, isAvailable, checkAvailability, authenticate } = useBiometricAuth();
   const { trigger } = useHaptics();
@@ -30,13 +32,23 @@ const Login = () => {
       }
       if (Capacitor.isNativePlatform()) {
         const savedServer = await storageGet('jarvis_server_url');
-        if (savedServer) setServerUrl(savedServer);
-        else setServerUrl('https://jarvis.sumemail.com');
+        const url = savedServer || 'https://jarvis.sumemail.com';
+        setServerUrl(url);
+        const result = await checkConnectivity(url);
+        setConnectivity(result);
         await checkAvailability();
       }
     };
     loadSaved();
   }, [checkAvailability]);
+
+  const handleTestConnection = async () => {
+    if (!serverUrl) return;
+    setConnectivity({ ok: false, error: 'Testing...' });
+    const result = await checkConnectivity(serverUrl);
+    setConnectivity(result);
+    trigger('light');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -135,17 +147,39 @@ const Login = () => {
             {showServerField && (
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Server URL</label>
-                <div className="relative">
-                  <Server className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                  <input 
-                    type="url"
-                    value={serverUrl}
-                    onChange={(e) => setServerUrl(e.target.value)}
-                    className="glass-input w-full pl-10"
-                    placeholder="http://192.168.1.x:8000"
-                    required
-                  />
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Server className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                    <input 
+                      type="url"
+                      value={serverUrl}
+                      onChange={(e) => setServerUrl(e.target.value)}
+                      className="glass-input w-full pl-10"
+                      placeholder="https://jarvis.sumemail.com"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTestConnection}
+                    className="glass-button px-3 min-w-[48px]"
+                    title="Test connection"
+                  >
+                    {connectivity?.ok ? (
+                      <Wifi size={18} className="text-green-400" />
+                    ) : connectivity?.error === 'Testing...' ? (
+                      <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <WifiOff size={18} className="text-red-400" />
+                    )}
+                  </button>
                 </div>
+                {connectivity && connectivity.error && connectivity.error !== 'Testing...' && (
+                  <p className="text-xs text-red-400 mt-1">{connectivity.error}</p>
+                )}
+                {connectivity?.ok && (
+                  <p className="text-xs text-green-400 mt-1">Connected ({connectivity.latency}ms)</p>
+                )}
               </div>
             )}
 
