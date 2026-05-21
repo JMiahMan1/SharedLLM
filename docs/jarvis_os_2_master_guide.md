@@ -1343,8 +1343,21 @@ To find physical device IPs for direct API and remote control calls, a **10-stra
 #### Persistent SQLite Device Registry (`device_registry.py`)
 Discovered devices are stored in a persistent `aiosqlite` SQLite database (`/data/device_registry.db`, WAL mode) keyed by `entity_id`. Schema captures: `ip`, `mac`, `hostname`, `integration`, `friendly_name`, `discovery_method`, `metadata` (JSON), `last_seen`, `last_verified`, and `ip_stale` flag. On connection errors, the registry marks IPs as stale (`invalidate_device()`), triggering re-discovery on next access.
 
-#### Identity as the Sole Credential Source (`.env` is Seed-Only)
-A critical architectural formalization: all services (especially `execution`) now resolve HA credentials at runtime via `resolve_internal_user()` against the Identity service. The `.env` file is only read **once** during initial seed (`POST /api/admin/seed`). No service reads `.env` in production. Tests use `PYTEST_CURRENT_TEST` placeholders, never `.env`.
+#### Identity as the Sole Configuration Source (`.env` is Seed-Only)
+
+A critical architectural formalization: **no service reads `.env` for runtime configuration.** The configuration lifecycle is:
+
+1. **Bootstrap Phase:** Only `INTERNAL_SECRET` and `IDENTITY_SVC_URL` are read from the environment at startup. These are the minimum required to contact Identity.
+2. **Runtime Phase:** `resolve_runtime_config()` in `services/config.py` fetches all other settings from `GET {IDENTITY_SVC_URL}/api/settings`. This includes `FERNET_KEY`, `OLLAMA_URL`, `HA_URL`, `HA_TOKEN`, model mappings, thresholds, integration URLs, and more.
+3. **Seeding:** The `.env` file is only used during initial setup (`POST /api/admin/seed`) to populate Identity's database. After seeding, `.env` is never consulted again.
+
+**Enforcement:**
+- `services/config.py` declares all runtime variables with empty-string defaults
+- `resolve_runtime_config()` maps Identity setting keys to module-level variables
+- Tests use `PYTEST_CURRENT_TEST` placeholders, never `.env`
+- Adding a new runtime variable requires: (a) adding it to `config.py` with a default, (b) adding it to the `settings_map` in `resolve_runtime_config()`, (c) adding it to Identity's settings UI or API
+- See `docs/CONFIG.md` for the complete reference
+- See `services/tests/test_config_resolution.py` for enforcement tests
 
 ---
 

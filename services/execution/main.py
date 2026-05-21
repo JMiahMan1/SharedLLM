@@ -27,7 +27,7 @@ try:
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
           SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest
     )
-    from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
+    from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
     from handlers import docker_logs as docker_logs_handler
     from handlers import git as git_handler
     from handlers import deployment as deployment_handler
@@ -46,7 +46,7 @@ except ImportError:
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
             SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, HAConfigRequest
         )
-        from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite
+        from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
         from .handlers import docker_logs as docker_logs_handler
         from .handlers import git as git_handler
         from .handlers import deployment as deployment_handler
@@ -64,7 +64,7 @@ except ImportError:
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
             SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, HAConfigRequest
         )
-        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video
+        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, groups
         from execution.handlers import docker_logs as docker_logs_handler
         from execution.handlers import git as git_handler
         from execution.handlers import deployment as deployment_handler
@@ -78,7 +78,7 @@ log = logging.getLogger("execution")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import INTERNAL_SECRET, IDENTITY_SVC_URL
+from config import INTERNAL_SECRET, IDENTITY_SVC_URL, OLLAMA_URL
 
 async def resolve_internal_user(user_id: str) -> Optional[Dict[str, Any]]:
     """Query Identity Service for full user credentials using internal secret."""
@@ -113,6 +113,10 @@ async def _check_internal_secret(x_internal_secret: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Resolve runtime config from Identity service
+    from config import resolve_runtime_config
+    await resolve_runtime_config()
+    
     log.info("Execution Bridge starting up.")
     # Auto-download Kokoro models if missing
     from config import MODELS_DIR
@@ -1586,6 +1590,45 @@ async def execute_media_status(req: MediaStatusRequest):
     ctx = req.user_context
     log.info(f"[media/status] user={ctx.user} area={req.area} entity={req.entity_id}")
     return await media_status_handler.handle_media_status(req)
+
+
+@app.get("/execute/media/music-assistant/playlists")
+async def get_ma_playlists():
+    """Get Music Assistant playlists."""
+    try:
+        from config import HA_URL, HA_TOKEN
+        from handlers.mass_client import get_playlists
+        playlists = await get_playlists(HA_URL, HA_TOKEN)
+        return {"status": "SUCCESS", "playlists": playlists}
+    except Exception as e:
+        log.error(f"[ma/playlists] Error: {e}")
+        return {"status": "SUCCESS", "playlists": []}
+
+
+@app.get("/execute/media/music-assistant/recent")
+async def get_ma_recent():
+    """Get Music Assistant recently played items."""
+    try:
+        from config import HA_URL, HA_TOKEN
+        from handlers.mass_client import get_recent
+        recent = await get_recent(HA_URL, HA_TOKEN)
+        return {"status": "SUCCESS", "recent": recent}
+    except Exception as e:
+        log.error(f"[ma/recent] Error: {e}")
+        return {"status": "SUCCESS", "recent": []}
+
+
+@app.get("/execute/audiobookshelf")
+async def handle_audiobookshelf_get(action: str = "last_played"):
+    """Handle Audiobookshelf GET requests."""
+    try:
+        from handlers.audiobookshelf import handle_audiobookshelf
+        from schemas import AudiobookshelfRequest, UserContext
+        req = AudiobookshelfRequest(action=action, user_context=UserContext(user="default"))
+        return await handle_audiobookshelf(req)
+    except Exception as e:
+        log.error(f"[abs] Error: {e}")
+        return {"status": "SUCCESS", "books": [], "libraries": []}
 
 @app.post("/execute/logs", response_model=ExecutionResult)
 async def execute_execution_logs(req: ExecutionLogRequest):

@@ -895,4 +895,83 @@ export const api = {
     const resp = await apiClient.get('/api/intercom/config');
     return resp.data;
   },
+
+  async mediaPlay(payload: {
+    entity_id?: string;
+    device_name?: string;
+    query?: string;
+    media_type?: string;
+    media_content_id?: string;
+    enqueue?: string;
+    volume?: number;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/media/play', payload);
+    return resp.data;
+  },
+
+  async mediaTransport(payload: {
+    entity_id?: string;
+    command: string;
+    volume_level?: number;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/media/transport', payload);
+    return resp.data;
+  },
+
+  async mediaStatus(): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/media/status', {});
+    return resp.data;
+  },
+
+  async getMusicAssistantPlaylists(): Promise<{ status: string; playlists: Array<{ name: string; items: number; uri: string }> }> {
+    const resp = await apiClient.get('/api/media/music-assistant/playlists');
+    return resp.data;
+  },
+
+  async getMusicAssistantRecent(): Promise<{ status: string; recent: Array<{ name: string; artist: string; uri: string; last_played: string }> }> {
+    const resp = await apiClient.get('/api/media/music-assistant/recent');
+    return resp.data;
+  },
+
+  async getAudiobookshelfLibraries(): Promise<{ status: string; libraries: Array<{ id: string; name: string; media_type: string }> }> {
+    const resp = await apiClient.get('/api/media/audiobookshelf/libraries');
+    return resp.data;
+  },
+
+  async getAudiobookshelfLastPlayed(): Promise<{ status: string; books: Array<{ id: string; title: string; author: string; progress: number; last_played: string; library_id: string }> }> {
+    const resp = await apiClient.get('/api/media/audiobookshelf/last-played');
+    return resp.data;
+  },
+
+  async playAudiobook(payload: {
+    book_id: string;
+    entity_id?: string;
+    device_name?: string;
+    resume?: boolean;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/audiobookshelf', {
+      action: 'play',
+      book_id: payload.book_id,
+      entity_id: payload.entity_id,
+      device_name: payload.device_name,
+      resume: payload.resume ?? true,
+    });
+    return resp.data;
+  },
+
+  async playPlaylist(payload: {
+    playlist_uri: string;
+    entity_id?: string;
+    device_name?: string;
+    volume?: number;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/media/play', {
+      query: payload.playlist_uri,
+      media_type: 'music',
+      entity_id: payload.entity_id,
+      device_name: payload.device_name,
+      volume: payload.volume,
+    });
+    return resp.data;
+  },
 };

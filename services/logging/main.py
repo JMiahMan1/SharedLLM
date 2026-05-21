@@ -42,6 +42,10 @@ async def retention_cleanup_task():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Resolve runtime config from Identity service
+    from config import resolve_runtime_config
+    await resolve_runtime_config()
+    
     py_logging.info(f"[Logging] Redis backend initialized (retention={LOG_RETENTION_DAYS}d, max_entries={LOG_MAX_ENTRIES})")
     task = asyncio.create_task(retention_cleanup_task())
     yield
