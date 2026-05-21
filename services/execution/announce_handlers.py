@@ -307,13 +307,17 @@ async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_
     })
 
 async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
-    """Samsung Tizen TV: wake, set volume, then play TTS announcement via MA player over DLNA."""
+    """Samsung Tizen TV: wake, set volume, play TTS via MA player over DLNA, then restore state."""
     from ha_client import call_service, get_state, get_all_states
     log.info(f"[announce.samsung] Waking {entity_id} for announcement")
     
+    # Capture initial state for restoration
+    initial_state = state
+    was_off = initial_state in ("off", "unavailable", "standby")
+    
     # Power on if needed
-    if state in ("off", "unavailable", "standby"):
-        log.info(f"[announce.samsung] TV is {state}, turning on...")
+    if was_off:
+        log.info(f"[announce.samsung] TV is {initial_state}, turning on...")
         await call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
         await asyncio.sleep(15)  # Samsung boot time
     
@@ -363,6 +367,7 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
         "media_id": media_url
     })
     
+    playback_ok = False
     if result.get("ok"):
         # Verify playback started or completed
         await asyncio.sleep(2)
@@ -373,16 +378,26 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
             v_media = v_attrs.get("media_content_id", "")
             if v_state in ("playing", "idle") and (media_url in v_media or v_state == "idle"):
                 log.info(f"[announce.samsung] Verified announcement on {play_target} (state={v_state})")
-                return result
-            log.warning(f"[announce.samsung] play_media accepted but state={v_state}, media={v_media}")
+                playback_ok = True
+            else:
+                log.warning(f"[announce.samsung] play_media accepted but state={v_state}, media={v_media}")
     
     # Fallback: try DLNA renderer directly
-    if ma_entity and dlna_entity:
+    if not playback_ok and ma_entity and dlna_entity:
         log.info(f"[announce.samsung] MA failed, trying DLNA renderer {dlna_entity}")
         result = await call_service(ha_url, ha_token, "media_player", "play_media", dlna_entity, {
             "media_content_id": media_url,
             "media_content_type": "music"
         })
+        if result.get("ok"):
+            playback_ok = True
+    
+    # Wait for announcement to finish (estimate ~3-5s for TTS) before restoring state
+    if was_off and playback_ok:
+        log.info("[announce.samsung] Waiting for announcement to complete before restoring TV to off...")
+        await asyncio.sleep(5)
+        log.info(f"[announce.samsung] Restoring TV to off state (was {initial_state})")
+        await call_service(ha_url, ha_token, "media_player", "turn_off", entity_id, {})
     
     return result
 
