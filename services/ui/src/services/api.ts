@@ -2,6 +2,13 @@ import axios from 'axios';
 import { storageGetSync } from '../lib/storage';
 import { Capacitor } from '@capacitor/core';
 
+function getBaseUrl(): string {
+  if (Capacitor.isNativePlatform()) {
+    return 'http://localhost';
+  }
+  return window.location.origin;
+}
+
 export interface HealthStatus {
   status: 'READY' | 'NOT_READY';
   services: Record<string, string>;
@@ -429,6 +436,69 @@ export const api = {
 
   async removeDnsEntry(hostname: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.delete(`/api/admin/dns/${hostname}`);
+    return resp.data;
+  },
+
+  // Presence
+  async getUserPresence(userId: string): Promise<{ status: string; user_id: string; presence: any }> {
+    const resp = await apiClient.get(`/api/presence/${userId}`);
+    return resp.data;
+  },
+
+  async getAllPresence(): Promise<{ status: string; presence: Record<string, any> }> {
+    const resp = await apiClient.get('/api/presence/all');
+    return resp.data;
+  },
+
+  async getPresenceRooms(): Promise<{ status: string; rooms: string[] }> {
+    const resp = await apiClient.get('/api/presence/rooms');
+    return resp.data;
+  },
+
+  // Location
+  async updateUserLocation(userId: string, location: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    speed?: number;
+    bearing?: number;
+    timestamp?: number;
+  }): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/users/${userId}/location`, location);
+    return resp.data;
+  },
+
+  async getUserLocation(userId: string): Promise<{
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    speed?: number;
+    bearing?: number;
+    timestamp?: number;
+  }> {
+    const resp = await apiClient.get(`/api/users/${userId}/location`);
+    return resp.data;
+  },
+
+  // Speech-to-Text
+  async transcribeAudio(audioBlob: Blob, model = 'base', language = 'en'): Promise<{ status: string; transcript: string }> {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'recording.wav');
+    formData.append('model', model);
+    formData.append('language', language);
+    const resp = await apiClient.post('/api/stt/transcribe', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return resp.data;
+  },
+
+  // Voice Commands
+  async executeVoiceCommand(transcript: string, userId: string, entityId?: string): Promise<{ status: string; message: string; transcript?: string }> {
+    const resp = await apiClient.post('/api/voice/command', {
+      transcript,
+      user_id: userId,
+      entity_id: entityId,
+    });
     return resp.data;
   },
 
