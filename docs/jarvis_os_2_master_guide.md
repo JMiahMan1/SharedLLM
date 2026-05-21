@@ -991,11 +991,138 @@ Four new dedicated handler files replace the old catch-all logic in `media.py`:
 | Handler | File | HA Integration | Key Service |
 | :--- | :--- | :--- | :--- |
 | **Roku** | `handlers/roku.py` | `roku` | ECP `launch/{app_id}` + Music Assistant sibling delegation |
-| **Samsung Tizen** | `handlers/samsung.py` | `samsungtv` | `samsungtv.send_key` (e.g., `KEY_POWER`, `KEY_HOME`) |
+| **Samsung Tizen** | `handlers/samsung.py` | `samsungtv` | `samsungtv.send_key`, `media_player.play_media`, WOL wake |
 | **LG WebOS** | `handlers/webos.py` | `webostv` | `webostv.command` (e.g., `HOME`, `BACK`) |
 | **Android TV** | `handlers/android_tv.py` | `androidtv_remote` | `androidtv_remote.send_command` + Cast sibling delegation for video |
 
 Each handler includes `is_<brand>_device()` for runtime platform detection via HA entity attributes (app IDs, source lists).
+
+---
+
+#### Samsung Tizen: Full Implementation Detail
+
+The Samsung handler (`handlers/samsung.py`) provides comprehensive media playback and transport control for Samsung Tizen TVs via Home Assistant's `samsungtv` integration and direct `samsungtvws` library calls.
+
+> [!IMPORTANT]
+> **Samsung Tizen TVs support URL-based media playback** via `media_player.play_media`. Unlike Roku (which requires ECP app launch + MA delegation), Samsung TVs accept direct video/audio URLs. The `samsungtvws` library provides WebSocket-based remote control, app management, and device info.
+> - **HA Integration docs:** [home-assistant.io/integrations/samsungtv](https://www.home-assistant.io/integrations/samsungtv/)
+> - **samsungtvws Python library:** [pypi.org/project/samsungtvws](https://pypi.org/project/samsungtvws/)
+> - **Samsung Tizen API reference:** Port 8001 (HTTP), Port 8002 (HTTPS/WebSocket)
+
+**Samsung Key Code Registry (built-in):**
+`KEY_HOME`, `KEY_RETURN`, `KEY_ENTER`, `KEY_PLAY`, `KEY_PAUSE`, `KEY_STOP`, `KEY_FF`, `KEY_REWIND`, `KEY_VOLUP`, `KEY_VOLDOWN`, `KEY_MUTE`, `KEY_POWER`, `KEY_UP`, `KEY_DOWN`, `KEY_LEFT`, `KEY_RIGHT`, `KEY_INFO`, `KEY_MENU`, `KEY_TOOLS`, `KEY_EXIT`, `KEY_SOURCE`, `KEY_GUIDE`, `KEY_CHUP`, `KEY_CHDOWN`, plus color keys (red/green/yellow/blue).
+
+##### Device Detection (`is_samsung_tv`)
+
+```python
+# Detection signals:
+# - app_id contains: "org.tizen.", "samsung.tv", "tizen.tv"
+# - entity_id contains: "samsungtv"
+# - Ports 8001/8002 open on device IP
+```
+
+##### Wake/Power-On (`wake_device`)
+
+```
+1. CHECK CURRENT STATE
+   If state is on/idle/playing → skip wake, return immediately
+
+2. WOL POWER-ON
+   media_player.turn_on via HA (triggers Wake-on-LAN)
+   → Requires MAC address configured in HA samsungtv integration
+
+3. BOOT WAIT
+   asyncio.sleep(15)  # Samsung TVs take ~15s to fully boot
+
+4. VERIFY
+   Re-check state → if still off/unavailable, log warning but return SUCCESS
+   (TV may still be booting)
+```
+
+##### Music Playback (`play_music`)
+
+Music on Samsung Tizen TVs flows through the gateway's `play_music()` handler in `media.py`:
+
+```
+1. MASS SEARCH (gateway-side)
+   music_assistant.search → resolves query to library:// URI
+
+2. URL PLAYBACK (Samsung handler)
+   samsung_handler.play_music(ha_url, ha_token, entity_id, uri)
+   → Calls media_player.play_media with media_content_type="audio/mpeg"
+   → Wakes TV first if off/standby
+
+3. FALLBACK
+   If MASS search returns nothing → get_library random track → play_media
+```
+
+Samsung TVs do NOT require MA sibling delegation (unlike Roku). They accept the MASS URI directly via `play_media`.
+
+##### Video Playback (`play_video`)
+
+Video on Samsung Tizen TVs is handled in `media.py:play_video()`:
+
+```
+1. YOUTUBE SEARCH
+   yt-dlp ytsearch:1 → extracts direct MP4 stream URL
+
+2. PROGRESSIVE DOWNLOAD
+   download_video_progressive() → buffers 5MB, returns control immediately
+   File served on port 8888 with HTTP Range headers
+
+3. PARALLEL WAKE + DOWNLOAD
+   wake_task = asyncio.create_task(samsung_handler.wake_device(...))
+   download_task = asyncio.create_task(download_video_progressive(...))
+   → Both run concurrently to minimize total latency
+
+4. PLAY MEDIA
+   samsung_handler.play_video(ha_url, ha_token, entity_id, stream_url, title)
+   → Calls media_player.play_media with media_content_type="video/mp4"
+   → Waits for wake to complete before sending URL
+```
+
+Samsung Tizen TVs support MP4/H.264 natively via `play_media`. No app launch or ECP required.
+
+##### Transport Controls (`send_key`)
+
+```
+1. MAP COMMAND TO SAMSUNG KEY CODE
+   command → SAMSUNG_KEYS dict (e.g., "pause" → "KEY_PAUSE")
+
+2. SEND VIA WEBSOCKET
+   samsungtv.send_key service call → HA → TV WebSocket
+
+3. FALLBACK
+   If key not in registry → KEY_{COMMAND_UPPER}
+```
+
+##### Announcements (`announce_samsung` in `announce_handlers.py`)
+
+```
+1. POWER-ON IF NEEDED
+   If state is off/unavailable/standby → media_player.turn_on + 15s boot wait
+
+2. VOLUME SETUP
+   Set volume to announcement level (configurable)
+   Unmute if muted
+
+3. PLAY TTS AUDIO
+   media_player.play_media with the Kokoro-generated WAV URL
+   media_content_type="url"
+
+4. FALLBACK
+   If play_media fails → samsungtv.send_key KEY_PLAY
+```
+
+**Key distinction from Roku:** Samsung announcements do NOT use ECP or Media Assistant. They use direct URL playback via `play_media`, which is simpler but requires the TV to be awake and ready.
+
+##### Failure Modes Handled
+
+- TV is off → WOL wake + 15s boot wait
+- WOL fails (MAC not configured) → logs warning, attempts play_media anyway
+- `play_media` returns error → logs failure, returns descriptive message
+- Device unreachable → `device_registry.invalidate_device()` marks IP stale for re-discovery
+- Boot time exceeded → still returns SUCCESS (TV may still be initializing)
 
 ---
 
