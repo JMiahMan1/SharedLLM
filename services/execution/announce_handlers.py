@@ -303,8 +303,8 @@ async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_
     })
 
 async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
-    """Samsung Tizen TV: wake, set volume, then play TTS announcement."""
-    from ha_client import call_service
+    """Samsung Tizen TV: wake, set volume, then play TTS announcement with verification."""
+    from ha_client import call_service, get_state
     log.info(f"[announce.samsung] Waking {entity_id} for announcement")
     
     # Power on if needed
@@ -333,12 +333,19 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
     })
     
     if result.get("ok"):
-        return result
+        # Verify playback started
+        await asyncio.sleep(3)
+        verify_state = await get_state(ha_url, ha_token, entity_id)
+        if verify_state and verify_state.get("state") == "playing":
+            log.info(f"[announce.samsung] Verified announcement playing on {entity_id}")
+            return result
+        log.warning(f"[announce.samsung] play_media accepted but state={verify_state.get('state') if verify_state else 'unknown'}")
     
-    # Fallback: use samsungtv send_key to trigger playback
-    log.info(f"[announce.samsung] Falling back to samsungtv.send_key on {entity_id}")
-    return await call_service(ha_url, ha_token, "samsungtv", "send_key", entity_id, {
-        "key": "KEY_PLAY"
+    # Fallback: use remote.send_command to trigger playback
+    remote_entity = entity_id.replace("media_player.", "remote.")
+    log.info(f"[announce.samsung] Falling back to remote.send_command Play on {remote_entity}")
+    return await call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {
+        "command": "Play"
     })
 
 async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
