@@ -306,7 +306,7 @@ async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_
         "command": f"am start -d '{media_url}' -a android.intent.action.VIEW"
     })
 
-async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Samsung Tizen TV: wake, set volume, then play TTS announcement with verification."""
     from ha_client import call_service, get_state
     log.info(f"[announce.samsung] Waking {entity_id} for announcement")

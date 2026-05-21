@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal, X, Play, Square, Loader } from 'lucide-react';
+import { Terminal, Loader } from 'lucide-react';
 import Modal from '../ui/Modal';
-import { api } from '../../services/api';
 
 interface RavenLiveTraceProps {
   isOpen: boolean;
@@ -41,12 +40,12 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
       try {
         const parsed = JSON.parse(event.data);
         setLogs((prev) => [...prev, parsed]);
-      } catch (e) {
+      } catch {
         setLogs((prev) => [...prev, { type: 'system', data: `Unknown output: ${event.data}` }]);
       }
     };
 
-    ws.onerror = (err) => {
+    ws.onerror = () => {
       setLogs((prev) => [...prev, { type: 'result_error', data: `WebSocket error occurred.` }]);
     };
 

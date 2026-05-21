@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
 import axios from 'axios';
+import { storageGet, storageSet, storageRemove } from '../lib/storage';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -18,14 +19,25 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('jarvis_api_key'));
+  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      const storedToken = await storageGet('jarvis_api_key');
+      if (storedToken) {
+        setToken(storedToken);
+      }
+      setIsLoading(false);
+    };
+    initAuth();
+  }, []);
 
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem('jarvis_api_key');
-    localStorage.removeItem('jarvis_user');
+    storageRemove('jarvis_api_key');
+    storageRemove('jarvis_user');
     window.location.href = '/login';
   }, []);
 
@@ -34,7 +46,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       const profile = await api.getMe();
       setUser(profile);
-      localStorage.setItem('jarvis_user', JSON.stringify(profile));
+      await storageSet('jarvis_user', JSON.stringify(profile));
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 401) {
         logout();
@@ -43,27 +55,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [token, logout]);
 
   useEffect(() => {
-    const initAuth = async () => {
+    const loadProfile = async () => {
       if (token) {
         await refreshProfile();
       }
-      setIsLoading(false);
     };
-    initAuth();
+    loadProfile();
   }, [token, refreshProfile]);
-
-  // Centralized 401 handling is now in services/api.ts
 
   const login = async (credentials: { username: string; password: string }) => {
     try {
       const data = await api.login(credentials.username, credentials.password);
       const authToken = data.api_key;
       setToken(authToken);
-      localStorage.setItem('jarvis_api_key', authToken);
+      await storageSet('jarvis_api_key', authToken);
       
       const profile = await api.getMe();
       setUser(profile);
-      localStorage.setItem('jarvis_user', JSON.stringify(profile));
+      await storageSet('jarvis_user', JSON.stringify(profile));
       
       toast.success(`Welcome back, ${profile.full_name || profile.username}!`);
     } catch (error: unknown) {

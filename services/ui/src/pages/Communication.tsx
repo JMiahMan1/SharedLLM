@@ -27,10 +27,10 @@ import {
   Code,
   Quote,
   Strikethrough,
-  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
+import { useHaptics } from '../hooks/useHaptics';
 import type {
   DeviceAssignment,
   ExecutionResponse,
@@ -69,6 +69,7 @@ const ToolbarButton = ({ icon, onClick, label }: { icon: React.ReactNode; onClic
 
 const Communication = () => {
   const queryClient = useQueryClient();
+  const { trigger } = useHaptics();
   const [timerTitle, setTimerTitle] = useState('');
   const [timerDuration, setTimerDuration] = useState('');
   const [announcementDevice, setAnnouncementDevice] = useState('');
@@ -77,8 +78,7 @@ const Communication = () => {
   const [noteTitle, setNoteTitle] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [noteCategory, setNoteCategory] = useState('Notes');
-  const [noteResult, setNoteResult] = useState<ExecutionResponse | null>(null);
-  const [noteStorage, setNoteStorage] = useState<'nextcloud' | 'local'>('nextcloud');
+  const [noteStorage] = useState<'nextcloud' | 'local'>('nextcloud');
   const [noteDirectories, setNoteDirectories] = useState<string[]>(['Notes']);
   const [noteList, setNoteList] = useState<Array<{ title: string; path: string; size: number; modified: string }>>([]);
   const [selectedNote, setSelectedNote] = useState<{ title: string; path: string } | null>(null);
@@ -276,7 +276,7 @@ const Communication = () => {
       }
       return api.createNote({ title: payload.title, content: payload.content, category: payload.category, storage: noteStorage });
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       toast.success('Note saved');
       listNotesMutation.mutate({ directories: noteDirectories });
     },
@@ -396,10 +396,10 @@ const Communication = () => {
   };
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="space-y-6 md:space-y-8 pb-12">
       <header>
-        <h2 className="text-4xl font-black tracking-tighter text-white uppercase">Communication</h2>
-        <p className="mt-2 text-slate-400">Live execution-backed timers, announcements, Nextcloud Talk chat, calendars, and notes.</p>
+        <h2 className="text-2xl md:text-4xl font-black tracking-tighter text-white uppercase">Communication</h2>
+        <p className="mt-2 text-sm md:text-base text-slate-400">Live execution-backed timers, announcements, Nextcloud Talk chat, calendars, and notes.</p>
       </header>
 
       <div className="grid gap-6 xl:gap-8 lg:grid-cols-2">
@@ -434,6 +434,7 @@ const Communication = () => {
                   return;
                 }
                 createTimerMutation.mutate();
+                trigger('success');
               }}
               className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
             >
@@ -514,6 +515,7 @@ const Communication = () => {
                   return;
                 }
                 announcementMutation.mutate();
+                trigger('success');
               }}
               className="glass-button w-full px-4 py-3 text-[10px] font-black uppercase tracking-widest"
             >
@@ -747,6 +749,7 @@ const Communication = () => {
                   return;
                 }
                 calendarMutation.mutate();
+                trigger('success');
               }}
               className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
             >
@@ -828,8 +831,8 @@ const Communication = () => {
             </div>
           )}
 
-          <div className="flex gap-4" style={{ height: '600px' }}>
-            <div className="w-64 shrink-0 flex flex-col">
+          <div className="flex flex-col md:flex-row gap-4" style={{ height: '500px' }}>
+            <div className="w-full md:w-64 shrink-0 flex flex-col max-h-48 md:max-h-none">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-black uppercase tracking-widest text-slate-400">Notes</p>
                 <button

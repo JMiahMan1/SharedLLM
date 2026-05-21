@@ -11,11 +11,15 @@ import {
   Settings2,
   Shield,
   X,
+  Mic,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { GlobalSetting, HealthStatus, LogEntry, Workspace } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useHaptics } from '../hooks/useHaptics';
+import HaloBanner from '../components/presence/HaloBanner';
+import VoiceAssistantOverlay from '../components/voice/VoiceAssistantOverlay';
 import Modal from '../components/ui/Modal';
 
 type SearchResult = {
@@ -49,6 +53,8 @@ const Dashboard = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult | null>(null);
   const { user } = useAuth();
+  const { trigger } = useHaptics();
+  const [voiceOpen, setVoiceOpen] = useState(false);
 
   const { data: health } = useQuery<HealthStatus>({
     queryKey: ['health'],
@@ -108,16 +114,19 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="space-y-8 pb-12">
-      <header className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-6 md:space-y-8 pb-12">
+      <HaloBanner />
+
+      <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">Jarvis Dashboard</h2>
-          <p className="mt-1 text-slate-400">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-white">Jarvis Dashboard</h2>
+          <p className="mt-1 text-sm text-slate-400">
             Welcome back, <span className="font-bold text-purple-400">{user?.full_name || user?.username}</span>
           </p>
         </div>
 
-        <form onSubmit={handleSearch} className="relative w-full max-w-xl">
+        <div className="flex items-center gap-3 w-full">
+          <form onSubmit={handleSearch} className="relative flex-1">
           <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
           <input
             type="text"
@@ -130,6 +139,15 @@ const Dashboard = () => {
             {isSearching ? '...' : <ArrowUpRight size={16} />}
           </button>
         </form>
+
+        <button
+          onClick={() => { trigger('medium'); setVoiceOpen(true); }}
+          className="p-3 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-400 hover:bg-purple-500/30 transition-colors shrink-0"
+          aria-label="Voice command"
+        >
+          <Mic size={20} />
+        </button>
+      </div>
       </header>
 
       {searchResults && (
@@ -174,7 +192,7 @@ const Dashboard = () => {
           {serviceSummaries.map((service) => (
             <button
               key={service.key}
-              onClick={() => setSelectedService(service)}
+              onClick={() => { trigger('light'); setSelectedService(service); }}
               className="glass-card flex flex-col gap-4 p-6 text-left transition hover:border-purple-500/30"
             >
               <div className="flex items-center justify-between">
@@ -301,6 +319,15 @@ const Dashboard = () => {
           ))}
         </div>
       </Modal>
+
+      <VoiceAssistantOverlay
+        isOpen={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        onCommand={(transcript) => {
+          setSearchQuery(transcript);
+          toast.success(`Voice command: "${transcript}"`);
+        }}
+      />
     </div>
   );
 };
