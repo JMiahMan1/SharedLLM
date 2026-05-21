@@ -39,7 +39,6 @@ export async function storageSet(key: string, value: string): Promise<void> {
     localStorage.setItem(key, value);
   }
 }
-}
 
 export async function storageRemove(key: string): Promise<void> {
   delete _cache[key];
