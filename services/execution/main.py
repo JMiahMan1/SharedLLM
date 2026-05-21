@@ -113,6 +113,13 @@ async def _check_internal_secret(x_internal_secret: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Patch DNS resolver to route .local domains through dns-sync for live failover
+    try:
+        from dns_resolver import patch_dns_resolver
+        patch_dns_resolver()
+    except Exception as e:
+        log.warning(f"DNS resolver patch failed: {e}")
+    
     # Resolve runtime config from Identity service
     from config import resolve_runtime_config
     await resolve_runtime_config()
