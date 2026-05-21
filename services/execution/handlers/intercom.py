@@ -4,9 +4,8 @@ Manages intercom sessions, broadcasts, and announcements.
 """
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
 import httpx
 
@@ -31,15 +30,37 @@ async def _call_identity(method: str, path: str, json_data: Optional[Dict] = Non
         return resp.json()
 
 
+async def _resolve_user_room(user_id: str) -> Optional[str]:
+    """Resolve user's current room via ESPresense presence data."""
+    try:
+        from presence import get_presence_tracker
+        tracker = get_presence_tracker()
+        presence = await tracker.get_user_presence(user_id)
+        if presence and presence.get("room") and presence.get("room") != "unknown":
+            return presence["room"]
+    except Exception as e:
+        log.warning(f"[intercom] Presence lookup failed for {user_id}: {e}")
+    return None
+
+
 # ─── Two-Way Intercom Sessions ────────────────────────────────────────────────
 
 async def handle_intercom_start(req, user_context: UserContext) -> ExecutionResult:
     """Start a two-way intercom session."""
     try:
+        target_room = getattr(req, "target_room", None)
+        target_user_id = getattr(req, "target_user_id", None)
+
+        # Resolve target room via presence if not explicitly provided
+        if not target_room and target_user_id:
+            target_room = await _resolve_user_room(target_user_id)
+            if target_room:
+                log.info(f"[intercom] Resolved {target_user_id} -> room: {target_room}")
+
         payload = {
             "caller_user_id": req.caller_user_id or user_context.user,
-            "target_user_id": getattr(req, "target_user_id", None),
-            "target_room": getattr(req, "target_room", None),
+            "target_user_id": target_user_id,
+            "target_room": target_room,
             "target_entity_ids": getattr(req, "target_entity_ids", []),
             "session_type": getattr(req, "session_type", "twoway"),
         }

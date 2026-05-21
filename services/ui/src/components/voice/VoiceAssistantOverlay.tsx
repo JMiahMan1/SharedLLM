@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 import { X, Mic, Loader2 } from 'lucide-react';
+import { api } from '../../services/api';
+import toast from 'react-hot-toast';
 
 interface VoiceAssistantOverlayProps {
   isOpen: boolean;
   onClose: () => void;
   onCommand?: (transcript: string) => void;
+  userId?: string;
 }
 
-const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand }: VoiceAssistantOverlayProps) => {
+const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand, userId }: VoiceAssistantOverlayProps) => {
   const { state, activate, deactivate, startAudioVisualization, stopAudioVisualization } = useVoiceAssistant();
   const [bars, setBars] = useState<number[]>(Array.from({ length: 32 }, () => 0));
+  const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
     if (state.isActive) {
@@ -31,12 +35,26 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand }: VoiceAssistantOve
     }
   }, [isOpen, activate, deactivate]);
 
-  const handleSubmit = useCallback(() => {
-    if (state.transcript.trim()) {
+  const handleSubmit = useCallback(async () => {
+    if (!state.transcript.trim()) return;
+    setProcessing(true);
+    try {
+      if (userId) {
+        const result = await api.executeVoiceCommand(state.transcript, userId);
+        if (result.status === 'SUCCESS') {
+          toast.success(`Voice command executed: "${state.transcript}"`);
+        } else {
+          toast.error(result.message || 'Command failed');
+        }
+      }
       onCommand?.(state.transcript);
+    } catch (e) {
+      toast.error('Failed to execute voice command');
+    } finally {
+      setProcessing(false);
       onClose();
     }
-  }, [state.transcript, onCommand, onClose]);
+  }, [state.transcript, onCommand, onClose, userId]);
 
   if (!isOpen) return null;
 
@@ -52,13 +70,17 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand }: VoiceAssistantOve
 
         <div className="flex flex-col items-center gap-2">
           <div className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 ${
-            state.isListening
+            processing
+              ? 'bg-cyan-500/30 border-2 border-cyan-400/50 shadow-lg shadow-cyan-500/20'
+              : state.isListening
               ? 'bg-purple-500/30 border-2 border-purple-400/50 shadow-lg shadow-purple-500/20'
               : state.isSpeaking
               ? 'bg-cyan-500/30 border-2 border-cyan-400/50 shadow-lg shadow-cyan-500/20'
               : 'bg-white/10 border-2 border-white/20'
           }`}>
-          {state.isListening ? (
+          {processing ? (
+            <Loader2 size={32} className="text-cyan-400 animate-spin" />
+          ) : state.isListening ? (
             <Mic size={32} className="text-purple-400 animate-pulse" />
           ) : state.isSpeaking ? (
             <Loader2 size={32} className="text-cyan-400 animate-spin" />
@@ -67,7 +89,7 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand }: VoiceAssistantOve
           )}
         </div>
         <p className="text-sm text-slate-400">
-          {state.isListening ? 'Listening...' : state.isSpeaking ? 'Processing...' : 'Tap to speak'}
+          {processing ? 'Executing...' : state.isListening ? 'Listening...' : state.isSpeaking ? 'Processing...' : 'Tap to speak'}
         </p>
       </div>
 
@@ -103,15 +125,14 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand }: VoiceAssistantOve
         </button>
         <button
           onClick={handleSubmit}
-          disabled={!state.transcript.trim()}
+          disabled={!state.transcript.trim() || processing}
           className="flex-1 py-3 rounded-xl bg-purple-500/30 border border-purple-500/30 text-white font-medium hover:bg-purple-500/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          Send
+          {processing ? 'Executing...' : 'Send'}
         </button>
       </div>
     </div>
-  </div>
-);
+  );
 };
 
 export default VoiceAssistantOverlay;
