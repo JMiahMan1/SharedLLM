@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from gateway.orchestrator import process_full_orchestration
 from gateway.config import (
     SYSTEM_IDENTITY, INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC,
-    RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL, OLLAMA_URL,
+    RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL,
 )
 from gateway.messaging import InferenceJobQueue, TIER2_SEMAPHORE, TIER3_LOCK
 from gateway.agent_loop import should_persist_learning
@@ -427,9 +427,12 @@ class RavenWorker:
         Dynamically find the largest available model that isn't the current one.
         Queries Ollama's /api/tags and picks the model with the largest size.
         """
+        from gateway.orchestrator import get_all_settings, _get
         try:
+            settings = await get_all_settings()
+            ollama_url = _get(settings, "llm_local_url", "")
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{OLLAMA_URL}/api/tags")
+                resp = await client.get(f"{ollama_url}/api/tags")
                 if resp.status_code != 200:
                     log.warning(f"[Worker] Failed to fetch Ollama models: {resp.status_code}")
                     return current_model

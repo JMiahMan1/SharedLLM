@@ -355,7 +355,7 @@ async def get_resident_model() -> Optional[str]:
     """Check what model is currently in VRAM to avoid unnecessary swaps."""
     try:
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
+        ollama_url = _get(settings, "llm_local_url", "")
         async with httpx.AsyncClient(timeout=1.0) as client:
             resp = await client.get(f"{ollama_url}/api/ps")
             if resp.status_code == 200:
@@ -1857,7 +1857,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         assistant = await get_assistant_model()
         vram_params = await get_vram_safe_params(assistant)
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
+        ollama_url = _get(settings, "llm_local_url", "")
         
         payload = {
             "model": assistant,
@@ -2632,7 +2632,7 @@ async def proxy_generate(request: Request):
     try:
         body = await request.json()
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
+        ollama_url = _get(settings, "llm_local_url", "")
         async with httpx.AsyncClient(timeout=None) as client:
             req = client.build_request("POST", f"{ollama_url}/api/generate", json=body)
             resp = await client.send(req, stream=True)
@@ -2653,7 +2653,7 @@ async def proxy_generate(request: Request):
 async def proxy_tags():
     try:
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
+        ollama_url = _get(settings, "llm_local_url", "")
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status_code != 200:
@@ -3493,7 +3493,7 @@ async def get_ollama_models():
     """Proxy to Ollama to list available tags."""
     try:
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "http://ollama-server.local:11434")
+        ollama_url = _get(settings, "llm_local_url", "")
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status_code == 200:

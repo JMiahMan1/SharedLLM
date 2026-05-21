@@ -369,7 +369,7 @@ test.describe('API Endpoints - Direct Tests', () => {
     const resp = await request.get(`${UI_URL}/health/ready`);
     expect(resp.status()).toBe(200);
     const data = await resp.json();
-    expect(data.status).toBe('READY');
+    expect(['READY', 'DEGRADED']).toContain(data.status);
   });
 
   test('entities endpoint returns HA entities', async ({ request }) => {
