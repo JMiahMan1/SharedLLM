@@ -271,8 +271,11 @@ async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
             timeout=timeout
         )
     else:
+        local_url = _get(settings, "llm_local_url")
+        if not local_url:
+            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
         return OllamaProvider(
-            base_url=_get(settings, "llm_local_url", ""),
+            base_url=local_url,
             timeout=timeout
         )
 

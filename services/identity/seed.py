@@ -168,7 +168,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             gitlab_token_enc=encrypt(udata.get("gitlab_token")),
             audiobookshelf_pass_enc=encrypt(udata.get("audiobookshelf_pass")),
         )
-        session.add(user)
+       session.add(user)
         count += 1
 
     # ── Seed Global Settings ──────────────────────────────────────────────────
@@ -180,6 +180,18 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             existing.value = ds["value"]
             existing.description = ds.get("description")
             session.add(existing)
+
+    # ── Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS) ─
+    from config import OLLAMA_URL as env_ollama_url
+    if env_ollama_url:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "llm_local_url")).first()
+        if not existing:
+            session.add(GlobalSetting(key="llm_local_url", value=env_ollama_url, description="Base URL for local LLM inference (Ollama, llama.cpp server, or compatible API). Seeded from .env OLLAMA_URL on first startup."))
+            log.info(f"[seed] Seeded OLLAMA_URL from .env: {env_ollama_url}")
+        elif force and not existing.value:
+            existing.value = env_ollama_url
+            session.add(existing)
+            log.info(f"[seed] Re-seeded OLLAMA_URL from .env: {env_ollama_url}")
 
     session.commit()
     log.info(f"[seed] Seeded {count} user(s) and default settings.")

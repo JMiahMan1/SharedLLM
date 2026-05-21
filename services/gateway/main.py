@@ -244,8 +244,11 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
             timeout=timeout
         )
     else:
+        local_url = _get(settings, "llm_local_url")
+        if not local_url:
+            raise RuntimeError(f"Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
         return OllamaProvider(
-            base_url=_get(settings, "llm_local_url"),
+            base_url=local_url,
             timeout=timeout
         )
 
@@ -355,7 +358,9 @@ async def get_resident_model() -> Optional[str]:
     """Check what model is currently in VRAM to avoid unnecessary swaps."""
     try:
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "")
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
         async with httpx.AsyncClient(timeout=1.0) as client:
             resp = await client.get(f"{ollama_url}/api/ps")
             if resp.status_code == 200:
@@ -1857,8 +1862,10 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         assistant = await get_assistant_model()
         vram_params = await get_vram_safe_params(assistant)
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "")
-        
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
+
         payload = {
             "model": assistant,
             "messages": [{"role": "user", "content": proposal_prompt}],
@@ -2632,7 +2639,9 @@ async def proxy_generate(request: Request):
     try:
         body = await request.json()
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "")
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
         async with httpx.AsyncClient(timeout=None) as client:
             req = client.build_request("POST", f"{ollama_url}/api/generate", json=body)
             resp = await client.send(req, stream=True)
@@ -2653,7 +2662,9 @@ async def proxy_generate(request: Request):
 async def proxy_tags():
     try:
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "")
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            return JSONResponse({"models": []}, status_code=503)
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status_code != 200:
@@ -3493,7 +3504,9 @@ async def get_ollama_models():
     """Proxy to Ollama to list available tags."""
     try:
         settings = await get_all_settings()
-        ollama_url = _get(settings, "llm_local_url", "")
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            return {"status": "ERROR", "message": "Ollama URL not configured in Identity settings", "models": []}
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status_code == 200:
