@@ -14,7 +14,7 @@ const MobileShell = ({ children }: MobileShellProps) => {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-950 text-slate-100">
       <Header />
-      <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-20 scroll-smooth">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 scroll-smooth" style={{ paddingBottom: showBottomNav ? 'calc(5rem + env(safe-area-inset-bottom, 0px))' : '1rem' }}>
         {children}
       </main>
       {showBottomNav && <BottomNav />}

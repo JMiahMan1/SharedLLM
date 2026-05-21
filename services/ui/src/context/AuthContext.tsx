@@ -12,6 +12,7 @@ interface AuthContextType {
   login: (credentials: { username: string; password: string }) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
+  initError: string | null;
   refreshProfile: () => Promise<void>;
 }
 
@@ -21,15 +22,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
-    const initAuth = async () => {
-      await storageInit();
-      const storedToken = await storageGet('jarvis_api_key');
-      if (storedToken) {
-        setToken(storedToken);
-      }
+    const hardTimeout = setTimeout(() => {
+      setInitError('Initialization timed out. Please restart the app.');
       setIsLoading(false);
+    }, 3000);
+
+    const initAuth = async () => {
+      try {
+        await storageInit();
+        const storedToken = await storageGet('jarvis_api_key');
+        if (storedToken) {
+          try {
+            const profile = await api.getMe();
+            setToken(storedToken);
+            setUser(profile);
+            await storageSet('jarvis_user', JSON.stringify(profile));
+          } catch {
+            setInitError('Session expired. Please log in again.');
+            setToken(null);
+            storageRemove('jarvis_api_key');
+            storageRemove('jarvis_user');
+          }
+        }
+      } catch (e) {
+        setInitError(`Auth init failed: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        clearTimeout(hardTimeout);
+        setIsLoading(false);
+      }
     };
     initAuth();
   }, []);
@@ -99,6 +122,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       login, 
       logout, 
       isLoading,
+      initError,
       refreshProfile
     }}>
       {children}

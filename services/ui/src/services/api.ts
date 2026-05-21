@@ -2,17 +2,6 @@ import axios from 'axios';
 import { storageGetSync } from '../lib/storage';
 import { Capacitor } from '@capacitor/core';
 
-const getBaseUrl = (): string => {
-  if (Capacitor.isNativePlatform()) {
-    const serverUrl = storageGetSync('jarvis_server_url');
-    if (serverUrl) return serverUrl;
-    return '';
-  }
-  return '';
-};
-
-const BASE_URL = '';
-
 export interface HealthStatus {
   status: 'READY' | 'NOT_READY';
   services: Record<string, string>;
@@ -259,6 +248,7 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 15000,
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -267,7 +257,7 @@ apiClient.interceptors.request.use((config) => {
     if (serverUrl) {
       config.baseURL = serverUrl;
     }
-    console.log('API request baseURL:', config.baseURL, 'url:', config.url);
+    console.log('[API] baseURL:', config.baseURL, 'url:', config.url, 'method:', config.method);
   }
   const token = storageGetSync('jarvis_api_key');
   const internalSecret = storageGetSync('internal_secret');
@@ -288,6 +278,7 @@ let isLoggingOut = false;
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    console.error('[API] Response error:', error.message, error.config?.baseURL, error.config?.url);
     if (error.response?.status === 401 && !isLoggingOut) {
       isLoggingOut = true;
       import('../lib/storage').then(({ storageRemove }) => {
