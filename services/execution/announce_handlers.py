@@ -25,6 +25,9 @@ ANDROID_INDICATORS = ("mediashell", "backdrop", "tvlauncher", "android.tv", "atv
 # Roku-specific source names
 ROKU_SOURCES = {"home", "roku media player", "the roku channel", "roku tv intro"}
 
+# Samsung Tizen-specific source names
+SAMSUNG_SOURCES = {"samsung gamebreaks", "samsung promotion", "smartthings", "samsung tv plus", "universal guide"}
+
 # Common streaming apps (present on many platforms, but Roku has them as sources)
 STREAMING_APPS = {"netflix", "hulu", "disney plus", "prime video", "youtube", "youtube tv", "peacock tv", "paramount plus", "tubi", "fandango at home"}
 
@@ -67,8 +70,9 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
     if "chrome" in eid or "_cast" in eid or app_id in CAST_APP_IDS:
         return "cast"
     
-    # 2. Samsung Tizen: entity contains 'samsung' or 'tizen' (check BEFORE Roku heuristic)
-    if "samsung" in eid or "tizen" in eid:
+    # 2. Samsung Tizen: entity contains 'samsung' or 'tizen', OR source_list has Samsung-specific entries
+    has_samsung_sources = bool(SAMSUNG_SOURCES & set(source_list))
+    if "samsung" in eid or "tizen" in eid or has_samsung_sources:
         return "samsung"
     
     # 3. webOS (LG): entity contains 'lg' or 'webos'
