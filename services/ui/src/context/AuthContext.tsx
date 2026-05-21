@@ -72,13 +72,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await storageSet('jarvis_api_key', authToken);
       
       const profile = await api.getMe();
+      console.log('Login profile response:', JSON.stringify(profile));
       setUser(profile);
       await storageSet('jarvis_user', JSON.stringify(profile));
       
-      toast.success(`Welcome back, ${profile.full_name || profile.username}!`);
+      const displayName = profile.full_name || profile.username || credentials.username;
+      toast.success(`Welcome back, ${displayName}!`);
     } catch (error: unknown) {
+      console.error('Login error:', error);
       if (axios.isAxiosError(error)) {
-        toast.error(error.response?.data?.detail || 'Login failed');
+        toast.error(error.response?.data?.detail || `Login failed: ${error.message}`);
       } else {
         toast.error('Login failed');
       }

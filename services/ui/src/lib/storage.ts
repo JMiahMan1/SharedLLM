@@ -8,8 +8,10 @@ export async function storageInit(): Promise<void> {
   if (isNative) {
     const { value: apiKey } = await Preferences.get({ key: 'jarvis_api_key' });
     const { value: internalSecret } = await Preferences.get({ key: 'internal_secret' });
+    const { value: serverUrl } = await Preferences.get({ key: 'jarvis_server_url' });
     _cache['jarvis_api_key'] = apiKey;
     _cache['internal_secret'] = internalSecret;
+    _cache['jarvis_server_url'] = serverUrl;
   }
 }
 
@@ -36,6 +38,7 @@ export async function storageSet(key: string, value: string): Promise<void> {
   } else {
     localStorage.setItem(key, value);
   }
+}
 }
 
 export async function storageRemove(key: string): Promise<void> {
