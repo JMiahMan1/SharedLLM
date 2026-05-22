@@ -177,43 +177,52 @@ async def resolve_runtime_config():
         "execution_external_host": "EXECUTION_EXTERNAL_HOST",
     }
     
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{IDENTITY_SVC_URL}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status_code != 200:
-                log.warning(f"Failed to fetch runtime config from Identity (HTTP {resp.status_code})")
+    import asyncio
+    
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC_URL}/api/settings",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if resp.status_code != 200:
+                    log.warning(f"Failed to fetch runtime config from Identity (HTTP {resp.status_code})")
+                    return
+                
+                settings = {s["key"]: s["value"] for s in resp.json()}
+                
+                for setting_key, var_name in settings_map.items():
+                    if setting_key in settings and settings[setting_key]:
+                        value = settings[setting_key]
+                        # Type coercion for known numeric settings
+                        if var_name in ("LOG_RETENTION_DAYS", "LOG_MAX_ENTRIES", "RAVEN_MAX_TOTAL_SECONDS",
+                                        "RAVEN_ITERATION_TIMEOUT", "RAVEN_HEARTBEAT_INTERVAL",
+                                        "RAVEN_HUNG_THRESHOLD", "RAVEN_ERROR_THRESHOLD", "RAVEN_CHECK_INTERVAL",
+                                        "DNS_POLL_INTERVAL", "WORKSPACE_RUNTIME_FILE_READ_LIMIT",
+                                        "WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT"):
+                            value = int(float(value))
+                        elif var_name == "FAST_PATH_THRESHOLD":
+                            value = float(value)
+                        globals()[var_name] = value
+                
+                log.info("Runtime configuration loaded from Identity service")
+                
+                # Update shorthand aliases (set at import time, stale after runtime resolve)
+                globals()["EXECUTION_SVC"] = globals()["EXECUTION_SVC_URL"]
+                globals()["IDENTITY_SVC"] = globals()["IDENTITY_SVC_URL"]
+                globals()["RAG_SVC"] = globals()["RAG_SVC_URL"]
+                globals()["STORAGE_SVC"] = globals()["STORAGE_SVC_URL"]
+                globals()["LOGGING_SVC"] = globals()["LOGGING_SVC_URL"]
+                globals()["WORKSPACE_RUNTIME_SVC"] = globals()["WORKSPACE_RUNTIME_SVC_URL"]
                 return
-            
-            settings = {s["key"]: s["value"] for s in resp.json()}
-            
-            for setting_key, var_name in settings_map.items():
-                if setting_key in settings and settings[setting_key]:
-                    value = settings[setting_key]
-                    # Type coercion for known numeric settings
-                    if var_name in ("LOG_RETENTION_DAYS", "LOG_MAX_ENTRIES", "RAVEN_MAX_TOTAL_SECONDS",
-                                    "RAVEN_ITERATION_TIMEOUT", "RAVEN_HEARTBEAT_INTERVAL",
-                                    "RAVEN_HUNG_THRESHOLD", "RAVEN_ERROR_THRESHOLD", "RAVEN_CHECK_INTERVAL",
-                                    "DNS_POLL_INTERVAL", "WORKSPACE_RUNTIME_FILE_READ_LIMIT",
-                                    "WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT"):
-                        value = int(float(value))
-                    elif var_name == "FAST_PATH_THRESHOLD":
-                        value = float(value)
-                    globals()[var_name] = value
-            
-            log.info("Runtime configuration loaded from Identity service")
-            
-            # Update shorthand aliases (set at import time, stale after runtime resolve)
-            globals()["EXECUTION_SVC"] = globals()["EXECUTION_SVC_URL"]
-            globals()["IDENTITY_SVC"] = globals()["IDENTITY_SVC_URL"]
-            globals()["RAG_SVC"] = globals()["RAG_SVC_URL"]
-            globals()["STORAGE_SVC"] = globals()["STORAGE_SVC_URL"]
-            globals()["LOGGING_SVC"] = globals()["LOGGING_SVC_URL"]
-            globals()["WORKSPACE_RUNTIME_SVC"] = globals()["WORKSPACE_RUNTIME_SVC_URL"]
-    except Exception as e:
-        log.warning(f"Failed to resolve runtime config from Identity: {e}")
+        except Exception as e:
+            if attempt < max_retries - 1:
+                log.warning(f"Identity not ready (attempt {attempt+1}/{max_retries}): {e}")
+                await asyncio.sleep(2)
+            else:
+                log.warning(f"Failed to resolve runtime config from Identity after {max_retries} attempts: {e}")
 
 CONFIG = {
     "assistant_model": ASSISTANT_MODEL or "",
