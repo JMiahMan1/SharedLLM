@@ -974,4 +974,14 @@ export const api = {
     });
     return resp.data;
   },
+
+  async getAudiobookshelfLibrary(libraryId: string, limit = 50): Promise<{ status: string; books: Array<{ id: string; title: string; author: string }> }> {
+    const resp = await apiClient.get(`/api/media/audiobookshelf/library/${encodeURIComponent(libraryId)}?limit=${limit}`);
+    return resp.data;
+  },
+
+  async searchAudiobookshelf(query: string, limit = 20): Promise<{ status: string; books: Array<{ id: string; title: string; author: string; narrator?: string; duration?: number }> }> {
+    const resp = await apiClient.get(`/api/media/audiobookshelf/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+    return resp.data;
+  },
 };
