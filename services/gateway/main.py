@@ -3826,7 +3826,15 @@ async def get_abs_libraries():
         if resp.status_code == 200:
             data = resp.json()
             if data.get("detail", {}).get("libraries"):
-                return {"status": "SUCCESS", "libraries": data["detail"]["libraries"]}
+                # Normalize 'type' → 'media_type' for UI compatibility
+                libs = data["detail"]["libraries"]
+                return {
+                    "status": "SUCCESS",
+                    "libraries": [
+                        {**lib, "media_type": lib.get("media_type") or lib.get("type") or lib.get("media_type", "audiobook")}
+                        for lib in libs
+                    ],
+                }
     return {"status": "SUCCESS", "libraries": []}
 
 

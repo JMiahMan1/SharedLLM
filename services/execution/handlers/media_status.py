@@ -14,73 +14,83 @@ log = logging.getLogger("execution.media_status")
 
 async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
     ctx = req.user_context
-    
+
     all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
     if not all_states:
         return ExecutionResult(status="FAILURE", message="Could not retrieve HA states.", service="media_status")
-    
-    # Filter to media_player entities that are playing/paused/idle (not off/unavailable)
-    media_players = []
+
+    active_players = []
+    available_players = []
+
     for state in all_states:
         entity_id = state.get("entity_id", "")
         if not entity_id.startswith("media_player."):
             continue
-        
+
         st = state.get("state", "")
-        if st in ("off", "unavailable", "unknown", "idle"):
-            continue
-        
         attrs = state.get("attributes", {})
         friendly_name = attrs.get("friendly_name", entity_id)
+        volume_level = attrs.get("volume_level")
+        is_volume_muted = attrs.get("is_volume_muted", False)
         media_title = attrs.get("media_title", "")
         media_artist = attrs.get("media_artist", "")
         media_album = attrs.get("media_album_name", "")
         source = attrs.get("source", "")
-        volume = attrs.get("volume_level")
-        
-        # Build display info
-        now_playing = []
-        if media_artist:
-            now_playing.append(media_artist)
-        if media_title:
-            now_playing.append(media_title)
-        if media_album:
-            now_playing.append(f"({media_album})")
-        
-        detail = " - ".join(now_playing) if now_playing else source or st
-        
-        media_players.append({
-            "name": friendly_name,
+
+        player = {
             "entity_id": entity_id,
+            "friendly_name": friendly_name,
             "state": st,
-            "now_playing": detail,
-            "volume": round(volume * 100) if volume is not None else None,
-        })
-    
+            "media_title": media_title,
+            "media_artist": media_artist,
+            "media_album": media_album,
+            "source": source,
+            "volume_level": round(volume_level, 2) if volume_level is not None else None,
+            "is_volume_muted": is_volume_muted,
+        }
+
+        if st in ("playing", "paused", "buffering"):
+            active_players.append(player)
+
+        # Also collect idle/standby players for device selection
+        if st in ("idle", "standby", "off"):
+            available_players.append(player)
+
     # Filter by area if requested
     if req.area:
         area_map = await ha_client.get_areas(ctx.ha_url, ctx.ha_token)
         area_lower = req.area.lower()
-        filtered = []
-        for mp in media_players:
-            entity_area = area_map.get(mp["entity_id"], "")
-            if area_lower in entity_area.lower():
-                mp["area"] = entity_area
-                filtered.append(mp)
-        media_players = filtered
-    
+        active_players = [
+            mp for mp in active_players
+            if area_lower in area_map.get(mp["entity_id"], "").lower()
+        ]
+        available_players = [
+            mp for mp in available_players
+            if area_lower in area_map.get(mp["entity_id"], "").lower()
+        ]
+
     # Filter by specific entity if requested
     if req.entity_id:
-        media_players = [mp for mp in media_players if req.entity_id.lower() in mp["entity_id"].lower()]
-    
-    if not media_players:
-        return ExecutionResult(status="SUCCESS", message="No media players are currently active.", service="media_status")
-    
-    # Format as a readable table
+        active_players = [mp for mp in active_players if req.entity_id.lower() in mp["entity_id"].lower()]
+        available_players = [mp for mp in available_players if req.entity_id.lower() in mp["entity_id"].lower()]
+
+    # Return active player as the main result (for UI player header)
+    # Return all players as additional data (for device selector)
+    result = {
+        "active": active_players[0] if active_players else None,
+        "available": available_players,
+        "all_players": active_players + available_players,
+    }
+
+    # Also return the formatted message for backwards compatibility
     lines = ["**Currently Playing:**\n"]
-    for mp in media_players:
-        vol_str = f" | Vol: {mp['volume']}%" if mp['volume'] is not None else ""
-        area_str = f" ({mp['area']})" if mp.get("area") else ""
-        lines.append(f"- **{mp['name']}**{area_str}: {mp['now_playing']}{vol_str}")
-    
-    return ExecutionResult(status="SUCCESS", message="\n".join(lines), service="media_status")
+    for mp in active_players:
+        vol_str = f" | Vol: {round(mp['volume_level'] * 100) if mp['volume_level'] is not None else 'N/A'}%" if mp['volume_level'] is not None else ""
+        lines.append(f"- **{mp['friendly_name']}**: {mp['media_title'] or mp['source'] or mp['state']}{vol_str}")
+
+    return ExecutionResult(
+        status="SUCCESS",
+        message="\n".join(lines) if active_players else "No media players are currently active.",
+        service="media_status",
+        detail=result,
+    )

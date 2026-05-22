@@ -222,16 +222,21 @@ async def _handle_progress(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if "error" in progress:
         return ExecutionResult(status="FAILURE", message=progress["error"], service="audiobookshelf")
 
-    items = progress.get("mediaProgress", [])
+    items = progress.get("mediaProgress", progress.get("mediaItems", []))
     in_progress = [i for i in items if not i.get("isComplete") and i.get("currentTime", 0) > 0]
     if not in_progress:
         return ExecutionResult(status="SUCCESS", message="No audiobooks currently in progress.", service="audiobookshelf")
 
     summaries = []
     for i in sorted(in_progress, key=lambda x: x.get("lastUpdate", 0), reverse=True)[:10]:
-        item_id = i.get("itemId") or i.get("libraryItemId")
-        book = await abs_client.get_book(abs_url, abs_key, item_id)
-        meta = book.get("media", {}).get("metadata", {})
+        # Newer ABS versions: item.item.libraryItem, older: item.libraryItem
+        book_obj = i.get("item", {}).get("libraryItem", i.get("libraryItem", {}))
+        item_id = book_obj.get("id", i.get("itemId", i.get("libraryItemId", "")))
+        meta = book_obj.get("media", {}).get("metadata", {})
+        if not meta.get("title"):
+            # Fallback: fetch full book details
+            book = await abs_client.get_book(abs_url, abs_key, item_id)
+            meta = book.get("media", {}).get("metadata", {})
         duration = i.get("duration", 0)
         current = i.get("currentTime", 0)
         pct = int((current / duration) * 100) if duration else 0
@@ -318,18 +323,32 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
     """Get recently played audiobooks from Audiobookshelf."""
     try:
         progress = await abs_client.get_progress(abs_url, abs_key)
+        # ABS /me/progress returns { "mediaProgress": [...] }
+        items = progress.get("mediaProgress", progress.get("mediaItems", []))
         books = []
-        for item in progress.get("mediaItems", []):
-            book = item.get("libraryItem", {})
+        for item in items:
+            # Newer ABS versions: item.item.libraryItem, older: item directly has libraryItem
+            book = item.get("item", {}).get("libraryItem", item.get("libraryItem", {}))
             media = book.get("media", {})
-            user_progress = item.get("progress", 0) or 0
-            last_played = item.get("updatedAt", 0) or 0
+            meta = media.get("metadata", {})
+            # Handle both author formats
+            author_name = meta.get("authorName", "") or meta.get("author", "")
+            authors = meta.get("authors", [])
+            if authors and isinstance(authors, list):
+                author_name = ", ".join(authors)
+            if not author_name:
+                author_name = meta.get("name", "Unknown")
+
+            duration = item.get("duration", 0)
+            current = item.get("currentTime", 0)
+            pct = int((current / duration) * 100) if duration else 0
+
             books.append({
                 "id": book.get("id", ""),
-                "title": media.get("title", media.get("name", "")),
-                "author": ", ".join(media.get("authors", []) or []),
-                "progress": user_progress,
-                "last_played": last_played,
+                "title": meta.get("title", book.get("title", "Unknown")),
+                "author": author_name or "Unknown",
+                "progress": pct,
+                "last_played": item.get("lastUpdate", 0) or 0,
                 "library_id": book.get("libraryId", ""),
             })
         books.sort(key=lambda b: b["last_played"], reverse=True)
