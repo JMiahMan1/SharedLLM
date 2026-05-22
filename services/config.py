@@ -22,13 +22,13 @@ def _optional(key: str, default: str = "") -> str:
 
 # --- Required secrets (only these come from .env for bootstrapping) ---
 INTERNAL_SECRET = _required("INTERNAL_SECRET")
+FERNET_KEY = _required("FERNET_KEY")
 
 # --- Identity service endpoint (bootstrap only) ---
 IDENTITY_SVC_URL = _optional("IDENTITY_SVC_URL", "http://identity:8001")
 
 # --- Runtime config: fetched from Identity service at startup ---
 # These are module-level placeholders; populated by resolve_runtime_config()
-FERNET_KEY = ""
 OLLAMA_URL = ""
 EXECUTION_SVC_URL = "http://execution:8003"
 RAG_SVC_URL = "http://rag:8004"
@@ -112,7 +112,7 @@ async def resolve_runtime_config():
     The .env file is seed-only; Identity holds the authoritative runtime values.
     Call this at service startup before handling any requests.
     """
-    global FERNET_KEY, OLLAMA_URL, EXECUTION_SVC_URL, RAG_SVC_URL
+    global OLLAMA_URL, EXECUTION_SVC_URL, RAG_SVC_URL
     global STORAGE_SVC_URL, LOGGING_SVC_URL, WORKSPACE_RUNTIME_SVC_URL
     global CONTROL_PLANE_URL, SEARXNG_URL, HA_URL, HA_TOKEN
     global NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
@@ -133,7 +133,6 @@ async def resolve_runtime_config():
     import httpx
     
     settings_map = {
-        "fernet_key": "FERNET_KEY",
         "llm_local_url": "OLLAMA_URL",
         "execution_svc_url": "EXECUTION_SVC_URL",
         "rag_svc_url": "RAG_SVC_URL",
