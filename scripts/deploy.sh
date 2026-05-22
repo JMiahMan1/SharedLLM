@@ -82,9 +82,16 @@ INFRA_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^docker-compose|^script
 
 # Identify specific services that changed
 MODIFIED_SERVICES=""
+SHARED_FILE_CHANGE=false
 if [ -n "$CHANGED_FILES" ]; then
+    # Check for shared files that affect all services
+    if printf '%s\n' "$CHANGED_FILES" | grep -qE "^services/config\.py$"; then
+        SHARED_FILE_CHANGE=true
+    fi
     # Extract service names from paths like services/gateway/...
-    MODIFIED_SERVICES=$(printf '%s\n' "$CHANGED_FILES" | grep "^services/" | cut -d'/' -f2 | sort | uniq || true)
+    # Only match known service directories
+    KNOWN_SERVICES="automation|control_plane|dns_sync|execution|gateway|identity|logging|rag|storage|ui|workspace_runtime"
+    MODIFIED_SERVICES=$(printf '%s\n' "$CHANGED_FILES" | grep "^services/" | cut -d'/' -f2 | grep -E "^(${KNOWN_SERVICES})$" | sort | uniq || true)
 fi
 
 log "Changes detected in: $CHANGED_FILES"
@@ -92,6 +99,10 @@ log "Changes detected in: $CHANGED_FILES"
 # --- Step 2: Restart or Rebuild ---
 if [ -n "$INFRA_CHANGE" ]; then
     log "Infrastructure changes detected — full rebuild required."
+    log "Running: $COMPOSE up -d --build"
+    $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"
+elif [ "$SHARED_FILE_CHANGE" = true ]; then
+    log "Shared config change detected — rebuilding all services."
     log "Running: $COMPOSE up -d --build"
     $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"
 elif [ -n "$MODIFIED_SERVICES" ]; then
