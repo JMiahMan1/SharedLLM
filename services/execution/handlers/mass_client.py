@@ -22,7 +22,7 @@ async def get_playlists(ha_url: str, ha_token: str) -> List[Dict[str, Any]]:
             return [
                 {
                     "name": pl.get("name", ""),
-                    "items": pl.get("num_tracks", 0),
+                    "items": pl.get("num_tracks", pl.get("items", 0)),
                     "uri": pl.get("uri", ""),
                 }
                 for pl in result["data"]
@@ -49,7 +49,7 @@ async def get_recent(ha_url: str, ha_token: str) -> List[Dict[str, Any]]:
                     "name": item.get("name", ""),
                     "artist": item.get("artist", ""),
                     "uri": item.get("uri", ""),
-                    "last_played": item.get("timestamp", ""),
+                    "last_played": item.get("last_played", item.get("timestamp", "")),
                 }
                 for item in result["data"]
             ]
