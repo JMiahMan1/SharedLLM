@@ -578,9 +578,15 @@ const Media = () => {
 
     if (absLastPlayed?.books) {
       for (const book of absLastPlayed.books) {
+        // Backend returns progress as 0-100 percentage, normalize to 0-1 ratio for UI
+        let progress: number | undefined;
+        if (book.progress !== undefined && book.progress !== null) {
+          const raw = Number(book.progress);
+          progress = raw > 1 ? raw / 100 : raw;
+        }
         items.push({
           id: `abs-${book.id}`, title: book.title, subtitle: book.author,
-          type: 'audiobook', progress: book.progress,
+          type: 'audiobook', progress,
         });
       }
     }
@@ -601,10 +607,14 @@ const Media = () => {
     try {
       const resp = await api.mediaStatus();
       if (resp.status === 'SUCCESS' && resp.detail) {
-        setMediaStatus(resp.detail as MediaStatus);
-        if (resp.detail.volume_level !== undefined) setVolume(Math.round(resp.detail.volume_level * 100));
-        if (resp.detail.is_volume_muted !== undefined) setMuted(resp.detail.is_volume_muted);
-        if (resp.detail.entity_id) setSelectedTarget(resp.detail.entity_id);
+        const detail = resp.detail as { active?: Record<string, unknown>; available?: unknown[]; all_players?: unknown[] };
+        const active = detail.active;
+        if (active) {
+          setMediaStatus(active as MediaStatus);
+          if (active.volume_level !== undefined) setVolume(Math.round(Number(active.volume_level) * 100));
+          if (active.is_volume_muted !== undefined) setMuted(Boolean(active.is_volume_muted));
+          if (active.entity_id) setSelectedTarget(String(active.entity_id));
+        }
       }
     } catch { /* ignore */ }
   }, []);
