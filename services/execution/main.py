@@ -1626,12 +1626,18 @@ async def get_ma_recent():
 
 
 @app.get("/execute/audiobookshelf")
-async def handle_audiobookshelf_get(action: str = "last_played"):
+async def handle_audiobookshelf_get(action: str = "last_played", library_id: str = "", query: str = "", limit: int = 25):
     """Handle Audiobookshelf GET requests."""
     try:
         from handlers.audiobookshelf import handle_audiobookshelf
         from schemas import AudiobookshelfRequest, UserContext
-        req = AudiobookshelfRequest(action=action, user_context=UserContext(user="default"))
+        req = AudiobookshelfRequest(
+            action=action,
+            user_context=UserContext(user="default"),
+            library_id=library_id or None,
+            query=query or None,
+            limit=limit,
+        )
         return await handle_audiobookshelf(req)
     except Exception as e:
         log.error(f"[abs] Error: {e}")

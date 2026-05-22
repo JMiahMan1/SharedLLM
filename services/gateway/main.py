@@ -3824,7 +3824,9 @@ async def get_abs_libraries():
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            if data.get("detail", {}).get("libraries"):
+                return {"status": "SUCCESS", "libraries": data["detail"]["libraries"]}
     return {"status": "SUCCESS", "libraries": []}
 
 
@@ -3838,5 +3840,39 @@ async def get_abs_last_played():
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            if data.get("detail", {}).get("books"):
+                return {"status": "SUCCESS", "books": data["detail"]["books"]}
+    return {"status": "SUCCESS", "books": []}
+
+
+@app.get("/api/media/audiobookshelf/library/{library_id}")
+async def get_abs_library_items(library_id: str, limit: int = 50):
+    """Get audiobooks from a specific Audiobookshelf library."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/audiobookshelf",
+            params={"action": "list", "library_id": library_id, "limit": limit},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("detail", {}).get("books"):
+                return {"status": "SUCCESS", "books": data["detail"]["books"]}
+    return {"status": "SUCCESS", "books": []}
+
+
+@app.get("/api/media/audiobookshelf/search")
+async def search_abs(q: str, limit: int = 20):
+    """Search Audiobookshelf for audiobooks."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/audiobookshelf",
+            params={"action": "search", "query": q, "limit": limit},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("detail", {}).get("books"):
+                return {"status": "SUCCESS", "books": data["detail"]["books"]}
     return {"status": "SUCCESS", "books": []}
