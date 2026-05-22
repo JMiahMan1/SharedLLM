@@ -57,6 +57,9 @@ def _parse_env_users() -> dict:
         "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL") or os.getenv("ABS_URL"),
         "audiobookshelf_user": os.getenv("AUDIOBOOKSHELF_USER") or os.getenv("ABS_USER"),
         "audiobookshelf_pass": os.getenv("AUDIOBOOKSHELF_PASS") or os.getenv("ABS_PASS"),
+        "skylight_url": os.getenv("SKYLIGHT_URL"),
+        "skylight_email": os.getenv("SKYLIGHT_EMAIL"),
+        "skylight_pass": os.getenv("SKYLIGHT_PASS"),
     }
     users["default"] = default
 
@@ -102,6 +105,9 @@ def _parse_env_users() -> dict:
             "audiobookshelf_user": "audiobookshelf_user",
             "audiobookshelf_pass": "audiobookshelf_pass",
             "audiobookshelf_password": "audiobookshelf_pass",
+            "skylight_url": "skylight_url",
+            "skylight_email": "skylight_email",
+            "skylight_pass": "skylight_pass",
             "api_key": "api_key",
         }
         if setting in mapping:
@@ -192,6 +198,39 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             existing.value = env_ollama_url
             session.add(existing)
             log.info(f"[seed] Re-seeded OLLAMA_URL from .env: {env_ollama_url}")
+
+    # ── Seed additional .env vars into GlobalSettings ─────────────────────────
+    env_to_global = {
+        "SEARXNG_URL": "searxng_url",
+        "RAG_HOSTNAME": "rag_hostname",
+        "RAG_ADDRESS": "rag_address",
+        "HA_DEFAULT_USER": "ha_default_user",
+        "SKYLIGHT_URL": "skylight_url",
+        "SKYLIGHT_EMAIL": "skylight_email",
+    }
+    for env_key, global_key in env_to_global.items():
+        env_val = os.getenv(env_key)
+        if env_val:
+            existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
+            if not existing:
+                session.add(GlobalSetting(key=global_key, value=env_val))
+                log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
+            elif force and not existing.value:
+                existing.value = env_val
+                session.add(existing)
+                log.info(f"[seed] Re-seeded {env_key} -> {global_key}: {env_val}")
+
+    # ── Seed SKYLIGHT_PASS (encrypted) ────────────────────────────────────────
+    skylight_pass = os.getenv("SKYLIGHT_PASS")
+    if skylight_pass:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "skylight_pass_enc")).first()
+        if not existing:
+            session.add(GlobalSetting(key="skylight_pass_enc", value=encrypt(skylight_pass)))
+            log.info("[seed] Seeded SKYLIGHT_PASS (encrypted)")
+        elif force and not existing.value:
+            existing.value = encrypt(skylight_pass)
+            session.add(existing)
+            log.info("[seed] Re-seeded SKYLIGHT_PASS (encrypted)")
 
     session.commit()
     log.info(f"[seed] Seeded {count} user(s) and default settings.")
