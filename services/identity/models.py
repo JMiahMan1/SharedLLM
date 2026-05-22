@@ -29,6 +29,8 @@ class User(SQLModel, table=True):
     gitlab_user: Optional[str] = None
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
+    skylight_url: Optional[str] = None
+    skylight_email: Optional[str] = None
     git_url: Optional[str] = None
     git_user: Optional[str] = None
 
@@ -38,6 +40,7 @@ class User(SQLModel, table=True):
     github_token_enc: Optional[str] = None
     gitlab_token_enc: Optional[str] = None
     audiobookshelf_pass_enc: Optional[str] = None
+    skylight_pass_enc: Optional[str] = None
     git_token_enc: Optional[str] = None
     
     # Biometric voice profile (stored as a JSON string of embeddings)
@@ -157,6 +160,12 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "control_plane_url", "value": "http://control_plane:8008", "description": "Control plane service URL"},
     {"key": "redis_url", "value": "redis://redis:6379/0", "description": "Redis connection URL"},
     {"key": "searxng_url", "value": "", "description": "SearXNG search service URL"},
+    {"key": "rag_hostname", "value": "", "description": "RAG service hostname (for logs)"},
+    {"key": "rag_address", "value": "", "description": "RAG service address"},
+    {"key": "ha_default_user", "value": "default", "description": "Default Home Assistant username"},
+    {"key": "skylight_url", "value": "https://app.ourskylight.com", "description": "Skylight Calendar API URL"},
+    {"key": "skylight_email", "value": "", "description": "Skylight Calendar login email"},
+    {"key": "skylight_pass_enc", "value": "", "description": "Skylight Calendar login password (encrypted)"},
     {"key": "llama_server_proxy_url", "value": "", "description": "Legacy llama.cpp server proxy URL (deprecated)"},
     {"key": "timezone", "value": "America/Phoenix", "description": "System timezone"},
     {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5", "description": "Embedding model for RAG"},
