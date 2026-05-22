@@ -204,6 +204,14 @@ async def resolve_runtime_config():
                     globals()[var_name] = value
             
             log.info("Runtime configuration loaded from Identity service")
+            
+            # Update shorthand aliases (set at import time, stale after runtime resolve)
+            globals()["EXECUTION_SVC"] = globals()["EXECUTION_SVC_URL"]
+            globals()["IDENTITY_SVC"] = globals()["IDENTITY_SVC_URL"]
+            globals()["RAG_SVC"] = globals()["RAG_SVC_URL"]
+            globals()["STORAGE_SVC"] = globals()["STORAGE_SVC_URL"]
+            globals()["LOGGING_SVC"] = globals()["LOGGING_SVC_URL"]
+            globals()["WORKSPACE_RUNTIME_SVC"] = globals()["WORKSPACE_RUNTIME_SVC_URL"]
     except Exception as e:
         log.warning(f"Failed to resolve runtime config from Identity: {e}")
 
