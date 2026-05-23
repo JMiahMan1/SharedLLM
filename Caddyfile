@@ -43,6 +43,9 @@
     handle /api/models* {
         reverse_proxy gateway:11435
     }
+    handle /api/media* {
+        reverse_proxy gateway:11435
+    }
 
     handle /api/logs* {
         reverse_proxy logging:8006
@@ -53,7 +56,7 @@
     }
 
     handle /execute* {
-        reverse_proxy localhost:8003
+        reverse_proxy gateway:11435
     }
 
     handle /control_plane* {
