@@ -2,7 +2,7 @@ import os
 import sys
 import httpx
 
-BASE_URL = os.getenv("LIVE_TEST_URL", "https://jarvis.sumemail.com")
+BASE_URL = os.getenv("LIVE_TEST_URL", "http://localhost:8080")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 API_KEY = os.getenv("API_KEY") # Optional: can use Bearer token instead
 

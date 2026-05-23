@@ -148,7 +148,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         password_hash = None
         is_admin = udata.get("is_admin", False)
         if udata["username"] == "default":
-            password_hash = pwd_context.hash("admin")
+            password_hash = pwd_context.hash(os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme"))
             is_admin = True # Default user should be admin for first setup
 
         user = User(
