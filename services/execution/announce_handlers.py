@@ -272,7 +272,7 @@ async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: 
     
     result = await call_service(ha_url, ha_token, "webostv", "notify", entity_id, {
         "message": media_url,
-        "icon": "https://ha.sumemail.com/local/kokoro-icon.png"
+        "icon": f"{ha_url}/local/kokoro-icon.png"
     })
     
     if result.get("ok"):

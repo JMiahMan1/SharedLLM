@@ -7,7 +7,7 @@ import requests
 import os
 import time
 
-HA_URL = os.getenv("HA_URL", "https://ha.sumemail.com")
+HA_URL = os.getenv("HA_URL", "http://localhost:8123")
 HA_TOKEN = os.getenv("HA_TOKEN")
 MEDIA_PLAYER = "media_player.28_tcl_roku_tv"
 REMOTE = "remote.28_tcl_roku_tv"

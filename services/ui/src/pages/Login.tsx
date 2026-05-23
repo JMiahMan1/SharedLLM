@@ -175,7 +175,7 @@ const Login = () => {
                       value={serverUrl}
                       onChange={(e) => setServerUrl(e.target.value)}
                       className="glass-input w-full pl-10"
-                      placeholder="https://jarvis.sumemail.com"
+                      placeholder="https://your-jarvis-server.com"
                       required
                     />
                   </div>

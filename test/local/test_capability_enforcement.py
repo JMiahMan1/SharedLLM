@@ -5,7 +5,7 @@ import pytest
 from typing import List, Dict, Any
 
 # Configuration
-BASE_URL = os.getenv("LIVE_TEST_URL", "https://jarvis.sumemail.com")
+BASE_URL = os.getenv("LIVE_TEST_URL", "http://localhost:8080")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 

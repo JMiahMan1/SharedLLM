@@ -5,7 +5,7 @@ import httpx
 import os
 
 HA_TOKEN = os.environ.get('HA_TOKEN', '')
-HA_URL = os.environ.get('HA_URL', 'https://ha.sumemail.com')
+HA_URL = os.environ.get('HA_URL', 'http://localhost:8123')
 
 async def main():
     print(f"HA_URL: {HA_URL}")

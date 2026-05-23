@@ -137,53 +137,108 @@ test.describe('Media Page - Media Explorer Modal', () => {
     await expect(page.getByRole('button', { name: /Audiobooks/i })).toBeVisible();
   });
 
-  test('Music Assistant tab shows playlists section', async ({ page }) => {
+  test('Music Assistant tab - playlists section renders with data or empty state', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
-    await page.waitForTimeout(2000);
-    // Should show playlists section or "No playlists found"
+    await page.waitForTimeout(3000);
+
+    // Should show playlists header
     const playlistsHeader = page.getByRole('heading', { name: /playlists/i, level: 3 }).first();
+    await expect(playlistsHeader).toBeVisible({ timeout: 10000 });
+
+    // Either show actual playlists or empty state
+    const actualPlaylist = page.locator('button').filter({ hasText: /playlist/i }).first();
     const noPlaylists = page.getByText('No playlists found');
-    if (await playlistsHeader.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(playlistsHeader).toBeVisible();
-    } else if (await noPlaylists.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(noPlaylists).toBeVisible();
-    }
+
+    const hasContent = await actualPlaylist.isVisible({ timeout: 5000 }).catch(() => false);
+    const hasEmpty = await noPlaylists.isVisible({ timeout: 5000 }).catch(() => false);
+    expect(hasContent || hasEmpty).toBe(true);
   });
 
-  test('Music Assistant tab shows recently played section', async ({ page }) => {
+  test('Music Assistant tab - recently played section renders with data or empty state', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
+
+    // Should show recently played header
     const recentHeader = page.getByRole('heading', { name: /recently played/i, level: 3 }).first();
+    await expect(recentHeader).toBeVisible({ timeout: 10000 });
+
+    // Either show actual items or empty state
     const noRecent = page.getByText('No recent items');
-    if (await recentHeader.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(recentHeader).toBeVisible();
-    } else if (await noRecent.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(noRecent).toBeVisible();
-    }
+    const hasEmpty = await noRecent.isVisible({ timeout: 5000 }).catch(() => false);
+
+    // Look for any playlist or recent item button (not the empty state)
+    const recentItems = page.locator('button').filter({ hasText: /track|album|artist|song/i }).first();
+    const hasItems = await recentItems.isVisible({ timeout: 5000 }).catch(() => false);
+
+    expect(hasItems || hasEmpty).toBe(true);
   });
 
-  test('can switch to Audiobooks tab', async ({ page }) => {
+  test('Audiobooks tab - libraries section renders with data or empty state', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await page.getByRole('button', { name: /Audiobooks/i }).click();
-    await page.waitForTimeout(2000);
-    // Should show libraries section or loading
+    await page.waitForTimeout(4000);
+
+    // Should show libraries header
     const libsHeader = page.getByRole('heading', { name: /libraries/i, level: 3 }).first();
+    await expect(libsHeader).toBeVisible({ timeout: 10000 });
+
+    // Either show actual library cards or empty state
     const noLibs = page.getByText('No libraries found');
-    if (await libsHeader.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(libsHeader).toBeVisible();
-    } else if (await noLibs.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(noLibs).toBeVisible();
+    const hasEmpty = await noLibs.isVisible({ timeout: 5000 }).catch(() => false);
+
+    // Look for library cards (they have media_type text like "audiobook")
+    const libraryCards = page.locator('button').filter({ hasText: /audiobook/i }).first();
+    const hasLibraries = await libraryCards.isVisible({ timeout: 5000 }).catch(() => false);
+
+    expect(hasLibraries || hasEmpty).toBe(true);
+  });
+
+  test('Music Assistant tab - shows actual playlist names when playlists exist', async ({ page }) => {
+    await page.getByRole('button', { name: 'Browse All Media' }).click();
+    await page.waitForTimeout(4000);
+
+    const noPlaylists = page.getByText('No playlists found');
+    const isEmpty = await noPlaylists.isVisible({ timeout: 5000 }).catch(() => false);
+
+    if (!isEmpty) {
+      // Verify actual playlist items are displayed (buttons with playlist names)
+      const playlistButtons = page.locator('[class*="bg-white/5"]').filter({ hasText: /^\\d+ tracks?$/ });
+      const count = await playlistButtons.count();
+      expect(count).toBeGreaterThan(0);
     }
   });
 
-  test('modal search input is visible', async ({ page }) => {
+  test('Audiobooks tab - shows actual library names when libraries exist', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
-    const searchInput = page.locator('input[type="text"]').first();
-    if (await searchInput.isVisible({ timeout: 5000 })) {
-      await expect(searchInput).toBeVisible();
+    await page.getByRole('button', { name: /Audiobooks/i }).click();
+    await page.waitForTimeout(4000);
+
+    const noLibs = page.getByText('No libraries found');
+    const isEmpty = await noLibs.isVisible({ timeout: 5000 }).catch(() => false);
+
+    if (!isEmpty) {
+      // Verify actual library cards are displayed
+      const libraryCards = page.locator('[class*="bg-white/5"]');
+      const count = await libraryCards.count();
+      expect(count).toBeGreaterThan(0);
     }
+  });
+
+  test('modal search input works for filtering', async ({ page }) => {
+    await page.getByRole('button', { name: 'Browse All Media' }).click();
+    await page.waitForTimeout(3000);
+
+    const searchInput = page.locator('input[type="text"]').first();
+    await expect(searchInput).toBeVisible({ timeout: 10000 });
+
+    // Type in search
+    await searchInput.fill('test');
+    await page.waitForTimeout(2000);
+
+    // Input should contain the search text
+    await expect(searchInput).toHaveValue('test');
   });
 
   test('modal closes when clicking overlay', async ({ page }) => {
@@ -210,36 +265,19 @@ test.describe('Media Page - Media Explorer Modal', () => {
     }
   });
 
-  test('audiobooks tab shows library cards with media_type', async ({ page }) => {
+  test('audiobook library navigation - enter library and see back button', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await page.getByRole('button', { name: /Audiobooks/i }).click();
-    await page.waitForTimeout(3000);
-    // Either show libraries or "No libraries found" message
-    const noLibs = page.getByText('No libraries found');
-    if (await noLibs.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(noLibs).toBeVisible();
-    }
-  });
+    await page.waitForTimeout(4000);
 
-  test('audiobook library item shows back navigation', async ({ page }) => {
-    // Dismiss any lingering modal from previous test
-    const overlay = page.locator('.fixed.inset-0.bg-black\\/70').first();
-    if (await overlay.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await overlay.click({ force: true });
-      await page.waitForTimeout(1000);
-    }
+    // Look for library cards with "audiobook" media type text
+    const libraryItem = page.locator('[class*="bg-white/5"]').filter({ hasText: /audiobook/i }).first();
 
-    await page.getByRole('button', { name: 'Browse All Media' }).click();
-    await page.waitForTimeout(2000);
-    await page.getByRole('button', { name: /Audiobooks/i }).click();
-    await page.waitForTimeout(3000);
-
-    // Try clicking on a library to enter it
-    const libraryItem = page.locator('[class*="bg-white\\/5"]').first();
     if (await libraryItem.isVisible({ timeout: 5000 }).catch(() => false)) {
       await libraryItem.click({ force: true });
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000);
+
       // Should show "Back to Libraries" link
       const backLink = page.getByText('Back to Libraries');
       if (await backLink.isVisible({ timeout: 5000 })) {
@@ -265,43 +303,75 @@ test.describe('Media Page - Data Flow', () => {
     expect(Array.isArray(data.entities)).toBe(true);
   });
 
-  test('music assistant playlists API returns valid structure', async ({ request }) => {
+  test('music assistant playlists API returns valid structure with content', async ({ request }) => {
     const resp = await request.get(`${UI_URL}/api/media/music-assistant/playlists`);
     expect(resp.status()).toBe(200);
     const data = await resp.json();
     expect(data).toHaveProperty('status');
     expect(data).toHaveProperty('playlists');
     expect(Array.isArray(data.playlists)).toBe(true);
+
+    // If playlists exist, verify each has required fields
+    if (data.playlists.length > 0) {
+      for (const pl of data.playlists) {
+        expect(pl).toHaveProperty('name');
+        expect(pl).toHaveProperty('items');
+        expect(pl).toHaveProperty('uri');
+      }
+    }
   });
 
-  test('music assistant recent API returns valid structure', async ({ request }) => {
+  test('music assistant recent API returns valid structure with content', async ({ request }) => {
     const resp = await request.get(`${UI_URL}/api/media/music-assistant/recent`);
     expect(resp.status()).toBe(200);
     const data = await resp.json();
     expect(data).toHaveProperty('status');
     expect(data).toHaveProperty('recent');
     expect(Array.isArray(data.recent)).toBe(true);
+
+    // If recent items exist, verify each has required fields
+    if (data.recent.length > 0) {
+      for (const item of data.recent) {
+        expect(item).toHaveProperty('name');
+        expect(item).toHaveProperty('artist');
+        expect(item).toHaveProperty('uri');
+      }
+    }
   });
 
-  test('audiobookshelf last played API returns valid structure', async ({ request }) => {
+  test('audiobookshelf last played API returns valid structure with content', async ({ request }) => {
     const resp = await request.get(`${UI_URL}/api/media/audiobookshelf/last-played`);
     expect(resp.status()).toBe(200);
     const data = await resp.json();
     expect(data).toHaveProperty('status');
     expect(data).toHaveProperty('books');
     expect(Array.isArray(data.books)).toBe(true);
+
+    // If books exist, verify each has required fields
+    if (data.books.length > 0) {
+      for (const book of data.books) {
+        expect(book).toHaveProperty('id');
+        expect(book).toHaveProperty('title');
+        expect(book).toHaveProperty('author');
+      }
+    }
   });
 
-  test('audiobookshelf libraries API returns valid structure', async ({ request }) => {
+  test('audiobookshelf libraries API returns valid structure with content', async ({ request }) => {
     const resp = await request.get(`${UI_URL}/api/media/audiobookshelf/libraries`);
     expect(resp.status()).toBe(200);
     const data = await resp.json();
     expect(data).toHaveProperty('status');
     expect(data).toHaveProperty('libraries');
     expect(Array.isArray(data.libraries)).toBe(true);
-    // Each library should have media_type (normalized by gateway)
-    for (const lib of data.libraries) {
-      expect(lib).toHaveProperty('media_type');
+
+    // If libraries exist, verify each has required fields
+    if (data.libraries.length > 0) {
+      for (const lib of data.libraries) {
+        expect(lib).toHaveProperty('id');
+        expect(lib).toHaveProperty('name');
+        expect(lib).toHaveProperty('media_type');
+      }
     }
   });
 
