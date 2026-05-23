@@ -8,7 +8,7 @@ async def test_autonomous_mission():
     """
     Tests the Raven Autonomous Mission pipeline.
     """
-    base_url = os.getenv("LIVE_TEST_URL", "https://jarvis.sumemail.com")
+    base_url = os.getenv("LIVE_TEST_URL", "http://localhost:8080")
     gateway_url = f"{base_url}/api"
     internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
     headers = {"X-Internal-Secret": internal_secret}

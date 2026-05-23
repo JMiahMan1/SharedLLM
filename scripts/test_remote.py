@@ -1,7 +1,8 @@
 import requests
 import json
+import os
 
-url = "https://jarvis.sumemail.com/api/chat"
+url = os.getenv("JARVIS_BASE_URL", "http://localhost:8080/api/chat")
 payload = {
     "query": "Execute the StorageIndexRequest tool for the path /Notes",
     "user_id": "jeremiah",

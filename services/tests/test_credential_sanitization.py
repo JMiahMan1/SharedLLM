@@ -104,7 +104,7 @@ class TestSanitizeForLLM:
                     "user_context": {
                         "user": "default",
                         "ha_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret",
-                        "nextcloud_pass": "Summers@2006",
+           "nextcloud_pass": "test-password-123",
                         "api_key": "e6ec93710dcc4c0db72ac17463401aeece3db95310fae5ee",
                         "is_admin": True,
                     },
