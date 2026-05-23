@@ -3825,9 +3825,10 @@ async def get_abs_libraries():
         )
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("detail", {}).get("libraries"):
+            detail = data.get("detail") or {}
+            if detail.get("libraries"):
                 # Normalize 'type' → 'media_type' for UI compatibility
-                libs = data["detail"]["libraries"]
+                libs = detail["libraries"]
                 return {
                     "status": "SUCCESS",
                     "libraries": [
@@ -3849,8 +3850,9 @@ async def get_abs_last_played():
         )
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("detail", {}).get("books"):
-                return {"status": "SUCCESS", "books": data["detail"]["books"]}
+            detail = data.get("detail") or {}
+            if detail.get("books"):
+                return {"status": "SUCCESS", "books": detail["books"]}
     return {"status": "SUCCESS", "books": []}
 
 
@@ -3865,8 +3867,9 @@ async def get_abs_library_items(library_id: str, limit: int = 50):
         )
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("detail", {}).get("books"):
-                return {"status": "SUCCESS", "books": data["detail"]["books"]}
+            detail = data.get("detail") or {}
+            if detail.get("books"):
+                return {"status": "SUCCESS", "books": detail["books"]}
     return {"status": "SUCCESS", "books": []}
 
 
@@ -3881,18 +3884,27 @@ async def search_abs(q: str, limit: int = 20):
         )
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("detail", {}).get("books"):
-                return {"status": "SUCCESS", "books": data["detail"]["books"]}
+            detail = data.get("detail") or {}
+            if detail.get("books"):
+                return {"status": "SUCCESS", "books": detail["books"]}
     return {"status": "SUCCESS", "books": []}
 
 
 # ─── Execution service proxy routes (for UI access) ──────────────────────
+
+def _ensure_user_context(body: dict) -> dict:
+    """Ensure body has user_context (required by execution service schemas)."""
+    if not body.get("user_context"):
+        body = {**body, "user_context": {"user": "default"}}
+    return body
+
 
 @app.post("/execute/media/status")
 async def proxy_media_status(request: Request):
     """Proxy media status requests from UI to execution service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         body = await request.json() if await request.body() else {}
+        body = _ensure_user_context(body)
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/media/status",
             json=body,
@@ -3906,6 +3918,7 @@ async def proxy_media_transport(request: Request):
     """Proxy media transport requests from UI to execution service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         body = await request.json() if await request.body() else {}
+        body = _ensure_user_context(body)
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/media/transport",
             json=body,
@@ -3919,6 +3932,7 @@ async def proxy_media_play(request: Request):
     """Proxy media play requests from UI to execution service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         body = await request.json() if await request.body() else {}
+        body = _ensure_user_context(body)
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/media/play",
             json=body,
@@ -3932,6 +3946,7 @@ async def proxy_audiobookshelf(request: Request):
     """Proxy audiobookshelf requests from UI to execution service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         body = await request.json() if await request.body() else {}
+        body = _ensure_user_context(body)
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/audiobookshelf",
             json=body,
