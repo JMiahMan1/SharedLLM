@@ -223,6 +223,13 @@ test.describe('Media Page - Media Explorer Modal', () => {
   });
 
   test('audiobook library item shows back navigation', async ({ page }) => {
+    // Dismiss any lingering modal from previous test
+    const overlay = page.locator('.fixed.inset-0.bg-black\\/70').first();
+    if (await overlay.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await overlay.click({ force: true });
+      await page.waitForTimeout(1000);
+    }
+
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await page.getByRole('button', { name: /Audiobooks/i }).click();
@@ -231,7 +238,7 @@ test.describe('Media Page - Media Explorer Modal', () => {
     // Try clicking on a library to enter it
     const libraryItem = page.locator('[class*="bg-white\\/5"]').first();
     if (await libraryItem.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await libraryItem.click();
+      await libraryItem.click({ force: true });
       await page.waitForTimeout(2000);
       // Should show "Back to Libraries" link
       const backLink = page.getByText('Back to Libraries');
