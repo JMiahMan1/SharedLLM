@@ -3884,3 +3884,57 @@ async def search_abs(q: str, limit: int = 20):
             if data.get("detail", {}).get("books"):
                 return {"status": "SUCCESS", "books": data["detail"]["books"]}
     return {"status": "SUCCESS", "books": []}
+
+
+# ─── Execution service proxy routes (for UI access) ──────────────────────
+
+@app.post("/execute/media/status")
+async def proxy_media_status(request: Request):
+    """Proxy media status requests from UI to execution service."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        body = await request.json() if await request.body() else {}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/media/status",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
+
+@app.post("/execute/media/transport")
+async def proxy_media_transport(request: Request):
+    """Proxy media transport requests from UI to execution service."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        body = await request.json() if await request.body() else {}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/media/transport",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
+
+@app.post("/execute/media/play")
+async def proxy_media_play(request: Request):
+    """Proxy media play requests from UI to execution service."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        body = await request.json() if await request.body() else {}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/media/play",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
+
+@app.post("/execute/audiobookshelf")
+async def proxy_audiobookshelf(request: Request):
+    """Proxy audiobookshelf requests from UI to execution service."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        body = await request.json() if await request.body() else {}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/audiobookshelf",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
