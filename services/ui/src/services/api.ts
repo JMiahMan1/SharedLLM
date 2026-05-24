@@ -281,10 +281,37 @@ apiClient.interceptors.request.use((config) => {
 });
 
 let isLoggingOut = false;
+let lastConnectivityToast = 0;
 
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    const isAxiosError = axios.isAxiosError(error);
+    const isConnectivityError = isAxiosError && (
+      error.code === 'ECONNABORTED' ||
+      error.code === 'ENOTFOUND' ||
+      error.code === 'ECONNREFUSED' ||
+      error.code === 'ERR_NETWORK'
+    );
+
+    if (isConnectivityError && Capacitor.isNativePlatform()) {
+      const now = Date.now();
+      if (now - lastConnectivityToast > 15000) {
+        lastConnectivityToast = now;
+        import('react-hot-toast').then(({ toast: t }) => {
+          t.error('Cannot connect to Jarvis server. Check your network connection.', {
+            duration: 8000,
+            style: {
+              background: 'rgba(239, 68, 68, 0.2)',
+              color: '#fca5a5',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              fontSize: '12px',
+            },
+          });
+        });
+      }
+    }
+
     console.error('[API] Response error:', error.message, error.config?.baseURL, error.config?.url);
     if (error.response?.status === 401 && !isLoggingOut) {
       isLoggingOut = true;
