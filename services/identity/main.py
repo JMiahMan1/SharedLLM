@@ -118,47 +118,15 @@ async def _ensure_default_settings(session: Session) -> None:
         setting.key
         for setting in session.exec(select(GlobalSetting)).all()
     }
-    
-    # Try to fetch available models from Ollama to provide better 'auto' defaults
-    available_models = []
-    # Read ollama URL from settings (seeded from .env on first startup, then persisted in DB)
-    llm_local_url_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "llm_local_url")).first()
-    ollama_url = llm_local_url_setting.value if llm_local_url_setting else ""
-    if ollama_url:
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(f"{ollama_url}/api/tags")
-                if resp.status_code == 200:
-                    available_models = [m["name"] for m in resp.json().get("models", [])]
-        except Exception as e:
-            log.warning(f"Could not reach Ollama to resolve 'auto' defaults: {e}")
 
-    def resolve_best_model(pattern: str, fallback: str) -> str:
-        if not available_models: return fallback
-        # Priority 1: Exact match
-        for m in available_models:
-            if pattern in m: return m
-        # Priority 2: First available
-        return available_models[0]
-
+    # Insert missing defaults exactly as defined in DEFAULT_GLOBAL_SETTINGS.
+    # Model settings default to "" (unconfigured) — they MUST be set explicitly
+    # via the UI before inference will work. No auto-resolution is performed here
+    # because silently picking the wrong model causes OOMs and load failures.
     inserted = False
     for setting in DEFAULT_GLOBAL_SETTINGS:
         if setting["key"] in existing_keys:
             continue
-        
-        # Dynamic Resolution for models
-        if setting.get("value") == "auto":
-            if setting["key"] in ("coding_model", "ollama_coding_model"):
-                setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:9b")
-            elif setting["key"] in ("librarian_model", "ollama_librarian_model"):
-                setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:9b")
-            elif setting["key"] in ("assistant_model", "ollama_assistant_model"):
-                setting["value"] = resolve_best_model("qwen3.5", "qwen3.5:9b")
-            elif setting["key"] == "cloud_coding_model":
-                setting["value"] = "anthropic/claude-3.5-sonnet"
-            elif setting["key"] in ("cloud_assistant_model", "cloud_librarian_model"):
-                setting["value"] = "google/gemini-2.0-flash-001"
-
         session.add(GlobalSetting(**setting))
         inserted = True
     if inserted:
@@ -946,6 +914,15 @@ def get_settings(
                 s.value = "sk-***"
     return settings
 
+# Keys that must never be written with a blank/empty value.
+# The UI dropdowns are always populated with real values, so a blank write
+# here means a UI bug or a bad direct API call — both must fail loudly.
+_MODEL_KEYS = {
+    "ollama_assistant_model", "ollama_coding_model", "ollama_librarian_model",
+    "cloud_assistant_model", "cloud_coding_model", "cloud_librarian_model",
+    "assistant_model", "librarian_model", "coding_model",
+}
+
 @app.post("/api/settings")
 def update_settings_bulk(
     body: Dict[str, str], 
@@ -956,6 +933,11 @@ def update_settings_bulk(
     Securely accept raw keys and commit them to the database without logging the raw payload.
     """
     for key, value in body.items():
+        if key in _MODEL_KEYS and not (value or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model setting '{key}' cannot be blank. Select a valid model from the dropdown."
+            )
         setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if not setting:
             setting = GlobalSetting(key=key, value=value)
@@ -984,7 +966,12 @@ def get_setting(
 
 @app.patch("/api/settings/{key}", response_model=GlobalSettingRead)
 def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
-        
+    if key in _MODEL_KEYS and not (body.value or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model setting '{key}' cannot be blank. Select a valid model from the dropdown."
+        )
+
     setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
     if not setting:
         setting = GlobalSetting(key=key, value=body.value)
