@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 class ResolveRequest(BaseModel):
     """Sent by the Gateway to resolve a caller's identity."""
+    user_id: Optional[int] = None
     rag_user: Optional[str] = None
     voice_id: Optional[str] = None
     device_id: Optional[str] = None
