@@ -47,14 +47,17 @@ const DeviceSelector = ({
   selectedTarget,
   selectedTargetInfo,
   entities,
+  onDeviceSelect,
 }: {
   selectedTarget: string;
   selectedTargetInfo?: { name: string; room: string };
   entities: MediaEntity[];
+  onDeviceSelect?: (entityId: string) => void;
 }) => {
   const { trigger } = useHaptics();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<(() => void) | null>(null);
 
   const targets = useMemo(
     () =>
@@ -67,17 +70,32 @@ const DeviceSelector = ({
     [entities],
   );
 
-  // Close when clicking outside
+  // Close when clicking outside — use mousedown for fast response on web,
+  // touchstart for mobile (touch events don't bubble mousedown on native platforms)
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
+    closeRef.current = () => setOpen(false);
+    const handler = (e: Event) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+    };
   }, [open]);
+
+  const handleSelect = useCallback(
+    (id: string) => {
+      trigger('light');
+      onDeviceSelect?.(id);
+      setOpen(false);
+    },
+    [onDeviceSelect, trigger],
+  );
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -99,7 +117,7 @@ const DeviceSelector = ({
             {targets.map((t) => (
               <button
                 key={t.id}
-                onClick={() => { trigger('light'); setOpen(false); }}
+                onClick={() => handleSelect(t.id)}
                 className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors text-left ${
                   selectedTarget === t.id ? 'bg-cyan-500/20 border border-cyan-500/30' : 'hover:bg-white/10'
                 } ${!t.online ? 'opacity-40' : ''}`}
@@ -130,6 +148,7 @@ const NowPlayingCard = ({
   muted,
   loading,
   entities,
+  onDeviceSelect,
   onPrevious,
   onTogglePlay,
   onNext,
@@ -143,6 +162,7 @@ const NowPlayingCard = ({
   muted: boolean;
   loading: string | null;
   entities: MediaEntity[];
+  onDeviceSelect?: (entityId: string) => void;
   onPrevious: () => void;
   onTogglePlay: () => void;
   onNext: () => void;
@@ -206,7 +226,7 @@ const NowPlayingCard = ({
               className="w-20 sm:w-24 accent-cyan-400" aria-label="Volume" />
             <span className="text-xs text-slate-500 w-8 text-right tabular-nums">{muted ? 'M' : `${volume}`}</span>
           </div>
-          <DeviceSelector selectedTarget={selectedTarget} selectedTargetInfo={selectedTargetInfo} entities={entities} />
+          <DeviceSelector selectedTarget={selectedTarget} selectedTargetInfo={selectedTargetInfo} entities={entities} onDeviceSelect={onDeviceSelect} />
         </div>
       </div>
 
@@ -673,6 +693,14 @@ const Media = () => {
   }, [fetchMediaStatus]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  /* ── device selection ───────────────────────────────────────────── */
+
+  const handleDeviceSelect = useCallback((entityId: string) => {
+    trigger('light');
+    setSelectedTarget(entityId);
+    setError(null);
+  }, [trigger]);
+
   /* ── transport helpers ────────────────────────────────────────── */
 
   const sendTransport = useCallback(async (command: string) => {
@@ -759,20 +787,21 @@ const Media = () => {
       )}
 
       {/* 1. Active Player Header */}
-       <NowPlayingCard
-        mediaStatus={mediaStatus}
-        selectedTarget={selectedTarget}
-        selectedTargetInfo={selectedTargetInfo}
-        volume={volume}
-        muted={muted}
-        loading={loading}
-        entities={entities}
-        onPrevious={() => sendTransport('previous')}
-        onTogglePlay={() => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'play')}
-        onNext={() => sendTransport('next')}
-        onVolumeChange={handleVolume}
-        onMuteToggle={toggleMute}
-      />
+      <NowPlayingCard
+         mediaStatus={mediaStatus}
+         selectedTarget={selectedTarget}
+         selectedTargetInfo={selectedTargetInfo}
+         volume={volume}
+         muted={muted}
+         loading={loading}
+         entities={entities}
+         onDeviceSelect={handleDeviceSelect}
+         onPrevious={() => sendTransport('previous')}
+         onTogglePlay={() => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'play')}
+         onNext={() => sendTransport('next')}
+         onVolumeChange={handleVolume}
+         onMuteToggle={toggleMute}
+       />
 
       {/* 2. Jump Back In */}
       <section>
