@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" fill="none" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="shieldGrad" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#863bff"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="eyeGrad" x1="176" y1="176" x2="336" y2="336" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  
+  <!-- Background shield shape -->
+  <path d="M256 32 L448 96 L448 272 C448 384 352 464 256 496 C160 464 64 384 64 272 L64 96 Z" 
+        fill="url(#shieldGrad)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+  
+  <!-- Inner circuit pattern - AI eye -->
+  <g filter="url(#glow)">
+    <!-- Outer eye shape -->
+    <path d="M144 240 Q256 176 368 240 Q256 304 144 240Z" 
+          fill="none" stroke="url(#eyeGrad)" stroke-width="6"/>
+    
+    <!-- Iris -->
+    <circle cx="256" cy="240" r="32" fill="none" stroke="url(#eyeGrad)" stroke-width="4"/>
+    
+    <!-- Pupil -->
+    <circle cx="256" cy="240" r="14" fill="url(#eyeGrad)"/>
+    
+    <!-- Circuit lines radiating from eye -->
+    <line x1="256" y1="208" x2="256" y2="160" stroke="url(#eyeGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="256" y1="272" x2="256" y2="320" stroke="url(#eyeGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="224" y1="240" x2="176" y2="240" stroke="url(#eyeGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="288" y1="240" x2="336" y2="240" stroke="url(#eyeGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    
+    <!-- Diagonal accents -->
+    <line x1="233" y1="217" x2="200" y2="184" stroke="url(#eyeGrad)" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+    <line x1="279" y1="217" x2="312" y2="184" stroke="url(#eyeGrad)" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+    <line x1="233" y1="263" x2="200" y2="296" stroke="url(#eyeGrad)" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+    <line x1="279" y1="263" x2="312" y2="296" stroke="url(#eyeGrad)" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+    
+    <!-- Nodes at line ends -->
+    <circle cx="256" cy="160" r="5" fill="#a78bfa"/>
+    <circle cx="256" cy="320" r="5" fill="#38bdf8"/>
+    <circle cx="176" cy="240" r="5" fill="#a78bfa"/>
+    <circle cx="336" cy="240" r="5" fill="#38bdf8"/>
+    <circle cx="200" cy="184" r="3" fill="#a78bfa" opacity="0.7"/>
+    <circle cx="312" cy="184" r="3" fill="#38bdf8" opacity="0.7"/>
+    <circle cx="200" cy="296" r="3" fill="#a78bfa" opacity="0.7"/>
+    <circle cx="312" cy="296" r="3" fill="#38bdf8" opacity="0.7"/>
+  </g>
+  
+  <!-- Subtle inner highlight -->
+  <path d="M256 48 L432 104 L432 268 C432 372 340 448 256 478 C172 448 80 372 80 268 L80 104 Z" 
+        fill="rgba(255,255,255,0.05)" stroke="none"/>
+</svg>
