@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Play, Pause, Volume2, Volume1, VolumeX, Cast,
@@ -54,6 +54,8 @@ const DeviceSelector = ({
 }) => {
   const { trigger } = useHaptics();
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
 
   const targets = useMemo(
     () =>
@@ -66,16 +68,35 @@ const DeviceSelector = ({
     [entities],
   );
 
+  const updatePosition = useCallback(() => {
+    const btn = buttonRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    setDropdownPos({
+      top: rect.bottom + window.scrollY + 6,
+      right: window.innerWidth - rect.right,
+    });
+  }, []);
+
   useEffect(() => {
     if (!open) return;
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, { passive: true });
+    window.addEventListener('resize', updatePosition);
     const handler = () => setOpen(false);
     const timer = setTimeout(() => document.addEventListener('click', handler), 0);
-    return () => { clearTimeout(timer); document.removeEventListener('click', handler); };
-  }, [open]);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handler);
+      window.removeEventListener('scroll', updatePosition);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [open, updatePosition]);
 
-  return (
-    <div className="relative">
+  if (!open) {
+    return (
       <button
+        ref={buttonRef}
         onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
           selectedTarget
@@ -87,34 +108,50 @@ const DeviceSelector = ({
         <span className="max-w-28 truncate">{selectedTargetInfo?.name || 'Cast To'}</span>
         <ChevronDown size={12} className={`opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
+    );
+  }
 
-      {open && (
-        <div
-          className="absolute right-0 top-full mt-1.5 w-64 glass-panel rounded-xl border border-white/10 shadow-2xl z-50 overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="p-1.5 max-h-60 overflow-y-auto custom-scrollbar">
-            {targets.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { trigger('light'); setOpen(false); }}
-                className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors text-left ${
-                  selectedTarget === t.id ? 'bg-cyan-500/20 border border-cyan-500/30' : 'hover:bg-white/10'
-                } ${!t.online ? 'opacity-40' : ''}`}
-              >
-                <Cast size={14} className="text-slate-400 shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-white text-sm font-medium truncate">{t.name}</p>
-                  <p className="text-xs text-slate-500 truncate">{t.room}</p>
-                </div>
-                <div className={`w-2 h-2 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
-              </button>
-            ))}
-            {targets.length === 0 && <p className="text-xs text-slate-500 text-center py-4">No media players found</p>}
-          </div>
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
+          selectedTarget
+            ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
+            : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-white'
+        }`}
+      >
+        <Cast size={12} />
+        <span className="max-w-28 truncate">{selectedTargetInfo?.name || 'Cast To'}</span>
+        <ChevronDown size={12} className={`opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div
+        className="fixed glass-panel rounded-xl border border-white/10 shadow-2xl z-[100] overflow-hidden"
+        style={{ top: dropdownPos.top, right: dropdownPos.right, width: '280px', transform: 'translateY(6px)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-1.5 max-h-64 overflow-y-auto custom-scrollbar">
+          {targets.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => { trigger('light'); setOpen(false); }}
+              className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors text-left ${
+                selectedTarget === t.id ? 'bg-cyan-500/20 border border-cyan-500/30' : 'hover:bg-white/10'
+              } ${!t.online ? 'opacity-40' : ''}`}
+            >
+              <Cast size={14} className="text-slate-400 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-sm font-medium truncate">{t.name}</p>
+                <p className="text-xs text-slate-500 truncate">{t.room}</p>
+              </div>
+              <div className={`w-2 h-2 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
+            </button>
+          ))}
+          {targets.length === 0 && <p className="text-xs text-slate-500 text-center py-4">No media players found</p>}
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 };
 
@@ -294,32 +331,44 @@ const MediaExplorerModal = ({
   const [libraryId, setLibraryId] = useState<string | null>(null);
   const [itemLoading, setItemLoading] = useState<string | null>(null);
 
-  const { data: absLibraries, isLoading: absLibrariesLoading } = useQuery({
+  const { data: absLibraries, isLoading: absLibrariesLoading, error: absLibrariesError } = useQuery({
     queryKey: ['abs-libraries'],
     queryFn: () => api.getAudiobookshelfLibraries(),
     enabled: show && tab === 'abs' && !libraryId,
+    retry: 2,
+    staleTime: 60000,
   });
 
-  const { data: absLibraryItems, isLoading: absLibraryItemsLoading } = useQuery({
+  const { data: absLibraryItems, isLoading: absLibraryItemsLoading, error: absLibraryItemsError } = useQuery({
     queryKey: ['abs-library-items', libraryId],
     queryFn: () => api.getAudiobookshelfLibrary(libraryId!, 50),
     enabled: show && tab === 'abs' && !!libraryId,
+    retry: 2,
+    staleTime: 60000,
   });
 
-  const { data: absSearchResults, isLoading: absSearchLoading } = useQuery({
+  const { data: absSearchResults, isLoading: absSearchLoading, error: absSearchError } = useQuery({
     queryKey: ['abs-search', search],
     queryFn: () => api.searchAudiobookshelf(search, 30),
     enabled: show && tab === 'abs' && search.length >= 2,
+    retry: 2,
+    staleTime: 60000,
   });
 
-  const { data: maPlaylists, isLoading: playlistsLoading } = useQuery({
+  const { data: maPlaylists, isLoading: playlistsLoading, error: maPlaylistsError } = useQuery({
     queryKey: ['ma-playlists'],
     queryFn: () => api.getMusicAssistantPlaylists(),
+    enabled: show && tab === 'ma',
+    retry: 2,
+    staleTime: 60000,
   });
 
-  const { data: maRecent, isLoading: maRecentLoading } = useQuery({
+  const { data: maRecent, isLoading: maRecentLoading, error: maRecentError } = useQuery({
     queryKey: ['ma-recent'],
     queryFn: () => api.getMusicAssistantRecent(),
+    enabled: show && tab === 'ma',
+    retry: 2,
+    staleTime: 60000,
   });
 
   const handlePlay = useCallback(
@@ -400,7 +449,17 @@ const MediaExplorerModal = ({
                 <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <List size={12} />Playlists
                 </h3>
-                {playlistsLoading ? loadingSection() : !maPlaylists?.playlists?.length ? emptySection('No playlists found') : (
+                {playlistsLoading ? loadingSection() : maPlaylistsError ? (
+                  <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                    <p className="text-sm text-red-400">Failed to load playlists. Check your server connection.</p>
+                    <button
+                      onClick={() => { /* query will auto-retry via staleTime */ }}
+                      className="mt-2 text-xs text-red-300 underline hover:text-red-200"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : !maPlaylists?.playlists?.length ? emptySection('No playlists found') : (
                   <div className="space-y-1.5">
                     {maPlaylists.playlists
                       .filter((pl) => !search || pl.name.toLowerCase().includes(search.toLowerCase()))
@@ -416,7 +475,17 @@ const MediaExplorerModal = ({
                 <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <Clock size={12} />Recently Played
                 </h3>
-                {maRecentLoading ? loadingSection() : !maRecent?.recent?.length ? emptySection('No recent items') : (
+                {maRecentLoading ? loadingSection() : maRecentError ? (
+                  <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                    <p className="text-sm text-red-400">Failed to load recent items. Check your server connection.</p>
+                    <button
+                      onClick={() => { /* query will auto-retry via staleTime */ }}
+                      className="mt-2 text-xs text-red-300 underline hover:text-red-200"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : !maRecent?.recent?.length ? emptySection('No recent items') : (
                   <div className="space-y-1.5">
                     {maRecent.recent
                       .filter((i) => !search || i.name.toLowerCase().includes(search.toLowerCase()) || i.artist.toLowerCase().includes(search.toLowerCase()))
@@ -453,7 +522,11 @@ const MediaExplorerModal = ({
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                     <Library size={12} />Libraries
                   </h3>
-                  {absLibrariesLoading ? loadingSection() : !absLibraries?.libraries?.length ? emptySection('No libraries found') : (
+                  {absLibrariesLoading ? loadingSection() : absLibrariesError ? (
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                      <p className="text-sm text-red-400">Failed to load libraries. Check your server connection.</p>
+                    </div>
+                  ) : !absLibraries?.libraries?.length ? emptySection('No libraries found') : (
                     <div className="space-y-1.5">
                       {absLibraries.libraries
                         .filter((lib) => !search || lib.name.toLowerCase().includes(search.toLowerCase()))
@@ -478,7 +551,11 @@ const MediaExplorerModal = ({
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
                     {absLibraryItems?.status ? 'Browse Books' : 'Loading...'}
                   </h3>
-                  {absLibraryItemsLoading ? loadingSection() : !absLibraryItems?.books?.length ? emptySection('No books in this library') : (
+                  {absLibraryItemsLoading ? loadingSection() : absLibraryItemsError ? (
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                      <p className="text-sm text-red-400">Failed to load library. Check your server connection.</p>
+                    </div>
+                  ) : !absLibraryItems?.books?.length ? emptySection('No books in this library') : (
                     <div className="space-y-1.5">
                       {absLibraryItems.books
                         .filter((b) => !search || b.title.toLowerCase().includes(search.toLowerCase()) || b.author.toLowerCase().includes(search.toLowerCase()))
@@ -505,7 +582,11 @@ const MediaExplorerModal = ({
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                     <Search size={12} />Search Results
                   </h3>
-                  {absSearchLoading ? loadingSection() : !absSearchResults?.books?.length ? emptySection(`No results for "${search}"`) : (
+                  {absSearchLoading ? loadingSection() : absSearchError ? (
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                      <p className="text-sm text-red-400">Search failed. Check your server connection.</p>
+                    </div>
+                  ) : !absSearchResults?.books?.length ? emptySection(`No results for "${search}"`) : (
                     <div className="space-y-1.5">
                       {absSearchResults.books.map((book) => (
                         <button key={book.id} onClick={() => handlePlay(book.id, 'audiobook')} disabled={isDisabled}
