@@ -54,8 +54,7 @@ const DeviceSelector = ({
 }) => {
   const { trigger } = useHaptics();
   const [open, setOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const targets = useMemo(
     () =>
@@ -68,54 +67,22 @@ const DeviceSelector = ({
     [entities],
   );
 
-  const updatePosition = useCallback(() => {
-    const btn = buttonRef.current;
-    if (!btn) return;
-    const rect = btn.getBoundingClientRect();
-    setDropdownPos({
-      top: rect.bottom + window.scrollY + 6,
-      right: window.innerWidth - rect.right,
-    });
-  }, []);
-
+  // Close when clicking outside
   useEffect(() => {
     if (!open) return;
-    updatePosition();
-    window.addEventListener('scroll', updatePosition, { passive: true });
-    window.addEventListener('resize', updatePosition);
-    const handler = () => setOpen(false);
-    const timer = setTimeout(() => document.addEventListener('click', handler), 0);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('click', handler);
-      window.removeEventListener('scroll', updatePosition);
-      window.removeEventListener('resize', updatePosition);
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
     };
-  }, [open, updatePosition]);
-
-  if (!open) {
-    return (
-      <button
-        ref={buttonRef}
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
-          selectedTarget
-            ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
-            : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-white'
-        }`}
-      >
-        <Cast size={12} />
-        <span className="max-w-28 truncate">{selectedTargetInfo?.name || 'Cast To'}</span>
-        <ChevronDown size={12} className={`opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-    );
-  }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
 
   return (
-    <>
+    <div ref={wrapperRef} className="relative">
       <button
-        ref={buttonRef}
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        onClick={() => setOpen(!open)}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
           selectedTarget
             ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
@@ -126,32 +93,30 @@ const DeviceSelector = ({
         <span className="max-w-28 truncate">{selectedTargetInfo?.name || 'Cast To'}</span>
         <ChevronDown size={12} className={`opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      <div
-        className="fixed glass-panel rounded-xl border border-white/10 shadow-2xl z-[100] overflow-hidden"
-        style={{ top: dropdownPos.top, right: dropdownPos.right, width: '280px', transform: 'translateY(6px)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-1.5 max-h-64 overflow-y-auto custom-scrollbar">
-          {targets.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => { trigger('light'); setOpen(false); }}
-              className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors text-left ${
-                selectedTarget === t.id ? 'bg-cyan-500/20 border border-cyan-500/30' : 'hover:bg-white/10'
-              } ${!t.online ? 'opacity-40' : ''}`}
-            >
-              <Cast size={14} className="text-slate-400 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="text-white text-sm font-medium truncate">{t.name}</p>
-                <p className="text-xs text-slate-500 truncate">{t.room}</p>
-              </div>
-              <div className={`w-2 h-2 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
-            </button>
-          ))}
-          {targets.length === 0 && <p className="text-xs text-slate-500 text-center py-4">No media players found</p>}
+      {open && (
+        <div className="absolute top-full right-0 mt-1.5 glass-panel rounded-xl border border-white/10 shadow-2xl z-[100] overflow-hidden" style={{ width: '280px' }}>
+          <div className="p-1.5 max-h-64 overflow-y-auto custom-scrollbar">
+            {targets.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => { trigger('light'); setOpen(false); }}
+                className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors text-left ${
+                  selectedTarget === t.id ? 'bg-cyan-500/20 border border-cyan-500/30' : 'hover:bg-white/10'
+                } ${!t.online ? 'opacity-40' : ''}`}
+              >
+                <Cast size={14} className="text-slate-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-sm font-medium truncate">{t.name}</p>
+                  <p className="text-xs text-slate-500 truncate">{t.room}</p>
+                </div>
+                <div className={`w-2 h-2 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
+              </button>
+            ))}
+            {targets.length === 0 && <p className="text-xs text-slate-500 text-center py-4">No media players found</p>}
+          </div>
         </div>
-      </div>
-    </>
+      )}
+    </div>
   );
 };
 
