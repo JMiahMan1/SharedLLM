@@ -246,7 +246,7 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
     else:
         local_url = _get(settings, "llm_local_url")
         if not local_url:
-            raise RuntimeError(f"Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
+            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
         return OllamaProvider(
             base_url=local_url,
             timeout=timeout
@@ -3935,11 +3935,29 @@ async def search_abs(q: str, limit: int = 20, request: Request = None):
 
 # ─── Execution service proxy routes (for UI access) ──────────────────────
 
-def _ensure_user_context(body: dict) -> dict:
-    """Ensure body has user_context (required by execution service schemas)."""
-    if not body.get("user_context"):
-        body = {**body, "user_context": {"user": ""}}
-    return body
+async def _resolve_user_context(request: Request, body: dict) -> dict:
+    """Resolve user context from request, falling back to first user."""
+    # If body already has user_context, use it
+    if body.get("user_context"):
+        return body["user_context"]
+    
+    # Try to resolve from request
+    try:
+        creds_data = await _resolve_identity_from_request(request)
+        if creds_data.get("user"):
+            return creds_data
+    except Exception:
+        pass
+    
+    # Fall back to first user
+    try:
+        first_user = await resolve_first_user()
+        if first_user:
+            return first_user
+    except Exception:
+        pass
+    
+    return {"user": ""}
 
 
 @app.post("/execute/media/status")
@@ -3947,10 +3965,11 @@ async def proxy_media_status(request: Request):
     """Proxy media status requests from UI to execution service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         body = await request.json() if await request.body() else {}
-        body = _ensure_user_context(body)
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/media/status",
-            json=body,
+            json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
@@ -3961,10 +3980,11 @@ async def proxy_media_transport(request: Request):
     """Proxy media transport requests from UI to execution service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         body = await request.json() if await request.body() else {}
-        body = _ensure_user_context(body)
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/media/transport",
-            json=body,
+            json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
@@ -3975,10 +3995,11 @@ async def proxy_media_play(request: Request):
     """Proxy media play requests from UI to execution service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         body = await request.json() if await request.body() else {}
-        body = _ensure_user_context(body)
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/media/play",
-            json=body,
+            json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
@@ -3989,10 +4010,11 @@ async def proxy_audiobookshelf(request: Request):
     """Proxy audiobookshelf requests from UI to execution service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         body = await request.json() if await request.body() else {}
-        body = _ensure_user_context(body)
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/audiobookshelf",
-            json=body,
+            json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
