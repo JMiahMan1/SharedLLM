@@ -554,7 +554,7 @@ async def clear_history_endpoint(request: Request):
     try:
         body = await request.json()
         creds_data = await resolve_identity(body)
-        user_id = creds_data.get("user", "default")
+        user_id = creds_data.get("user") or ""
         
         from gateway.history import _redis, _get_history_key
         key = _get_history_key(user_id)
@@ -1619,6 +1619,14 @@ async def resolve_identity(body: dict) -> dict:
       raise HTTPException(status_code=503, detail="Identity service unreachable")
 
 
+async def resolve_first_user() -> dict:
+    """Resolve the first (ID=1) user in the system."""
+    try:
+        return await resolve_identity({"user_id": 1})
+    except HTTPException:
+        return {}
+
+
 def _auth_body_from_request(request: Request, body: dict | None = None) -> dict:
     merged = dict(body or {})
     user_id = request.query_params.get("user_id")
@@ -1645,7 +1653,7 @@ async def _proxy_execution_with_identity(
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with httpx.AsyncClient(timeout=60.0) as client:
         if method.upper() == "GET":
-            params = {"user_id": creds_data.get("user", "default")}
+            params = {"user_id": creds_data.get("user") or ""}
             resp = await client.get(f"{EXECUTION_SVC}{endpoint}", headers=headers, params=params)
         else:
             exec_payload = {"user_context": creds_data, **(payload or {})}
@@ -1673,7 +1681,7 @@ async def fetch_ha_entities(creds: dict) -> list:
             
             entities = data.get("entities", []) if isinstance(data, dict) else []
             if entities:
-                user_id = creds.get("user", "default")
+                user_id = creds.get("user") or ""
                 # Update IntentEngine cache for fuzzy matching
                 engine.update_entity_cache(entities)
                 
@@ -2872,10 +2880,11 @@ async def get_storage_stats(request: Request):
     # Resolve user and nextcloud IDs from request
     try:
         creds_data = await _resolve_identity_from_request(request)
-        jarvis_user = creds_data.get("user", "default")
+        jarvis_user = creds_data.get("user") or ""
         nc_user = creds_data.get("nextcloud_user")
     except Exception:
-        jarvis_user = "default"
+        first_user = await resolve_first_user()
+        jarvis_user = first_user.get("user") or ""
         nc_user = None
 
     # Helper to merge stats from multiple users
@@ -2927,9 +2936,10 @@ async def get_storage_stats(request: Request):
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
     try:
         creds_data = await _resolve_identity_from_request(request)
-        user_id = request.query_params.get("user_id") or creds_data.get("nextcloud_user") or creds_data.get("user", "default")
+        user_id = request.query_params.get("user_id") or creds_data.get("nextcloud_user") or creds_data.get("user") or ""
     except Exception:
-        user_id = "default"
+        first_user = await resolve_first_user()
+        user_id = first_user.get("user") or ""
 
     resp = await get_http_client().get(
         f"{RAG_SVC}/rag/collection/{collection_name}?user_id={user_id}&limit={limit}",
@@ -2949,9 +2959,10 @@ async def get_collection_docs(collection_name: str, request: Request, limit: int
 async def purge_storage_collection(collection_name: str, request: Request):
     try:
         creds_data = await _resolve_identity_from_request(request)
-        user_id = creds_data.get("user", "default")
+        user_id = creds_data.get("user") or ""
     except Exception:
-        user_id = "default"
+        first_user = await resolve_first_user()
+        user_id = first_user.get("user") or ""
 
     body = await request.json()
     
@@ -3789,11 +3800,17 @@ async def execute_voice_command(request: Request):
 
 
 @app.get("/api/media/music-assistant/playlists")
-async def get_ma_playlists():
-    """Get Music Assistant playlists."""
+async def get_ma_playlists(request: Request):
+    """Get Music Assistant playlists (per-user credentials)."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[media/playlists] identity resolution failed: {e.detail}")
+        return {"status": "SUCCESS", "playlists": []}
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/playlists",
+            params={"user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
@@ -3802,11 +3819,17 @@ async def get_ma_playlists():
 
 
 @app.get("/api/media/music-assistant/recent")
-async def get_ma_recent():
-    """Get Music Assistant recently played items."""
+async def get_ma_recent(request: Request):
+    """Get Music Assistant recently played items (per-user credentials)."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[media/recent] identity resolution failed: {e.detail}")
+        return {"status": "SUCCESS", "recent": []}
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/recent",
+            params={"user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
@@ -3815,12 +3838,17 @@ async def get_ma_recent():
 
 
 @app.get("/api/media/audiobookshelf/libraries")
-async def get_abs_libraries():
-    """Get Audiobookshelf libraries."""
+async def get_abs_libraries(request: Request):
+    """Get Audiobookshelf libraries (per-user credentials)."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[abs/libraries] identity resolution failed: {e.detail}")
+        return {"status": "SUCCESS", "libraries": []}
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/audiobookshelf",
-            params={"action": "libraries"},
+            params={"action": "libraries", "user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
@@ -3840,12 +3868,17 @@ async def get_abs_libraries():
 
 
 @app.get("/api/media/audiobookshelf/last-played")
-async def get_abs_last_played():
-    """Get Audiobookshelf last played books."""
+async def get_abs_last_played(request: Request):
+    """Get Audiobookshelf last played books (per-user credentials)."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[abs/last-played] identity resolution failed: {e.detail}")
+        return {"status": "SUCCESS", "books": []}
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/audiobookshelf",
-            params={"action": "last_played"},
+            params={"action": "last_played", "user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
@@ -3857,12 +3890,17 @@ async def get_abs_last_played():
 
 
 @app.get("/api/media/audiobookshelf/library/{library_id}")
-async def get_abs_library_items(library_id: str, limit: int = 50):
-    """Get audiobooks from a specific Audiobookshelf library."""
+async def get_abs_library_items(library_id: str, limit: int = 50, request: Request = None):
+    """Get audiobooks from a specific Audiobookshelf library (per-user credentials)."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[abs/library] identity resolution failed: {e.detail}")
+        return {"status": "SUCCESS", "books": []}
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/audiobookshelf",
-            params={"action": "list", "library_id": library_id, "limit": limit},
+            params={"action": "list", "library_id": library_id, "limit": limit, "user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
@@ -3874,12 +3912,17 @@ async def get_abs_library_items(library_id: str, limit: int = 50):
 
 
 @app.get("/api/media/audiobookshelf/search")
-async def search_abs(q: str, limit: int = 20):
-    """Search Audiobookshelf for audiobooks."""
+async def search_abs(q: str, limit: int = 20, request: Request = None):
+    """Search Audiobookshelf for audiobooks (per-user credentials)."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[abs/search] identity resolution failed: {e.detail}")
+        return {"status": "SUCCESS", "books": []}
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/audiobookshelf",
-            params={"action": "search", "query": q, "limit": limit},
+            params={"action": "search", "query": q, "limit": limit, "user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
@@ -3895,7 +3938,7 @@ async def search_abs(q: str, limit: int = 20):
 def _ensure_user_context(body: dict) -> dict:
     """Ensure body has user_context (required by execution service schemas)."""
     if not body.get("user_context"):
-        body = {**body, "user_context": {"user": "default"}}
+        body = {**body, "user_context": {"user": ""}}
     return body
 
 

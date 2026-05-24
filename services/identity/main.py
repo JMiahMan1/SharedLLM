@@ -300,16 +300,20 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     """
     user = None
     
+    # Resolve by user ID (integer primary key)
+    if req.user_id is not None:
+        user = session.exec(select(User).where(User.id == req.user_id)).first()
+
     # Resolve by API Key first (for OpenWebUI & UI clients)
-    if req.api_key:
+    if not user and req.api_key:
         user = _find_user_for_api_key(session, req.api_key)
 
-    elif req.rag_user:
+    if not user and req.rag_user:
         user = session.exec(select(User).where(User.username == req.rag_user.lower())).first()
-    elif req.voice_id:
+    if not user and req.voice_id:
         # Search for user by voice_id (username or biometric match)
         user = session.exec(select(User).where(User.username == req.voice_id.lower())).first()
-    elif req.device_id:
+    if not user and req.device_id:
         assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == req.device_id)).first()
         if assignment:
             user = assignment.user
