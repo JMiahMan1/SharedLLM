@@ -109,19 +109,17 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
     
     # --- OLLAMA MODELS ---
-    {"key": "ollama_assistant_model", "value": "auto", "description": "Ollama assistant model"},
-    {"key": "ollama_coding_model", "value": "auto", "description": "Ollama coding model"},
-    {"key": "ollama_librarian_model", "value": "auto", "description": "Ollama librarian model"},
+    # Not seeded here — must be set explicitly via the UI.
+    # If absent from the DB, get_assistant_model() raises RuntimeError immediately.
+
 
     # --- CLOUD MODELS ---
-    {"key": "cloud_assistant_model", "value": "auto", "description": "Cloud assistant model (OpenRouter/OpenAI)"},
-    {"key": "cloud_coding_model", "value": "auto", "description": "Cloud coding model (OpenRouter/OpenAI)"},
-    {"key": "cloud_librarian_model", "value": "auto", "description": "Cloud librarian model (OpenRouter/OpenAI)"},
+    # Not seeded here — must be set explicitly via the UI.
+
     
-    # --- DEPRECATED (FOR BACKWARD COMPATIBILITY) ---
-    {"key": "assistant_model", "value": "auto", "description": "DEPRECATED: Use provider-specific models."},
-    {"key": "librarian_model", "value": "auto", "description": "DEPRECATED: Use provider-specific models."},
-    {"key": "coding_model", "value": "auto", "description": "DEPRECATED: Use provider-specific models."},
+    # --- DEPRECATED MODEL KEYS ---
+    # Not seeded here — if present in DB they are read as fallbacks, but never auto-inserted.
+
     {"key": "llm_cloud_fallback_model", "value": "google/gemini-2.5-flash-8b", "description": "DEPRECATED: Use cloud_assistant_model."},
     
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
