@@ -80,20 +80,34 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import INTERNAL_SECRET, IDENTITY_SVC_URL, OLLAMA_URL
 
-async def resolve_internal_user(user_id: str) -> Optional[Dict[str, Any]]:
-    """Query Identity Service for full user credentials using internal secret."""
+async def resolve_internal_user(user_id: Optional[int] = None, rag_user: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Query Identity Service for full user credentials using internal secret.
+    
+    If called with a single positional arg, auto-detect: int -> user_id param, str -> rag_user param.
+    """
+    payload: dict[str, Any] = {}
+    if user_id is not None:
+        payload["user_id"] = user_id
+    if rag_user is not None:
+        payload["rag_user"] = rag_user
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(
                 f"{IDENTITY_SVC_URL}/api/resolve",
-                json={"rag_user": user_id},
+                json=payload,
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status_code == 200:
                 return resp.json()
     except Exception as e:
-        log.error(f"Failed to resolve internal user {user_id}: {e}")
+        sample_user = user_id if user_id is not None else rag_user
+        log.error(f"Failed to resolve internal user {sample_user}: {e}")
     return None
+
+
+async def resolve_first_user() -> Optional[Dict[str, Any]]:
+    """Resolve the first (ID=1) user in the system — the system default."""
+    return await resolve_internal_user(user_id=1)
 
 async def require_internal(request: Request, x_internal_secret: str = Header(None)):
     if request.url.path == "/health" or request.url.path.startswith("/media/"):
@@ -361,7 +375,7 @@ async def execute_media_play(req: MediaPlayRequest):
     # Resolve HA credentials via Identity service if not in context
     ctx = req.user_context
     if not ctx.ha_url or not ctx.ha_token:
-        creds = await resolve_internal_user("default")
+        creds = await resolve_first_user()
         if creds:
             ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
             ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
@@ -371,7 +385,7 @@ async def execute_media_play(req: MediaPlayRequest):
 async def execute_media_transport(req: MediaTransportRequest):
     ctx = req.user_context
     if not ctx.ha_url or not ctx.ha_token:
-        creds = await resolve_internal_user("default")
+        creds = await resolve_first_user()
         if creds:
             ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
             ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
@@ -474,7 +488,10 @@ async def execute_trigger(payload: Dict[str, Any]):
         return _ok(f"Triggered {timer_data.get('title')} (no user context)", "automation_trigger")
 
     # Resolve full credentials for the user (to get HA token)
-    creds = await resolve_internal_user(user_id)
+    if isinstance(user_id, int):
+        creds = await resolve_internal_user(user_id=user_id)
+    else:
+        creds = await resolve_internal_user(rag_user=str(user_id))
     if not creds:
         log.error(f"Trigger failed: could not resolve credentials for user {user_id}")
         return _ok(f"Triggered {timer_data.get('title')} (failed to resolve creds)", "automation_trigger")
@@ -653,7 +670,7 @@ async def execute_workspace_search(request: Request):
     
     # Ensure user_context exists
     if "user_context" not in body:
-        body["user_context"] = {"user": "default", "is_admin": True}
+        body["user_context"] = {"user": "", "is_admin": True}
     
     req = WorkspaceSearchRequest(**body)
     return await workspace.handle_workspace_search(req)
@@ -671,7 +688,7 @@ async def execute_workspace_file_read(request: Request):
     if "filename" in body and "path" not in body:
         body["path"] = body.pop("filename")
     if "user_context" not in body:
-        body["user_context"] = {"user": "default", "is_admin": True}
+        body["user_context"] = {"user": "", "is_admin": True}
     req = WorkspaceFileReadRequest(**body)
     res = await workspace.handle_workspace_read(req)
     if res.status == "FAILURE":
@@ -687,7 +704,7 @@ async def execute_workspace_file_write(request: Request):
     if "filename" in body and "path" not in body:
         body["path"] = body.pop("filename")
     if "user_context" not in body:
-        body["user_context"] = {"user": "default", "is_admin": True}
+        body["user_context"] = {"user": "", "is_admin": True}
     req = WorkspaceFileWriteRequest(**body)
     res = await workspace.handle_workspace_write(req)
     if res.status == "FAILURE":
@@ -703,7 +720,7 @@ async def execute_workspace_file_patch(request: Request):
     if "filename" in body and "path" not in body:
         body["path"] = body.pop("filename")
     if "user_context" not in body:
-        body["user_context"] = {"user": "default", "is_admin": True}
+        body["user_context"] = {"user": "", "is_admin": True}
     req = WorkspaceFilePatchRequest(**body)
     res = await workspace.handle_workspace_patch(req)
     if res.status == "FAILURE":
@@ -734,7 +751,7 @@ async def execute_workspace_lint(request: Request):
         body["path"] = body.pop("target")
     
     if "user_context" not in body:
-        body["user_context"] = {"user": "default", "is_admin": True}
+        body["user_context"] = {"user": "", "is_admin": True}
     
     req = WorkspaceLintRequest(**body)
     return await workspace.handle_workspace_lint(req)
@@ -997,7 +1014,7 @@ async def execute_announce(req: AnnouncementRequest):
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
     if not ha_url or not ha_token:
-        creds = await resolve_internal_user("default")
+        creds = await resolve_first_user()
         ha_url = ha_url or (creds or {}).get("ha_url", "")
         ha_token = ha_token or (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
@@ -1302,7 +1319,7 @@ async def execute_entity_search(req: EntitySearchRequest):
     ha_token = ctx.ha_token
     
     if not ha_url or not ha_token:
-        creds = await resolve_internal_user("default")
+        creds = await resolve_first_user()
         ha_url = ha_url or (creds or {}).get("ha_url", "")
         ha_token = ha_token or (creds or {}).get("ha_token", "")
     
@@ -1402,7 +1419,7 @@ def _detect_media_platform(entity_id: str, attrs: dict) -> str:
 
 @app.get("/discovery/entities")
 async def discovery_entities(request: Request):
-    creds = await resolve_internal_user("default")
+    creds = await resolve_first_user()
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
@@ -1432,7 +1449,7 @@ async def discovery_entities(request: Request):
 
 @app.get("/discovery/history")
 async def discovery_history(entity_id: str, days: int = 1):
-    creds = await resolve_internal_user("default")
+    creds = await resolve_first_user()
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
@@ -1462,7 +1479,7 @@ async def discovery_device_refresh(entity_id: str, request: Request):
     device_type = body.get("device_type")
     subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
     
-    creds = await resolve_internal_user("default")
+    creds = await resolve_first_user()
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
@@ -1484,7 +1501,7 @@ async def discovery_bulk_scan(request: Request):
     body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
     
-    creds = await resolve_internal_user("default")
+    creds = await resolve_first_user()
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
@@ -1507,7 +1524,7 @@ async def discovery_device_profile(entity_id: str, subnet: str = None):
     """Generate a complete device profile with network info, HA data, and control methods."""
     import device_discovery
     import device_profiler
-    creds = await resolve_internal_user("default")
+    creds = await resolve_first_user()
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
@@ -1521,7 +1538,7 @@ async def discovery_profile_all(subnet: str = None):
     """Profile all media_player entities."""
     import device_discovery
     import device_profiler
-    creds = await resolve_internal_user("default")
+    creds = await resolve_first_user()
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
@@ -1600,12 +1617,17 @@ async def execute_media_status(req: MediaStatusRequest):
 
 
 @app.get("/execute/media/music-assistant/playlists")
-async def get_ma_playlists():
-    """Get Music Assistant playlists."""
+async def get_ma_playlists(user_id: str = ""):
+    """Get Music Assistant playlists (per-user credentials)."""
     try:
-        from config import HA_URL, HA_TOKEN
+        creds = await resolve_internal_user(rag_user=user_id)
+        ha_url = creds.get("ha_url") if creds else (HA_URL if HA_URL else None)
+        ha_token = creds.get("ha_token") if creds else (HA_TOKEN if HA_TOKEN else None)
+        if not ha_url or not ha_token:
+            log.error(f"[ma/playlists] No HA credentials for user {user_id}")
+            return {"status": "SUCCESS", "playlists": []}
         from handlers.mass_client import get_playlists
-        playlists = await get_playlists(HA_URL, HA_TOKEN)
+        playlists = await get_playlists(ha_url, ha_token)
         return {"status": "SUCCESS", "playlists": playlists}
     except Exception as e:
         log.error(f"[ma/playlists] Error: {e}")
@@ -1613,12 +1635,17 @@ async def get_ma_playlists():
 
 
 @app.get("/execute/media/music-assistant/recent")
-async def get_ma_recent():
-    """Get Music Assistant recently played items."""
+async def get_ma_recent(user_id: str = ""):
+    """Get Music Assistant recently played items (per-user credentials)."""
     try:
-        from config import HA_URL, HA_TOKEN
+        creds = await resolve_internal_user(rag_user=user_id)
+        ha_url = creds.get("ha_url") if creds else (HA_URL if HA_URL else None)
+        ha_token = creds.get("ha_token") if creds else (HA_TOKEN if HA_TOKEN else None)
+        if not ha_url or not ha_token:
+            log.error(f"[ma/recent] No HA credentials for user {user_id}")
+            return {"status": "SUCCESS", "recent": []}
         from handlers.mass_client import get_recent
-        recent = await get_recent(HA_URL, HA_TOKEN)
+        recent = await get_recent(ha_url, ha_token)
         return {"status": "SUCCESS", "recent": recent}
     except Exception as e:
         log.error(f"[ma/recent] Error: {e}")
@@ -1626,14 +1653,28 @@ async def get_ma_recent():
 
 
 @app.get("/execute/audiobookshelf")
-async def handle_audiobookshelf_get(action: str = "last_played", library_id: str = "", query: str = "", limit: int = 25):
-    """Handle Audiobookshelf GET requests."""
+async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = "", library_id: str = "", query: str = "", limit: int = 25):
+    """Handle Audiobookshelf GET requests (per-user credentials)."""
     try:
         from handlers.audiobookshelf import handle_audiobookshelf
         from schemas import AudiobookshelfRequest, UserContext
+        
+        # Resolve per-user credentials from Identity service
+        user_ctx = UserContext(user=user_id)
+        creds = await resolve_internal_user(rag_user=user_id)
+        if creds:
+                user_ctx = UserContext(
+                    user=user_id,
+                    ha_url=creds.get("ha_url"),
+                    ha_token=creds.get("ha_token"),
+                    audiobookshelf_url=creds.get("audiobookshelf_url"),
+                    audiobookshelf_user=creds.get("audiobookshelf_user"),
+                    audiobookshelf_pass=creds.get("audiobookshelf_pass"),
+                )
+        
         req = AudiobookshelfRequest(
             action=action,
-            user_context=UserContext(user="default"),
+            user_context=user_ctx,
             library_id=library_id or None,
             query=query or None,
             limit=limit,
@@ -1653,7 +1694,7 @@ async def execute_execution_logs(req: ExecutionLogRequest):
 async def execute_video_play(req: VideoPlayRequest):
     ctx = req.user_context
     if not ctx.ha_url or not ctx.ha_token:
-        creds = await resolve_internal_user("default")
+        creds = await resolve_first_user()
         if creds:
             ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
             ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
@@ -1772,7 +1813,7 @@ async def execute_media_group(req):
     """Manage media device groups."""
     from schemas_groups import MediaGroupRequest
     parsed = MediaGroupRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
-    ctx = parsed.user_context if hasattr(parsed, 'user_context') else UserContext(user="default")
+    ctx = parsed.user_context if hasattr(parsed, 'user_context') else UserContext(user="")
     log.info(f"[groups] media_group action={parsed.action} group_id={parsed.group_id}")
     return await groups.handle_media_group(parsed, ctx)
 
@@ -1782,7 +1823,7 @@ async def execute_light_cluster(req):
     """Manage light clusters."""
     from schemas_groups import LightClusterRequest
     parsed = LightClusterRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
-    ctx = parsed.user_context if hasattr(parsed, 'user_context') else UserContext(user="default")
+    ctx = parsed.user_context if hasattr(parsed, 'user_context') else UserContext(user="")
     log.info(f"[groups] light_cluster action={parsed.action} cluster_id={parsed.cluster_id}")
     return await groups.handle_light_cluster(parsed, ctx)
 
@@ -1885,7 +1926,7 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
     from schemas import UserContext, LightControlRequest, MediaPlayRequest
 
     transcript = req.get("transcript", "").strip().lower()
-    user_id = req.get("user_id", "default")
+    user_id = req.get("user_id") or ""
     ctx = UserContext(user=user_id)
 
     if not transcript:
