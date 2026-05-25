@@ -42,7 +42,7 @@ def test_light_control_valid(mocker):
     mock_call.assert_called_once()
 
 def test_media_play_valid(mocker):
-    mock_call = mocker.patch("main.ha_client.call_service", return_value={"ok": True})
+    mocker.patch("main.ha_client.call_service", return_value={"ok": True})
     
     resp = client.post("/execute/media/play", 
         headers={"X-Internal-Secret": "test-secret"},
@@ -73,7 +73,7 @@ def test_tv_cast_smart_power_sync(mocker):
     assert mock_call.call_count >= 1
 
 def test_entity_search_by_query(mocker):
-    mock_states = mocker.patch("main.ha_client.get_states", return_value=[
+    mocker.patch("main.ha_client.get_states", return_value=[
         {"entity_id": "media_player.office_tv", "state": "idle", "attributes": {"friendly_name": "Office TV", "device_class": "tv"}},
         {"entity_id": "media_player.office_tv_chrome", "state": "off", "attributes": {"friendly_name": "Office TV Cast", "device_class": "speaker"}},
         {"entity_id": "light.office_desk", "state": "on", "attributes": {"friendly_name": "Office Desk Light", "device_class": "light"}},

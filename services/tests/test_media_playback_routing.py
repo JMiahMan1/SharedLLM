@@ -5,17 +5,14 @@ Validates:
 2. Port 8888 used for all media URLs
 3. Correct handler routing per device type
 """
-import sys
 import os
 import unittest
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "execution"))
-
-from announce_handlers import detect_tv_type
-from handlers.media import detect_media_type
-from handlers.video import handle_video_play
-from schemas import VideoPlayRequest, UserContext
+from execution.announce_handlers import detect_tv_type
+from execution.handlers.media import detect_media_type
+from execution.handlers.video import handle_video_play
+from execution.schemas import VideoPlayRequest, UserContext
 
 
 class TestDeviceDetection(unittest.TestCase):
@@ -154,7 +151,7 @@ class TestMediaPlaybackRouting(unittest.TestCase):
         )
 
         with patch("handlers.video.EXECUTION_EXTERNAL_HOST", "192.168.2.205"):
-            result = await handle_video_play(req)
+            await handle_video_play(req)
 
         # Verify the call_service was called with port 8888 URL
         call_args = mock_call.call_args_list
@@ -185,7 +182,7 @@ class TestMediaPlaybackRouting(unittest.TestCase):
         )
 
         with patch("handlers.video.EXECUTION_EXTERNAL_HOST", "192.168.2.205"):
-            result = await handle_video_play(req)
+            await handle_video_play(req)
 
         # Verify roku_play_video was called with port 8888 URL
         call_args = mock_roku_play.call_args

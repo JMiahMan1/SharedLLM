@@ -4,9 +4,8 @@ Manages enrollment, snapshot ingestion, queries, and LLM pattern analysis.
 """
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
 import httpx
 

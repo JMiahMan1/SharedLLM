@@ -27,7 +27,7 @@ def get_local_subnet() -> str:
                 if len(parts) >= 3 and parts[1] == "00000000":
                     iface = parts[0]
                     # Get IP and mask for this interface
-                    with open(f"/sys/class/net/{iface}/address") as af:
+                    with open(f"/sys/class/net/{iface}/address"):
                         pass  # MAC address, not needed
                     # Parse IP from ifconfig or ip command
                     result = subprocess_run(["ip", "-j", "addr", "show", iface])

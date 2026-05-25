@@ -1,20 +1,14 @@
 import pytest
 from unittest.mock import MagicMock
-import sys
-import os
 import re
 
-# Add execution service to path for absolute imports
-_execution_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
-if _execution_path not in sys.path:
-    sys.path.insert(0, _execution_path)
-
 # Mock heavy dependencies for testing
+import sys
 sys.modules['kokoro_onnx'] = MagicMock()
 sys.modules['onnxruntime'] = MagicMock()
 
 import numpy as np
-from tts import KokoroTTSEngine, get_tts_engine
+from execution.tts import KokoroTTSEngine, get_tts_engine
 
 def test_normalization():
     engine = KokoroTTSEngine()

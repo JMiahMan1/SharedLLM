@@ -54,6 +54,7 @@ class KokoroTTSEngine:
             return await self._generate_storybook(text, voice)
         
         text = self._normalize_text(text)
+        assert self._kokoro is not None
         samples, sample_rate = await asyncio.to_thread(
             self._kokoro.create, text, voice=voice, speed=1.0, lang="en-us"
         )
@@ -77,7 +78,8 @@ class KokoroTTSEngine:
             
             normalized = self._normalize_text(content)
             if not normalized.strip(): continue
-            
+
+            assert self._kokoro is not None
             samples, last_sample_rate = await asyncio.to_thread(
                 self._kokoro.create, normalized, voice=voice, speed=1.0, lang="en-us"
             )

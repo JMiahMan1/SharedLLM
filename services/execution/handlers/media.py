@@ -536,7 +536,12 @@ async def handle_tv_cast(req) -> ExecutionResult:
     play_req = MediaPlayRequest(
         user_context=req.user_context,
         entity_id=req.media_player_entity_id,
+        device_name=None,
+        query=None,
+        media_type=None,
         media_content_id=req.media_content_id,
-        media_content_type=req.media_content_type
+        media_content_type=req.media_content_type,
+        enqueue="replace",
+        volume=None,
     )
     return await handle_media_play(play_req)

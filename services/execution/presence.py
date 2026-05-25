@@ -62,13 +62,14 @@ class PresenceTracker:
 
     async def start(self):
         """Start MQTT subscriber and Redis connection."""
-        if paho is None:
-            log.warning("[presence] paho-mqtt not installed, presence tracking disabled")
+        if paho is None or aioredis is None:
+            log.warning("[presence] paho-mqtt or redis not installed, presence tracking disabled")
             return
 
         self._running = True
         try:
             self._redis = aioredis.from_url(self.redis_url, decode_responses=True)
+            assert self._redis is not None
             await self._redis.ping()
             log.info("[presence] Connected to Redis")
         except Exception as e:

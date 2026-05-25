@@ -199,7 +199,7 @@ async def search_device_type(entity_id: str, attributes: dict, loaded_components
     
     return None
 
-async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Cast devices support direct URL playback."""
     from ha_client import call_service
     log.info(f"[announce.cast] Playing URL on {entity_id}: {media_url[:60]}")
@@ -265,7 +265,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
         "media_content_type": "url"
     })
 
-async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """webOS TV: try webostv.notify, then media_player as fallback."""
     from ha_client import call_service
     log.info(f"[announce.webos] Trying webostv.notify on {entity_id}")
@@ -284,7 +284,7 @@ async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: 
         "media_content_type": "url"
     })
 
-async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Android TV: try media_player, then ADB commands."""
     from ha_client import call_service
     log.info(f"[announce.android_tv] Trying play_media on {entity_id}")
@@ -401,7 +401,7 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
     
     return result
 
-async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Sony Bravia TV."""
     from ha_client import call_service
     log.info(f"[announce.bravia] Trying play_media on {entity_id}")
@@ -410,7 +410,7 @@ async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url:
         "media_content_type": "url"
     })
 
-async def announce_music_assistant(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_music_assistant(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Music Assistant integration."""
     from ha_client import call_service
     log.info(f"[announce.mass] Using media_player.play_media on {entity_id}")
@@ -419,7 +419,7 @@ async def announce_music_assistant(ha_url: str, ha_token: str, entity_id: str, m
         "media_content_type": "url"
     })
 
-async def announce_esphome(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_esphome(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """ESPHome media player."""
     from ha_client import call_service
     log.info(f"[announce.esphome] Trying play_media on {entity_id}")
@@ -428,7 +428,7 @@ async def announce_esphome(ha_url: str, ha_token: str, entity_id: str, media_url
         "media_content_type": "url"
     })
 
-async def announce_dlna(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_dlna(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """DLNA renderer."""
     from ha_client import call_service
     log.info(f"[announce.dlna] Trying play_media on {entity_id}")
@@ -437,7 +437,7 @@ async def announce_dlna(ha_url: str, ha_token: str, entity_id: str, media_url: s
         "media_content_type": "url"
     })
 
-async def announce_generic_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_generic_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Generic TV fallback."""
     from ha_client import call_service
     log.info(f"[announce.generic_tv] Trying play_media on {entity_id}")
@@ -446,7 +446,7 @@ async def announce_generic_tv(ha_url: str, ha_token: str, entity_id: str, media_
         "media_content_type": "url"
     })
 
-async def announce_speaker(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_speaker(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Generic speaker."""
     from ha_client import call_service
     log.info(f"[announce.speaker] Trying play_media on {entity_id}")
@@ -455,7 +455,7 @@ async def announce_speaker(ha_url: str, ha_token: str, entity_id: str, media_url
         "media_content_type": "url"
     })
 
-async def announce_unknown(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None) -> Dict[str, Any]:
+async def announce_unknown(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict = None, message: str = "") -> Dict[str, Any]:
     """Unknown device: try generic play_media, log all attributes for later identification."""
     from ha_client import call_service
     log.info(f"[announce.unknown] Unknown device type for {entity_id}, trying generic play_media")

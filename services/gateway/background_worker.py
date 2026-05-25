@@ -549,8 +549,10 @@ class RavenWorker:
             return
         problematic = []
         for c in containers:
+            if not isinstance(c, dict) or "name" not in c:
+                continue
             errs = await self._get_errors(c["name"])
-            if len(errs) >= error_threshold:
+            if errs and len(errs) >= error_threshold:
                 problematic.append({"name": c["name"], "count": len(errs), "sample": errs[:3]})
         if problematic:
             await self.trigger_self_repair(problematic, settings)

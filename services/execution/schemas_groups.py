@@ -7,7 +7,7 @@ Light Patterns: Named color sequences applied across light cluster members.
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 

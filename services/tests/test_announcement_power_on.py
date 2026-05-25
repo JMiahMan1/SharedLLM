@@ -31,7 +31,7 @@ async def test_announcement_powers_on_tv_with_longer_timeout():
     with patch("execution.main.ha_client.get_state", mock_get_state), \
          patch("execution.main.ha_client.call_service", mock_call_service), \
          patch("execution.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-        result = await execute_announce(req)
+        await execute_announce(req)
 
     # Verify TV got 5s wake timeout
     mock_sleep.assert_any_call(5.0)
@@ -70,7 +70,7 @@ async def test_announcement_skips_power_on_when_already_on():
     with patch("execution.main.ha_client.get_state", mock_get_state), \
          patch("execution.main.ha_client.call_service", mock_call_service), \
          patch("execution.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-        result = await execute_announce(req)
+        await execute_announce(req)
 
     # Should NOT call turn_on
     for call in mock_call_service.call_args_list:

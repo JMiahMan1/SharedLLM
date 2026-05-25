@@ -9,13 +9,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-try:
-    from ..schemas import ExecutionResult
-except ImportError:
-    try:
-        from execution.schemas import ExecutionResult
-    except ImportError:
-        from schemas import ExecutionResult
+from schemas import ExecutionResult
 
 import httpx
 
@@ -24,10 +18,7 @@ log = logging.getLogger("execution.ha_config")
 
 async def _get_ha_credentials(user_context: dict) -> tuple:
     """Resolve HA URL and token from identity service."""
-    try:
-        from config import INTERNAL_SECRET, IDENTITY_SVC_URL
-    except ImportError:
-        from ..config import INTERNAL_SECRET, IDENTITY_SVC_URL
+    from config import INTERNAL_SECRET, IDENTITY_SVC_URL
 
     rag_user = user_context.get("user", "default")
     async with httpx.AsyncClient(timeout=5.0) as client:

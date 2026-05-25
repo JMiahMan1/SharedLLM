@@ -583,7 +583,8 @@ async def readiness():
       "control_plane": f"{CONTROL_PLANE_URL}/health",
     }
 
-    results = {"status": "READY", "services": {}}
+    services_status: dict[str, str] = {}
+    results: dict[str, Any] = {"status": "READY", "services": services_status}
     all_ok = True
 
     async with httpx.AsyncClient(timeout=2.0) as client:
@@ -591,21 +592,21 @@ async def readiness():
           try:
             resp = await client.get(url)
             if resp.status_code == 200:
-                results["services"][name] = "OK"
+                services_status[name] = "OK"
             else:
-                results["services"][name] = f"ERROR ({resp.status_code})"
+                services_status[name] = f"ERROR ({resp.status_code})"
                 all_ok = False
           except Exception:
-            results["services"][name] = "UNREACHABLE"
+            services_status[name] = "UNREACHABLE"
             all_ok = False
 
     # The Gateway itself is running if we are responding to this request
-    results["services"]["gateway"] = "OK"
+    services_status["gateway"] = "OK"
 
     if ping_redis():
-      results["services"]["redis"] = "OK"
+      services_status["redis"] = "OK"
     else:
-      results["services"]["redis"] = "ERROR"
+      services_status["redis"] = "ERROR"
       all_ok = False
 
     # Include config validation status
@@ -1872,8 +1873,8 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
     try:
         # Strategy 7: Dynamic VRAM Awareness for Shadow Execution
         assistant = await get_assistant_model()
-        vram_params = await get_vram_safe_params(assistant)
         settings = await get_all_settings()
+        vram_params = await get_vram_safe_params(assistant, settings)
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
@@ -2048,7 +2049,7 @@ async def chat_handler(request: Request, background_tasks: BackgroundTasks = Non
             media_type = "video" if is_likely_video_request(query) else None
             resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
         elif intent in ["turn_on", "turn_off"]:
-            resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device_id=cached_device_id)
+            resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
             resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [], cached_device=cached_device_id)
         else:

@@ -286,7 +286,7 @@ async def _discover_via_homekit_diagnostics(
             for dev in device_registry_list:
                 dev_name = (dev.get("name") or "").lower()
                 dev_name_by_user = (dev.get("name_by_user") or "").lower()
-                dev_model = (dev.get("model") or "").lower()
+                (dev.get("model") or "").lower()
                 if (any(part in dev_name for part in friendly_lower.split() if len(part) > 2) or
                     any(part in dev_name_by_user for part in friendly_lower.split() if len(part) > 2) or
                     any(part in dev_name for part in entity_lower.split(".") if len(part) > 2)):
@@ -303,7 +303,7 @@ async def _discover_via_homekit_diagnostics(
 
             webos_model = (webos_device.get("model") or "").lower()
             webos_manufacturer = (webos_device.get("manufacturer") or "").lower()
-            webos_serial = (webos_device.get("serial_number") or "").lower()
+            (webos_device.get("serial_number") or "").lower()
 
             # Find matching homekit_controller config entries
             entries_resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
@@ -921,7 +921,7 @@ async def bulk_scan(
             attrs = state.get("attributes", {})
             integration = attrs.get("integration", "")
             entity_lower = entity_id.lower()
-            friendly = (attrs.get("friendly_name") or "").lower()
+            (attrs.get("friendly_name") or "").lower()
             
             # Try HA registry and entity attrs first
             result = await _discover_via_ha_registry(entity_id, ha_url, ha_token, None)

@@ -177,12 +177,18 @@ def test_workflow_auto_creates_review_branch_and_returns_review_metadata(workspa
         "test-secret",
     )
 
+    assert result is not None
     assert result["push"]["branch"].startswith("raven/admin/test_safe-")
     assert result["review"]["head"] == result["push"]["branch"]
     assert result["review"]["base"] == "main"
-    assert "test_safe.py" in result["review"]["summary"]["changed_files"]
-    assert result["review"]["summary"]["pytest"]["passed"] is True
-    assert result["review"]["summary"]["lint"][0]["passed"] is True
+    review_summary = result["review"]["summary"]
+    pytest_result: dict = review_summary["pytest"]
+    lint_result: list = review_summary["lint"]
+    assert isinstance(pytest_result, dict)
+    assert isinstance(lint_result, list)
+    assert "test_safe.py" in review_summary["changed_files"]
+    assert pytest_result["passed"] is True
+    assert lint_result[0]["passed"] is True
 
 
 def test_path_traversal_protection(workspace_env):

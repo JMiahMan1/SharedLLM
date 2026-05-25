@@ -123,7 +123,7 @@ async def handle_deployment(req) -> dict:
                 "detail": {
                     "container": container_name,
                     "docker_status": container.status,
-                    "image": container.image.tags[0] if container.image.tags else "unknown",
+                    "image": container.image.tags[0] if container.image and container.image.tags else "unknown",
                 },
             }
         except Exception as e:
@@ -161,7 +161,7 @@ async def handle_deployment(req) -> dict:
             result = [
                 {"name": c.name, "status": c.status}
                 for c in all_containers
-                if c.name.startswith(CONTAINER_ALLOWLIST_PREFIX)
+                if c.name is not None and c.name.startswith(CONTAINER_ALLOWLIST_PREFIX)
             ]
             return {
                 "status": "SUCCESS",

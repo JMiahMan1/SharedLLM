@@ -72,13 +72,21 @@ except ImportError:
         from execution.handlers import media_status as media_status_handler
         from execution.handlers import ha_config as ha_config_handler
 
+import threading
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 log = logging.getLogger("execution")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import INTERNAL_SECRET, IDENTITY_SVC_URL, OLLAMA_URL
+from config import (
+    INTERNAL_SECRET,
+    IDENTITY_SVC_URL,
+    OLLAMA_URL,
+    HA_URL,
+    HA_TOKEN,
+)
 
 async def resolve_internal_user(user_id: Optional[int] = None, rag_user: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Query Identity Service for full user credentials using internal secret.
@@ -220,9 +228,9 @@ async def lifespan(app: FastAPI):
         log.info("Media server (FastAPI) running on port 8888")
         return thread
     
-    media_server = run_media_server()
+    media_server: threading.Thread = run_media_server()
     yield
-    media_server.shutdown()
+    media_server.join(timeout=5)
     log.info("Execution Bridge shutting down.")
 
 
@@ -264,6 +272,7 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
     import time
     start = time.time()
     is_tv = device_type in ("roku", "samsung", "webos", "android_tv", "bravia", "generic_tv")
+    state_resp: dict | None = None
     
     while time.time() - start < timeout:
         state_resp = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -506,10 +515,16 @@ async def execute_trigger(payload: Dict[str, Any]):
             log.info(f"Dispatching media alert to {target_device}")
             await media.handle_media_play(
                 MediaPlayRequest(
-                    media_id="media-source://tts/google?message=" + f"Timer {timer_data.get('title')} is done",
-                    entity_id=target_device
-                ),
-                context
+                    user_context=context,
+                    entity_id=target_device,
+                    query="Timer " + str(timer_data.get("title", "")) + " is done",
+                    media_type="announcement",
+                    device_name=target_device,
+                    media_content_id=None,
+                    media_content_type=None,
+                    enqueue="replace",
+                    volume=None,
+                )
             )
         
         return _ok(f"Triggered {timer_data.get('title')} on {target_device}", "automation_trigger")
@@ -578,7 +593,7 @@ async def execute_docker(req: DockerComposeRequest):
             compose_dir = COMPOSE_PROJECT_DIR or os.path.expanduser("~/workspace")
             res = subprocess.run(cmd, capture_output=True, text=True, cwd=compose_dir)
             if res.returncode == 0:
-                return _ok(f"Docker Compose up -d --build successful for {len(services)} services.", {"output": res.stdout})
+                return _ok(f"Docker Compose up -d --build successful for {len(services)} services.", "docker", {"output": res.stdout})
             else:
                 return _fail(f"Docker Compose up failed (code {res.returncode})", "docker", {"error": res.stderr, "output": res.stdout})
         except Exception as e:
@@ -590,12 +605,13 @@ async def execute_docker(req: DockerComposeRequest):
         mock_req = DeploymentRequest(
             user_context=req.user_context,
             action=req.action,
-            container_name=container_name
+            container_name=container_name,
+            tail=100
         )
         res = await deployment_handler.handle_deployment(mock_req)
         results.append(res)
     
-    return _ok(f"Docker action '{req.action}' applied to {len(services)} services.", {"results": results})
+    return _ok(f"Docker action '{req.action}' applied to {len(services)} services.", "docker", {"results": results})
 
 
 @app.post("/execute/volumes")
@@ -1057,7 +1073,7 @@ async def execute_announce(req: AnnouncementRequest):
                 # Find the actual Roku media_player entity for ECP control
                 for s in all_states:
                     eid = s.get("entity_id", "")
-                    s_attrs = s.get("attributes", {})
+                    s.get("attributes", {})
                     if eid.startswith("media_player.") and "roku" in eid.lower():
                         log.info(f"[announce] MA-wrapped Roku: MA={ma_player_entity}, Roku={eid}")
                         target_player = eid
@@ -1082,7 +1098,7 @@ async def execute_announce(req: AnnouncementRequest):
     
     # 1. Power on if needed
     if was_off:
-        log.info(f"[announce] Device was {initial_state.get('state')}, turning on...")
+        log.info(f"[announce] Device was {initial_state.get('state') if initial_state else 'unknown'}, turning on...")
         # Detect device type for platform-specific power-on
         from announce_handlers import detect_tv_type
         attrs = initial_state.get("attributes", {}) if initial_state else {}
@@ -1678,6 +1694,8 @@ async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = 
             library_id=library_id or None,
             query=query or None,
             limit=limit,
+            book_id=None,
+            entity_id=None,
         )
         return await handle_audiobookshelf(req)
     except Exception as e:
@@ -1784,7 +1802,6 @@ async def execute_audiobookshelf(req: AudiobookshelfRequest):
 @app.post("/execute/composite/broadcast", response_model=ExecutionResult)
 async def execute_composite_broadcast(req):
     """Read a document from storage and broadcast as TTS to a media player."""
-    ctx = req.user_context
     log.info(f"[composite] broadcast: {getattr(req, 'input_path', '')} -> {getattr(req, 'entity_id', '')}")
     return await composite.handle_document_broadcast(req)
 
@@ -1940,13 +1957,20 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
         entity_id = req.get("entity_id", "")
         if not entity_id:
             return {"status": "FAILURE", "message": "entity_id required for light commands"}
-        action = "on" if "turn on" in transcript or "on" in transcript else "off"
+        if "turn on" in transcript or "on" in transcript:
+            action = "turn_on"
+        elif "dim" in transcript or "brightness" in transcript:
+            action = "turn_on"
+        else:
+            action = "turn_off"
+        brightness_pct = None
         if "dim" in transcript or "brightness" in transcript:
-            action = "brightness"
+            brightness_pct = 50
         light_req = LightControlRequest(
             user_context=ctx,
             action=action,
             entity_id=entity_id,
+            brightness_pct=brightness_pct,
         )
         return await light.handle_light(light_req)
 
@@ -1959,15 +1983,27 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
         if "play" in transcript:
             media_req = MediaPlayRequest(
                 user_context=ctx,
-                action="play",
                 entity_id=entity_id,
+                media_type="music",
+                device_name=entity_id,
+                query=None,
+                media_content_id=None,
+                media_content_type=None,
+                enqueue="replace",
+                volume=None,
             )
             return await media.handle_media_play(media_req)
         elif "pause" in transcript:
             media_req = MediaPlayRequest(
                 user_context=ctx,
-                action="pause",
                 entity_id=entity_id,
+                media_type="music",
+                device_name=entity_id,
+                query=None,
+                media_content_id=None,
+                media_content_type=None,
+                enqueue="replace",
+                volume=None,
             )
             return await media.handle_media_transport(media_req)
 

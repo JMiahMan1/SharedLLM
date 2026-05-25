@@ -47,6 +47,8 @@ class InferenceJobQueue:
         if not self._redis:
             await self.connect()
 
+        assert self._redis is not None
+
         job_id = str(uuid.uuid4())
         job_data = {
             "job_id": job_id,
@@ -80,6 +82,8 @@ class InferenceJobQueue:
         if not self._redis:
             await self.connect()
 
+        assert self._redis is not None
+
         job_id = await self._redis.lmove(self.QUEUE_KEY, self.PROCESSING_KEY, "LEFT", "RIGHT")
         if not job_id:
             return None
@@ -109,10 +113,14 @@ class InferenceJobQueue:
     async def heartbeat_job(self, job_id: str):
         if not self._redis:
             await self.connect()
+        assert self._redis is not None
         await self._redis.set(f"{self.LEASE_PREFIX}{job_id}", str(time.time()), ex=self.LEASE_TTL_SECONDS)
 
     async def complete_job(self, job_id: str, result: Any):
         """Marks a job as completed and stores the result."""
+        if not self._redis:
+            await self.connect()
+        assert self._redis is not None
         job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
         if not job_raw:
             return
@@ -132,6 +140,9 @@ class InferenceJobQueue:
 
     async def fail_job(self, job_id: str, error: str):
         """Marks a job as failed."""
+        if not self._redis:
+            await self.connect()
+        assert self._redis is not None
         job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
         if not job_raw:
             return
@@ -153,7 +164,9 @@ class InferenceJobQueue:
         """Retrieves the current status and result of a job."""
         if not self._redis:
             await self.connect()
-        
+
+        assert self._redis is not None
+
         job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
         return json.loads(job_raw) if job_raw else None
 
@@ -161,7 +174,9 @@ class InferenceJobQueue:
         """Returns the 0-indexed position of a job in the queue."""
         if not self._redis:
             await self.connect()
-        
+
+        assert self._redis is not None
+
         queue = await self._redis.lrange(self.QUEUE_KEY, 0, -1)
         try:
             return queue.index(job_id)
@@ -172,6 +187,7 @@ class InferenceJobQueue:
         """Pushes a message chunk to a job-specific Redis list."""
         if not self._redis:
             await self.connect()
+        assert self._redis is not None
         key = f"raven:job:chunks:{job_id}"
         await self._redis.rpush(key, chunk)
         await self._redis.expire(key, 600) # 10 minute TTL for chunks
@@ -180,6 +196,7 @@ class InferenceJobQueue:
         """Pops all available chunks for a job."""
         if not self._redis:
             await self.connect()
+        assert self._redis is not None
         key = f"raven:job:chunks:{job_id}"
         # Atomic pop all
         chunks = await self._redis.lrange(key, 0, -1)
@@ -197,6 +214,8 @@ class InferenceJobQueue:
         """
         if not self._redis:
             await self.connect()
+
+        assert self._redis is not None
 
         reclaimed = 0
         processing_jobs = await self._redis.lrange(self.PROCESSING_KEY, 0, -1)
@@ -246,5 +265,6 @@ class InferenceJobQueue:
     async def _finalize_job(self, job_id: str):
         if not self._redis:
             await self.connect()
+        assert self._redis is not None
         await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)
         await self._redis.delete(f"{self.LEASE_PREFIX}{job_id}")

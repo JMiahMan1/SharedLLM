@@ -1,6 +1,7 @@
 import os
 import sys
 import docker
+from docker.errors import NotFound
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config import INTERNAL_SECRET
@@ -53,11 +54,11 @@ def list_containers():
         # Only expose sharedllm_ prefixed containers for security
         results = []
         for c in containers:
-            if c.name.startswith("sharedllm_"):
+            if c.name and c.name.startswith("sharedllm_"):
                 results.append({
                     "name": c.name,
                     "status": c.status,
-                    "image": c.image.tags[0] if c.image.tags else "unknown"
+                    "image": c.image.tags[0] if c.image and c.image.tags else "unknown"
                 })
         return results
     except Exception as e:
@@ -73,9 +74,9 @@ def get_service_status(service_name: str):
         return {
             "name": container.name,
             "status": container.status,
-            "image": container.image.tags[0] if container.image.tags else "unknown"
+            "image": container.image.tags[0] if container.image and container.image.tags else "unknown"
         }
-    except docker.errors.NotFound:
+    except NotFound:
         raise HTTPException(status_code=404, detail="Service not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -93,7 +94,7 @@ def restart_service(service_name: str):
         container = client.containers.get(service_name)
         container.restart()
         return {"status": "SUCCESS", "message": f"Container {service_name} restarted successfully"}
-    except docker.errors.NotFound:
+    except NotFound:
         raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -107,7 +108,7 @@ def get_container_logs(service_name: str, tail: int = 100):
         container = client.containers.get(service_name)
         logs = container.logs(tail=tail, stdout=True, stderr=True).decode("utf-8")
         return {"name": service_name, "logs": logs}
-    except docker.errors.NotFound:
+    except NotFound:
         raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -143,7 +144,12 @@ def exec_in_container(service_name: str, body: dict):
             stderr=True,
             demux=False
         )
-        output_str = output.decode("utf-8") if output else ""
+        if isinstance(output, bytes):
+            output_str = output.decode("utf-8") if output else ""
+        elif isinstance(output, tuple):
+            output_str = (output[0] or b"").decode("utf-8") + (output[1] or b"").decode("utf-8")
+        else:
+            output_str = ""
         log.info(f"[exec] {service_name} `{command}` → exit_code={exit_code}")
         return {
             "service": service_name,
@@ -151,7 +157,7 @@ def exec_in_container(service_name: str, body: dict):
             "exit_code": exit_code,
             "output": output_str
         }
-    except docker.errors.NotFound:
+    except NotFound:
         raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
     except HTTPException:
         raise

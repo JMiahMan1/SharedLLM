@@ -48,7 +48,7 @@ async def handle_document_broadcast(req) -> ExecutionResult:
     try:
         from schemas import StorageFileReadRequest
         read_req = StorageFileReadRequest(user_context=ctx, path=input_path)
-        read_result = await storage.handle_storage_file_read(read_req)
+        read_result = await storage.handle_storage_read(read_req)
         if read_result.status != "SUCCESS":
             return ExecutionResult(
                 status="FAILURE",
@@ -67,11 +67,40 @@ async def handle_document_broadcast(req) -> ExecutionResult:
         if len(content) > 500:
             broadcast_text += "... (document truncated)"
 
-    # Step 3: Generate TTS and play on media player
+    # Step 3: Generate Kokoro TTS audio
     try:
         audio_bytes = await text_to_speech(broadcast_text, voice=voice)
     except Exception as e:
         return ExecutionResult(status="FAILURE", message=f"TTS generation failed: {e}", service="composite_broadcast")
+
+    if not audio_bytes:
+        return ExecutionResult(status="FAILURE", message="Kokoro TTS returned empty audio.", service="composite_broadcast")
+
+    # Cache audio in memory and serve via local media server (port 8888)
+    from uuid import uuid4
+    import time
+    audio_cache_key = f"tts-{uuid4().hex[:8]}-{int(time.time())}"
+    
+    from main import TEMP_AUDIO_CACHE, TEMP_AUDIO_DIR
+    import os
+    TEMP_AUDIO_CACHE[audio_cache_key] = audio_bytes
+    
+    # Save to disk for media server FileResponse
+    wav_path = os.path.join(TEMP_AUDIO_DIR, f"{audio_cache_key}.wav")
+    try:
+        with open(wav_path, "wb") as f:
+            f.write(audio_bytes)
+    except Exception as e:
+        log.warning(f"Failed to save TTS to disk: {e}")
+
+    # Build local media URL
+    try:
+        from config import EXECUTION_EXTERNAL_HOST
+        if not EXECUTION_EXTERNAL_HOST:
+            raise RuntimeError("EXECUTION_EXTERNAL_HOST not configured")
+        media_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{audio_cache_key}"
+    except Exception as e:
+        return ExecutionResult(status="FAILURE", message=f"Cannot build media URL: {e}", service="composite_broadcast")
 
     full_entity_id = ha_client.sanitize_entity_id("media_player", entity_id)
 
@@ -82,12 +111,12 @@ async def handle_document_broadcast(req) -> ExecutionResult:
         import asyncio
         await asyncio.sleep(2)
 
-    # Play TTS via HA media_player
+    # Play Kokoro audio via local media server URL
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         "media_player", "play_media",
         full_entity_id,
-        {"media_content_id": "media-source://tts/tts_pipeline", "media_content_type": "audio/mpeg"},
+        {"media_content_id": media_url, "media_content_type": "audio/wav"},
     )
 
     if result.get("ok"):
@@ -136,7 +165,7 @@ async def handle_night_mode(req) -> ExecutionResult:
                 light_entities = lights if isinstance(lights, list) else [lights]
 
             for light_id in light_entities:
-                light_req = LightControlRequest(user_context=ctx, entity_id=light_id, action="turn_off")
+                light_req = LightControlRequest(user_context=ctx, entity_id=light_id, action="turn_off", brightness_pct=0)
                 from handlers import light as light_handler
                 r = await light_handler.handle_light(light_req)
                 results.append(f"light.{light_id}: {r.message}")
@@ -146,14 +175,12 @@ async def handle_night_mode(req) -> ExecutionResult:
     # Step 2: Set climate to sleep temp
     if climate_entity:
         try:
-            from schemas import ClimateRequest
-            climate_req = ClimateRequest(
+            from handlers import climate as climate_handler
+            climate_req = climate_handler.ClimateRequest(
                 user_context=ctx,
                 entity_id=climate_entity,
-                action="set_temperature",
                 temperature=sleep_temp,
             )
-            from handlers import climate as climate_handler
             r = await climate_handler.handle_climate(climate_req)
             results.append(f"Climate: {r.message}")
         except Exception as e:
@@ -166,7 +193,13 @@ async def handle_night_mode(req) -> ExecutionResult:
             media_req = MediaPlayRequest(
                 user_context=ctx,
                 entity_id=media_entity,
+                device_name=None,
                 query=media_query,
+                media_type=None,
+                media_content_id=None,
+                media_content_type=None,
+                enqueue="replace",
+                volume=None,
             )
             from handlers import media as media_handler
             r = await media_handler.handle_media_play(media_req)
