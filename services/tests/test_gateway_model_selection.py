@@ -120,7 +120,7 @@ def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
     original_package = gateway_main.__package__
     monkeypatch.setattr(gateway_main, "__package__", None)
     try:
-        selected = select_system_instruction_for_query(
+        select_system_instruction_for_query(
             "Please analyze logs and self repair this service",
             "qwen2.5-coder:7b",
         )
@@ -187,6 +187,7 @@ async def test_resolve_chat_workspace_bootstraps_unavailable_workspace(monkeypat
 
     workspace = await gateway_main.resolve_chat_workspace({}, "alice")
 
+    assert workspace is not None
     assert workspace["id"] == "sharedllm"
     assert any(path == "/workspaces/bootstrap" for _, path, _, _ in calls)
 
@@ -635,7 +636,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
                 }
             )
         if url.endswith("/files/read"):
-            relative_path = json["relative_path"]
+            relative_path = (json or {})["relative_path"]
             return FakeRuntimeResponse(
                 {
                     "status": "SUCCESS",
@@ -651,7 +652,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
                 }
             )
         if url.endswith("/files/write"):
-            return FakeRuntimeResponse({"status": "SUCCESS", "relative_path": json["relative_path"]})
+            return FakeRuntimeResponse({"status": "SUCCESS", "relative_path": json.get("relative_path", "")})
         if url.endswith("/provider/sync/file"):
             return FakeRuntimeResponse({"status": "SUCCESS", "provider_path": "/Code/SharedLLM/temp/README.md"})
         return FakeRuntimeResponse({"status": "SUCCESS"})
@@ -689,6 +690,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
             is_openai=False,
         )
 
+    assert isinstance(response, dict), f"Expected dict, got {type(response).__name__}"
     assert response["model"] == "qwen2.5-coder:7b"
     assert response["message"]["content"].startswith("I generated temp/README.md")
     assert "# Generated README" in response["message"]["content"]

@@ -40,6 +40,9 @@ class ResolvedCredentials(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None  # decrypted at resolution time
+    git_url: Optional[str] = None
+    git_user: Optional[str] = None
+    git_token: Optional[str] = None
     preferred_tts_voice: Optional[str] = "af_heart"
 
 

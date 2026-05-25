@@ -79,6 +79,7 @@ async def test_inference_queue_reclaims_expired_job():
 
     job_id = await queue.enqueue_job("raven", {"query": "fix something"})
     claimed = await queue.claim_job()
+    assert claimed is not None
     assert claimed["job_id"] == job_id
     assert claimed["status"] == JobStatus.PROCESSING
 
@@ -87,6 +88,7 @@ async def test_inference_queue_reclaims_expired_job():
 
     assert reclaimed == 1
     status = await queue.get_job_status(job_id)
+    assert status is not None
     assert status["status"] == JobStatus.QUEUED
     assert queue._redis.lists[queue.QUEUE_KEY] == [job_id]
 
@@ -107,6 +109,7 @@ async def test_inference_queue_dead_letters_after_max_attempts():
 
     assert reclaimed == 0
     status = await queue.get_job_status(job_id)
+    assert status is not None
     assert status["status"] == JobStatus.FAILED
     assert queue._redis.lists[queue.DEAD_LETTER_KEY] == [job_id]
 

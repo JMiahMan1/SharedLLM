@@ -135,7 +135,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         # Clear using SQLModel to avoid table name mismatches
         for table in ["deviceassignment", "user", "apikey", "globalsetting"]:
             try:
-                session.exec(text(f"DELETE FROM {table}"))
+                session.execute(text(f"DELETE FROM {table}"))
             except Exception:
                 pass 
         session.commit()

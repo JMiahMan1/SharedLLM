@@ -1,21 +1,13 @@
 # services/tests/test_execution_handlers.py
-import sys
-import os
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
-# Add execution service to path for absolute imports (from schemas import ...)
-_execution_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
-if _execution_path not in sys.path:
-    sys.path.insert(0, _execution_path)
-
-from services.execution.handlers import light, media, climate, security, talk, volumes
-from services.execution.personal_data import resolve_personal_data_provider
-# Import ALL models from execution schemas via sys.path to ensure class identity matches handler imports
-from schemas import (
+from execution.schemas import (
     UserContext, LightControlRequest, MediaTransportRequest,
     TVCastRequest, TalkRequest, VolumeInventoryRequest, SecurityRequest
 )
+from execution.handlers import light, media, climate, security, talk, volumes
+from execution.personal_data import resolve_personal_data_provider
 
 @pytest.fixture
 def user_ctx():
@@ -102,7 +94,7 @@ async def test_climate_handler(user_ctx):
 async def test_tv_cast_macro(user_ctx):
     with patch("ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("ha_client.call_service", new_callable=AsyncMock) as mock_call, \
-         patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+         patch("asyncio.sleep", new_callable=AsyncMock):
         
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}

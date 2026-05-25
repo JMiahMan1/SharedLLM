@@ -1,13 +1,10 @@
 # services/tests/test_device_registry.py
 """Tests for device_registry.py (aiosqlite backend)."""
 import os
-import sys
 import pytest
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "execution"))
-
-import device_registry
+from execution import device_registry
 
 
 @pytest.fixture(autouse=True)
@@ -17,10 +14,9 @@ def use_tmp_db(monkeypatch):
     tmp.close()
     monkeypatch.setenv("DEVICE_REGISTRY_PATH", tmp.name)
     # Force module-level _db to reset
-    import device_registry as dr
-    dr._db = None
+    device_registry._db = None
     yield
-    dr._db = None
+    device_registry._db = None
     try:
         os.unlink(tmp.name)
     except OSError:
@@ -41,6 +37,7 @@ async def test_set_and_get_device():
     assert result["mac"] == "aa:bb:cc:dd:ee:ff"
 
     fetched = await device_registry.get_device("media_player.test_tv")
+    assert fetched is not None
     assert fetched["ip"] == "192.168.1.100"
     assert fetched["friendly_name"] == "Test TV"
 
@@ -58,6 +55,7 @@ async def test_update_device():
         mac="aa:bb:cc:dd:ee:ff",
     )
     result = await device_registry.get_device("media_player.test_tv")
+    assert result is not None
     assert result["ip"] == "192.168.1.200"
     assert result["mac"] == "aa:bb:cc:dd:ee:ff"
     assert result["friendly_name"] == "Test TV"
@@ -68,11 +66,13 @@ async def test_invalidate_and_clear_stale():
     await device_registry.set_device("media_player.test_tv", ip="192.168.1.100")
     await device_registry.invalidate_device("media_player.test_tv", "timeout")
     result = await device_registry.get_device("media_player.test_tv")
+    assert result is not None
     assert result["ip_stale"] == 1
     assert result["ip_stale_reason"] == "timeout"
 
     await device_registry.clear_stale("media_player.test_tv")
     result = await device_registry.get_device("media_player.test_tv")
+    assert result is not None
     assert result["ip_stale"] == 0
 
 
@@ -142,5 +142,6 @@ async def test_metadata_merge():
         metadata={"model": "50S435"},
     )
     result = await device_registry.get_device("media_player.test_tv")
+    assert result is not None
     assert result["metadata"]["serial"] == "ABC123"
     assert result["metadata"]["model"] == "50S435"

@@ -263,7 +263,8 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         }
         
         if proc.returncode == 0:
-            return _ok(f"Command executed successfully: {req.command[:50]}...", detail)
+            cmd_prefix = req.command[:50] if req.command else "<unknown>"
+            return _ok(f"Command executed successfully: {cmd_prefix}...", detail)
         else:
             return _fail(f"Command failed with exit code {proc.returncode}", detail)
             

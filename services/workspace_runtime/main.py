@@ -909,8 +909,8 @@ def _build_review_metadata(
     push_result: Optional[dict[str, Any]],
 ) -> dict[str, Any]:
     base_branch = str(workspace.get("default_branch") or "main").strip() or "main"
-    changed_files = [relative_path] + [
-        item.get("path")
+    changed_files: list[str] = [relative_path] + [
+        str(item.get("path"))
         for item in lint_results
         if item.get("path") and item.get("path") != relative_path
     ]
@@ -934,16 +934,18 @@ def _build_review_metadata(
         f"- Workspace: {workspace.get('id')}",
         f"- Branch: {branch_name}",
         f"- Commit: {commit_result.get('commit') or 'pending'}",
-        f"- Changed files: {', '.join(unique_changed_files)}",
+        f"- Changed files: {', '.join(unique_changed_files) if unique_changed_files else 'none'}",
         "- Verification:",
     ]
     for item in lint_summary:
-        tools = ", ".join(item["tools"]) or "none"
+        tools_list: list[str] = item.get("tools") or []
+        tools = ", ".join(tools_list) or "none"
         summary_lines.append(
             f"  - Lint {item['path']}: {'PASS' if item['passed'] else 'FAIL'} via {tools}"
         )
     if pytest_summary:
-        targets = ", ".join(pytest_summary["targets"]) or "(full suite)"
+        targets_list: list[str] = pytest_summary.get("targets") or []
+        targets = ", ".join(targets_list) or "(full suite)"
         summary_lines.append(
             f"  - Pytest: {'PASS' if pytest_summary['passed'] else 'FAIL'} on {targets}"
         )
@@ -1572,7 +1574,7 @@ def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret
 
 
 @app.post("/workflow/write-sync-commit")
-def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: Optional[str] = Header(default=None)) -> dict:
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")

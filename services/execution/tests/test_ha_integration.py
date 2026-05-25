@@ -214,7 +214,7 @@ class TestMediaPlayer:
 
         # Get current volume
         state = get_entity_state(test_mp, ha_url, ha_token)
-        original_volume = state.get("attributes", {}).get("volume_level")
+        state.get("attributes", {}).get("volume_level")
 
         # Set volume to 0.5
         resp = client.post("/execute/media/transport",

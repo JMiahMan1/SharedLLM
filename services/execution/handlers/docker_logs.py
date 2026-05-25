@@ -109,11 +109,11 @@ async def handle_list_containers(req) -> dict:
         all_containers = client.containers.list(all=True)
         result = []
         for c in all_containers:
-            if c.name.startswith(CONTAINER_ALLOWLIST_PREFIX):
+            if c.name is not None and c.name.startswith(CONTAINER_ALLOWLIST_PREFIX):
                 result.append({
                     "name": c.name,
                     "status": c.status,
-                    "image": c.image.tags[0] if c.image.tags else "unknown",
+                    "image": c.image.tags[0] if c.image and c.image.tags else "unknown",
                 })
         return {
             "status": "SUCCESS",
