@@ -77,7 +77,10 @@ async def search_youtube(query: str) -> str | None:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"ytsearch1:{query}", download=False)
                 if info and info.get("entries"):
-                    entry = info["entries"][0]
+                    entries = list(info["entries"])
+                    if not entries:
+                        return None
+                    entry = entries[0]
                     url = entry.get("url") or entry.get("webpage_url")
                     if url:
                         return url

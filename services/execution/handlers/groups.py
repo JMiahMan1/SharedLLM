@@ -4,9 +4,8 @@ Manages CRUD operations via the Identity service database.
 """
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
 import httpx
 

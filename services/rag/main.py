@@ -409,7 +409,7 @@ async def sync_ha(payload: dict, user_id: Optional[str] = None):
         if not isinstance(e, dict): continue
         eid = e.get("entity_id", "")
         if not eid: continue
-        state = e.get("state", "unknown")
+        e.get("state", "unknown")
         attrs = e.get("attributes", {})
         fname = attrs.get("friendly_name", eid)
         area = attrs.get("area_id") or "unassigned area"

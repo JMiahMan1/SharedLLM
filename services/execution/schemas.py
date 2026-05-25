@@ -76,7 +76,13 @@ class UserContext(BaseModel):
     github_token: Optional[str] = None
     gitlab_token: Optional[str] = None
     git_token: Optional[str] = None
+    git_url: Optional[str] = None
+    git_user: Optional[str] = None
     api_key: Optional[str] = None
+    audiobookshelf_url: Optional[str] = None
+    audiobookshelf_user: Optional[str] = None
+    audiobookshelf_pass: Optional[str] = None
+    preferred_tts_voice: Optional[str] = None
 
 
 

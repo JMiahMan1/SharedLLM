@@ -72,7 +72,10 @@ class IntentEngine:
             if fname:
                 new_cache[fname] = eid
             # Also index the ID itself (stripped of domain)
-            short_id = eid.split(".")[-1].replace("_", " ")
+            if eid:
+                short_id = eid.split(".")[-1].replace("_", " ")
+            else:
+                short_id = ""
             if short_id and short_id not in new_cache:
                 new_cache[short_id] = eid
         
@@ -94,6 +97,9 @@ class IntentEngine:
             log.warning("Phrasebook is empty.")
             return
             
+        if self.model is None:
+            log.error("Cannot embed: model not loaded.")
+            return
         embeddings = list(self.model.embed(phrases))
         if np is not None:
             self.intent_embeddings = np.array(embeddings)

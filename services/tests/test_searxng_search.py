@@ -1,16 +1,10 @@
 # services/tests/test_searxng_search.py
 """Tests for SearXNG JSON API integration with Playwright fallback."""
-import sys
-import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-_execution_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
-if _execution_path not in sys.path:
-    sys.path.insert(0, _execution_path)
-
-from schemas import UserContext, WebSearchRequest  # noqa: E402
-from services.execution.handlers import browser  # noqa: E402
+from execution.schemas import UserContext, WebSearchRequest
+from execution.handlers import browser
 
 
 @pytest.fixture
@@ -136,6 +130,7 @@ async def test_handle_web_search_json_api_first(search_req, mock_json_response):
 
     assert result is not None
     assert result.status == "SUCCESS"
+    assert result.detail is not None
     assert result.detail["source"] == "searxng_json"
 
 
@@ -158,6 +153,7 @@ async def test_handle_web_search_fallback_to_playwright(search_req):
 
     assert result is not None
     assert result.status == "SUCCESS"
+    assert result.detail is not None
     assert result.detail["source"] == "playwright_fallback"
     assert len(result.detail["results"]) == 1
 
