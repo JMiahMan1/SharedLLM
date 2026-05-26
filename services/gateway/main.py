@@ -15,6 +15,7 @@ from typing import Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.datastructures import UploadFile
 from pydantic import BaseModel
 
 from gateway.schemas import ResolvedCredentials, StorageListRequest, StorageIndexRequest
@@ -34,28 +35,6 @@ from gateway.background_worker import worker as raven_worker
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-# --- Compatibility layer: service URLs resolved from Identity at import time ---
-# These are lazy-resolved on first use. All code paths that reference these
-# will get the current Identity settings value.
-_svc_cache: dict = {}
-
-def _svc(key: str, default: str) -> str:
-    """Get service URL from cache (populated by get_all_settings calls)."""
-    if not _svc_cache:
-        # Populate defaults at import time; runtime calls refresh via get_all_settings
-        _svc_cache.update({
-            "identity_svc_url": "http://identity:8001",
-            "execution_svc_url": "http://execution:8003",
-            "rag_svc_url": "http://rag:8004",
-            "storage_svc_url": "http://storage:8005",
-            "logging_svc_url": "http://logging:8006",
-            "workspace_runtime_svc_url": "http://workspace_runtime:8007",
-            "control_plane_url": "http://control_plane:8008",
-            "llm_local_url": "",
-            "redis_url": "redis://redis:6379/0",
-            "ollama_timeout": "600",
-        })
-    return _svc_cache.get(key, default)
 
 # Backward-compatible aliases (updated by get_all_settings calls)
 IDENTITY_SVC = "http://identity:8001"
@@ -78,7 +57,7 @@ QWEN_GROUNDING_INSTRUCTION = """
 6. **TERMINAL EXECUTION**: Continue until the task is verified fixed. If you stall, you are in violation of protocol.
 """
 
-def _make_ollama_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
+def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
     if not stream:
         res = {
@@ -115,7 +94,7 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False):
     }
 
 
-def _make_openai_response(message: str, model: str, intent: str = None, debug_context: str = None, stream: bool = False):
+def _make_openai_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
     if not stream:
         res = {
@@ -153,7 +132,7 @@ def _make_openai_response(message: str, model: str, intent: str = None, debug_co
     
     return StreamingResponse(gen(), media_type="text/event-stream")
 
-def _make_openai_chunk(content: str, model: str, finish_reason: str = None):
+def _make_openai_chunk(content: str, model: str, finish_reason: str | None = None):
     import time
     return {
         "id": f"chatcmpl-{int(time.time())}",
@@ -163,7 +142,7 @@ def _make_openai_chunk(content: str, model: str, finish_reason: str = None):
         "choices": [{"delta": {"content": content} if content else {}, "index": 0, "finish_reason": finish_reason}]
     }
 
-def _make_ollama_error(message: str, model: str) -> dict:
+def _make_ollama_error(message: str, model: str) -> Any:
     """Create an Ollama-compatible error response."""
     return {
         "model": model,
@@ -174,7 +153,7 @@ def _make_ollama_error(message: str, model: str) -> dict:
         "error": message
     }
 
-def _make_openai_error(message: str, model: str) -> dict:
+def _make_openai_error(message: str, model: str) -> Any:
     """Create an OpenAI-compatible error response."""
     import time
     return {
@@ -208,7 +187,6 @@ async def get_job_queue() -> InferenceJobQueue:
 # --- Ouroboros Worker ---
 log.info("Successfully imported Raven background worker.")
 
-LOGGING_SVC_URL = ""  # Resolved at runtime from Identity
 _DEFAULT_FAST_PATH_THRESHOLD = 0.85
 
 # Global Inference Lock (Strategy 8: Singleton Queue)
@@ -289,7 +267,7 @@ async def execute_inference(payload: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def _parse_llm_json_object(raw: Any) -> dict:
+def _parse_llm_json_object(raw: Any) -> Any:
     """
     Robust JSON extractor for LLM outputs.
     Mirrors extract_action_json logic from agent_loop for consistency.
@@ -690,11 +668,11 @@ async def get_documentation(
         raise HTTPException(status_code=500, detail="Error reading documentation file")
 
 # --- Logging Helper ---
-async def emit_log(level: str, message: str, context: dict = None):
+async def emit_log(level: str, message: str, context: dict | None = None):
     try:
       from gateway.agent_loop import sanitize_for_llm
       safe_context = sanitize_for_llm(context) if context else None
-      safe_message = sanitize_for_llm(message) if isinstance(message, str) else message
+      safe_message = sanitize_for_llm(message)
       async with httpx.AsyncClient() as client:
           await client.post(
             f"{LOGGING_SVC_URL}/log",
@@ -985,7 +963,7 @@ def wants_direct_code_orchestration(query: str) -> bool:
     return action_requested and file_scoped
 
 
-async def workspace_runtime_request(method: str, path: str, *, json_payload: dict | None = None, params: dict | None = None) -> dict:
+async def workspace_runtime_request(method: str, path: str, *, json_payload: dict | None = None, params: dict | None = None) -> Any:
     client = get_http_client()
 
     resp = await client.request(
@@ -1013,8 +991,6 @@ async def resolve_chat_workspace(body: dict, user_id: str) -> dict | None:
       return None
 
     async def try_bootstrap(item: dict) -> dict | None:
-        if not isinstance(item, dict):
-            return None
         candidate_id = str(item.get("id") or "").strip()
         if not candidate_id:
             return None
@@ -1177,11 +1153,10 @@ async def generate_workspace_readme_via_coding_model(
     }
     data = await execute_inference(payload)
     generated = ""
-    if isinstance(data, dict):
-      msg_obj = data.get("message")
-      if isinstance(msg_obj, dict):
+    msg_obj = data.get("message")
+    if isinstance(msg_obj, dict):
         generated = str(msg_obj.get("content") or "")
-      else:
+    else:
         generated = str(data.get("response") or "")
     if not generated.strip():
       raise HTTPException(status_code=502, detail="Coding model returned an empty README response")
@@ -1346,7 +1321,7 @@ async def orchestrate_code_change(
     return _make_ollama_response(summary, selected_model, stream=should_stream)
 
 
-def resolve_media_target(query: str, entities: list[dict], media_type: str = None, cached_device: str | None = None) -> str | None:
+def resolve_media_target(query: str, entities: list[dict], media_type: str | None = None, cached_device: str | None = None) -> str | None:
     """
     Resolve media player entity from query using device capabilities/metadata.
     For video: prefer Cast/Chromecast devices (support play_media with local streams).
@@ -1445,7 +1420,7 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str = Non
 
       return score, eid
 
-    candidates = [e for e in entities if isinstance(e, dict) and e.get("entity_id", "").startswith("media_player.")]
+    candidates = [e for e in entities if e.get("entity_id", "").startswith("media_player.")]
     if not candidates:
       return None
 
@@ -1535,7 +1510,7 @@ def resolve_video_target(query: str, entities: list[dict], cached_device: str | 
           score += 50
       return score, eid
 
-    candidates = [e for e in entities if isinstance(e, dict) and e.get("entity_id", "").startswith("media_player.")]
+    candidates = [e for e in entities if e.get("entity_id", "").startswith("media_player.")]
     if not candidates:
       return None
 
@@ -1570,9 +1545,7 @@ async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
     try:
       data = await execute_inference(
           {"model": await get_assistant_model(), "messages": [{"role": "user", "content": prompt}], "stream": False}
-      )
-      if not isinstance(data, dict):
-          return None
+     )
       raw = str(data.get("response", "")).strip()
       start = raw.find("{")
       end = raw.rfind("}")
@@ -1597,7 +1570,7 @@ async def decompose_command_query(query: str) -> list[str]:
     parts = re.split(r'\s+(?:and|then)\s+', query, flags=re.IGNORECASE)
     return [p.strip() for p in parts if p.strip()]
 
-async def resolve_identity(body: dict) -> dict:
+async def resolve_identity(body: dict) -> Any:
     try:
       async with httpx.AsyncClient() as client:
           resp = await client.post(
@@ -1620,7 +1593,7 @@ async def resolve_identity(body: dict) -> dict:
       raise HTTPException(status_code=503, detail="Identity service unreachable")
 
 
-async def resolve_first_user() -> dict:
+async def resolve_first_user() -> Any:
     """Resolve the first (ID=1) user in the system."""
     try:
         return await resolve_identity({"user_id": 1})
@@ -1628,7 +1601,7 @@ async def resolve_first_user() -> dict:
         return {}
 
 
-def _auth_body_from_request(request: Request, body: dict | None = None) -> dict:
+def _auth_body_from_request(request: Request, body: dict | None = None) -> Any:
     merged = dict(body or {})
     user_id = request.query_params.get("user_id")
     if user_id:
@@ -1639,7 +1612,7 @@ def _auth_body_from_request(request: Request, body: dict | None = None) -> dict:
     return merged
 
 
-async def _resolve_identity_from_request(request: Request, body: dict | None = None) -> dict:
+async def _resolve_identity_from_request(request: Request, body: dict | None = None) -> Any:
     return await resolve_identity(_auth_body_from_request(request, body))
 
 
@@ -1793,7 +1766,7 @@ async def get_entities(request: Request):
     except Exception:
         return {"entities": []}
 
-async def execute_command(endpoint: str, payload: dict) -> dict:
+async def execute_command(endpoint: str, payload: dict) -> Any:
     try:
       resp = await get_http_client().post(
           f"{EXECUTION_SVC}{endpoint}",
@@ -1903,7 +1876,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
 
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
-async def chat_handler(request: Request, background_tasks: BackgroundTasks = None):
+async def chat_handler(request: Request, background_tasks: BackgroundTasks | None = None):
     log.info("Chat handler entered")
     client = get_http_client()
     # 1. Resolve Identity
@@ -2497,7 +2470,7 @@ async def proxy_list_calendars(request: Request):
 
 
 @app.get("/api/communication/calendar/events")
-async def proxy_read_calendar(request: Request, calendar_name: str = None):
+async def proxy_read_calendar(request: Request, calendar_name: str | None = None):
     payload = {"action": "read"}
     if calendar_name:
         payload["calendar_name"] = calendar_name
@@ -3452,7 +3425,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
         
         # 1. Send all existing historical messages first
         history_key = f"raven:mission:history:{real_id}"
-        existing_logs = await r.lrange(history_key, 0, -1)
+        existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
         for msg in existing_logs:
             try:
                 await websocket.send_text(msg)
@@ -3767,6 +3740,7 @@ async def transcribe_audio(request: Request):
     """Transcribe audio using Whisper STT."""
     form = await request.form()
     audio_file = form.get("audio")
+    assert isinstance(audio_file, UploadFile), "audio must be a file"
     model = form.get("model", "base")
     language = form.get("language", "en")
 
@@ -3891,8 +3865,10 @@ async def get_abs_last_played(request: Request):
 
 
 @app.get("/api/media/audiobookshelf/library/{library_id}")
-async def get_abs_library_items(library_id: str, limit: int = 50, request: Request = None):
+async def get_abs_library_items(library_id: str, limit: int = 50, request: Request | None = None):
     """Get audiobooks from a specific Audiobookshelf library (per-user credentials)."""
+    if not request:
+        return {"status": "SUCCESS", "books": []}
     try:
         creds = await _resolve_identity_from_request(request)
     except HTTPException as e:
@@ -3913,8 +3889,10 @@ async def get_abs_library_items(library_id: str, limit: int = 50, request: Reque
 
 
 @app.get("/api/media/audiobookshelf/search")
-async def search_abs(q: str, limit: int = 20, request: Request = None):
+async def search_abs(q: str, limit: int = 20, request: Request | None = None):
     """Search Audiobookshelf for audiobooks (per-user credentials)."""
+    if not request:
+        return {"status": "SUCCESS", "books": []}
     try:
         creds = await _resolve_identity_from_request(request)
     except HTTPException as e:
@@ -3936,7 +3914,7 @@ async def search_abs(q: str, limit: int = 20, request: Request = None):
 
 # ─── Execution service proxy routes (for UI access) ──────────────────────
 
-async def _resolve_user_context(request: Request, body: dict) -> dict:
+async def _resolve_user_context(request: Request, body: dict) -> Any:
     """Resolve user context from request, falling back to first user."""
     # If body already has user_context, use it
     if body.get("user_context"):

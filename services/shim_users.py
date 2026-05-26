@@ -10,7 +10,7 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import IDENTITY_SVC_URL, INTERNAL_SECRET
-from typing import Dict
+from typing import Dict, Optional
 from fastapi import Security, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -18,7 +18,7 @@ log = logging.getLogger("shim_users")
 
 security = HTTPBearer(auto_error=False)
 
-def get_user_creds(username: str = "default") -> Dict[str, str]:
+def get_user_creds(username: str = "default") -> Dict[str, Optional[str]]:
     """
     Replaces the legacy get_user_creds().
     Calls the Identity Service /api/resolve with rag_user=username.

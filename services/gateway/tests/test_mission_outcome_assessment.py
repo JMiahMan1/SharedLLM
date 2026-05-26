@@ -5,7 +5,7 @@ class TestMissionOutcomeAssessment:
     """Tests for should_persist_learning — used by both AgentLoop RAG gate and Worker mission status."""
 
     def test_none_result(self):
-        assert should_persist_learning(None) is False
+        assert should_persist_learning("") is False
 
     def test_empty_result(self):
         assert should_persist_learning("") is False

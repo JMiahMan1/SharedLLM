@@ -30,6 +30,7 @@ async def handle_climate(req: ClimateRequest) -> ExecutionResult:
             service="climate"
         )
 
+    assert ctx.ha_url is not None and ctx.ha_token is not None
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         "climate", "set_temperature",

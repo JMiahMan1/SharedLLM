@@ -21,12 +21,6 @@ import traceback
 
 _redis_client: Optional[redis.Redis] = None
 
-async def get_redis() -> redis.Redis:
-    global _redis_client
-    if _redis_client is None:
-        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-    return _redis_client
-
 async def retention_cleanup_task():
     """Periodically remove logs older than LOG_RETENTION_DAYS."""
     while True:

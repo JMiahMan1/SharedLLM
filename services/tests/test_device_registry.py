@@ -32,6 +32,7 @@ async def test_set_and_get_device():
         friendly_name="Test TV",
         integration="roku",
     )
+    assert result is not None
     assert result["entity_id"] == "media_player.test_tv"
     assert result["ip"] == "192.168.1.100"
     assert result["mac"] == "aa:bb:cc:dd:ee:ff"

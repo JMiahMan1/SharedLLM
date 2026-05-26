@@ -401,7 +401,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             _stream_redis = redis.from_url(REDIS_URL, decode_responses=True)
         try:
             msg_str = json.dumps(msg_obj)
-            await _stream_redis.rpush(f"raven:mission:history:{mission_id}", msg_str)
+            await _stream_redis.rpush(f"raven:mission:history:{mission_id}", msg_str)  # type: ignore[reportGeneralTypeIssues]
             await _stream_redis.expire(f"raven:mission:history:{mission_id}", 86400)
             await _stream_redis.publish(f"raven:mission:stream:{mission_id}", msg_str)
         except Exception as e:
@@ -427,15 +427,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         
         if active_provider_name == "openrouter":
             if is_technical:
-                selected_model = settings.get("cloud_coding_model")
+                selected_model = settings.get("cloud_coding_model") or ""
             else:
-                selected_model = settings.get("cloud_assistant_model")
+                selected_model = settings.get("cloud_assistant_model") or ""
         else:
             # Both ollama and llama_server use the same model settings
             if is_technical:
-                selected_model = settings.get("ollama_coding_model") or settings.get("coding_model")
+                selected_model = settings.get("ollama_coding_model") or settings.get("coding_model") or ""
             else:
-                selected_model = settings.get("ollama_assistant_model") or settings.get("assistant_model")
+                selected_model = settings.get("ollama_assistant_model") or settings.get("assistant_model") or ""
         log.info(f"[AgentLoop] Model resolved from '{original_model}' to '{selected_model}' (is_technical={is_technical})")
     else:
         log.info(f"[AgentLoop] Using explicit model: '{selected_model}' (not auto/assistant/coder)")
@@ -689,11 +689,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     async def chunk_logger(chunk: str):
                         await stream_event("reasoning", chunk)
 
+                    inference_options = ollama_payload.get("options", {})
+                    if not isinstance(inference_options, dict):
+                        inference_options = {}
                     data = await execute_inference(
-                        provider, 
-                        selected_model, 
-                        ollama_payload["messages"], 
-                        ollama_payload.get("options", {}),
+                        provider,
+                        selected_model,
+                        ollama_payload["messages"],
+                        inference_options,
                         chunk_callback=chunk_logger
                     )
                     
@@ -1161,7 +1164,7 @@ async def run_post_write_lint(file_path: str, execution_svc: str, internal_secre
 
     logger.info(f"Post-write lint check for {file_path} (ext={ext})")
     try:
-        lint_payload = {"path": file_path}
+        lint_payload: dict[str, Any] = {"path": file_path}
         if user_context:
             lint_payload["user_context"] = user_context
         async with httpx.AsyncClient(timeout=15.0) as lint_client:

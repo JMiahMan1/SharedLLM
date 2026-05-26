@@ -4,9 +4,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from execution.schemas import (
     UserContext, LightControlRequest, MediaTransportRequest,
-    TVCastRequest, TalkRequest, VolumeInventoryRequest, SecurityRequest
+    TVCastRequest, TalkRequest, VolumeInventoryRequest
 )
 from execution.handlers import light, media, climate, security, talk, volumes
+from execution.handlers.security import SecurityRequest
 from execution.personal_data import resolve_personal_data_provider
 
 @pytest.fixture

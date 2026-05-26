@@ -17,14 +17,18 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import paho.mqtt.client  # pyright: ignore[reportMissingImports]
+    import redis.asyncio as aioredis
 
 try:
-    import paho.mqtt.client as mqtt
+    import paho.mqtt.client as mqtt  # pyright: ignore[reportMissingImports]
     import redis.asyncio as aioredis
 except ImportError:
     paho = None
-    aioredis = None
+    aioredis = None  # type: ignore[assignment]
 
 log = logging.getLogger("execution.presence")
 
@@ -54,7 +58,7 @@ class PresenceTracker:
         self.redis_url = redis_url
         self.redis_key_prefix = redis_key_prefix
         self.presence_ttl = presence_ttl
-        self._redis: Optional[aioredis.Redis] = None
+        self._redis: Optional["aioredis.Redis"] = None  # type: ignore[valid-type]
         self._mqtt_client = None
         self._running = False
         self._user_mac_map: Dict[str, str] = {}  # user_id -> mac_address

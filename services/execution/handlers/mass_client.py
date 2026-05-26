@@ -5,18 +5,18 @@ from ha_client import call_service, find_mass_config_entry
 
 log = logging.getLogger(__name__)
 
-MASS_CONFIG_ENTRY_ID = ""
+_mass_config_entry_id = ""
 
 async def get_playlists(ha_url: str, ha_token: str) -> List[Dict[str, Any]]:
     """Get Music Assistant playlists."""
-    global MASS_CONFIG_ENTRY_ID
-    if not MASS_CONFIG_ENTRY_ID:
-        MASS_CONFIG_ENTRY_ID = await find_mass_config_entry(ha_url, ha_token)
+    global _mass_config_entry_id
+    if not _mass_config_entry_id:
+        _mass_config_entry_id = await find_mass_config_entry(ha_url, ha_token)
     
     try:
         result = await call_service(
             ha_url, ha_token, "music_assistant", "playlists", "",
-            {"config_entry_id": MASS_CONFIG_ENTRY_ID}
+            {"config_entry_id": _mass_config_entry_id}
         )
         if result.get("status") == "SUCCESS" and result.get("data"):
             return [
@@ -34,14 +34,14 @@ async def get_playlists(ha_url: str, ha_token: str) -> List[Dict[str, Any]]:
 
 async def get_recent(ha_url: str, ha_token: str) -> List[Dict[str, Any]]:
     """Get Music Assistant recently played items."""
-    global MASS_CONFIG_ENTRY_ID
-    if not MASS_CONFIG_ENTRY_ID:
-        MASS_CONFIG_ENTRY_ID = await find_mass_config_entry(ha_url, ha_token)
+    global _mass_config_entry_id
+    if not _mass_config_entry_id:
+        _mass_config_entry_id = await find_mass_config_entry(ha_url, ha_token)
     
     try:
         result = await call_service(
             ha_url, ha_token, "music_assistant", "recently_played", "",
-            {"config_entry_id": MASS_CONFIG_ENTRY_ID, "limit": 20}
+            {"config_entry_id": _mass_config_entry_id, "limit": 20}
         )
         if result.get("status") == "SUCCESS" and result.get("data"):
             return [

@@ -29,8 +29,10 @@ def get_cached_state(entity_id: str) -> str | None:
     """Return cached state or None if missing/expired."""
     try:
         r = get_redis()
-        val = r.get(_key(entity_id))
-        return val
+        val = r.get(_key(entity_id))  # type: ignore[assignment]
+        if val is None:
+            return None
+        return str(val)
     except Exception as e:
         log.error(f"Redis cache read error: {e}")
         return None

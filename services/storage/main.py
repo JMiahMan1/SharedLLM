@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 try:
     from .indexer import (
-        build_content_index, summarize_index, extract_and_chunk_contents,
+        build_content_index, extract_and_chunk_contents,
         set_indexer_pause, is_indexer_paused, CheckpointManager
     )
     from .providers import build_provider, ProviderConfig
@@ -230,8 +230,7 @@ async def list_provider_entries(req: IndexScanRequest):
         # Map indexed status to entries
         result_entries = []
         for e in entries:
-            # Use model_dump if available (Pydantic V2), otherwise fallback to dict()
-            e_dict = e.model_dump() if hasattr(e, "model_dump") else e.dict()
+            e_dict = e.model_dump()
             e_dict["indexed"] = e_dict["path"] in indexed_paths
             result_entries.append(e_dict)
 
@@ -260,7 +259,7 @@ async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(
                 matches.append(e)
                 if len(matches) >= 20: break # Limit
                 
-        return {"status": "SUCCESS", "matches": [e.dict() for e in matches]}
+        return {"status": "SUCCESS", "matches": [e.model_dump() for e in matches]}
     except Exception as e:
         log.error(f"Provider search failed: {e}")
         return {"status": "ERROR", "matches": []}
@@ -298,10 +297,11 @@ async def write_provider_content(req: ProviderWriteRequest):
 async def mirror_provider_directory(req: ProviderMirrorRequest):
     try:
         provider = build_provider(req.provider)
-        if not hasattr(provider, "upload_directory"):
-             raise HTTPException(status_code=400, detail="Provider does not support directory mirroring")
-             
-        result = await run_in_threadpool(provider.upload_directory, req.remote_path, req.local_path, excludes=req.excludes)
+        upload_fn = getattr(provider, "upload_directory", None)
+        if upload_fn is None:
+            raise HTTPException(status_code=400, detail="Provider does not support directory mirroring")
+
+        result = await run_in_threadpool(upload_fn, req.remote_path, req.local_path, excludes=req.excludes)
         return {"status": "SUCCESS", "result": result}
     except Exception as e:
         log.error(f"Provider mirror failed: {e}")

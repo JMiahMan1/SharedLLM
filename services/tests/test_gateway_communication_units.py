@@ -67,7 +67,7 @@ async def test_proxy_execution_with_identity_posts_talk_payload(mocker):
         "/execute/talk",
         {"action": "send", "token": "room-alpha", "message": "hello world"},
     )
-    payload = json.loads(response.body)
+    payload = json.loads(response.body if isinstance(response.body, bytes) else response.body.tobytes())
 
     assert response.status_code == 200
     assert payload["service"] == "talk_send"

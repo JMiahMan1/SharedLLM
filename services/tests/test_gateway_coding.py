@@ -6,7 +6,7 @@ import pytest
 GATEWAY_URL = "http://ai.local:11435"
 # In a real test, we would get this from a proper auth flow, 
 # but for smoke tests we assume localhost bypass or pre-known secret.
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET") or ""
 
 @pytest.mark.server_only
 def test_coding_chat():

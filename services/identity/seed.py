@@ -12,13 +12,14 @@ from sqlmodel import Session, select, text
 from dotenv import load_dotenv
 
 try:
-    from .models import User, GlobalSetting, DeviceAssignment, APIKey, DEFAULT_GLOBAL_SETTINGS
+    from .models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
     from .crypto import encrypt
 except ImportError:
     from models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
     from crypto import encrypt
 
 from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Load legacy .env if available
@@ -135,7 +136,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         # Clear using SQLModel to avoid table name mismatches
         for table in ["deviceassignment", "user", "apikey", "globalsetting"]:
             try:
-                session.execute(text(f"DELETE FROM {table}"))
+                session.connection().execute(text(f"DELETE FROM {table}"))
             except Exception:
                 pass 
         session.commit()
@@ -181,7 +182,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     for ds in DEFAULT_GLOBAL_SETTINGS:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == ds["key"])).first()
         if not existing:
-            session.add(GlobalSetting(**ds))
+            setting = GlobalSetting(key=ds["key"], value=ds["value"])
+            if "description" in ds:
+                setting.description = ds["description"]
+            session.add(setting)
         elif force:
             existing.value = ds["value"]
             existing.description = ds.get("description")
@@ -225,10 +229,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     if skylight_pass:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "skylight_pass_enc")).first()
         if not existing:
-            session.add(GlobalSetting(key="skylight_pass_enc", value=encrypt(skylight_pass)))
+            session.add(GlobalSetting(key="skylight_pass_enc", value=encrypt(skylight_pass) or ""))
             log.info("[seed] Seeded SKYLIGHT_PASS (encrypted)")
         elif force and not existing.value:
-            existing.value = encrypt(skylight_pass)
+            existing.value = encrypt(skylight_pass) or ""
             session.add(existing)
             log.info("[seed] Re-seeded SKYLIGHT_PASS (encrypted)")
 
