@@ -3,7 +3,6 @@
 Diagnostic tool to trace entity resolution for specific queries
 """
 import requests
-import json
 
 REMOTE_URL = "http://ai.local:11435"
 

@@ -1,8 +1,6 @@
-import sys
 import os
 import time
 import requests
-import json
 from dotenv import load_dotenv
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +19,7 @@ def send_query(query, history=None):
     log(f"\n[USER] {query}")
     payload = {"messages": history if history else [{"role":"user","content":query}], "stream":False}
     if history:
-        payload["messages"].append({"role":"user", "content":query})
+        history.append({"role":"user", "content":query})
     
     try:
         r = requests.post(f"{API_URL}/api/chat", json=payload, headers=HEADERS, timeout=60)
@@ -82,11 +80,11 @@ def test_context_and_search():
     # Actually, the API is stateful per user (X-RAG-User), so consecutive calls should work.
     
     resp1, _ = send_query("Who is the president of France?")
-    if "Macron" in resp1:
+    if resp1 and "Macron" in resp1:
         log("   [PASS] Identified President.")
     
     resp2, _ = send_query("Who is his wife?")
-    if "Brigitte" in resp2:
+    if resp2 and "Brigitte" in resp2:
         log("   [PASS] Context maintained (Brigitte identified).")
     else:
         log("   [FAIL] Context lost.")
@@ -94,20 +92,15 @@ def test_context_and_search():
     # 2. Web Search
     log(">> Step 2: Web Search")
     resp3, _ = send_query("Search for the current stock price of Apple")
-    if "$" in resp3 or "USD" in resp3:
+    if resp3 and ("$" in resp3 or "USD" in resp3):
          log("   [PASS] Search returned financial data.")
     else:
          log("   [WARN] Search might have failed or been generic.")
 
     # 3. RAG (Knowledge)
     log(">> Step 3: RAG Retrieval")
-    # Assuming 'SharedLLM' or 'Antigravity' is in the knowledge base or we ask something generic
-    # Let's ask about something likely in the vector store if populated, or just generic to verify flow.
-    # User said "also for RAG". I'll ask a question that requires RAG.
-    # Since I don't know the exact KB content, I'll rely on the logs ensuring RAG was attempted.
     resp4, _ = send_query("What devices are in the Office?") 
-    # This hits Home Assistant RAG context usually.
-    if "Office" in resp4:
+    if resp4 and "Office" in resp4:
         log("   [PASS] RAG context usage plausible.")
 
 if __name__ == "__main__":

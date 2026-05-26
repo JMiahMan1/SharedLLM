@@ -8,7 +8,8 @@ sys.path.append(os.getcwd())
 
 # Mock the ops module BEFORE importing the integration
 sys.modules["app.logic.music_assistant_ops"] = MagicMock()
-from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
+# pyright: ignore[reportMissingImports]
+from app.domains.media.integrations.music_assistant import MusicAssistantIntegration  # pyright: ignore[reportMissingImports]
 from app.logic import music_assistant_ops
 
 async def main():

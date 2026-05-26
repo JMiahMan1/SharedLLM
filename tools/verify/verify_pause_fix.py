@@ -5,10 +5,9 @@ Manual test to verify Pause command now uses remote Play button.
 import asyncio
 import sys
 import os
-import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from app.domains.shared import execute_ha_service
+from app.users import get_user_creds  # noqa: F401
 from app.users import get_user_creds
 import requests
 import time
@@ -21,7 +20,7 @@ async def main():
     print("Testing Pause Fix for Roku Video")
     print("=" * 70)
     
-    user_creds = get_user_creds("admin")
+    get_user_creds("admin")  # noqa: F841
     
     def chat(query):
         resp = requests.post(f"{BASE_URL}/api/chat", json={"query": query, "user": "admin"}, timeout=120)

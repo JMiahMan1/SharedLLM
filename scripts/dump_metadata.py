@@ -1,11 +1,7 @@
 
 
-import asyncio
 import logging
-import sys
-import os
 import requests
-import json
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO)

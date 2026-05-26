@@ -5,8 +5,6 @@ Roku is picky about parameter names (case-sensitive) and endpoints.
 """
 import requests
 import time
-import urllib.parse
-import sys
 
 ROKU_IP = "192.168.2.166"
 # Using the cached video we know exists

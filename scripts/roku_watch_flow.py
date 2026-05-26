@@ -11,7 +11,6 @@ Test Roku Watch Intent complete flow:
 import asyncio
 import sys
 import os
-import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from app.domains.shared import execute_ha_service
@@ -43,8 +42,9 @@ async def main():
     
     async def remote_cmd(command, desc):
         print(f"\n  [{desc}] Sending remote command: {command}")
+        cleaned_creds = {k: v for k, v in user_creds.items() if v is not None}
         result = await execute_ha_service(
-            "remote", "send_command", ROKU_REMOTE, user_creds, 
+            "remote", "send_command", ROKU_REMOTE, cleaned_creds, 
             {"command": command}, None
         )
         print(f"    Result: {result.get('status')}")

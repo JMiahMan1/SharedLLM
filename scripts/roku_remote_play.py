@@ -5,7 +5,6 @@ Test Roku remote Play command using internal app infrastructure.
 import asyncio
 import sys
 import os
-import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from app.domains.shared import execute_ha_service
@@ -54,7 +53,7 @@ async def main():
         "remote",
         "send_command",
         "remote.28_tcl_roku_tv",
-        user_creds,
+        {k: v for k, v in user_creds.items() if v is not None},
         {"command": "Play"},
         None
     )
@@ -72,7 +71,7 @@ async def main():
         "remote",
         "send_command",
         "remote.28_tcl_roku_tv",
-        user_creds,
+        {k: v for k, v in user_creds.items() if v is not None},
         {"command": "Play"},
         None
     )

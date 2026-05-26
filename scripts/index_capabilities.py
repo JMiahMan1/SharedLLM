@@ -13,9 +13,9 @@ from services.execution import schemas as exec_schemas
 from services.gateway import schemas as gateway_schemas
 
 try:
-    from services.workspace_runtime import schemas as workspace_schemas
+    from services.workspace_runtime import schemas as _workspace_schemas  # pyright: ignore[reportUnusedImport, reportMissingImports, reportAttributeAccessIssue]
 except ImportError:
-    workspace_schemas = None
+    _workspace_schemas = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("indexer")
@@ -71,15 +71,15 @@ def index_capabilities():
     # We prioritize execution schemas first, then check workspace_runtime
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services', 'workspace_runtime'))
     try:
-        import main as ws_main
+        import main as _ws_main  # pyright: ignore[reportMissingImports]
     except Exception as e:
         log.warning(f"Failed to load workspace_runtime main: {e}")
-        ws_main = None
+        _ws_main = None
 
     for class_name, description in schema_map.items():
         model = getattr(exec_schemas, class_name, None)
-        if not model and ws_main:
-            model = getattr(ws_main, class_name, None)
+        if not model and _ws_main:
+            model = getattr(_ws_main, class_name, None)
             
         if model:
             capabilities.append({

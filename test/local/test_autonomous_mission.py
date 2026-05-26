@@ -1,8 +1,6 @@
 import asyncio
 import os
 import httpx
-import json
-import time
 
 async def test_autonomous_mission():
     """

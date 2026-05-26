@@ -1,5 +1,4 @@
 import requests
-import json
 import time
 import sys
 import os
@@ -143,10 +142,16 @@ if __name__ == "__main__":
     parser.add_argument("--ha-token", default=os.getenv("HA_TOKEN"), help="Home Assistant Token")
     args = parser.parse_args()
     
-    if args.ha_url: HA_URL = args.ha_url
-    if args.ha_token: HA_TOKEN = args.ha_token
-    
-    if not HA_URL or not HA_TOKEN:
+    ha_url_override = None
+    ha_token_override = None
+    if args.ha_url:
+        ha_url_override = args.ha_url
+    if args.ha_token:
+        ha_token_override = args.ha_token
+
+    ha_url_val = ha_url_override if ha_url_override else os.getenv("HA_URL")
+    ha_token_val = ha_token_override if ha_token_override else os.getenv("HA_TOKEN")
+    if not ha_url_val or not ha_token_val:
         log.error("Missing HA_URL or HA_TOKEN. Please set env vars or pass args.")
         sys.exit(1)
         

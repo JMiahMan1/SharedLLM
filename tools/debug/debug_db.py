@@ -1,7 +1,6 @@
 # debug_db.py
 import os
-import sys
-from langchain_chroma import Chroma
+from langchain_chroma import Chroma  # pyright: ignore[reportMissingImports]
 from langchain_huggingface import HuggingFaceEmbeddings
 
 # Point this to your actual DB folder defined in .env or settings

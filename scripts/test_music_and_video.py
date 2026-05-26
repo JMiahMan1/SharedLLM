@@ -3,7 +3,6 @@
 Comprehensive test for Music Assistant and Video playback on all devices
 """
 import requests
-import json
 import time
 
 REMOTE_URL = "http://ai.local:11435/api/chat"
