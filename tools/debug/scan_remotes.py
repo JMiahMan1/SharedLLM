@@ -1,6 +1,5 @@
 
-import requests
-import json
+# import requests  # not needed - prints directly
 
 HA_URL = "http://ai.local:11435/api/ha/states"
 # We'll valid auth via the server's known method or just try generic if we can't get token easily.

@@ -10,11 +10,8 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import app.main # Bootstrap
-
-from app.settings import GlobalResources
-from app.domains.media.integrations.cast import CastIntegration
-from app.settings import CHROMA_DIR as CHROMA_DB_PATH
+# Bootstrap not needed for script
+from app.settings import CHROMA_DIR as CHROMA_DB_PATH  # noqa: E402
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +35,7 @@ async def debug_group_lookup():
     
     # Re-instantiate client to read existing DB
     import chromadb
-    client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+    client = chromadb.PersistentClient(path=CHROMA_DB_PATH)  # type: ignore[attr-defined]
     try:
         collection = client.get_collection("home_assistant")
     except Exception as e:

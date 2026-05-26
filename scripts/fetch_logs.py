@@ -1,23 +1,22 @@
 
 import requests
-import json
 import os
 import sys
 
 from dotenv import load_dotenv
 
 load_dotenv()
-API_URL = os.getenv("RAG_ADDRESS")
+api_url_raw = os.getenv("RAG_ADDRESS")
 
-if not API_URL:
+if not api_url_raw:
     print("ERROR: RAG_ADDRESS not set in .env")
     sys.exit(1)
 
 # Ensure http prefix
-if not API_URL.startswith("http"):
-    API_URL = f"http://{API_URL}:11435"
+if not api_url_raw.startswith("http"):
+    api_url = f"http://{api_url_raw}:11435"
 else:
-    API_URL = f"{API_URL}:11435"
+    api_url = f"{api_url_raw}:11435"
 
 HEADERS = {
     "Content-Type": "application/json",
@@ -27,7 +26,7 @@ HEADERS = {
 
 def fetch_logs():
     try:
-        url = f"{API_URL}/api/logs?limit=200"
+        url = f"{api_url}/api/logs?limit=200"
         print(f"Fetching logs from {url}...")
         resp = requests.get(url, headers=HEADERS, timeout=10)
         

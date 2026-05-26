@@ -1,6 +1,5 @@
 import httpx
 import json
-import sys
 
 GATEWAY_URL = "http://ai.local:8080/api/chat"
 INTERNAL_SECRET = "change-me-in-production"

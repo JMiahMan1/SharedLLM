@@ -42,7 +42,7 @@ class MockCollection:
         results = []
         q = query.lower()
         for c in ALL_CANDIDATES:
-            if c["friendly_name"].lower() in q:
+            if str(c["friendly_name"]).lower() in q:
                 # Mock a Document object
                 doc = MagicMock()
                 doc.metadata = c
@@ -51,12 +51,11 @@ class MockCollection:
 
 # 3. Import the Target Function (Needs mocking of dependencies inside modules)
 import sys
-import types
 sys.modules['app.settings'] = MagicMock()
 sys.modules['app.settings'].GlobalResources.ha_collection = MockCollection()
 # Mock blocking runner to just execute async
 async def mock_run_blocking(f):
-    if asyncio.iscoroutinefunction(f):
+    if asyncio.iscoroutinefunction(f):  # type: ignore[deprecated]
         return await f()
     return f()
 
@@ -71,7 +70,7 @@ sys.modules['app.logic.pattern_matching'].detect_number_pattern = lambda x: [] #
 import os
 sys.path.append(os.getcwd())
 
-from app.domains.media.devices import smart_resolve_entity
+from app.domains.media.devices import smart_resolve_entity  # pyright: ignore[reportMissingImports]
 
 async def run_test(name, query, intent, is_music, is_video, expected_id):
     print(f"--- TEST: {name} ---")

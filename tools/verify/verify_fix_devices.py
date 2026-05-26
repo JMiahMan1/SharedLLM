@@ -1,7 +1,7 @@
 import asyncio
-import logging
 import sys
 import os
+from unittest.mock import MagicMock
 
 # Add project root to path
 sys.path.append(os.getcwd())
@@ -12,19 +12,19 @@ sys.modules['app.logic.pattern_matching'].detect_number_pattern = MagicMock(retu
 
 # Mock GlobalResources
 mock_resources = MagicMock()
-sys.modules['app.settings'].GlobalResources = mock_resources
+sys.modules['app.settings'].GlobalResources = mock_resources  # type: ignore[attr-defined]
 
 
 # helper for run_blocking (it just awaits the lambda or executes it)
 async def mock_run_blocking(func):
-    if asyncio.iscoroutinefunction(func):
+    if asyncio.iscoroutinefunction(func):  # type: ignore[deprecated]
         return await func()
     return func()
-sys.modules['app.settings'].run_blocking = mock_run_blocking
+sys.modules['app.settings'].run_blocking = mock_run_blocking  # type: ignore[attr-defined]
 
 # Import the target function
 # We need to ensure we import it AFTER mocking
-from app.domains.media.devices import smart_resolve_entity
+from app.domains.media.devices import smart_resolve_entity  # pyright: ignore[reportMissingImports]
 
 async def test_resolve_priority():
     print("Testing Smart Resolve Entity Priority...")
@@ -53,7 +53,7 @@ async def test_resolve_priority():
 
     # Result format is (eid, integ, meta)
     if len(res) == 3:
-        eid, integ, meta = res
+        eid, integ, _meta = res
     else:
         eid, integ = res
         
@@ -72,7 +72,7 @@ async def test_resolve_priority():
         return
 
     if len(res_music) == 3:
-        eid_m, integ_m, meta_m = res_music
+        eid_m, integ_m, _meta_m = res_music
     else:
         eid_m, integ_m = res_music
     

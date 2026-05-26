@@ -1,6 +1,6 @@
 import time
 import sys
-import pychromecast
+import pychromecast  # pyright: ignore[reportMissingImports]
 
 TARGET_IP = "192.168.2.240"  # Found via scan_cast_ips.py
 VIDEO_URL = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"

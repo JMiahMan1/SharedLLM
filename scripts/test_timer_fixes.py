@@ -2,7 +2,7 @@
 import sys
 import os
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch  # pyright: ignore[reportUnusedImport]
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -23,7 +23,7 @@ async def test_regression_fixes():
     
     print("\n[STEP 1] Verifying Intent Routing...")
     for q, expected in queries.items():
-        intent = IntentClassifier.apply_regex_override(q)
+        intent = IntentClassifier.apply_regex_override(q)  # pyright: ignore[reportAttributeAccessIssue]
         if intent == expected:
             print(f"  [PASS] '{q}' -> {intent}")
         else:
@@ -34,7 +34,8 @@ async def test_regression_fixes():
     print("\n[STEP 2] Verifying Handler Argument Pass-through...")
     from app.logic.execution.registry import ActionDispatcher
     # Ensure handlers are registered
-    import app.logic.execution.handlers 
+    # pyright: ignore[reportMissingImports]
+    import app.logic.execution.handlers  # pyright: ignore[reportMissingImports]
     
     # Mock GlobalResources
     with patch("app.logic.execution.handlers.GlobalResources") as mock_resources, \
@@ -44,7 +45,7 @@ async def test_regression_fixes():
         mock_creds = {"user": "test_user"}
         
         # Dispatch 'timer_pause'
-        await ActionDispatcher.dispatch("timer_pause", query="pause the timer", user_creds=mock_creds)
+        await ActionDispatcher.dispatch(action="timer_pause", query="pause the timer", user_creds=mock_creds)
         
         # Verify tool_timer_pause was called with (query, user_creds, redis_client)
         try:

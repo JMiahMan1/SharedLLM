@@ -1,6 +1,5 @@
 import httpx
 import time
-import json
 import os
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://jeremiah-home-desktop.local:11434")

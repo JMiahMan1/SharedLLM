@@ -1,7 +1,6 @@
 import requests
 import time
 import sys
-import xml.etree.ElementTree as ET
 
 # CONFIG
 ROKU_IP = "192.168.2.166"

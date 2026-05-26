@@ -1,5 +1,4 @@
 import requests
-import sys
 
 REMOTE_URL = "http://ai.local:11435/api/admin/logs?lines=500"
 

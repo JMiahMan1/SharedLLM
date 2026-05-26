@@ -1,7 +1,6 @@
 import os
 import sys
 import requests
-import json
 import time
 
 # Add project root to path

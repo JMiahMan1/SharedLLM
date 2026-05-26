@@ -21,7 +21,7 @@ USER_CREDS = {"ha_token": os.environ.get("HA_TOKEN", "")}
 
 async def main():
     log.info("--- Starting Youtube Click Verification ---")
-    await load_resources()
+    await load_resources()  # type: ignore[misc]
 
     entity_id = "media_player.office_tv_chrome"
     # Found via list_remotes.py

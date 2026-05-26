@@ -1,7 +1,6 @@
 import asyncio
 import os
 import sys
-import json
 import logging
 import requests
 from dotenv import load_dotenv
@@ -48,23 +47,25 @@ async def run_test():
     # Actually, user wants to test OUR routing.
     # So we should hit OUR API.
 
-    API_URL = os.getenv("RAG_ADDRESS")
-    if not API_URL:
+    api_url_raw = os.getenv("RAG_ADDRESS")
+    if not api_url_raw:
         print("[FAIL] Error: RAG_ADDRESS not set in .env")
         return
     # Add http:// if not present
-    if not API_URL.startswith("http"):
-        API_URL = f"http://{API_URL}:11435"
-    if not API_URL.endswith("/api/chat"):
-        API_URL = f"{API_URL}/api/chat"
-    print(f"Using API URL: {API_URL}")
+    if not api_url_raw.startswith("http"):
+        rag_api_url = f"http://{api_url_raw}:11435"
+    else:
+        rag_api_url = api_url_raw
+    if not rag_api_url.endswith("/api/chat"):
+        rag_api_url = f"{rag_api_url}/api/chat"
+    print(f"Using API URL: {rag_api_url}")
 
     async def chat(q):
         print(f"\nUser: {q}")
         try:
             print(f"   [INFO] Sending request (timeout: 120s)...")
             r = requests.post(
-                API_URL, json={"query": q, "user_id": "test_user"}, timeout=120
+                rag_api_url, json={"query": q, "user_id": "test_user"}, timeout=120
             )
             if r.status_code == 200:
                 response = r.json()

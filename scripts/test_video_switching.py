@@ -5,7 +5,6 @@ Tests the full application flow through the chat API
 """
 import requests
 import time
-import os
 
 API_URL = "http://ai.local:11435/api/chat"
 

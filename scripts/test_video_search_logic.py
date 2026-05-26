@@ -1,7 +1,8 @@
 import asyncio
 import logging
 from unittest.mock import MagicMock, patch
-from app.domains.media.integrations.standard import StandardIntegration
+# pyright: ignore[reportMissingImports]
+from app.domains.media.integrations.standard import StandardIntegration  # pyright: ignore[reportMissingImports]
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

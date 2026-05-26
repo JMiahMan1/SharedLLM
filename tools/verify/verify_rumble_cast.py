@@ -3,12 +3,11 @@ import asyncio
 import logging
 import sys
 import os
-import json
 
 # Ensure we can import app modules
 sys.path.append(os.getcwd())
 
-from app.settings import load_resources, GlobalResources
+from app.settings import load_resources
 from app.domains.shared import execute_ha_service
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -16,9 +15,6 @@ log = logging.getLogger("RUMBLE_TEST")
 
 # Sample Rumble Video (Viral cute cat video or similar stable URL)
 # Using a generic popular one found in public searches or a placeholder
-RUMBLE_URL = "https://rumble.com/v2n9z0w-cat-meowing.html"
-# Alternatively, I will use a known working test URL if that fails.
-# Actually, let's use a very standard one.
 RUMBLE_URL = "https://rumble.com/v117k0d-relaxing-fireplace-4k-fire-place.html" 
 
 # Mock Credentials (from settings or env)
@@ -40,7 +36,7 @@ async def extract_url(url):
         # Run in executor
         loop = asyncio.get_running_loop()
         def _extract():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
                 return ydl.extract_info(url, download=False)
         
         info = await loop.run_in_executor(None, _extract)
@@ -52,7 +48,7 @@ async def extract_url(url):
 
 async def main():
     log.info("--- Starting Rumble Cast Verification ---")
-    await load_resources()
+    await load_resources()  # type: ignore[misc]
     
     entity_id = "media_player.office_tv_chrome"
     
@@ -71,10 +67,10 @@ async def main():
     
     # For generic video, we use media_content_type: 'video'
     # This triggers the Default Media Receiver
-    payload = {
+    payload: dict[str, str] = {
         "media_content_id": stream_url,
         "media_content_type": "video",
-        "title": title # Optional, HA might pass this to Chromecast
+        "title": title or "",
     }
     
     res = await execute_ha_service(

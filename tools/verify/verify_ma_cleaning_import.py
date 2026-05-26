@@ -4,7 +4,7 @@ import os
 
 sys.path.append(os.getcwd()) 
 
-from app.domains.media.integrations.music_assistant import MusicAssistantIntegration
+from app.domains.media.integrations.music_assistant import MusicAssistantIntegration  # pyright: ignore[reportMissingImports]
 
 def test_cleaning():
     print("Testing MusicAssistantIntegration._clean_query logic...")
