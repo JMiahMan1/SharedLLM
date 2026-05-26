@@ -36,6 +36,7 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
     # 2. STATE CHECK — avoid redundant commands
     if req.action in ("turn_on", "turn_off"):
         target_state = "on" if req.action == "turn_on" else "off"
+        assert ctx.ha_url is not None and ctx.ha_token is not None
         current = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
         if current:
             current_state = current.get("state", "").lower()
@@ -55,6 +56,7 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
     if req.rgb_color is not None:
         service_data["rgb_color"] = list(req.rgb_color)
 
+    assert ctx.ha_url is not None and ctx.ha_token is not None
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         domain, req.action,

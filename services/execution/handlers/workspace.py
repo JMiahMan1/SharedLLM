@@ -92,7 +92,7 @@ def _get_discovery_suggestion(path: str) -> Optional[str]:
             return None
         
         matches = []
-        for root, dirs, files in os.walk(WORKSPACE_ROOT):
+        for root, _, files in os.walk(WORKSPACE_ROOT):
             # Skip hidden directories like .git
             if "/.git" in root:
                 continue

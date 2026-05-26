@@ -4,7 +4,7 @@ import uuid
 import logging
 import time
 from typing import Any, Dict, Optional, List
-import redis.asyncio as redis
+import redis.asyncio as redis  # noqa: E402
 
 log = logging.getLogger("gateway.messaging")
 
@@ -69,7 +69,7 @@ class InferenceJobQueue:
         )
         
         # Push to FIFO queue (Right push)
-        await self._redis.rpush(self.QUEUE_KEY, job_id)
+        await self._redis.rpush(self.QUEUE_KEY, job_id)  # type: ignore[reportGeneralTypeIssues]
         
         log.info(f"Job {job_id} enqueued for user {user_id}")
         return job_id
@@ -84,13 +84,13 @@ class InferenceJobQueue:
 
         assert self._redis is not None
 
-        job_id = await self._redis.lmove(self.QUEUE_KEY, self.PROCESSING_KEY, "LEFT", "RIGHT")
+        job_id = await self._redis.lmove(self.QUEUE_KEY, self.PROCESSING_KEY, "LEFT", "RIGHT")  # type: ignore[reportGeneralTypeIssues]
         if not job_id:
             return None
 
-        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
+        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[reportGeneralTypeIssues]
         if not job_raw:
-            await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)
+            await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[reportGeneralTypeIssues]
             return None
 
         job = json.loads(job_raw)
@@ -114,14 +114,14 @@ class InferenceJobQueue:
         if not self._redis:
             await self.connect()
         assert self._redis is not None
-        await self._redis.set(f"{self.LEASE_PREFIX}{job_id}", str(time.time()), ex=self.LEASE_TTL_SECONDS)
+        await self._redis.set(f"{self.LEASE_PREFIX}{job_id}", str(time.time()), ex=self.LEASE_TTL_SECONDS)  # type: ignore[reportGeneralTypeIssues]
 
     async def complete_job(self, job_id: str, result: Any):
         """Marks a job as completed and stores the result."""
         if not self._redis:
             await self.connect()
         assert self._redis is not None
-        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
+        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[reportGeneralTypeIssues]
         if not job_raw:
             return
 
@@ -143,7 +143,7 @@ class InferenceJobQueue:
         if not self._redis:
             await self.connect()
         assert self._redis is not None
-        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
+        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[reportGeneralTypeIssues]
         if not job_raw:
             return
 
@@ -167,7 +167,7 @@ class InferenceJobQueue:
 
         assert self._redis is not None
 
-        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
+        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[reportGeneralTypeIssues]
         return json.loads(job_raw) if job_raw else None
 
     async def get_queue_position(self, job_id: str) -> int:
@@ -177,7 +177,7 @@ class InferenceJobQueue:
 
         assert self._redis is not None
 
-        queue = await self._redis.lrange(self.QUEUE_KEY, 0, -1)
+        queue = await self._redis.lrange(self.QUEUE_KEY, 0, -1)  # type: ignore[reportGeneralTypeIssues]
         try:
             return queue.index(job_id)
         except ValueError:
@@ -189,8 +189,8 @@ class InferenceJobQueue:
             await self.connect()
         assert self._redis is not None
         key = f"raven:job:chunks:{job_id}"
-        await self._redis.rpush(key, chunk)
-        await self._redis.expire(key, 600) # 10 minute TTL for chunks
+        await self._redis.rpush(key, chunk)  # type: ignore[reportGeneralTypeIssues]
+        await self._redis.expire(key, 600) # 10 minute TTL for chunks  # type: ignore[reportGeneralTypeIssues]
 
     async def get_chunks(self, job_id: str) -> List[str]:
         """Pops all available chunks for a job."""
@@ -199,8 +199,8 @@ class InferenceJobQueue:
         assert self._redis is not None
         key = f"raven:job:chunks:{job_id}"
         # Atomic pop all
-        chunks = await self._redis.lrange(key, 0, -1)
-        await self._redis.ltrim(key, len(chunks), -1)
+        chunks = await self._redis.lrange(key, 0, -1)  # type: ignore[reportGeneralTypeIssues]
+        await self._redis.ltrim(key, len(chunks), -1)  # type: ignore[reportGeneralTypeIssues]
         return chunks
 
     async def close(self):
@@ -218,13 +218,13 @@ class InferenceJobQueue:
         assert self._redis is not None
 
         reclaimed = 0
-        processing_jobs = await self._redis.lrange(self.PROCESSING_KEY, 0, -1)
+        processing_jobs = await self._redis.lrange(self.PROCESSING_KEY, 0, -1)  # type: ignore[reportGeneralTypeIssues]
         for job_id in processing_jobs:
-            lease_exists = await self._redis.exists(f"{self.LEASE_PREFIX}{job_id}")
+            lease_exists = await self._redis.exists(f"{self.LEASE_PREFIX}{job_id}")  # type: ignore[reportGeneralTypeIssues]
             if lease_exists:
                 continue
 
-            job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")
+            job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[reportGeneralTypeIssues]
             if not job_raw:
                 await self._finalize_job(job_id)
                 continue
@@ -235,7 +235,7 @@ class InferenceJobQueue:
                 continue
 
             attempts = int(job.get("attempts", 0))
-            await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)
+            await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[reportGeneralTypeIssues]
 
             if attempts >= self.MAX_ATTEMPTS:
                 job["status"] = JobStatus.FAILED
@@ -246,7 +246,7 @@ class InferenceJobQueue:
                     json.dumps(job),
                     ex=self.DEFAULT_TTL_SECONDS,
                 )
-                await self._redis.rpush(self.DEAD_LETTER_KEY, job_id)
+                await self._redis.rpush(self.DEAD_LETTER_KEY, job_id)  # type: ignore[reportGeneralTypeIssues]
                 log.error("Job %s moved to dead-letter queue after %s expired attempts", job_id, attempts)
                 continue
 
@@ -256,7 +256,7 @@ class InferenceJobQueue:
                 json.dumps(job),
                 ex=self.DEFAULT_TTL_SECONDS,
             )
-            await self._redis.rpush(self.QUEUE_KEY, job_id)
+            await self._redis.rpush(self.QUEUE_KEY, job_id)  # type: ignore[reportGeneralTypeIssues]
             reclaimed += 1
             log.warning("Re-queued expired job %s after lease loss (attempt %s)", job_id, attempts)
 
@@ -266,5 +266,5 @@ class InferenceJobQueue:
         if not self._redis:
             await self.connect()
         assert self._redis is not None
-        await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)
-        await self._redis.delete(f"{self.LEASE_PREFIX}{job_id}")
+        await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[reportGeneralTypeIssues]
+        await self._redis.delete(f"{self.LEASE_PREFIX}{job_id}")  # type: ignore[reportGeneralTypeIssues]

@@ -55,8 +55,8 @@ async def _get_searxng_url() -> str | None:
                     if item.get("key") == "searxng_url":
                         url = item.get("value", "").rstrip("/")
                         if url:
-                            _SEARXNG_URL_CACHE = url
-                            _SEARXNG_CACHE_TS = time.time()
+                            _SEARXNG_URL_CACHE = url  # pyright: ignore[reportConstantRedefinition]
+                            _SEARXNG_CACHE_TS = time.time()  # pyright: ignore[reportConstantRedefinition]
                             return url
     except Exception:
         pass
@@ -68,16 +68,17 @@ async def search_youtube(query: str) -> str | None:
     try:
         import yt_dlp
         def _yt_search():
-            ydl_opts = {
+            ydl_opts: dict[str, object] = {
                 "quiet": True,
                 "no_warnings": True,
                 "extract_flat": True,
                 "playlistend": 1,
             }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
                 info = ydl.extract_info(f"ytsearch1:{query}", download=False)
-                if info and info.get("entries"):
-                    entries = list(info["entries"])
+                raw_entries = info.get("entries")
+                if raw_entries:
+                    entries = list(raw_entries)  # type: ignore[arg-type]
                     if not entries:
                         return None
                     entry = entries[0]
@@ -166,7 +167,7 @@ async def _ensure_youtube_cookies() -> str | None:
                     domain = c.get("domain", ".youtube.com")
                     if not domain.startswith("."):
                         domain = "." + domain
-                    f.write(f"{domain}\tTRUE\t{c.get('path', '/')}\t{'TRUE' if c.get('secure') else 'FALSE'}\t{c.get('expirationDate', 0)}\t{c['name']}\t{c['value']}\n")
+                    f.write(f"{domain}\tTRUE\t{c.get('path', '/')}\t{'TRUE' if c.get('secure') else 'FALSE'}\t{c.get('expirationDate', 0)}\t{c.get('name', '')}\t{c.get('value', '')}\n")
             return YT_COOKIES_PATH
     except Exception as e:
         log.warning(f"Failed to extract YouTube cookies: {e}")
@@ -195,7 +196,7 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        _stdout, stderr = await proc.communicate()
         
         if proc.returncode != 0:
             log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
@@ -294,7 +295,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
                     asyncio.create_task(_wait_for_download(proc, tmp_path, media_id))
                     return media_id, title
         
-        stdout, stderr = await proc.communicate()
+        _stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
             return None, None
@@ -319,7 +320,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
 async def _wait_for_download(proc, tmp_path: str, media_id: str):
     """Background task to wait for download completion and log result."""
     try:
-        stdout, stderr = await proc.communicate()
+        _stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             log.error(f"[video] Background download failed for {media_id}: {stderr.decode()[:200]}")
         else:
@@ -352,7 +353,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        info_out, info_err = await info_proc.communicate()
+        info_out, _ = await info_proc.communicate()
         if info_out:
             try:
                 info = json.loads(info_out.decode())
@@ -374,7 +375,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        _stdout, stderr = await proc.communicate()
         
         if proc.returncode != 0:
             log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
@@ -400,6 +401,8 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
 
 async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
     ctx = req.user_context
+    assert ctx.ha_url is not None
+    assert ctx.ha_token is not None
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     log.info(f"[video/play] user={ctx.user} entity={full_entity_id} query='{req.query}'")
 

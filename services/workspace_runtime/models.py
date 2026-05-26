@@ -29,5 +29,5 @@ class Workspace(SQLModel, table=True):
     @property
     def effective_container_path(self) -> str:
         """Returns the path to use for container-internal operations."""
-        return self.container_mount_path or self.local_path
+        return self.container_mount_path or self.local_path or ""
 

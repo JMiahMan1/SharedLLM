@@ -6,10 +6,6 @@ from fastapi import status
 # This test suite simulates production failure scenarios using respx
 # to ensure the Gateway handles downstream microservice failures gracefully.
 
-@respx.template
-def identity_svc(req):
-    return httpx.Response(status.HTTP_200_OK, json={"user": "test_user", "is_admin": False})
-
 @pytest.mark.asyncio
 @respx.mock
 async def test_identity_401_expired_token():

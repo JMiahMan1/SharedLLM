@@ -6,7 +6,7 @@ from config import WORKSPACE_DATABASE_URL
 from sqlmodel import Session, SQLModel, create_engine
 from sqlalchemy import inspect, text
 try:
-    from .models import Workspace
+    from .models import Workspace  # pyright: ignore[reportUnusedImport]
 except (ImportError, ValueError):
     pass
 

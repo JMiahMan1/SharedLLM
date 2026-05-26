@@ -106,7 +106,7 @@ async def _resolve_workspace_path(workspace_id: Optional[str] = None) -> str:
     return WORKSPACE_ROOT
 
 
-async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dict = None) -> dict:
+async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dict | None = None) -> dict:
     """
     Run a git command as a subprocess and return stdout/stderr/returncode.
     args — list of git sub-command + arguments (NOT including 'git' itself).
@@ -218,12 +218,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     is_admin: bool = getattr(user_context, "is_admin", False) if user_context else False
 
     if action in {"reset", "clean"}:
-        return {
-            "status": "FAILURE",
-            "message": f"git {action} is blocked for safety.",
-            "service": "git",
-            "detail": {"error": "unsafe_git_action_blocked"},
-        }
+        return GitExecutionResult(status="FAILURE", message=f"git {action} is blocked for safety.", service="git", detail={"error": "unsafe_git_action_blocked"})
 
     if action == "status":
         r = await _run_git(["status", "--porcelain", "--branch"], cwd=workspace_path)
@@ -312,12 +307,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
 
     elif action == "push" or action == "pull":
         if action == "push" and not is_admin:
-            return {
-                "status": "FAILURE",
-                "message": "Push requires admin privileges.",
-                "service": "git",
-                "detail": {"error": "insufficient_permissions"},
-            }
+            return GitExecutionResult(status="FAILURE", message="Push requires admin privileges.", service="git", detail={"error": "insufficient_permissions"})
         
         # Resolve remote URL for token injection
         remote_url = await _get_remote_url("origin", cwd=workspace_path)
@@ -376,9 +366,4 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         return _ok("log", {"commits": r["stdout"].splitlines(), **r})
 
     else:
-        return {
-            "status": "FAILURE",
-            "message": f"Unknown git action '{action}'. Valid: status, diff, add, commit, pull, push, log.",
-            "service": "git",
-            "detail": {},
-        }
+        return GitExecutionResult(status="FAILURE", message=f"Unknown git action '{action}'. Valid: status, diff, add, commit, pull, push, log.", service="git", detail={})

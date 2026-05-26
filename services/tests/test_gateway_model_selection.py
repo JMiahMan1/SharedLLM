@@ -5,6 +5,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
@@ -18,6 +19,7 @@ os.environ.setdefault("LIBRARIAN_MODEL", "qwen3:8b")
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
+from starlette.responses import Response
 import pytest
 
 import gateway.main as gateway_main
@@ -609,8 +611,8 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
         def json(self):
             return self._payload
 
-    async def fake_request(method, url, json=None, params=None, headers=None, timeout=None):
-        captured["requests"].append({"method": method, "url": url, "json": json, "params": params})
+    async def fake_request(method, url, json_payload=None, params=None, headers=None, timeout=None):
+        captured["requests"].append({"method": method, "url": url, "json": json_payload, "params": params})
         if url.endswith("/workspaces"):
             return FakeRuntimeResponse(
                 {
@@ -636,7 +638,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
                 }
             )
         if url.endswith("/files/read"):
-            relative_path = (json or {})["relative_path"]
+            relative_path = (json_payload or {}).get("relative_path", "")
             return FakeRuntimeResponse(
                 {
                     "status": "SUCCESS",
@@ -652,7 +654,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
                 }
             )
         if url.endswith("/files/write"):
-            return FakeRuntimeResponse({"status": "SUCCESS", "relative_path": json.get("relative_path", "")})
+            return FakeRuntimeResponse({"status": "SUCCESS", "relative_path": (json_payload or {}).get("relative_path", "")})
         if url.endswith("/provider/sync/file"):
             return FakeRuntimeResponse({"status": "SUCCESS", "provider_path": "/Code/SharedLLM/temp/README.md"})
         return FakeRuntimeResponse({"status": "SUCCESS"})

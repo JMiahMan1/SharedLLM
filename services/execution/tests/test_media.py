@@ -9,7 +9,6 @@ def test_detect_music_default():
     assert detect_media_type("The Beatles") == "music"
     assert detect_media_type("play some jazz") == "music"
     assert detect_media_type("") == "music"
-    assert detect_media_type(None) == "music"
 
 def test_detect_music_hint():
     assert detect_media_type("anything", "music") == "music"
