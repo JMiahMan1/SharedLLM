@@ -82,6 +82,7 @@ async def test_checkpoint_resume_from_iteration():
     await r.setex("raven:checkpoint:99", 1860, json.dumps(cp_data))
 
     raw = await r.get("raven:checkpoint:99")
+    assert raw is not None
     cp = json.loads(raw)
     assert cp["iteration"] == 7
     assert cp["successful_tool_calls"] == 7
