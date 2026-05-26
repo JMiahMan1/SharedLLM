@@ -1875,8 +1875,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
 
 
 @app.post("/api/chat")
-@app.post("/v1/chat/completions")
-async def chat_handler(request: Request, background_tasks: BackgroundTasks | None = None):
+async def chat_handler(request: Request, background_tasks=None):
     log.info("Chat handler entered")
     client = get_http_client()
     # 1. Resolve Identity
@@ -2735,7 +2734,7 @@ async def get_workspaces_proxy(request: Request):
         log.error(f"Workspaces proxy failed: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
-async def _proxy_workspace_runtime_json(method: str, path: str, request: Request | None = None):
+async def _proxy_workspace_runtime_json(method: str, path: str, request = None):
     body = await request.json() if request is not None else None
     resp = await get_http_client().request(
         method,
@@ -3865,7 +3864,7 @@ async def get_abs_last_played(request: Request):
 
 
 @app.get("/api/media/audiobookshelf/library/{library_id}")
-async def get_abs_library_items(library_id: str, limit: int = 50, request: Request | None = None):
+async def get_abs_library_items(library_id: str, limit: int = 50, request = None):
     """Get audiobooks from a specific Audiobookshelf library (per-user credentials)."""
     if not request:
         return {"status": "SUCCESS", "books": []}
@@ -3889,7 +3888,7 @@ async def get_abs_library_items(library_id: str, limit: int = 50, request: Reque
 
 
 @app.get("/api/media/audiobookshelf/search")
-async def search_abs(q: str, limit: int = 20, request: Request | None = None):
+async def search_abs(q: str, limit: int = 20, request = None):
     """Search Audiobookshelf for audiobooks (per-user credentials)."""
     if not request:
         return {"status": "SUCCESS", "books": []}
