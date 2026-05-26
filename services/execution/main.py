@@ -781,7 +781,7 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
     """
     # Note: Gateway is usually at http://gateway:11435 in docker
     from config import GATEWAY_INTERNAL_URL
-    GATEWAY_INTERNAL = GATEWAY_INTERNAL_URL or "http://gateway:11435"
+    GATEWAY_INTERNAL = GATEWAY_INTERNAL_URL or "http://localhost:11435"
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
