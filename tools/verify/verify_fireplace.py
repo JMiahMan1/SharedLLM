@@ -13,16 +13,15 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("VERIFY_FIREPLACE")
 
 from app.settings import GlobalResources, load_resources
-from app.domains.media.commands import handle_media_command
+from app.domains.media.commands import handle_media_command  # pyright: ignore[reportMissingImports]
 
 async def run_test():
     log.info("--- Starting Live Fireplace Verification ---")
     
     # Init Resources (Redis/Chroma needed for full pipeline)
-    await load_resources()
+    await load_resources()  # type: ignore[misc]
     
-    from app.settings import HA_ENV_TOKEN
-    user_creds = {"user": "admin", "ha_token": HA_ENV_TOKEN}
+    user_creds = {"user": "admin", "ha_token": os.getenv("HA_ENV_TOKEN", "") or os.getenv("HA_TOKEN", "")}
     
     # Input
     intent = "watch_video" 
@@ -47,8 +46,8 @@ async def run_test():
         query=query,
         entity_id=entity_id,
         user_creds=user_creds,
-        ha_collection=GlobalResources.ha_collection,
-        redis_client=GlobalResources.redis_client,
+        ha_collection=GlobalResources.ha_collection if hasattr(GlobalResources, "ha_collection") else None,  # type: ignore[attr-defined]
+        redis_client=GlobalResources.redis_client if hasattr(GlobalResources, "redis_client") else None,  # type: ignore[attr-defined]
         device_name=device_name,
         integration="cast" # Hint integration as Router would
     )

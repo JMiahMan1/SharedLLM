@@ -2,23 +2,24 @@
 import os
 import sys
 import requests
-import json
 import logging
-from typing import Dict
+from dotenv import load_dotenv
 
 # Setup minimal logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger("inspect_players")
 
+load_dotenv()
+
 # Env setup (mimic app settings without importing whole app if possible, or minimal import)
-# We try to use app.settings if available to get correct HA_URL/TOKEN
+_ha_url_from_app: str | None = None
 try:
-    from app.settings import HA_URL, HA_ENV_TOKEN
-    HA_TOKEN = HA_ENV_TOKEN
+    from app.settings import HA_URL as _ha_url_from_app  # noqa: F401
 except ImportError:
-    # Fallback to env vars
-    HA_URL = os.getenv("HA_URL")
-    HA_TOKEN = os.getenv("HA_TOKEN")
+    pass
+
+HA_URL: str = _ha_url_from_app or os.getenv("HA_URL", "")  # type: ignore[assignment]
+HA_TOKEN: str = os.getenv("HA_ENV_TOKEN", "") or os.getenv("HA_TOKEN", "")  # type: ignore[assignment]
 
 def get_headers():
     if not HA_TOKEN:
@@ -58,12 +59,10 @@ def print_player_details(player):
     # relevant attributes
     keys = ["app_name", "app_id", "volume_level", "is_volume_muted", "source", "source_list", "media_title", "media_artist", "mass_player_type", "active_queue"]
     
-    found_any = False
     for k in keys:
         if k in attrs:
             val = attrs[k]
             print(f"  {k}: {val}")
-            found_any = True
             
     # Check for Roku specific
     if "roku" in eid or "roku" in fname.lower():

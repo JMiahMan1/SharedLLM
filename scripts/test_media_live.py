@@ -9,8 +9,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.settings import get_user_creds, HA_URL
 from app.logic.media_ops import handle_media_command
-# We import _handle_single_command to test pipeline routing (Regex overrides)
-from app.logic.pipeline import _handle_single_command
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
@@ -49,7 +47,6 @@ async def test_live_media_payloads():
     log.info(f"Result A: {result}")
     
     # 2. Test Case B: Skip Request (Regex Override Test)
-    # We call _handle_single_command to ensure the regex in pipeline captures 'skip' 
     # and maps it to 'media_next' BEFORE it hits vectors.
     skip_query = "Skip on the Office TV"
     log.info(f"Testing Skip Query (Regex Check): '{skip_query}'")

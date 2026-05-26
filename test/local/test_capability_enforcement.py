@@ -1,8 +1,6 @@
-import asyncio
 import os
 import httpx
 import pytest
-from typing import List, Dict, Any
 
 # Configuration
 BASE_URL = os.getenv("LIVE_TEST_URL", "http://localhost:8080")
@@ -17,17 +15,12 @@ async def test_capability_read_success():
     """Verify that a workspace with 'read' capability allowed can list and read files."""
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Use sharedllm_system which has 'read'
-        payload = {
-            "workspace_id": "sharedllm_system",
-            "path": ".",
-            "recursive": False
-        }
         resp = await client.post(f"{GATEWAY_URL}/execute/workspace_search", json={
             "workspace_id": "sharedllm_system",
             "path": ".",
             "query": "SharedLLM",
             "user_context": {"user": "test_user", "is_admin": False}
-        }, headers=HEADERS)
+        }, headers=HEADERS)  # noqa: F841
         
         # Capability check happens at workspace_runtime level, but routed through execution -> gateway
         assert resp.status_code == 200

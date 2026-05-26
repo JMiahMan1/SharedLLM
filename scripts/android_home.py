@@ -8,8 +8,6 @@ sys.path.insert(0, '/home/jeremiah/Summers Drive/Code/SharedLLM')
 import asyncio
 from app.domains.shared import execute_ha_service
 from app.users import get_user_creds
-import requests
-import time
 
 BASE_URL = "http://ai.local:11435"
 ANDROID_TV_REMOTE = "remote.office_tv_remote"
@@ -28,7 +26,7 @@ async def main():
             "remote",
             "send_command",
             ANDROID_TV_REMOTE,
-            user_creds,
+            {k: v for k, v in user_creds.items() if v is not None},
             {"command": "HOME"},
             None
         )

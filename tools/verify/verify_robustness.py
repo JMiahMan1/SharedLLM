@@ -1,16 +1,14 @@
 
 import sys
 import os
-import json
 import logging
-import time
 from fastapi.testclient import TestClient
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import App
-from app.main import app
+from app.main import app  # pyright: ignore[reportMissingImports]
 from app.settings import GlobalResources
 
 # Setup Logging
@@ -79,15 +77,9 @@ class MockCollection:
 def discover_entities_mock():
     """Fetches real HA data but puts it in a Mock Collection."""
     log.info("Fetching HA Data for Mock Collection...")
-    from app.utils.ha_fetch import fetch_ha_data, get_device_info
+    from app.utils.ha_fetch import fetch_ha_data, get_device_info  # pyright: ignore[reportMissingImports]
     
-    try:
-        from langchain_core.documents import Document
-    except ImportError:
-        class Document:
-            def __init__(self, page_content, metadata):
-                self.page_content = page_content
-                self.metadata = metadata
+    from langchain_core.documents import Document  # pyright: ignore[assignment]
 
     # Fetch raw data
     states, device_registry, entity_registry, area_registry = fetch_ha_data()
@@ -100,7 +92,7 @@ def discover_entities_mock():
         if eid.split('.')[0] not in ALLOWED_DOMAINS: continue
         
         attrs = s.get("attributes", {})
-        device_name, integration, area_name = get_device_info(eid, device_registry, entity_registry, area_registry)
+        _device_name, integration, area_name = get_device_info(eid, device_registry, entity_registry, area_registry)
         
         # Build Metadata
         metadata = {
@@ -147,19 +139,19 @@ def discover_entities(collection):
         if not candidates["tv"]:
             if domain == "media_player" and any(x in integ for x in ["roku", "androidtv", "webostv", "samsungtv", "braviatv", "tv"]):
                 if "cast" not in integ:
-                    candidates["tv"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}
+                    candidates["tv"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}  # type: ignore[dict-item]
                     log.info(f"Found TV Candidate: {friendly_name} ({eid}) [{integ}]")
 
         # Find Speaker
         if not candidates["speaker"]:
             if domain == "media_player" and ("music_assistant" in integ or "sonos" in integ or "speaker" in integ):
-                 candidates["speaker"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}
+                 candidates["speaker"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}  # type: ignore[dict-item]
                  log.info(f"Found Speaker Candidate: {friendly_name} ({eid}) [{integ}]")
-        
+
         # Find Light
         if not candidates["light"]:
             if domain == "light":
-                candidates["light"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}
+                candidates["light"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}  # type: ignore[dict-item]
                 log.info(f"Found Light Candidate: {friendly_name} ({eid})")
 
     return candidates
@@ -222,14 +214,14 @@ def main():
         return
 
     # Patch GlobalResources
-    GlobalResources.ha_collection = mock_collection
+    GlobalResources.ha_collection = mock_collection  # type: ignore[attr-defined]
     
     # We also need to populate verify candidates
     candidates = discover_entities(mock_collection)
 
     with TestClient(app) as client:
         # Re-patch
-        GlobalResources.ha_collection = mock_collection
+        GlobalResources.ha_collection = mock_collection  # type: ignore[attr-defined]
         
         if not any(candidates.values()):
             log.warning("No suitable candidates found in Mock.")

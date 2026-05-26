@@ -2,8 +2,8 @@ import os
 import sys
 import json
 import redis
-import time
 from datetime import datetime
+from typing import Any
 from dotenv import load_dotenv
 
 # Load Env
@@ -16,7 +16,7 @@ print(f"{'='*50}")
 print(f"Connecting to: {REDIS_URL}")
 
 try:
-    r = redis.from_url(REDIS_URL, decode_responses=True)
+    r: redis.Redis[Any] = redis.from_url(REDIS_URL, decode_responses=True)  # type: ignore[assignment]
     r.ping()
     print("[OK] Redis Connection Successful.")
 except Exception as e:
@@ -24,7 +24,7 @@ except Exception as e:
     sys.exit(1)
 
 # 1. Dump All Timer Keys
-keys = r.keys("rag:timers:*")
+keys: list[str] = r.keys("rag:timers:*")  # type: ignore[assignment]
 print(f"\nFound {len(keys)} timer keys in Redis:")
 
 if not keys:
@@ -34,12 +34,12 @@ else:
     print(f"Current System Time: {now} (iso: {now.isoformat()})")
     
     for k in keys:
-        val = r.get(k)
+        val = r.get(k)  # type: ignore[misc]
         print(f"\n--- Key: {k} ---")
         print(f"Raw Value: {val}")
         
         try:
-            data = json.loads(val)
+            data = json.loads(val) if val is not None else {}  # type: ignore[arg-type]
             expires_at_str = data.get("expires_at")
             
             if expires_at_str:

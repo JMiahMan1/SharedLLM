@@ -1,9 +1,10 @@
+
 import sys
 import os
-import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'services/gateway'))
-from intent_engine import IntentEngine
+# pyright: ignore[reportMissingImports]
+from intent_engine import IntentEngine  # pyright: ignore[reportMissingImports]
 
 def test_intent():
     print("--- 1. Testing Intent Engine ---")

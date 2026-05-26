@@ -3,7 +3,6 @@ import os
 import time
 import httpx
 import pytest
-import json
 from dotenv import load_dotenv
 
 # Load local .env
@@ -60,6 +59,7 @@ def test_light_toggle_verification(client):
 
     # 4. Verify state change
     final = get_ha_state(entity_id)
+    assert final is not None, f"Entity {entity_id} not found after toggle"
     final_state = final.get("state")
     print(f"[Test] Final state of {entity_id}: {final_state}")
     
@@ -87,6 +87,7 @@ def test_brightness_control_verification(client):
 
     # Verify attributes
     state = get_ha_state(entity_id)
+    assert state is not None, f"Entity {entity_id} not found for brightness check"
     brightness = state.get("attributes", {}).get("brightness")
     print(f"[Test] HA reported brightness: {brightness} (Target range: {target_val-5} to {target_val+5})")
     

@@ -1,6 +1,5 @@
 import pytest
 import httpx
-from fastapi import status
 
 # Phase 4.3: Test Storage Async Indexing
 # This test ensures that indexing requests return 202 Accepted immediately.
@@ -20,11 +19,7 @@ async def test_storage_indexing_is_async():
     
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
-        import time
-        start = time.time()
         resp = await ac.post("/index/full", json=payload)
-        duration = time.time() - start
-        
         # 1. Assert status code is 202
         assert resp.status_code == 202
         assert resp.json()["status"] == "ACCEPTED"

@@ -8,8 +8,9 @@ sys.path.append(os.getcwd())
 
 # Mock the integration factory and handler
 sys.modules["app.domains.media.integrations.factory"] = MagicMock()
-from app.domains.media.integrations.factory import IntegrationFactory
-from app.domains.media.commands import _execute_transport_command
+# pyright: ignore[reportMissingImports]
+from app.domains.media.integrations.factory import IntegrationFactory  # pyright: ignore[reportMissingImports]
+from app.domains.media.commands import _execute_transport_command  # pyright: ignore[reportMissingImports]
 
 async def main():
     print("Testing 'Skip' (media_next) Command Mapping...")
@@ -23,7 +24,7 @@ async def main():
     
     # Test Case 1: media_next (The alias that was failing)
     print("\nTest 1: Intent='media_next'")
-    result = await _execute_transport_command(
+    _result = await _execute_transport_command(
         intent="media_next",
         entity_id="media_player.test",
         domain="media_player",
@@ -57,7 +58,7 @@ async def main():
 
     # Test Case 3: Verify RokuIntegration structure (Static check)
     print("\nTest 3: Checking RokuIntegration methods...")
-    from app.domains.media.integrations.roku import RokuIntegration
+    from app.domains.media.integrations.roku import RokuIntegration  # pyright: ignore[reportMissingImports]
     if hasattr(RokuIntegration, "next_track") and hasattr(RokuIntegration, "previous_track"):
         print("PASS: RokuIntegration has next_track and previous_track methods.")
     else:

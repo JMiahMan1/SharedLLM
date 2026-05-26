@@ -1,8 +1,6 @@
-import sys
 import os
 import time
 import requests
-import json
 from dotenv import load_dotenv
 
 # Setup
@@ -26,13 +24,20 @@ def send_chat(content):
     except Exception as e:
         return {"error": str(e)}
 
+def _safe_msg(resp):
+    if isinstance(resp, dict):
+        msg = resp.get("message")
+        if isinstance(msg, dict):
+            return msg.get("content", "")
+    return ""
+
 def test_media_extended():
     log("\n--- TEST: Media Extended (Volume/Transport) ---")
     
     # 1. Volume
     log("   [ACTION] Set volume to 50% on Office TV")
     resp = send_chat("Set volume to 50% on Office TV")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     if SILENT_TOKEN in msg or "volume" in msg.lower():
         log("   [PASS] Volume command accepted.")
     else:
@@ -41,7 +46,7 @@ def test_media_extended():
     # 2. Pause (Regex Check)
     log("   [ACTION] Pause the Office TV")
     resp = send_chat("Pause the Office TV")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     if SILENT_TOKEN in msg or "paus" in msg.lower() or "stop" in msg.lower():
         log("   [PASS] Pause command accepted.")
     else:
@@ -55,7 +60,7 @@ def test_calendar_tools():
     evt_title = f"Test Meeting {ts}"
     log(f"   [ACTION] Schedule '{evt_title}' tomorrow at 2pm")
     resp = send_chat(f"Schedule {evt_title} tomorrow at 2pm")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     
     if "scheduled" in msg.lower() or "added" in msg.lower():
         log("   [PASS] Event creation reported success.")
@@ -65,7 +70,7 @@ def test_calendar_tools():
     # 2. List Events
     log("   [ACTION] List my meetings")
     resp = send_chat("List my meetings")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     if evt_title in msg:
         log(f"   [PASS] Found '{evt_title}' in calendar list.")
     else:
@@ -77,7 +82,7 @@ def test_note_tools():
     # 1. Create Note
     log("   [ACTION] Create a note called 'System Check' saying 'All systems go'")
     resp = send_chat("Create a note called 'System Check' saying 'All systems go'")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     
     if "created" in msg.lower() or "saved" in msg.lower():
         log("   [PASS] Note creation reported success.")
@@ -87,7 +92,7 @@ def test_note_tools():
     # 2. Read Note
     log("   [ACTION] Read my 'System Check' note")
     resp = send_chat("Read my 'System Check' note")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     if "All systems go" in msg:
         log("   [PASS] Note content verified.")
     else:
@@ -97,7 +102,7 @@ def test_web_search():
     log("\n--- TEST: Web Search ---")
     log("   [ACTION] Search for 'current time in Tokyo'")
     resp = send_chat("Search for the current time in Tokyo")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     
     # Check for actual search results logic (assuming tool output is in response)
     if "Tokyo" in msg and any(char.isdigit() for char in msg):
@@ -109,7 +114,7 @@ def test_timer_extended():
     log("\n--- TEST: Timer Extended ---")
     log("   [ACTION] Set a timer for 10 minutes")
     resp = send_chat("Set a timer for 10 minutes")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     if "set" in msg.lower() and "10 minute" in msg.lower():
         log("   [PASS] Timer set.")
     else:
@@ -117,7 +122,7 @@ def test_timer_extended():
         
     log("   [ACTION] Pause the timer")
     resp = send_chat("Pause the timer")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     if "paused" in msg.lower():
         log("   [PASS] Timer paused.")
     else:

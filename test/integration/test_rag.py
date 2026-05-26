@@ -1,6 +1,5 @@
 import pytest
 import httpx
-import os
 
 # RAG Service URL
 RAG_URL = "http://localhost:11438"

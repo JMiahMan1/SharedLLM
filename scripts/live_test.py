@@ -2,7 +2,6 @@ import sys
 import subprocess
 import os
 import time
-import json
 import warnings
 from datetime import datetime, timedelta
  
@@ -85,23 +84,23 @@ def ensure_device_state(friendly_name, entity_id, target_state="off"):
         return True
        
     print(f"   [PRE-CHECK] {friendly_name} is '{current}'. forcing '{target_state}'...")
-   
+    
     nl_cmd = f"Turn {target_state} the {friendly_name}"
     print(f"   [ACTION] Sending command: '{nl_cmd}'...")
     requests.post(f"{API_URL}/api/chat", json={"messages":[{"role":"user","content":nl_cmd}], "stream":False}, headers=HEADERS)
    
-    for i in range(20):
+    for _ in range(20):
         time.sleep(2)
         current = get_state(entity_id)
         current_is_on = current in ["on", "idle", "playing", "paused", "buffering"]
-       
+        
         if target_state == "on" and current_is_on:
             print(f"   [READY] {friendly_name} is now '{current}' (ON).")
             return True
         if target_state == "off" and not current_is_on:
             print(f"   [READY] {friendly_name} is now '{current}' (OFF).")
             return True
-           
+            
     print(f"   [WARNING] Failed to force {friendly_name} to {target_state}. Got '{current}'.")
     return False
  
@@ -312,7 +311,7 @@ def test_music_playback(entity_id, friendly_name):
    
     print(f"   [VERIFYING] {entity_id} -> 'playing'...")
     playing = False
-    for i in range(10):
+    for _i in range(10):
         state = get_state(entity_id)
         if state in ["playing", "buffering"]:
             print(f"   [PASS] {entity_id} is '{state}'.")
@@ -424,7 +423,7 @@ def test_functionality():
  
     print_header("Func: Multi-Command (Turn OFF Both)")
     print("   [SETUP] Forcing BOTH devices ON...")
-    lamp_ready = ensure_device_state(LAMP_NAME, lamp_id, "on")
+    ensure_device_state(LAMP_NAME, lamp_id, "on")
     tv_ready = ensure_device_state(MEDIA_NAME, tv_id, "on")
    
     if not tv_ready:

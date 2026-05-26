@@ -1,6 +1,5 @@
 import httpx
 import json
-import time
 
 GATEWAY_URL = "http://ai.local:8080/api/chat"
 RAG_URL = "http://ai.local:8080/api/storage" # Or internal if possible, but let's hit gateway

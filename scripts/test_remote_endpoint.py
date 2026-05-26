@@ -1,5 +1,4 @@
 import requests
-import json
 import logging
 import sys
 
@@ -14,7 +13,7 @@ log = logging.getLogger("RemoteTest")
 REMOTE_URL = "http://ai.local:11435/api/chat"
 HEADERS = {"Content-Type": "application/json"}
 
-def test_query(query: str, expected_device_substr: str = None, expected_intent: str = None):
+def test_query(query: str, expected_device_substr: str | None = None, expected_intent: str | None = None):
     log.info(f"\n--- Testing Query: '{query}' ---")
     payload = {"query": query}
     

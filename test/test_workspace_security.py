@@ -1,6 +1,5 @@
 import pytest
 import httpx
-from fastapi import status
 
 # Phase 4.2: Test Workspace Security
 # This test attempts a path traversal attack and asserts a 403 Forbidden.
@@ -25,7 +24,7 @@ async def test_workspace_path_traversal_blocked():
         )
         
         if resp.status_code == 404:
-            print(f"Routes: {[r.path for r in app.routes]}")
+            print(f"Routes: {[getattr(r, 'path', '<no path>') for r in app.routes]}")
             
         # Should be blocked by resolve_safe_path
         assert resp.status_code == 403

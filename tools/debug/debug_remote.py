@@ -1,5 +1,4 @@
 import requests
-import sys
 
 URL = "http://ai.local:11435"
 

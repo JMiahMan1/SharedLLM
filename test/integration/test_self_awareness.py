@@ -1,8 +1,7 @@
 # test/integration/test_self_awareness.py
 import os
 import requests
-import json
-import pytest
+import pytest  # pyright: ignore[reportUnusedImport]
 
 RAG_SVC_URL = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 GATEWAY_SVC_URL = os.getenv("GATEWAY_SVC_URL", "http://127.0.0.1:11435")

@@ -1,7 +1,6 @@
 import pytest
 import httpx
 import respx
-import re
 from fastapi import status
 
 # Phase 4.1: Test HTTP Timeouts

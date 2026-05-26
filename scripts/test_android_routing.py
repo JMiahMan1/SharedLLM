@@ -1,12 +1,12 @@
 
-import asyncio
 import sys
 import os
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.domains.media.devices import _route_by_intent
+# pyright: ignore[reportMissingImports]
+from app.domains.media.devices import _route_by_intent  # pyright: ignore[reportMissingImports]
 
 def test_dual_mode_routing():
     print("Testing 'Play' vs 'Watch' routing priority...")

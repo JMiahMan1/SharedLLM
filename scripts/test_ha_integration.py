@@ -35,6 +35,13 @@ HEADERS = {
     "X-Internal-Secret": SECRET,
 }
 
+def _safe_resp_content(resp):
+    if isinstance(resp, dict):
+        msg = resp.get("message")
+        if isinstance(msg, dict):
+            return msg.get("content", "")
+    return ""
+
 NON_ADMIN_CTX = {
     "user": "testuser",
     "is_admin": False,
@@ -42,15 +49,22 @@ NON_ADMIN_CTX = {
     "ha_token": HA_TOKEN,
 }
 
-results = {"passed": 0, "failed": 0, "skipped": 0, "details": []}
+results: dict = {"passed": 0, "failed": 0, "skipped": 0, "details": []}
 
 def log(msg, level="INFO"):
     print(f"[{level}] {msg}")
 
 def record(name, passed, detail=""):
     status = "PASS" if passed else "FAIL"
-    results["passed" if passed else "failed"] += 1
-    results["details"].append(f"  [{status}] {name}: {detail}")
+    if passed:
+        results["passed"] = results.get("passed", 0) + 1
+    else:
+        results["failed"] = results.get("failed", 0) + 1
+    details_list = results.get("details", [])
+    if not isinstance(details_list, list):
+        details_list = []
+        results["details"] = details_list
+    details_list.append(f"  [{status}] {name}: {detail}")
     print(f"  [{status}] {name}: {detail}")
 
 def ha_get_state(entity_id):
@@ -62,7 +76,9 @@ def ha_get_state(entity_id):
             timeout=10.0,
         )
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            if isinstance(data, dict):
+                return data
         return None
     except Exception as e:
         return {"error": str(e)}
@@ -143,11 +159,12 @@ def wait_for_logbook_entry(entity_id, expected_action, timeout=15):
     start = time.time()
     while time.time() - start < timeout:
         entries = ha_get_logbook(entity_id, minutes=5)
-        for entry in entries:
-            if expected_action.lower() in str(entry.get("action_type", "")).lower() or \
-               expected_action.lower() in str(entry.get("message", "")).lower() or \
-               expected_action.lower() in str(entry.get("state", "")).lower():
-                return True, entries
+        if isinstance(entries, list):
+            for entry in entries:
+                if expected_action.lower() in str(entry.get("action_type", "")).lower() or \
+                   expected_action.lower() in str(entry.get("message", "")).lower() or \
+                   expected_action.lower() in str(entry.get("state", "")).lower():
+                    return True, entries
         time.sleep(2)
     entries = ha_get_logbook(entity_id, minutes=5)
     return False, entries
@@ -245,13 +262,17 @@ def test_light_brightness():
     time.sleep(3)
     state = ha_get_state(entity)
     if state and "attributes" in state:
-        brightness = state["attributes"].get("brightness")
-        # HA brightness is 0-255, 50% = ~128
-        expected_approx = 128
-        close = brightness is not None and abs(brightness - expected_approx) < 30
-        record("Light Brightness - HA attribute verified", close, f"brightness={brightness} (expected ~{expected_approx})")
+        attrs = state.get("attributes")
+        if attrs and isinstance(attrs, dict):
+            brightness = attrs.get("brightness")
+            # HA brightness is 0-255, 50% = ~128
+            expected_approx = 128
+            close = brightness is not None and abs(brightness - expected_approx) < 30
+            record("Light Brightness - HA attribute verified", close, f"brightness={brightness} (expected ~{expected_approx})")
+        else:
+            record("Light Brightness - HA attribute verified", False, "attributes not a dict")
     else:
-        record("Light Brightness - HA attribute verified", False, f"state={state}")
+        record("Light Brightness - HA attribute verified", False, "state is None or missing attributes")
 
     # Turn off after test
     exec_post("/execute/light", {"user_context": USER_CTX, "entity_id": entity, "action": "turn_off"})
@@ -308,8 +329,8 @@ def test_ha_logbook():
         record("HA Logbook - HTTP response", False, f"Status={status}, resp={resp}")
         return
 
-    detail = resp.get("detail", {})
-    entries = detail.get("entries", [])
+    detail = resp.get("detail", {}) if isinstance(resp, dict) else {}
+    entries = detail.get("entries", []) if isinstance(detail, dict) else []
     has_entries = len(entries) > 0
     record("HA Logbook - HTTP response", resp.get("status") == "SUCCESS", f"status={resp.get('status')}, entries={len(entries)}")
     record("HA Logbook - Has entries", has_entries, f"Found {len(entries)} entries for {entity}")
@@ -333,7 +354,7 @@ def test_discovery_entities():
     record("Discovery Entities - HTTP response", has_entities, f"Found {len(entities)} entities")
 
     # Check area mapping
-    with_areas = [e for e in entities if e.get("attributes", {}).get("area_id")]
+    with_areas = [e for e in entities if isinstance(e, dict) and e.get("attributes", {}).get("area_id")]
     record("Discovery Entities - Area mapping present", len(with_areas) > 0, f"{len(with_areas)} entities have area_id")
 
 
@@ -385,9 +406,10 @@ def test_climate_control():
     if not initial:
         record("Climate - Entity exists", False, "Entity not found")
         return
-    record("Climate - Entity exists", True, f"state={initial.get('state')}")
+    initial_attrs = initial.get("attributes") if initial else {}
+    record("Climate - Entity exists", True, f"state={initial.get('state') if initial else 'unknown'}")
 
-    initial_temp = initial.get("attributes", {}).get("temperature")
+    initial_temp = initial_attrs.get("temperature") if initial_attrs and isinstance(initial_attrs, dict) else None
     log(f"  Initial temperature: {initial_temp}")
 
     target_temp = 75.0
@@ -409,7 +431,8 @@ def test_climate_control():
     time.sleep(5)
     state = ha_get_state(entity)
     if state:
-        new_temp = state.get("attributes", {}).get("temperature")
+        state_attrs = state.get("attributes")
+        new_temp = state_attrs.get("temperature") if state_attrs and isinstance(state_attrs, dict) else None
         temp_changed = new_temp == target_temp
         record("Climate - Temperature verified", temp_changed, f"Expected={target_temp}, Actual={new_temp}")
     else:
@@ -443,7 +466,7 @@ def test_chat_turn_on_light():
         return
 
     # Check response indicates success
-    content = resp.get("message", {}).get("content", "")
+    content = _safe_resp_content(resp)
     log(f"  Gateway response: {content[:200]}")
 
     success_indicators = ["success", "completed", "executed", "turned on", "piano lamp"]
@@ -478,7 +501,7 @@ def test_chat_turn_off_light():
         record("Chat OFF - HTTP response", False, f"Status={status}, resp={resp}")
         return
 
-    content = resp.get("message", {}).get("content", "")
+    content = _safe_resp_content(resp)
     log(f"  Gateway response: {content[:200]}")
 
     success_indicators = ["success", "completed", "executed", "turned off", "off"]
@@ -501,7 +524,7 @@ def test_chat_status_query():
 
     # Get actual state from HA first
     actual = ha_get_state(entity)
-    actual_state = actual.get("state") if actual else "unknown"
+    actual_state = actual.get("state") if isinstance(actual, dict) else "unknown"
     log(f"  Actual HA state of {entity}: {actual_state}")
 
     # Ask via chat
@@ -512,11 +535,12 @@ def test_chat_status_query():
         record("Chat Status - HTTP response", False, f"Status={status}")
         return
 
-    content = resp.get("message", {}).get("content", "")
+    content = _safe_resp_content(resp)
     log(f"  Gateway response: {content[:200]}")
 
     # Verify response mentions the actual state
-    has_state = actual_state.lower() in content.lower()
+    actual_state_lower = actual_state.lower() if isinstance(actual_state, str) else ""
+    has_state = actual_state_lower in content.lower()
     record("Chat Status - Response matches HA state", has_state, f"HA state={actual_state}, response mentions it={has_state}")
 
 
@@ -559,7 +583,7 @@ if __name__ == "__main__":
     log("=" * 60)
     log(f"RESULTS: {results['passed']} passed, {results['failed']} failed, {results['skipped']} skipped")
     log("")
-    for d in results["details"]:
+    for d in (results.get("details") or []):
         print(d)
 
     sys.exit(0 if results["failed"] == 0 else 1)

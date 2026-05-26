@@ -1,7 +1,5 @@
 import os
 import sys
-import json
-import time
 import argparse
 from datetime import datetime
 import requests
@@ -9,15 +7,15 @@ import requests
 # Add the project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-from app.tests.base import BaseTest
-from app.tests.test_media import MediaTests
-from app.tests.test_timers import TimerTests
-from app.tests.test_search import SearchTests
-from app.tests.test_productivity import ProductivityTests
-from app.tests.test_hardware import HardwareTests
-from app.tests.test_android_tv import AndroidTVTests
-from app.tests.test_advanced import AdvancedTests
-from app.tests.test_context import ContextTests
+# pyright: ignore[reportMissingImports]
+from app.tests.test_media import MediaTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_timers import TimerTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_search import SearchTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_productivity import ProductivityTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_hardware import HardwareTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_android_tv import AndroidTVTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_advanced import AdvancedTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_context import ContextTests  # pyright: ignore[reportMissingImports]
 
 TEST_MAP = {
     "MediaTests": MediaTests,

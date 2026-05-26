@@ -1,6 +1,4 @@
 import re
-import dateparser
-from datetime import datetime, timedelta
 
 WORD_TO_NUM = {
     'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
@@ -42,7 +40,7 @@ def test_query(query):
     
     # Clean prefix for regex
     clean_input = re.sub(r'^\s*[\d\.\s]*(?:can you|please|i want to|start|set|create|add|a|an|\s+)+', '', normalized).strip()
-    print(f"Cleaned for Regex: '{clean_parse_input}'") # Note: variable name in print matches concept
+    print(f"Cleaned for Regex: '{clean_input}'")
     
     match = re.match(duration_regex, clean_input)
     if match and any(match.groups()):

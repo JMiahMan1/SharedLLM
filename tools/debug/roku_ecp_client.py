@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-import sys
-import requests
 import argparse
+import requests
 import xml.etree.ElementTree as ET
-import time
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Diagnostics for Roku ECP Interface")

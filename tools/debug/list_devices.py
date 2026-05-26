@@ -1,7 +1,5 @@
 
-import requests
-import json
-import os
+# import requests  # not needed - uses shell approach
 
 API_URL = "http://ai.local:11435"
 HEADERS = {
@@ -18,7 +16,7 @@ def list_devices():
         # However, `app/routers/ha.py` likely exposes something.
         # Let's try to search for "media_player" which usually returns everything in the RAG context.
         
-        payload = {
+        _payload = {
             "messages": [{"role": "user", "content": "List all media players"}],
             "tools": ["check_states"] # Hypothetical, or we just rely on the RAG retrieval logs if we can't hit a direct list.
         }

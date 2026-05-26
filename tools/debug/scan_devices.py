@@ -1,6 +1,4 @@
 import requests
-import json
-import os
 
 API_URL = "http://ai.local:11435/api/ha/states"
 

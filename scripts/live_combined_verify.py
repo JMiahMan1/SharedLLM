@@ -1,8 +1,6 @@
-import sys
 import os
 import time
 import requests
-import json
 from dotenv import load_dotenv
 
 # Setup
@@ -33,11 +31,18 @@ def send_chat(content):
     except Exception as e:
         return {"error": str(e)}
 
+def _safe_msg(resp):
+    if isinstance(resp, dict):
+        msg = resp.get("message")
+        if isinstance(msg, dict):
+            return msg.get("content", "")
+    return ""
+
 def test_hardware_routing():
     log("\n--- TEST: Hardware Routing (Turn Off TV) ---")
     # This should target androidtv/cast, NOT music_assistant
     resp = send_chat("Turn off the Office TV")
-    msg = resp.get("message", {}).get("content", "") or str(resp)
+    msg = _safe_msg(resp) or str(resp)
     
     if SILENT_TOKEN in msg:
         log("   [PASS] Silent Success token received.")
@@ -58,7 +63,7 @@ def test_hardware_routing():
 def test_audio_routing():
     log("\n--- TEST: Audio Routing (Play Music) ---")
     resp = send_chat("Play Brandon Lake on the Office TV")
-    log(f"   [INFO] Command Sent. Response: {resp.get('message', {}).get('content', '')}")
+    log(f"   [INFO] Command Sent. Response: {_safe_msg(resp)}")
     
     # Wait for state update
     time.sleep(2)
@@ -80,7 +85,7 @@ def test_silent_success():
     log("\n--- TEST: Silent Success (Light) ---")
     # Turn on a light (Piano Lamp)
     resp = send_chat("Turn on the Piano Lamp")
-    msg = resp.get("message", {}).get("content", "")
+    msg = _safe_msg(resp)
     
     if SILENT_TOKEN in msg:
         log("   [PASS] Silent Success validated on Light.")

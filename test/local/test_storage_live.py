@@ -1,6 +1,5 @@
 import pytest
 import os
-import asyncio
 import sys
 
 # Add services dir to path

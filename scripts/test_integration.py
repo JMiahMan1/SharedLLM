@@ -1,7 +1,6 @@
 import httpx
 import os
 import asyncio
-import json
 
 # Configuration
 SERVER_IP = "ai.local"

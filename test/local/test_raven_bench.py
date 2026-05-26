@@ -1,8 +1,6 @@
 import asyncio
 import os
 import httpx
-import json
-import time
 
 # List of diagnostic tasks for Raven
 RAVEN_MISSIONS = [
@@ -42,7 +40,7 @@ async def run_mission(client, gateway_url, headers, mission, model):
     print(f"   ✅ Mission #{mission_id} queued...")
 
     # Polling
-    for i in range(20):
+    for _i in range(20):
         await asyncio.sleep(5)
         status_resp = await client.get(f"{gateway_url}/raven/missions", headers=headers)
         if status_resp.status_code == 200:

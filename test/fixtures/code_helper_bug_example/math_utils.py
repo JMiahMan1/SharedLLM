@@ -3,7 +3,7 @@ def normalize_username(value: str) -> str:
     return value.strip().lower().replace(" ", "_")
 
 
-def parse_port(value: str, default: int = 8000) -> int:
+def parse_port(value: str | None, default: int = 8000) -> int:
     """Parse a TCP port from user input, falling back to the default."""
     if value is None:
         return default
