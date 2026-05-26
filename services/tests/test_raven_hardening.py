@@ -75,7 +75,8 @@ class FakeRedis:
 @pytest.mark.asyncio
 async def test_inference_queue_reclaims_expired_job():
     queue = InferenceJobQueue("redis://fake")
-    queue._redis = FakeRedis()
+    fake_redis = FakeRedis()
+    setattr(queue, "_redis", fake_redis)
 
     job_id = await queue.enqueue_job("raven", {"query": "fix something"})
     claimed = await queue.claim_job()
@@ -83,27 +84,30 @@ async def test_inference_queue_reclaims_expired_job():
     assert claimed["job_id"] == job_id
     assert claimed["status"] == JobStatus.PROCESSING
 
-    await queue._redis.delete(f"{queue.LEASE_PREFIX}{job_id}")
+    await fake_redis.delete(f"{queue.LEASE_PREFIX}{job_id}")
     reclaimed = await queue.reclaim_expired_jobs()
 
     assert reclaimed == 1
     status = await queue.get_job_status(job_id)
     assert status is not None
     assert status["status"] == JobStatus.QUEUED
-    assert queue._redis.lists[queue.QUEUE_KEY] == [job_id]
+    assert fake_redis.lists[queue.QUEUE_KEY] == [job_id]
 
 
 @pytest.mark.asyncio
 async def test_inference_queue_dead_letters_after_max_attempts():
     queue = InferenceJobQueue("redis://fake")
-    queue._redis = FakeRedis()
+    fake_redis = FakeRedis()
+    setattr(queue, "_redis", fake_redis)
 
     job_id = await queue.enqueue_job("raven", {"query": "fix something"})
-    job_raw = json.loads(await queue._redis.get(f"{queue.JOB_PREFIX}{job_id}"))
+    job_data = await fake_redis.get(f"{queue.JOB_PREFIX}{job_id}")
+    assert job_data is not None
+    job_raw = json.loads(job_data)
     job_raw["status"] = JobStatus.PROCESSING
     job_raw["attempts"] = queue.MAX_ATTEMPTS
-    await queue._redis.set(f"{queue.JOB_PREFIX}{job_id}", json.dumps(job_raw))
-    await queue._redis.rpush(queue.PROCESSING_KEY, job_id)
+    await fake_redis.set(f"{queue.JOB_PREFIX}{job_id}", json.dumps(job_raw))
+    await fake_redis.rpush(queue.PROCESSING_KEY, job_id)
 
     reclaimed = await queue.reclaim_expired_jobs()
 
@@ -111,7 +115,7 @@ async def test_inference_queue_dead_letters_after_max_attempts():
     status = await queue.get_job_status(job_id)
     assert status is not None
     assert status["status"] == JobStatus.FAILED
-    assert queue._redis.lists[queue.DEAD_LETTER_KEY] == [job_id]
+    assert fake_redis.lists[queue.DEAD_LETTER_KEY] == [job_id]
 
 
 @pytest.mark.asyncio
@@ -165,6 +169,7 @@ async def test_workspace_shell_blocks_mutating_commands():
     req = WorkspaceShellRequest(
         user_context=UserContext(user="raven", is_admin=True),
         command="rm -rf services",
+        commands=None,
         cwd=".",
         timeout=5,
     )
@@ -181,6 +186,7 @@ async def test_workspace_shell_allows_safe_read_only_commands(monkeypatch, tmp_p
     req = WorkspaceShellRequest(
         user_context=UserContext(user="raven", is_admin=True),
         command="pwd",
+        commands=None,
         cwd=".",
         timeout=5,
     )
@@ -214,8 +220,12 @@ async def test_git_handler_allows_autonomous_commit(monkeypatch, tmp_path):
 
     req = GitOperationRequest(
         user_context=UserContext(user="raven", is_admin=True),
+        workspace_id=None,
         action="commit",
+        path=".",
         commit_message="test commit",
+        branch="microservices",
+        log_count=10,
     )
 
     result = await git_handler.handle_git(req)
@@ -238,12 +248,22 @@ async def test_git_handler_blocks_reset_for_all_users(monkeypatch, tmp_path):
     monkeypatch.setattr(git_handler, "_get_current_branch", fake_branch)
     req = GitOperationRequest(
         user_context=UserContext(user="admin", is_admin=True),
+        workspace_id=None,
         action="reset",
+        path=".",
+        commit_message=None,
+        branch="microservices",
+        log_count=10,
     )
 
     result = await git_handler.handle_git(req)
 
-    status = result.status if hasattr(result, 'status') else result.get("status")
-    detail = result.detail if hasattr(result, 'detail') else result.get("detail", {})
+    assert result is not None
+    if isinstance(result, dict):
+        status = result.get("status")
+        detail = result.get("detail", {})
+    else:
+        status = result.status
+        detail = result.detail if result.detail is not None else {}
     assert status == "FAILURE"
     assert detail.get("error") == "unsafe_git_action_blocked"

@@ -1,5 +1,5 @@
 # services/tests/test_searxng_search.py
-"""Tests for SearXNG JSON API integration with Playwright fallback."""
+"""Tests for SearXNG HTML search integration with Playwright fallback."""
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -18,33 +18,27 @@ def search_req(user_ctx):
 
 
 @pytest.fixture
-def mock_json_response():
-    return {
-        "results": [
-            {
-                "title": "httpx Documentation",
-                "url": "https://www.python-httpx.org/",
-                "content": "A fully featured HTTP client for Python 3.",
-                "engine": "google",
-                "score": 1.0,
-            },
-            {
-                "title": "Async HTTP in Python",
-                "url": "https://example.com/async-http",
-                "content": "Guide to async HTTP requests.",
-                "engine": "duckduckgo",
-                "score": 0.8,
-            },
-        ],
-        "number_of_results": 2,
-    }
+def mock_html_response():
+    return (
+        '<div class="result__title">'
+        '<a href="https://www.python-httpx.org/">httpx Documentation</a>'
+        '</div>'
+        '<div class="result__title">'
+        '<a href="https://example.com/async-http">Async HTTP in Python</a>'
+        '</div>'
+    )
+
+
+@pytest.fixture
+def mock_html_no_results():
+    return '<div>No results found</div>'
 
 
 @pytest.mark.asyncio
-async def test_searxng_json_search_success(search_req, mock_json_response):
-    """Verify JSON API returns structured results with engine source and score."""
+async def test_searxng_html_search_success(search_req, mock_html_response):
+    """Verify HTML search returns structured results with title and URL."""
     mock_resp = MagicMock()
-    mock_resp.json.return_value = mock_json_response
+    mock_resp.text = mock_html_response
     mock_resp.raise_for_status = MagicMock()
 
     with patch("services.execution.handlers.browser.httpx.AsyncClient") as mock_client_cls:
@@ -52,22 +46,19 @@ async def test_searxng_json_search_success(search_req, mock_json_response):
         mock_client.get.return_value = mock_resp
         mock_client_cls.return_value.__aenter__.return_value = mock_client
 
-        result = await browser._searxng_json_search(search_req)
+        result = await browser._searxng_html_search(search_req)
 
     assert result is not None
     assert result.status == "SUCCESS"
-    assert result.detail["source"] == "searxng_json"
-    assert len(result.detail["results"]) == 2
-    assert result.detail["results"][0]["engine"] == "google"
-    assert result.detail["results"][0]["score"] == 1.0
-    assert "httpx" in result.detail["formatted_content"]
+    assert "httpx Documentation" in result.message
+    assert "Async HTTP in Python" in result.message
 
 
 @pytest.mark.asyncio
-async def test_searxng_json_search_no_results(search_req):
-    """Verify empty results return SUCCESS with empty list."""
+async def test_searxng_html_search_no_results(search_req, mock_html_no_results):
+    """Verify empty results returns None (triggers Playwright fallback)."""
     mock_resp = MagicMock()
-    mock_resp.json.return_value = {"results": [], "number_of_results": 0}
+    mock_resp.text = mock_html_no_results
     mock_resp.raise_for_status = MagicMock()
 
     with patch("services.execution.handlers.browser.httpx.AsyncClient") as mock_client_cls:
@@ -75,29 +66,25 @@ async def test_searxng_json_search_no_results(search_req):
         mock_client.get.return_value = mock_resp
         mock_client_cls.return_value.__aenter__.return_value = mock_client
 
-        result = await browser._searxng_json_search(search_req)
+        result = await browser._searxng_html_search(search_req)
 
-    assert result is not None
-    assert result.status == "SUCCESS"
-    assert result.detail["results"] == []
-    assert "no results" in result.message.lower()
+    assert result is None
 
 
 @pytest.mark.asyncio
-async def test_searxng_json_search_with_optional_params(user_ctx):
-    """Verify optional params (category, engines, time_range) are passed to API."""
+async def test_searxng_html_search_with_optional_params(user_ctx):
+    """Verify optional params (category, engines, safesearch) are passed to API."""
     req = WebSearchRequest(
         user_context=user_ctx,
         query="latest python news",
         category="news",
         engines="google,bing",
-        time_range="week",
         language="en",
         safesearch=1,
     )
 
     mock_resp = MagicMock()
-    mock_resp.json.return_value = {"results": [], "number_of_results": 0}
+    mock_resp.text = '<div class="result__title"><a href="https://example.com">Test</a></div>'
     mock_resp.raise_for_status = MagicMock()
 
     with patch("services.execution.handlers.browser.httpx.AsyncClient") as mock_client_cls:
@@ -105,20 +92,19 @@ async def test_searxng_json_search_with_optional_params(user_ctx):
         mock_client.get.return_value = mock_resp
         mock_client_cls.return_value.__aenter__.return_value = mock_client
 
-        await browser._searxng_json_search(req)
+        await browser._searxng_html_search(req)
 
         call_args = mock_client.get.call_args[0][0]
         assert "categories=news" in call_args
         assert "engines=google%2Cbing" in call_args or "engines=google,bing" in call_args
-        assert "time_range=week" in call_args
         assert "safesearch=1" in call_args
 
 
 @pytest.mark.asyncio
-async def test_handle_web_search_json_api_first(search_req, mock_json_response):
-    """Verify handle_web_search tries JSON API first."""
+async def test_handle_web_search_uses_html_search_first(search_req, mock_html_response):
+    """Verify handle_web_search tries HTML search first."""
     mock_resp = MagicMock()
-    mock_resp.json.return_value = mock_json_response
+    mock_resp.text = mock_html_response
     mock_resp.raise_for_status = MagicMock()
 
     with patch("services.execution.handlers.browser.httpx.AsyncClient") as mock_client_cls:
@@ -130,14 +116,21 @@ async def test_handle_web_search_json_api_first(search_req, mock_json_response):
 
     assert result is not None
     assert result.status == "SUCCESS"
-    assert result.detail is not None
-    assert result.detail["source"] == "searxng_json"
+    assert "httpx Documentation" in result.message
 
 
 @pytest.mark.asyncio
 async def test_handle_web_search_fallback_to_playwright(search_req):
-    """Verify fallback to Playwright when JSON API raises."""
-    with patch("services.execution.handlers.browser._searxng_json_search", side_effect=Exception("API down")):
+    """Verify fallback to Playwright when HTML search returns no results."""
+    mock_resp = MagicMock()
+    mock_resp.text = '<div>No results</div>'
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("services.execution.handlers.browser.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+
         mock_page = AsyncMock()
         mock_page.evaluate.return_value = [
             {"title": "Fallback Result", "url": "https://example.com", "snippet": "Found via fallback"}
@@ -153,16 +146,25 @@ async def test_handle_web_search_fallback_to_playwright(search_req):
 
     assert result is not None
     assert result.status == "SUCCESS"
-    assert result.detail is not None
-    assert result.detail["source"] == "playwright_fallback"
-    assert len(result.detail["results"]) == 1
+    assert "Fallback Result" in result.message
 
 
 @pytest.mark.asyncio
 async def test_handle_web_search_total_failure(search_req):
-    """Verify FAILURE when both JSON API and Playwright fail."""
-    with patch("services.execution.handlers.browser._searxng_json_search", side_effect=Exception("API down")):
-        with patch("services.execution.handlers.browser._playwright_fallback", side_effect=Exception("Browser crash")):
+    """Verify FAILURE when both HTML search and Playwright fail."""
+    mock_resp = MagicMock()
+    mock_resp.text = '<div>No results</div>'
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("services.execution.handlers.browser.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+
+        mock_playwright = AsyncMock()
+        mock_playwright.chromium.launch.side_effect = Exception("Browser crash")
+
+        with patch("services.execution.handlers.browser.async_playwright", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_playwright), __aexit__=AsyncMock())):
             result = await browser.handle_web_search(search_req)
 
     assert result.status == "FAILURE"

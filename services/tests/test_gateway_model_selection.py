@@ -5,7 +5,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
@@ -19,7 +19,7 @@ os.environ.setdefault("LIBRARIAN_MODEL", "qwen3:8b")
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response as StarletteResponse
 import pytest
 
 import gateway.main as gateway_main
@@ -150,8 +150,9 @@ async def test_chat_handler_routes_direct_file_edit_requests_to_code_orchestrati
         )
     )
 
-    assert response.status_code == 200
-    assert "orchestrated" in json.loads(response.body)["message"]["content"]
+    resp = cast(StarletteResponse, response)
+    assert resp.status_code == 200
+    assert "orchestrated" in json.loads(resp.body if isinstance(resp.body, bytes) else resp.body.tobytes())["message"]["content"]
     mock_orchestrate.assert_awaited_once()
 
 
@@ -224,8 +225,9 @@ async def test_workspace_bootstrap_proxy_uses_gateway_route(monkeypatch):
         )
     )
 
-    payload = json.loads(response.body)
-    assert response.status_code == 200
+    resp = cast(StarletteResponse, response)
+    payload = json.loads(resp.body if isinstance(resp.body, bytes) else resp.body.tobytes())
+    assert resp.status_code == 200
     assert payload["workspace"]["id"] == "alice-demo"
     assert captured["method"] == "POST"
     assert captured["url"].endswith("/workspaces/bootstrap")
@@ -262,8 +264,9 @@ async def test_workspace_pytest_proxy_uses_gateway_route(monkeypatch):
         )
     )
 
-    payload = json.loads(response.body)
-    assert response.status_code == 200
+    resp = cast(StarletteResponse, response)
+    payload = json.loads(resp.body if isinstance(resp.body, bytes) else resp.body.tobytes())
+    assert resp.status_code == 200
     assert payload["exit_code"] == 0
     assert captured["method"] == "POST"
     assert captured["url"].endswith("/tests/pytest")
@@ -329,7 +332,8 @@ async def test_orchestrate_code_change_uses_review_branch_workflow_payload(monke
     assert captured["json"]["review_branch_prefix"] == "raven"
     assert captured["json"]["push"] is True
 
-    payload = json.loads(response.body)
+    resp = cast(StarletteResponse, response)
+    payload = json.loads(resp.body if isinstance(resp.body, bytes) else resp.body.tobytes())
     assert payload["message"]["content"].find("Review Branch") != -1
 
 
@@ -378,8 +382,9 @@ async def test_orchestrate_code_change_parses_fenced_json_payload(monkeypatch):
         is_openai=False,
     )
 
-    payload = json.loads(response.body)
-    assert response.status_code == 200
+    resp = cast(StarletteResponse, response)
+    payload = json.loads(resp.body if isinstance(resp.body, bytes) else resp.body.tobytes())
+    assert resp.status_code == 200
     assert "temp/test_raven_live.py" in payload["message"]["content"]
 
 
@@ -696,7 +701,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
     assert response["model"] == "qwen2.5-coder:7b"
     assert response["message"]["content"].startswith("I generated temp/README.md")
     assert "# Generated README" in response["message"]["content"]
-    assert captured["ollama_payload"]["model"] == "qwen2.5-coder:7b"
+    assert cast(dict[str, Any], captured["ollama_payload"])["model"] == "qwen2.5-coder:7b"
     request_urls = [item["url"] for item in captured["requests"]]
     assert any(url.endswith("/files/list") for url in request_urls)
     assert any(url.endswith("/files/write") for url in request_urls)

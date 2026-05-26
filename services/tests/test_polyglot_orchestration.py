@@ -4,7 +4,7 @@ import time
 import pytest
 
 GATEWAY_URL = "http://ai.local:11435"
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET") or ""
 
 @pytest.mark.server_only
 def run_coding_task(description, expected_markers, workspace_id="SharedLLM", relative_path=None):

@@ -5,7 +5,8 @@ from fastapi import BackgroundTasks
 
 # These work with PYTHONPATH=services
 from storage.indexer import chunk_text, CheckpointManager, extract_and_chunk_contents
-from storage.models import IndexScanRequest, ContentIndexItem
+from storage.models import ContentIndexItem
+from storage.main import IndexScanRequest
 
 @pytest.mark.server_only
 def test_storage_main_functions():
@@ -68,9 +69,10 @@ def test_storage_api_control_endpoints():
 
 @pytest.mark.server_only
 def test_full_index_endpoint_mocks(monkeypatch):
+    from storage.models import ProviderConfig
     from storage.main import full_content_index
     request = IndexScanRequest(
-        provider={"kind": "nextcloud", "settings": {"url": "http://x", "username": "u", "password": "p"}},
+        provider=ProviderConfig(kind="nextcloud", settings={"url": "http://x", "username": "u", "password": "p"}),
         path="/",
         recursive=True,
     )

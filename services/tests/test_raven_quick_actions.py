@@ -11,6 +11,7 @@ These tests verify that:
 
 import os
 import pytest
+from typing import cast
 from unittest.mock import patch, AsyncMock
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
@@ -30,7 +31,7 @@ from gateway.main import select_model_for_query, select_system_instruction_for_q
 from gateway.agent_loop import extract_action_json
 
 
-MISSION_TEMPLATES = [
+MISSION_TEMPLATES: list[dict[str, str | list[str]]] = [
     {
         "label": "Audit Codebase",
         "query": "Audit the codebase for lint errors, unused imports, and code quality issues. Fix all findings.",
@@ -62,8 +63,9 @@ def _patch_model_selection():
 async def test_audit_codebase_routes_to_raven():
     template = MISSION_TEMPLATES[0]
     with _patch_model_selection():
-        model = await select_model_for_query(template["query"])
-        prompt = select_system_instruction_for_query(template["query"], model)
+        query = cast(str, template["query"])
+        model = await select_model_for_query(query)
+        prompt = select_system_instruction_for_query(query, model)
         assert model == "qwen2.5-coder:7b"
         assert prompt == RAVEN_AUTONOMOUS_PROTOCOL
 
@@ -72,8 +74,9 @@ async def test_audit_codebase_routes_to_raven():
 async def test_sync_workspaces_routes_to_raven():
     template = MISSION_TEMPLATES[1]
     with _patch_model_selection():
-        model = await select_model_for_query(template["query"])
-        prompt = select_system_instruction_for_query(template["query"], model)
+        query = cast(str, template["query"])
+        model = await select_model_for_query(query)
+        prompt = select_system_instruction_for_query(query, model)
         assert model == "qwen2.5-coder:7b"
         assert prompt == RAVEN_AUTONOMOUS_PROTOCOL
 
@@ -82,8 +85,9 @@ async def test_sync_workspaces_routes_to_raven():
 async def test_convert_files_routes_to_raven():
     template = MISSION_TEMPLATES[2]
     with _patch_model_selection():
-        model = await select_model_for_query(template["query"])
-        prompt = select_system_instruction_for_query(template["query"], model)
+        query = cast(str, template["query"])
+        model = await select_model_for_query(query)
+        prompt = select_system_instruction_for_query(query, model)
         assert model == "qwen2.5-coder:7b"
         assert prompt == RAVEN_AUTONOMOUS_PROTOCOL
 
@@ -92,8 +96,9 @@ async def test_convert_files_routes_to_raven():
 async def test_check_dependencies_routes_to_raven():
     template = MISSION_TEMPLATES[3]
     with _patch_model_selection():
-        model = await select_model_for_query(template["query"])
-        prompt = select_system_instruction_for_query(template["query"], model)
+        query = cast(str, template["query"])
+        model = await select_model_for_query(query)
+        prompt = select_system_instruction_for_query(query, model)
         assert model == "qwen2.5-coder:7b"
         assert prompt == RAVEN_AUTONOMOUS_PROTOCOL
 
@@ -140,7 +145,7 @@ def test_raven_prompt_includes_shell_command():
 
 def test_all_templates_contain_autonomy_signals():
     for template in MISSION_TEMPLATES:
-        query_lower = template["query"].lower()
+        query_lower = cast(str, template["query"]).lower()
         has_signal = any(signal in query_lower for signal in AUTONOMOUS_SIGNALS)
         assert has_signal, f"Quick Action '{template['label']}' lacks autonomy signal in: {template['query']}"
 
@@ -155,7 +160,7 @@ def test_raven_prompt_includes_context_search_tool():
 def test_context_search_in_single_turn_endpoints():
     from gateway.orchestrator import SINGLE_TURN_TOOL_ENDPOINTS
     assert "contextsearchrequest" in SINGLE_TURN_TOOL_ENDPOINTS
-    svc, endpoint = SINGLE_TURN_TOOL_ENDPOINTS["contextsearchrequest"]
+    _, endpoint = SINGLE_TURN_TOOL_ENDPOINTS["contextsearchrequest"]
     assert endpoint == "/rag/search"
 
 
@@ -167,7 +172,7 @@ def test_context_search_in_agent_action_map():
 
 def test_context_search_schema_exists():
     from gateway.schemas import ContextSearchRequest
-    schema = ContextSearchRequest(query="test", collection_name="ha_entities")
+    schema = ContextSearchRequest(query="test", collection_name="ha_entities", k=5)
     assert schema.query == "test"
     assert schema.collection_name == "ha_entities"
     assert schema.k == 5  # default value
