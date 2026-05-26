@@ -55,6 +55,7 @@ class TestConfigBootstrap:
 class TestRuntimeConfigResolution:
     """Test runtime phase: all config from Identity service."""
 
+    @pytest.mark.local_only
     @pytest.mark.asyncio
     async def test_resolve_runtime_config_fetches_from_identity(self, monkeypatch, respx_mock):
         """resolve_runtime_config() calls Identity /api/settings and populates variables."""
@@ -91,6 +92,7 @@ class TestRuntimeConfigResolution:
         assert config.FAST_PATH_THRESHOLD == 0.9
         assert config.RAVEN_ERROR_THRESHOLD == 3
 
+    @pytest.mark.local_only
     @pytest.mark.asyncio
     async def test_resolve_runtime_config_handles_identity_unavailable(self, monkeypatch, respx_mock):
         """resolve_runtime_config() does not crash if Identity is down."""
@@ -113,6 +115,7 @@ class TestRuntimeConfigResolution:
         # Should retain defaults, not crash
         assert config.FERNET_KEY == ""
 
+    @pytest.mark.local_only
     @pytest.mark.asyncio
     async def test_resolve_runtime_config_skips_in_tests(self, monkeypatch):
         """resolve_runtime_config() is a no-op when PYTEST_CURRENT_TEST is set."""
