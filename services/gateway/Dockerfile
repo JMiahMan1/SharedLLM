@@ -21,5 +21,5 @@ RUN groupadd -g ${PGID} sharedllm || true \
 ENV HOME=/home/sharedllm
 ENV PYTHONPATH=/app/services
 
-EXPOSE 8002
+EXPOSE 11435
 CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "11435"]
