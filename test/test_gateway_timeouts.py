@@ -1,4 +1,3 @@
-@pytest.mark.server_only
 import pytest
 import httpx
 import respx
