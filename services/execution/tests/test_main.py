@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
+os.environ["EXECUTION_EXTERNAL_HOST"] = "localhost"
 from main import app
 
 client = TestClient(app)
@@ -59,6 +60,7 @@ def test_tv_cast_smart_power_sync(mocker):
     mocker.patch("handlers.media.ha_client.call_service", return_value={"ok": True})
     mocker.patch("asyncio.sleep", return_value=None)
     mocker.patch("handlers.video.extract_video_url", return_value="https://example.com/video.mp4")
+    mocker.patch("handlers.video.download_video_progressive", return_value=("test_media_id", "Test Video"))
     mocker.patch("handlers.roku.is_roku_device", return_value=False)
     mocker.patch("handlers.android_tv.is_android_tv", return_value=False)
     mocker.patch("handlers.samsung.is_samsung_tv", return_value=False)
