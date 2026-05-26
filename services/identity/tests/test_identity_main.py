@@ -11,11 +11,11 @@ import sys
 # Ensure parent directory is in sys.path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from main import app, require_api_key, require_internal, resolve_identity
-from models import User
-from crypto import encrypt
-from schemas import ResolveRequest
-import main
+from identity.main import app, require_api_key, require_internal, resolve_identity
+from identity.models import User
+from identity.crypto import encrypt
+from identity.schemas import ResolveRequest
+import identity.main as main
 
 # Setup in-memory database for testing
 @pytest.fixture(name="session")
