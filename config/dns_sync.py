@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """DNS Sync Sidecar - Polls Identity for DNS mappings, health-checks IPs, and serves DNS with automatic failover."""
 import os
-import sys
 import json
 import time
 import signal

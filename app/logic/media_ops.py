@@ -26,6 +26,6 @@ async def handle_media_command(
     Returns:
         Dict with 'status' and optionally 'data' or 'detail'.
     """
-    from app.domains.media.commands import handle_media_command as _handle
+    from app.domains.media.commands import handle_media_command as _handle  # pyright: ignore[reportMissingImports]
 
     return await _handle(command, user_creds=user_creds, **kwargs)
