@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, StaticPool
 from pathlib import Path
 from unittest.mock import patch
-from models import Workspace
-import main
+from workspace_runtime.models import Workspace
+import workspace_runtime.main as main
 
 @pytest.fixture(name="session")
 def session_fixture():

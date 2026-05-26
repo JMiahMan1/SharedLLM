@@ -12,10 +12,10 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import main as identity_main
-from main import app, require_api_key, require_internal, resolve_identity
-from models import User, DeviceAssignment
-from schemas import ResolveRequest, ResolvedCredentials
-from crypto import encrypt
+from identity.main import app, require_api_key, require_internal, resolve_identity
+from identity.models import User, DeviceAssignment
+from identity.schemas import ResolveRequest, ResolvedCredentials
+from identity.crypto import encrypt
 
 
 @pytest.fixture(name="session")

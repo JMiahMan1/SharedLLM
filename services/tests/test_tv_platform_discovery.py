@@ -66,4 +66,5 @@ async def main():
                     if d['sources']:
                         print(f"    Sources: {d['sources']}")
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())
