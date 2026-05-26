@@ -550,6 +550,7 @@ class WebSearchRequest(BaseRequest):
     safesearch: Optional[int] = Field(None, ge=0, le=2, description="Safe search level: 0=off, 1=moderate, 2=strict")
     language: Optional[str] = Field("en", description="Locale code for results (e.g. 'en', 'de', 'fr')")
     pageno: Optional[int] = Field(None, ge=1, description="Page number for pagination")
+    max_results: Optional[int] = Field(None, description="Maximum number of results to return")
 
 class WebReadRequest(BaseRequest):
     """Fetches a URL and returns the content as markdown."""

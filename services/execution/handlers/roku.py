@@ -228,7 +228,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                 log.warning(f"[roku.music] ECP launch returned {resp.status_code}")
     except Exception as e:
         log.warning(f"[roku.music] ECP launch failed: {e}")
-        device_registry.invalidate_device(roku_entity)
+        await device_registry.invalidate_device(roku_entity)
 
     log.info(f"[roku.music] Delegating audio to MA: {ma_entity} media_id={ma_media_id} type={ma_media_type}")
     
@@ -323,7 +323,7 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
             log.warning(f"[roku.video] ECP launch returned {resp.status_code}")
     except Exception as e:
         log.warning(f"[roku.video] ECP launch failed: {e}")
-        device_registry.invalidate_device(roku_entity)
+        await device_registry.invalidate_device(roku_entity)
 
     return ExecutionResult(status="FAILURE", message=f"Failed to play video on {roku_entity}.", service="roku_video")
 

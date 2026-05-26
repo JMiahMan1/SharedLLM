@@ -70,12 +70,15 @@ def ocs_request(
     data: dict[str, Any] | None = None,
     timeout: int = 30,
 ) -> tuple[bool, Any, str]:
+    request_params = {"format": "json"}
+    if params:
+        request_params.update(params)
     resp = requests.request(
         method,
         ocs_url(base_url, endpoint),
         headers=ocs_headers(),
         auth=(username, password),
-        params={"format": "json", **(params or {})},
+        params=request_params,
         data=data,
         timeout=timeout,
         verify=False,

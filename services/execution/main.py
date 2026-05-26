@@ -23,9 +23,9 @@ try:
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
         CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
         WebSearchRequest, WebReadRequest, ExecutionResult,
-        DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
+           DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
         WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-          SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, DocumentBroadcastRequest, NightModeRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest
+          SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest
     )
     from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
     from handlers import docker_logs as docker_logs_handler
@@ -42,7 +42,7 @@ except ImportError:
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
             CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
             WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, GitExecutionResult, DeploymentRequest, VolumeInventoryRequest,
+       DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
             SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, HAConfigRequest
         )
@@ -125,7 +125,7 @@ async def require_internal(request: Request, x_internal_secret: str = Header(Non
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
-async def _check_internal_secret(x_internal_secret: str):
+async def _check_internal_secret(x_internal_secret: str | None):
     """Simple secret check for endpoints without Request dependency."""
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
@@ -176,7 +176,7 @@ async def lifespan(app: FastAPI):
         
         @media_app.get("/media/{media_id}")
         @media_app.head("/media/{media_id}")
-        async def serve_media(media_id: str):
+        async def serve_media(media_id: str):  # pyright: ignore[reportUnusedFunction]
             # TTS audio from memory cache
             if media_id in TEMP_AUDIO_CACHE:
                 return Response(
@@ -379,7 +379,7 @@ async def execute_light(req: LightControlRequest):
 
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
-    if not await verify_entity_access(req.user_context, req.entity_id):
+    if req.entity_id and not await verify_entity_access(req.user_context, req.entity_id):
         raise HTTPException(status_code=403, detail="Access denied to this device")
     # Resolve HA credentials via Identity service if not in context
     ctx = req.user_context
@@ -604,7 +604,7 @@ async def execute_docker(req: DockerComposeRequest):
         container_name = svc if svc.startswith("sharedllm_") else f"sharedllm_{svc}"
         mock_req = DeploymentRequest(
             user_context=req.user_context,
-            action=req.action,
+            action=req.action if req.action in ("restart", "logs") else "restart",
             container_name=container_name,
             tail=100
         )
@@ -1183,14 +1183,14 @@ async def execute_announce(req: AnnouncementRequest):
             # Dispatch to TV-specific handler
             log.info(f"[announce] Dispatching: target={target_player}, state={initial_state_str}, attrs_keys={list(attrs.keys())}, _ma_player={attrs.get('_ma_player_entity')}")
             from announce_handlers import dispatch_announce
-            result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume, initial_state_str, attrs, loaded_components, message=req.message)
+            result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume or 0.5, initial_state_str, attrs, loaded_components, message=req.message)
             log.info(f"[announce] Dispatch result: {result}")
             
             if req.save_path:
                 from handlers import storage as storage_handler
                 from schemas import StorageFileWriteRequest
                 await storage_handler.handle_storage_write(StorageFileWriteRequest(
-                    user_context=ctx, path=req.save_path, content=audio_bytes
+                    user_context=ctx, path=req.save_path, content=audio_bytes.decode('utf-8', errors='replace')
                 ))
         except Exception as e:
             log.error(f"[announce] Kokoro failed: {e}")
@@ -1406,7 +1406,7 @@ async def execute_entity_search(req: EntitySearchRequest):
 @app.post("/execute/ha_service", response_model=ExecutionResult)
 async def execute_ha_service(req: HAServiceRequest):
     ctx = req.user_context
-    result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, req.domain, req.service, req.entity_id, req.service_data)
+    result = await ha_client.call_service(ctx.ha_url or "", ctx.ha_token or "", req.domain, req.service, req.entity_id, req.service_data)
     if result.get("ok"):
         return _ok(f"{req.domain}.{req.service} executed.", "ha_service")
     return _fail(f"Service call failed: {result.get('error')}", "ha_service", result)
@@ -1536,7 +1536,7 @@ async def discovery_device_remove(entity_id: str):
     return {"status": "FAILURE", "message": f"Device {entity_id} not found"}
 
 @app.get("/discovery/profile/{entity_id}")
-async def discovery_device_profile(entity_id: str, subnet: str = None):
+async def discovery_device_profile(entity_id: str, subnet: str | None = None):
     """Generate a complete device profile with network info, HA data, and control methods."""
     import device_discovery
     import device_profiler
@@ -1550,7 +1550,7 @@ async def discovery_device_profile(entity_id: str, subnet: str = None):
     return profile
 
 @app.get("/discovery/profile")
-async def discovery_profile_all(subnet: str = None):
+async def discovery_profile_all(subnet: str | None = None):
     """Profile all media_player entities."""
     import device_discovery
     import device_profiler
@@ -1576,7 +1576,7 @@ async def discovery_network_scan(req: NetworkDeviceScanRequest):
     devices = await scan_network(
         subnet=req.subnet,
         device_type=req.device_type,
-        include_mac=req.include_mac,
+        include_mac=req.include_mac if req.include_mac is not None else False,
     )
     
     if devices:
@@ -1610,7 +1610,7 @@ async def execute_ha_logbook(req: LogbookRequest):
     full_entity_id = ha_client.sanitize_entity_id("sensor", req.entity_id)
     log.info(f"[ha_logbook] user={ctx.user} entity={full_entity_id}")
     
-    entries = await ha_client.get_logbook(ctx.ha_url, ctx.ha_token, full_entity_id, days=req.days)
+    entries = await ha_client.get_logbook(ctx.ha_url or "", ctx.ha_token or "", full_entity_id, days=req.days)
     
     if entries:
         return ExecutionResult(
@@ -1689,7 +1689,7 @@ async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = 
                 )
         
         req = AudiobookshelfRequest(
-            action=action,
+            action=action if action in ("search", "play", "resume", "progress", "libraries", "list", "get_book") else "list",
             user_context=user_ctx,
             library_id=library_id or None,
             query=query or None,
@@ -1829,8 +1829,15 @@ async def execute_ha_config(req: "HAConfigRequest"):
 async def execute_media_group(req):
     """Manage media device groups."""
     from schemas_groups import MediaGroupRequest
-    parsed = MediaGroupRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
-    ctx = parsed.user_context if hasattr(parsed, 'user_context') else UserContext(user="")
+    from pydantic import BaseModel
+    if isinstance(req, BaseModel):
+        dump = req.model_dump()
+    else:
+        dump = req
+    if "user_context" not in dump:
+        dump["user_context"] = UserContext(user="")
+    parsed = MediaGroupRequest(**dump)
+    ctx = getattr(parsed, "user_context", UserContext(user=""))
     log.info(f"[groups] media_group action={parsed.action} group_id={parsed.group_id}")
     return await groups.handle_media_group(parsed, ctx)
 
@@ -1839,8 +1846,15 @@ async def execute_media_group(req):
 async def execute_light_cluster(req):
     """Manage light clusters."""
     from schemas_groups import LightClusterRequest
-    parsed = LightClusterRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
-    ctx = parsed.user_context if hasattr(parsed, 'user_context') else UserContext(user="")
+    from pydantic import BaseModel
+    if isinstance(req, BaseModel):
+        dump = req.model_dump()
+    else:
+        dump = req
+    if "user_context" not in dump:
+        dump["user_context"] = UserContext(user="")
+    parsed = LightClusterRequest(**dump)
+    ctx = getattr(parsed, "user_context", UserContext(user=""))
     log.info(f"[groups] light_cluster action={parsed.action} cluster_id={parsed.cluster_id}")
     return await groups.handle_light_cluster(parsed, ctx)
 
@@ -1893,11 +1907,10 @@ async def get_presence_rooms(x_internal_secret: str = Header(None)):
 @app.post("/execute/stt/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), model: str = "base", language: str = "en"):
     """Transcribe audio file using Whisper STT."""
-    await _check_internal_secret(None)
     import tempfile
     import os
     try:
-        import whisper
+        import whisper  # pyright: ignore[reportMissingImports]
     except ImportError:
         return JSONResponse(
             status_code=501,

@@ -25,7 +25,7 @@ async def get_history(user_id: str) -> list:
     """Retrieves conversation history as a list of dicts."""
     try:
         key = _get_history_key(user_id)
-        raw_msgs = _redis.lrange(key, 0, -1)
+        raw_msgs: list = _redis.lrange(key, 0, -1)  # type: ignore[assignment]
         if not raw_msgs: return []
         
         msgs = []
@@ -153,6 +153,7 @@ Return ONLY a bulleted list of facts, or 'NONE'.
 def ping_redis() -> bool:
     """Verifies Redis connectivity for health checks."""
     try:
-        return _redis.ping()
+        result = _redis.ping()  # type: ignore[assignment]
+        return bool(result)
     except:
         return False

@@ -21,7 +21,7 @@ async def resolve_hostname_with_fallback(hostname: str, port: int = 0, timeout: 
         results = await asyncio.get_event_loop().run_in_executor(
             None, socket.getaddrinfo, hostname, port, socket.AF_INET, socket.SOCK_STREAM
         )
-        ips = list(dict.fromkeys(r[4][0] for r in results))  # deduplicate, preserve order
+        ips = list(dict.fromkeys(str(r[4][0]) for r in results))  # deduplicate, preserve order
     except socket.gaierror:
         log.warning(f"[resolver] DNS lookup failed for {hostname}")
         return None
@@ -35,7 +35,7 @@ async def resolve_hostname_with_fallback(hostname: str, port: int = 0, timeout: 
     # Try each IP until one responds
     for ip in ips:
         try:
-            reader, writer = await asyncio.wait_for(
+            _, writer = await asyncio.wait_for(
                 asyncio.open_connection(ip, port), timeout=timeout
             )
             writer.close()

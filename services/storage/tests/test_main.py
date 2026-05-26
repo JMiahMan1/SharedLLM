@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 # Ensure parent directory is in sys.path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from main import app, health, list_provider_entries, write_provider_content
-from models import ProviderListRequest, ProviderWriteRequest, StorageEntry
+from main import app, health, list_provider_entries, write_provider_content, IndexScanRequest
+from models import ProviderConfig, ProviderWriteRequest, StorageEntry
 
 client = TestClient(app)
 
@@ -21,7 +21,7 @@ class FakeProvider:
 
     def write_content(self, path, content, create_parents=True, verify=True, is_binary=False):
         self.writes.append({
-            "path": path, "content": content, "create_parents": create_parents, 
+            "path": path, "content": content, "create_parents": create_parents,
             "verify": verify, "is_binary": is_binary
         })
         size = len(content) if isinstance(content, bytes) else len(content.encode("utf-8"))
@@ -40,17 +40,15 @@ def test_health():
 def test_provider_list_returns_generic_entries(monkeypatch):
     monkeypatch.setattr("main.build_provider", lambda config: FakeProvider(_fixture_entries()))
 
-    request = ProviderListRequest(
-        provider={
-            "kind": "nextcloud",
-            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
-        },
+    request = IndexScanRequest(
+        provider=ProviderConfig(kind="nextcloud", settings={"url": "https://cloud.local", "username": "jeremiah", "password": "secret"}),
         path="/Library",
         recursive=False,
     )
 
     data = asyncio.run(list_provider_entries(request))
     assert data["status"] == "SUCCESS"
+    assert isinstance(data["entries"], list)
     assert len(data["entries"]) == 2
 
 def test_provider_write_returns_result(monkeypatch):
@@ -58,10 +56,7 @@ def test_provider_write_returns_result(monkeypatch):
     monkeypatch.setattr("main.build_provider", lambda config: fake_provider)
 
     request = ProviderWriteRequest(
-        provider={
-            "kind": "nextcloud",
-            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
-        },
+        provider=ProviderConfig(kind="nextcloud", settings={"url": "https://cloud.local", "username": "jeremiah", "password": "secret"}),
         path="/docs/example.md",
         content="# Example\n",
         create_parents=True,
@@ -70,4 +65,6 @@ def test_provider_write_returns_result(monkeypatch):
 
     data = asyncio.run(write_provider_content(request))
     assert data["status"] == "SUCCESS"
-    assert data["result"]["path"] == "/docs/example.md"
+    result = data["result"]
+    assert isinstance(result, dict)
+    assert result["path"] == "/docs/example.md"

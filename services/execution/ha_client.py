@@ -283,7 +283,7 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
             return {}
     return {}  # Fallback
 
-async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, domain: str = "media_player", media_type: str = None) -> str | None:
+async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, domain: str = "media_player", media_type: str | None = None) -> str | None:
     """
     Resolve a human-readable device name to an HA entity_id.
     Searches all states for entities matching the device_name in their friendly_name or entity_id.

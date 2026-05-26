@@ -73,7 +73,7 @@ class NextCloudClient:
                 props = {}
                 for propstat in propstats:
                     status = propstat.find("d:status", ns).text
-                    if "200" in status:
+                    if status is not None and "200" in status:
                         prop_node = propstat.find("d:prop", ns)
                         if prop_node is not None:
                             # Extract properties

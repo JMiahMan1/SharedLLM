@@ -23,7 +23,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import aiosqlite
 
@@ -63,7 +63,7 @@ async def _get_conn() -> aiosqlite.Connection:
     return _db
 
 
-def _row_to_dict(row: tuple, keys: list) -> Optional[dict]:
+def _row_to_dict(row: Any | None, keys: list) -> Optional[dict]:
     if row is None:
         return None
     d = dict(zip(keys, row))
@@ -103,7 +103,7 @@ async def set_device(
     device_class: Optional[str] = None,
     metadata: Optional[dict] = None,
     discovery_method: Optional[str] = None,
-) -> dict:
+) -> Optional[dict]:
     """Store or update device info. Returns the updated device record."""
     db = await _get_conn()
     existing = await get_device(entity_id)
@@ -246,4 +246,4 @@ async def search_devices(query: str) -> list[dict]:
         ORDER BY last_updated DESC
     """, (pattern, pattern, pattern, pattern)) as cursor:
         rows = await cursor.fetchall()
-    return [_row_to_dict(r, COLUMNS) for r in rows]
+    return [r for r in (_row_to_dict(r, COLUMNS) for r in rows) if r is not None]

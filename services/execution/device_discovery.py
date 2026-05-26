@@ -19,7 +19,7 @@ import ipaddress
 import logging
 import os
 import socket
-from typing import Optional
+from typing import Optional, cast
 
 import device_registry
 import ha_client
@@ -482,7 +482,7 @@ async def _discover_via_arp_scan(
             net = ipaddress.IPv4Network(local_subnet, strict=False)
             subnets = [local_subnet]
             # Add adjacent subnet (e.g., if on 192.168.2.0/24, also scan 192.168.1.0/24)
-            adjacent = list(net.network_address)
+            adjacent = list(net.network_address.packed)
             adjacent[2] = (adjacent[2] + 1) % 256
             subnets.append(f"{adjacent[0]}.{adjacent[1]}.{adjacent[2]}.0/24")
         except Exception:
@@ -955,4 +955,4 @@ async def bulk_scan(
             return None
 
     results = await asyncio.gather(*[_scan_one(s) for s in media_states], return_exceptions=True)
-    return [r for r in results if r and not isinstance(r, Exception)]
+    return cast(list[dict], [r for r in results if r and not isinstance(r, Exception)])

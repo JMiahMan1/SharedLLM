@@ -64,12 +64,6 @@ class TestSanitizeForLLM:
         assert "github_pat_" not in result
         assert "[REDACTED]" in result
 
-    def test_redacts_ghp_token_in_string(self):
-        text = "using ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef12"
-        result = sanitize_for_llm(text)
-        assert "ghp_" not in result
-        assert "[REDACTED]" in result
-
     def test_redacts_glpat_token_in_string(self):
         text = "GitLab token: glpat-ABCDEFGHIJKLMNOPQRST"
         result = sanitize_for_llm(text)

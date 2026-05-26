@@ -33,7 +33,7 @@ def get_last_used_device(user_id: str) -> Optional[dict]:
     """Return cached last-used device info or None."""
     try:
         r = get_redis()
-        raw = r.get(_user_key(user_id))
+        raw: str | None = r.get(_user_key(user_id))  # type: ignore[assignment]
         if raw:
             return json.loads(raw)
     except Exception as e:

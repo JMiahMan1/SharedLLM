@@ -234,7 +234,7 @@ async def profile_device(
     entity_id: str,
     ha_url: str,
     ha_token: str,
-    subnet: str = None,
+    subnet: str | None = None,
 ) -> dict:
     """
     Generate a complete device profile.
@@ -291,17 +291,20 @@ async def profile_device(
 
     # 3. Scan open ports if IP found
     if network["ip"]:
-        all_ports = set()
+        all_ports: set[int] = set()
         for methods in CONTROL_METHODS.values():
-            all_ports.update(methods.get("ports", []))
-        network["open_ports"] = _check_ports(network["ip"], sorted(all_ports))
+            ports = methods.get("ports")
+            if isinstance(ports, (list, tuple)):
+                all_ports.update(int(p) for p in ports)
+        ip = str(network["ip"])
+        network["open_ports"] = _check_ports(ip, sorted(all_ports))
 
     # 4. Detect device type
     device_type = _detect_device_type(
         entity_id,
         ha_info.get("integration", ""),
         ha_info.get("device_class", ""),
-        network["open_ports"],
+        network.get("open_ports") or [],
         net_info.get("metadata", {}) if net_info else {},
     )
 
@@ -338,7 +341,8 @@ async def profile_device(
         recommendations.append("Use media_player.play_media for all media types")
     if device_type == "esphome":
         recommendations.append("Use HTTP API on port 80 for control")
-        if 8080 in network.get("open_ports", []):
+        open_ports = network.get("open_ports")
+        if open_ports and 8080 in open_ports:
             recommendations.append("ESP32-CAM stream available on port 8080")
     if device_type == "mqtt":
         recommendations.append("Use MQTT publish/subscribe for control")
@@ -357,7 +361,7 @@ async def profile_device(
 
 
 async def profile_all_media_devices(
-    ha_url: str, ha_token: str, subnet: str = None
+    ha_url: str, ha_token: str, subnet: str | None = None
 ) -> list[dict]:
     """Profile all media_player entities concurrently."""
     if not subnet:
@@ -380,11 +384,11 @@ async def profile_all_media_devices(
             return {"entity_id": entity_id, "error": str(e)}
 
     results = await asyncio.gather(*[_profile_one(e) for e in media_entities], return_exceptions=True)
-    return [r for r in results if not isinstance(r, Exception)]
+    return [r for r in results if not isinstance(r, BaseException)]
 
 
 async def build_capability_map(
-    ha_url: str, ha_token: str, subnet: str = None
+    ha_url: str, ha_token: str, subnet: str | None = None
 ) -> dict:
     """
     Build a friendly-name -> capability lookup for all media devices.

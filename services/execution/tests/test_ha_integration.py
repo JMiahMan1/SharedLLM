@@ -28,29 +28,29 @@ client = TestClient(app)
 
 async def resolve_default_user():
     """Resolve default user credentials for real HA testing."""
-    return await main.resolve_internal_user("default")
+    return await main.resolve_internal_user(rag_user="default")
 
 
-def wait_for_state(entity_id: str, expected_state: str, ha_url: str, ha_token: str, timeout: int = 30, poll_interval: int = 2) -> dict:
+async def wait_for_state(entity_id: str, expected_state: str, ha_url: str, ha_token: str, timeout: int = 30, poll_interval: int = 2) -> dict | None:
     """Poll HA until entity reaches expected state or timeout."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        state = ha_client_module.get_state(ha_url, ha_token, entity_id)
+        state = await ha_client_module.get_state(ha_url, ha_token, entity_id)
         if state and state.get("state") == expected_state:
             return state
-        time.sleep(poll_interval)
+        await asyncio.sleep(poll_interval)
     # Return last known state for debugging
-    return ha_client_module.get_state(ha_url, ha_token, entity_id)
+    return await ha_client_module.get_state(ha_url, ha_token, entity_id)
 
 
-def get_entity_state(entity_id: str, ha_url: str, ha_token: str) -> dict:
+async def get_entity_state(entity_id: str, ha_url: str, ha_token: str) -> dict | None:
     """Get current state of an entity."""
-    return ha_client_module.get_state(ha_url, ha_token, entity_id)
+    return await ha_client_module.get_state(ha_url, ha_token, entity_id)
 
 
-def call_ha_service(domain: str, service: str, entity_id: str, data: dict, ha_url: str, ha_token: str) -> dict:
+async def call_ha_service(domain: str, service: str, entity_id: str, data: dict, ha_url: str, ha_token: str) -> dict:
     """Call a HA service and return the response."""
-    return ha_client_module.call_service(ha_url, ha_token, domain, service, entity_id, data)
+    return await ha_client_module.call_service(ha_url, ha_token, domain, service, entity_id, data)
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -78,12 +78,12 @@ def ha_connection(ha_credentials):
 class TestLightControl:
     """Test light control with state verification."""
 
-    def test_light_turn_on_and_off(self, ha_connection):
+    async def test_light_turn_on_and_off(self, ha_connection):
         """Test turning a light on and verifying state change."""
         ha_url, ha_token = ha_connection
 
         # Find a light entity that is currently off
-        states = ha_client_module.get_states(ha_url, ha_token) or []
+        states = await ha_client_module.get_states(ha_url, ha_token) or []
         test_light = None
         for s in states:
             if s["entity_id"].startswith("light.") and s.get("state") == "off":
@@ -107,7 +107,7 @@ class TestLightControl:
         assert result["status"] == "SUCCESS", f"Light turn_on failed: {result.get('message')}"
 
         # Verify state actually changed to 'on'
-        state = wait_for_state(test_light, "on", ha_url, ha_token, timeout=15)
+        state = await wait_for_state(test_light, "on", ha_url, ha_token, timeout=15)
         assert state is not None, f"Entity {test_light} not found after turn_on"
         assert state.get("state") == "on", f"Light state is '{state.get('state')}', expected 'on'"
 
@@ -125,16 +125,16 @@ class TestLightControl:
         assert result["status"] == "SUCCESS", f"Light turn_off failed: {result.get('message')}"
 
         # Verify state changed back to 'off'
-        state = wait_for_state(test_light, "off", ha_url, ha_token, timeout=15)
+        state = await wait_for_state(test_light, "off", ha_url, ha_token, timeout=15)
         assert state is not None, f"Entity {test_light} not found after turn_off"
         assert state.get("state") == "off", f"Light state is '{state.get('state')}', expected 'off'"
 
-    def test_light_brightness(self, ha_connection):
+    async def test_light_brightness(self, ha_connection):
         """Test setting light brightness and verifying it."""
         ha_url, ha_token = ha_connection
 
         # Find a dimmable light
-        states = ha_client_module.get_states(ha_url, ha_token) or []
+        states = await ha_client_module.get_states(ha_url, ha_token) or []
         test_light = None
         for s in states:
             if s["entity_id"].startswith("light.") and s.get("state") == "off":
@@ -159,7 +159,7 @@ class TestLightControl:
         assert result["status"] == "SUCCESS"
 
         # Verify brightness
-        state = wait_for_state(test_light, "on", ha_url, ha_token, timeout=15)
+        state = await wait_for_state(test_light, "on", ha_url, ha_token, timeout=15)
         assert state is not None
         attrs = state.get("attributes", {})
         brightness = attrs.get("brightness")
@@ -169,7 +169,7 @@ class TestLightControl:
             assert abs(brightness - expected) <= 25, f"Brightness {brightness} not close to expected {expected}"
 
         # Cleanup: turn off
-        call_ha_service("light", "turn_off", test_light, {}, ha_url, ha_token)
+        await call_ha_service("light", "turn_off", test_light, {}, ha_url, ha_token)
 
 
 # ─── Media Player Tests ──────────────────────────────────────────────────────
@@ -177,11 +177,11 @@ class TestLightControl:
 class TestMediaPlayer:
     """Test media player functionality with state verification."""
 
-    def test_media_player_state_query(self, ha_connection):
+    async def test_media_player_state_query(self, ha_connection):
         """Test querying media player state returns valid data."""
         ha_url, ha_token = ha_connection
 
-        states = ha_client_module.get_states(ha_url, ha_token) or []
+        states = await ha_client_module.get_states(ha_url, ha_token) or []
         media_players = [s for s in states if s["entity_id"].startswith("media_player.")]
         assert len(media_players) > 0, "No media_player entities found"
 
@@ -195,12 +195,12 @@ class TestMediaPlayer:
             # All media players should have friendly_name
             assert "friendly_name" in attrs, f"Missing friendly_name for {mp['entity_id']}"
 
-    def test_media_player_volume_control(self, ha_connection):
+    async def test_media_player_volume_control(self, ha_connection):
         """Test volume control on an available media player."""
         ha_url, ha_token = ha_connection
 
         # Find an idle or playing media player
-        states = ha_client_module.get_states(ha_url, ha_token) or []
+        states = await ha_client_module.get_states(ha_url, ha_token) or []
         test_mp = None
         for s in states:
             if s["entity_id"].startswith("media_player.") and s.get("state") in ["idle", "playing", "on"]:
@@ -213,8 +213,9 @@ class TestMediaPlayer:
             pytest.skip("No media player with volume control found")
 
         # Get current volume
-        state = get_entity_state(test_mp, ha_url, ha_token)
-        state.get("attributes", {}).get("volume_level")
+        state = await get_entity_state(test_mp, ha_url, ha_token)
+        if state:
+            state.get("attributes", {}).get("volume_level")
 
         # Set volume to 0.5
         resp = client.post("/execute/media/transport",
@@ -252,12 +253,12 @@ class TestMediaPlayer:
 class TestEntitySearch:
     """Test entity search functionality."""
 
-    def test_search_media_player_by_name(self, ha_connection):
+    async def test_search_media_player_by_name(self, ha_connection):
         """Test searching for media players by friendly name."""
         ha_url, ha_token = ha_connection
 
         # Get all states to find a searchable entity
-        states = ha_client_module.get_states(ha_url, ha_token) or []
+        states = await ha_client_module.get_states(ha_url, ha_token) or []
         media_players = [s for s in states if s["entity_id"].startswith("media_player.")]
         assert len(media_players) > 0
 
@@ -303,12 +304,12 @@ class TestEntitySearch:
 class TestHAServiceCall:
     """Test direct HA service calls."""
 
-    def test_ha_service_turn_on_light(self, ha_connection):
+    async def test_ha_service_turn_on_light(self, ha_connection):
         """Test direct HA service call to turn on a light."""
         ha_url, ha_token = ha_connection
 
         # Find an off light
-        states = ha_client_module.get_states(ha_url, ha_token) or []
+        states = await ha_client_module.get_states(ha_url, ha_token) or []
         test_light = None
         for s in states:
             if s["entity_id"].startswith("light.") and s.get("state") == "off":
@@ -332,12 +333,12 @@ class TestHAServiceCall:
         assert result["status"] == "SUCCESS"
 
         # Verify state
-        state = wait_for_state(test_light, "on", ha_url, ha_token, timeout=15)
+        state = await wait_for_state(test_light, "on", ha_url, ha_token, timeout=15)
         assert state is not None
         assert state.get("state") == "on"
 
         # Cleanup
-        call_ha_service("light", "turn_off", test_light, {}, ha_url, ha_token)
+        await call_ha_service("light", "turn_off", test_light, {}, ha_url, ha_token)
 
 
 # ─── Discovery Tests ─────────────────────────────────────────────────────────
@@ -347,8 +348,6 @@ class TestDiscovery:
 
     def test_discovery_entities(self, ha_connection):
         """Test discovery entities endpoint returns data."""
-        ha_url, ha_token = ha_connection
-
         resp = client.get("/discovery/entities")
         assert resp.status_code == 200
         result = resp.json()

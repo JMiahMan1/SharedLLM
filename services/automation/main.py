@@ -14,7 +14,6 @@ from config import REDIS_URL, EXECUTION_SVC_URL, INTERNAL_SECRET
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 log = logging.getLogger("automation")
 
-REDIS_URL = REDIS_URL
 EXECUTION_SVC = EXECUTION_SVC_URL
 
 SCHEDULER_INTERVAL = 5  # seconds

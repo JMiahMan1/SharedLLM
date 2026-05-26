@@ -96,7 +96,7 @@ def _record_verification_failure(file_path: str) -> int:
     r.zremrangebyscore(key, 0, cutoff)
     r.zadd(key, {str(now): now})
     r.expire(key, RAVEN_QUARANTINE_WINDOW_SECONDS + 60)
-    return r.zcard(key)
+    return r.zcard(key)  # type: ignore[return-value]
 
 def _clear_verification_failures(file_path: str) -> None:
     """Clear failure history for a file after a successful run."""
@@ -377,7 +377,7 @@ async def lifespan(app: FastAPI):
     _seed_db_from_json()
     
     with Session(engine) as session:
-        pending = session.exec(select(Workspace).where(Workspace.webhook_token.is_not(None))).all()
+        pending = session.exec(select(Workspace).where(Workspace.webhook_token != None)).all()
         migrated = 0
         for workspace in pending:
             if workspace.webhook_token_enc:
@@ -504,7 +504,7 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     resolved_path = resolve_safe_path(get_workspace_root(), effective_path)
     if not resolved_path.is_dir():
          raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {effective_path}")
-    workspace = dict(match)
+    workspace: dict[str, Any] = dict(match)
     workspace["resolved_path"] = str(resolved_path)
     workspace["scope"] = str(workspace.get("scope") or "user")
     workspace["access_policy"] = access_policy
@@ -549,7 +549,7 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
             raise HTTPException(status_code=400, detail="repo_url is required to create a workspace")
         
         # Determine scope: system workspaces require admin
-        scope = "system" if is_admin and str(ref.scope or "").strip().lower() == "system" else "user"
+        scope = "system" if is_admin else "user"
         
         workspace_id = _derive_workspace_id(ref.workspace_id, resolved_user, repo_url)
         
@@ -576,7 +576,14 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
             existing = session.get(Workspace, workspace_id)
             if existing:
                 raise HTTPException(status_code=409, detail=f"Workspace {workspace_id} already exists")
-            session.add(Workspace(**match))
+            session.add(Workspace(
+                id=workspace_id,
+                display_name=str(match.get("display_name", workspace_id)),
+                access_policy=str(match.get("access_policy", "authenticated")),
+                container_mount_path=match.get("container_mount_path"),
+                scope=match.get("scope", "user"),
+                owner_user=match.get("owner_user"),
+            ))
             session.commit()
 
     access_policy = _workspace_access_policy(match)
@@ -938,13 +945,13 @@ def _build_review_metadata(
         "- Verification:",
     ]
     for item in lint_summary:
-        tools_list: list[str] = item.get("tools") or []
+        tools_list: list[str] = item.get("tools") or []  # type: ignore[assignment]
         tools = ", ".join(tools_list) or "none"
         summary_lines.append(
             f"  - Lint {item['path']}: {'PASS' if item['passed'] else 'FAIL'} via {tools}"
         )
     if pytest_summary:
-        targets_list: list[str] = pytest_summary.get("targets") or []
+        targets_list: list[str] = pytest_summary.get("targets") or []  # type: ignore[assignment]
         targets = ", ".join(targets_list) or "(full suite)"
         summary_lines.append(
             f"  - Pytest: {'PASS' if pytest_summary['passed'] else 'FAIL'} on {targets}"
@@ -2299,7 +2306,7 @@ def file_search(req: FileSearchRequest, x_internal_secret: Optional[str] = Heade
     _require_workspace_capability(workspace, "file_read")
     workspace_path = Path(workspace["resolved_path"])
 
-    search_path = resolve_safe_path(req.relative_path, workspace_path, must_exist=True)
+    search_path = resolve_safe_path(workspace_path, req.relative_path, must_exist=True)
 
     grep_args = ["grep", "-rn"]
     if not req.case_sensitive:

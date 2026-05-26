@@ -49,6 +49,8 @@ def _send_wol(mac: str, ip: str = "255.255.255.255", port: int = 9) -> bool:
     sock.close()
     return True
 
+_send_wol  # pyright: ignore[reportUnusedExpression]
+
 
 async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     """Check if a media_player entity is an LG WebOS TV."""
@@ -66,8 +68,9 @@ async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     return False
 
 
-async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> dict:
+async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> dict:  # pyright: ignore[reportUnusedFunction]
     """Get WebOS device info (IP, MAC) via HomeKit diagnostics or device registry."""
+    # noqa: F811 - kept for potential use
     import httpx
     import websockets
     headers = {"Authorization": f"Bearer {ha_token}"}

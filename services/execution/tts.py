@@ -6,8 +6,12 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import DEFAULT_TTS_VOICE, MODELS_DIR
-from typing import Optional, Protocol, List
+from typing import Optional, Protocol, List, TYPE_CHECKING
 import numpy as np
+
+if TYPE_CHECKING:
+    import kokoro_onnx  # pyright: ignore[reportMissingImports,reportUnusedImport]
+    import soundfile as sf  # pyright: ignore[reportMissingImports,reportUnusedImport]
 
 log = logging.getLogger("execution.tts")
 
@@ -31,7 +35,7 @@ class KokoroTTSEngine:
 
     def _ensure_loaded(self):
         if self._kokoro is None:
-            from kokoro_onnx import Kokoro
+            from kokoro_onnx import Kokoro  # pyright: ignore[reportMissingImports]
             if not os.path.exists(self.model_path):
                 log.error(f"Kokoro model not found at {self.model_path}")
                 raise FileNotFoundError(f"Kokoro model missing: {self.model_path}")
@@ -68,7 +72,7 @@ class KokoroTTSEngine:
         all_samples = []
         last_sample_rate = 24000
 
-        for i, (content, is_dialogue) in enumerate(segments):
+        for _i, (content, is_dialogue) in enumerate(segments):
             voice = primary_voice
             if is_dialogue:
                 # Infer gender from preceding context (last 150 chars)
@@ -161,7 +165,7 @@ class KokoroTTSEngine:
 
     def _samples_to_bytes(self, samples: np.ndarray, sample_rate: int) -> bytes:
         import io
-        import soundfile as sf
+        import soundfile as sf  # pyright: ignore[reportMissingImports]
         buffer = io.BytesIO()
         sf.write(buffer, samples, sample_rate, format='WAV')
         return buffer.getvalue()

@@ -30,6 +30,7 @@ def session_fixture():
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
     main.engine = session.bind
+    assert main.engine is not None
     SQLModel.metadata.create_all(main.engine)
     
     from seed import seed_from_env
@@ -37,6 +38,7 @@ def client_fixture(session: Session):
     
     # Mock admin user
     admin_user = session.exec(select(User).where(User.username == "default")).first()
+    assert admin_user is not None
     admin_user.is_admin = True
     session.add(admin_user)
     session.commit()

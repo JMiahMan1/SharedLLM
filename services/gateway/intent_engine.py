@@ -40,7 +40,7 @@ class IntentEngine:
     def load(self):
         # ... (keep existing load logic)
         try:
-            from fastembed import TextEmbedding
+            from fastembed import TextEmbedding  # pyright: ignore[reportMissingImports]
             model_name = EMBEDDING_MODEL
             log.info(f"Loading Semantic Router model: {model_name}")
             

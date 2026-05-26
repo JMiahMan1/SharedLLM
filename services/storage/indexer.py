@@ -17,23 +17,20 @@ except ImportError:
     from models import ContentIndexItem, StorageEntry
 
 log = logging.getLogger("storage.indexer")
-INDEXER_PAUSED = False
-PAUSE_EXPIRY = 0
+_indexer_state: dict = {"paused": False, "expiry": 0.0}
 
 def set_indexer_pause(paused: bool):
-    global INDEXER_PAUSED, PAUSE_EXPIRY
-    INDEXER_PAUSED = paused
+    _indexer_state["paused"] = paused
     if paused:
         import time
-        PAUSE_EXPIRY = time.time() + 60.0
+        _indexer_state["expiry"] = time.time() + 60.0
 
 def is_indexer_paused():
-    global INDEXER_PAUSED
-    if INDEXER_PAUSED:
+    if _indexer_state["paused"]:
         import time
-        if time.time() > PAUSE_EXPIRY:
-            INDEXER_PAUSED = False
-    return INDEXER_PAUSED
+        if time.time() > _indexer_state["expiry"]:
+            _indexer_state["paused"] = False
+    return _indexer_state["paused"]
 
 GLOBAL_SKIP_LIST = [
     "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
@@ -143,7 +140,7 @@ async def extract_and_chunk_contents(
     chunks = []
     for item in items:
         # Checkpoint skip
-        if checkpoint and checkpoint.is_indexed(item.path, item.mtime):
+        if checkpoint and item.mtime and checkpoint.is_indexed(item.path, item.mtime):
             continue
 
         # Resource Prioritization: Pause
@@ -185,7 +182,7 @@ async def extract_and_chunk_contents(
                         }
                     })
             
-        if checkpoint:
+        if checkpoint and item.mtime:
             checkpoint.mark_indexed(item.path, item.mtime)
             checkpoint.save()
             
@@ -255,13 +252,13 @@ def _classify_file(entry: StorageEntry) -> ContentIndexItem:
         usage = "Useful for generic text extraction if content is parseable."
         restrictions = ["binary_only"] if item_type == "binary" else []
     else:
-        item_type = rule["item_type"]
-        subtype = rule["subtype"]
-        role = rule["role"]
-        capabilities = rule["capabilities"]
-        tools = rule["tools"]
-        usage = rule["usage"]
-        restrictions = rule.get("restrictions", [])
+        item_type = str(rule["item_type"])
+        subtype = str(rule["subtype"])
+        role = str(rule["role"])
+        capabilities = list(rule["capabilities"])
+        tools = list(rule["tools"])
+        usage = str(rule["usage"])
+        restrictions = list(rule.get("restrictions", []))
 
     item = ContentIndexItem(
         path=entry.path,

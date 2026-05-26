@@ -1,7 +1,7 @@
 import httpx
 import os
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET") or ""
 BASE_URL = "http://localhost:8007"
 
 def test_health():

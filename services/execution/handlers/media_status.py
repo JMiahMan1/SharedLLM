@@ -14,6 +14,7 @@ log = logging.getLogger("execution.media_status")
 
 async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
     ctx = req.user_context
+    assert ctx.ha_url is not None and ctx.ha_token is not None
 
     all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
     if not all_states:
@@ -58,6 +59,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
 
     # Filter by area if requested
     if req.area:
+        assert ctx.ha_url is not None and ctx.ha_token is not None
         area_map = await ha_client.get_areas(ctx.ha_url, ctx.ha_token)
         area_lower = req.area.lower()
         active_players = [

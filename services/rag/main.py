@@ -16,9 +16,9 @@ from typing import Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
 from fastapi.responses import JSONResponse
-import chromadb
-from chromadb.config import Settings
-from chromadb.utils import embedding_functions
+import chromadb  # pyright: ignore[reportMissingTypeStubs]
+from chromadb.config import Settings  # pyright: ignore[reportMissingTypeStubs]
+from chromadb.utils import embedding_functions  # pyright: ignore[reportMissingTypeStubs]
 import traceback
 
 try:
@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     log.info(f"Initializing RAG Service. Chroma DB dir: {CHROMA_DIR}")
     
     os.makedirs(CHROMA_DIR, exist_ok=True)
-    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(anonymized_telemetry=False))
+    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(anonymized_telemetry=False))  # pyright: ignore[reportAttributeAccessIssue]
     embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL)
     
     log.info("RAG Service Ready.")
@@ -138,7 +138,7 @@ async def search(req: SearchRequest):
         top_k = sorted_results[:req.k]
         
         response_items = []
-        for (doc, meta_tuple), score in top_k:
+        for (doc, meta_tuple), _score in top_k:
             response_items.append(SearchResultItem(content=doc, metadata=dict(meta_tuple)))
                 
         return SearchResponse(results=response_items)
@@ -154,6 +154,8 @@ def purge_rag_collection(
     x_internal_secret: Optional[str] = Header(default=None)
 ):
     """Purge entries via query parameters (legacy interface)."""
+    if x_internal_secret is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     require_internal(x_internal_secret)
     try:
         user_id = user_id.lower()

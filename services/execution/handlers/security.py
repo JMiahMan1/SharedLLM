@@ -28,6 +28,7 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
     log.info(f"[security] user={ctx.user} entity={full_entity_id} action={req.action} (original={req.entity_id})")
 
     if req.action == "status":
+        assert ctx.ha_url is not None and ctx.ha_token is not None
         state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
         if state:
             return ExecutionResult(
@@ -54,6 +55,7 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
             service="security"
         )
 
+    assert ctx.ha_url is not None and ctx.ha_token is not None
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,
         domain, service,

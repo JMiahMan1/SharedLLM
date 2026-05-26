@@ -1,7 +1,9 @@
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 import os
 import sys
+from typing import cast
 from unittest.mock import MagicMock, AsyncMock
 
 # Ensure parent directory is in sys.path for imports
@@ -27,7 +29,7 @@ def client_fixture(monkeypatch):
     from main import app
     import main
     # Disable background tasks for testing
-    main.background_tasks = None
+    main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
     
     return TestClient(app)
 
@@ -71,7 +73,7 @@ async def test_bulk_settings_proxy_forwards_post(monkeypatch):
         async def json(self):
             return {"ollama_assistant_model": "qwen3.5:14b"}
 
-    resp = await main.proxy_update_settings_bulk(FakeRequest())
+    resp = await main.proxy_update_settings_bulk(cast(Request, FakeRequest()))
 
     assert resp.status_code == 200
     assert captured["url"].endswith("/api/settings")

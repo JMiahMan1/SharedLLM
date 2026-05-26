@@ -183,7 +183,8 @@ async def _fast_port_scan(
             tasks.append(_check(ip, port))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    return [r for r in results if r is not None and not isinstance(r, Exception)]
+    filtered: list[tuple[str, int]] = [r for r in results if r is not None and not isinstance(r, Exception)]  # type: ignore[arg-type]
+    return filtered
 
 
 async def _enrich_devices(
@@ -372,9 +373,9 @@ async def _probe_sony_bravia(client: httpx.AsyncClient, ip: str, timeout: float)
 async def _probe_chromecast(ip: str, timeout: float) -> Optional[dict]:
     """Probe Chromecast device."""
     try:
-        import pychromecast
+        from pychromecast import get_chromecasts  # pyright: ignore[reportMissingImports]
         casts = await asyncio.wait_for(
-            asyncio.to_thread(pychromecast.get_chromecasts, timeout=timeout),
+            asyncio.to_thread(get_chromecasts, timeout=timeout),
             timeout=timeout + 2,
         )
         for cast in casts:
@@ -415,7 +416,7 @@ async def _probe_dlna(client: httpx.AsyncClient, ip: str, timeout: float) -> Opt
 async def _probe_esphome(ip: str, timeout: float) -> Optional[dict]:
     """Probe ESPHome device via native API."""
     try:
-        import aioesphomeapi
+        import aioesphomeapi  # pyright: ignore[reportMissingImports]
         client = aioesphomeapi.APIClient(ip, 6053, "")
         await asyncio.wait_for(client.connect(login=True), timeout=timeout)
         try:

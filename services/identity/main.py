@@ -21,7 +21,7 @@ try:
         ResolveRequest, ResolvedCredentials, 
         UserCreate, UserRead, UserUpdate,
         DeviceAssignmentRead, DeviceAssignmentCreate,
-        LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportUserResult, ImportResponse,
+        LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportResponse,
         GlobalSettingRead, GlobalSettingUpdate
     )
     from .crypto import encrypt, decrypt, digest_secret
@@ -127,7 +127,7 @@ async def _ensure_default_settings(session: Session) -> None:
     for setting in DEFAULT_GLOBAL_SETTINGS:
         if setting["key"] in existing_keys:
             continue
-        session.add(GlobalSetting(**setting))
+        session.add(GlobalSetting(key=setting["key"], value=setting["value"], description=setting.get("description")))
         inserted = True
     if inserted:
         session.commit()
@@ -527,10 +527,10 @@ def list_devices(session: Session = Depends(get_session), _: User = Depends(requ
     results = session.exec(select(DeviceAssignment)).all()
     return [
         DeviceAssignmentRead(
-            id=d.id, 
+            id=d.id or 0, 
             device_id=d.device_id, 
-            user_id=d.user_id, 
-            username=d.user.username
+            user_id=d.user_id or 0, 
+            username=d.user.username if d.user else ""
         ) for d in results
     ]
 
@@ -540,14 +540,14 @@ def add_device(body: DeviceAssignmentCreate, session: Session = Depends(get_sess
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    assignment = DeviceAssignment(device_id=body.device_id, user_id=user.id)
+    assignment = DeviceAssignment(device_id=body.device_id, user_id=user.id or 0)
     session.add(assignment)
     session.commit()
     session.refresh(assignment)
     return DeviceAssignmentRead(
-        id=assignment.id, 
+        id=assignment.id or 0, 
         device_id=assignment.device_id, 
-        user_id=assignment.user_id, 
+        user_id=assignment.user_id or 0, 
         username=user.username
     )
 
@@ -566,10 +566,10 @@ def list_devices_ui(session: Session = Depends(get_session), _: User = Depends(r
     results = session.exec(select(DeviceAssignment)).all()
     return [
         DeviceAssignmentRead(
-            id=d.id, 
+            id=d.id or 0, 
             device_id=d.device_id, 
-            user_id=d.user_id, 
-            username=d.user.username
+            user_id=d.user_id or 0, 
+            username=d.user.username if d.user else ""
         ) for d in results
     ]
 
@@ -597,20 +597,20 @@ def add_device_ui(
     # Upsert logic: if device already assigned, reassign it
     existing = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == body.device_id)).first()
     if existing:
-        existing.user_id = target_user.id
+        existing.user_id = target_user.id or 0
         session.add(existing)
         session.commit()
         session.refresh(existing)
-        return DeviceAssignmentRead(id=existing.id, device_id=existing.device_id, user_id=existing.user_id, username=target_user.username)
+        return DeviceAssignmentRead(id=existing.id or 0, device_id=existing.device_id, user_id=existing.user_id or 0, username=target_user.username)
 
-    assignment = DeviceAssignment(device_id=body.device_id, user_id=target_user.id)
+    assignment = DeviceAssignment(device_id=body.device_id, user_id=target_user.id or 0)
     session.add(assignment)
     session.commit()
     session.refresh(assignment)
     return DeviceAssignmentRead(
-        id=assignment.id, 
+        id=assignment.id or 0, 
         device_id=assignment.device_id, 
-        user_id=assignment.user_id, 
+        user_id=assignment.user_id or 0, 
         username=target_user.username
     )
 
@@ -762,7 +762,7 @@ def generate_key(body: dict, session: Session = Depends(get_session), user: User
     """Generate a new API key for the current user."""
     import secrets
     new_key_value = "sk-" + secrets.token_hex(24)
-    new_key = APIKey(label=body.get("label", "New Key"), user_id=user.id)
+    new_key = APIKey(label=body.get("label", "New Key"), user_id=user.id or 0)
     _store_generated_api_key(new_key, new_key_value)
     session.add(new_key)
     session.commit()
@@ -828,6 +828,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     # 2. Scan Nextcloud (Provisioning API)
     if nc_url and nc_user and nc_pass_enc:
         nc_pass = decrypt(nc_pass_enc)
+        assert nc_pass is not None
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
@@ -1014,7 +1015,7 @@ def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
 
 @app.get("/api/raven/missions", response_model=List[RavenMissionRead])
 def get_missions(session: Session = Depends(get_session)):
-    missions = session.exec(select(RavenMission).order_by(RavenMission.created_at.desc())).all()
+    missions = session.exec(select(RavenMission).order_by(text("created_at DESC"))).all()
     return missions
 
 @app.get("/api/raven/missions/{mission_id_or_slug}", response_model=RavenMissionRead)
@@ -1108,8 +1109,16 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
             nc_admin_pass = decrypt(admin.nextcloud_pass_enc) if admin.nextcloud_pass_enc else None
 
         # Resolve Home Assistant credentials
-        ha_url = admin.ha_url or (default_user.ha_url if default_user else None)
-        ha_token_enc = admin.ha_token_enc or (default_user.ha_token_enc if default_user else None)
+        ha_url = None
+        if admin:
+            ha_url = admin.ha_url
+        if not ha_url and default_user:
+            ha_url = default_user.ha_url
+        ha_token_enc = None
+        if admin:
+            ha_token_enc = admin.ha_token_enc
+        if not ha_token_enc and default_user:
+            ha_token_enc = default_user.ha_token_enc
         ha_token = decrypt(ha_token_enc) if ha_token_enc else None
 
         if not nc_url or not nc_admin_user or not nc_admin_pass:
@@ -1252,7 +1261,7 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
 def list_media_groups(x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
-        groups = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("media_group:%"))).all()
+        groups = session.exec(select(GlobalSetting).where(text("globalsetting.key LIKE 'media_group:%'"))).all()
         result = []
         for g in groups:
             data = json.loads(g.value)
@@ -1339,7 +1348,7 @@ def remove_media_group_members(group_id: str, member_data: dict, x_internal_secr
 def list_light_clusters(x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
-        clusters = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("light_cluster:%"))).all()
+        clusters = session.exec(select(GlobalSetting).where(text("globalsetting.key LIKE 'light_cluster:%'"))).all()
         result = []
         for c in clusters:
             data = json.loads(c.value)
@@ -1427,7 +1436,7 @@ def remove_light_cluster_members(cluster_id: str, member_data: dict, x_internal_
 def list_light_patterns(x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
-        patterns = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("light_pattern:%"))).all()
+        patterns = session.exec(select(GlobalSetting).where(text("globalsetting.key LIKE 'light_pattern:%'"))).all()
         result = []
         for p in patterns:
             data = json.loads(p.value)
@@ -1498,7 +1507,7 @@ def delete_light_pattern(pattern_id: str, x_internal_secret: str = Header(...)):
 def list_telemetry_enrollments(x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
-        enrollments = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("telemetry_enroll:%"))).all()
+        enrollments = session.exec(select(GlobalSetting).where(text("globalsetting.key LIKE 'telemetry_enroll:%'"))).all()
         result = []
         for e in enrollments:
             data = json.loads(e.value)
@@ -1515,21 +1524,16 @@ def enroll_telemetry(enroll_data: dict, x_internal_secret: str = Header(...)):
         raise HTTPException(status_code=400, detail="entity_id is required")
     key = f"telemetry_enroll:{entity_id}"
     with Session(engine) as session:
+        from datetime import datetime, timezone
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if existing:
             raise HTTPException(status_code=409, detail=f"'{entity_id}' already enrolled")
-        from datetime import datetime
         enrollment = GlobalSetting(
             key=key,
             value=json.dumps({
                 "entity_id": entity_id,
-                "power_tracking": enroll_data.get("power_tracking", True),
-                "availability_tracking": enroll_data.get("availability_tracking", True),
-                "usage_tracking": enroll_data.get("usage_tracking", True),
-                "offline_alert_threshold_minutes": enroll_data.get("offline_alert_threshold_minutes", 30),
-                "group_id": enroll_data.get("group_id"),
-                "owner_user_id": enroll_data.get("owner_user_id", "system"),
-                "enrolled_at": datetime.utcnow().isoformat(),
+                "enrolled_by": "system",
+                "enrolled_at": datetime.now(timezone.utc).isoformat(),
             }),
             description=f"Telemetry enrollment: {entity_id}",
         )
@@ -1644,7 +1648,7 @@ def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str = Hea
 def get_telemetry_insights(x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
-        insights = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("telemetry_insight:%"))).all()
+        insights = session.exec(select(GlobalSetting).where(text("globalsetting.key LIKE 'telemetry_insight:%'"))).all()
         result = []
         for i in insights:
             data = json.loads(i.value)
@@ -1659,7 +1663,7 @@ def get_telemetry_insights(x_internal_secret: str = Header(...)):
 def list_intercom_sessions(x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
-        sessions = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("intercom_session:%"))).all()
+        sessions = session.exec(select(GlobalSetting).where(text("globalsetting.key LIKE 'intercom_session:%'"))).all()
         result = []
         for s in sessions:
             data = json.loads(s.value)
@@ -1672,32 +1676,31 @@ def list_intercom_sessions(x_internal_secret: str = Header(...)):
 def start_intercom_session(session_data: dict, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     import uuid
-    from datetime import datetime
+    from datetime import datetime, timezone
     session_id = str(uuid.uuid4())[:8]
     key = f"intercom_session:{session_id}"
     with Session(engine) as session:
-        new_session = GlobalSetting(
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Session '{session_id}' already exists")
+        intercom_session = GlobalSetting(
             key=key,
             value=json.dumps({
-                "session_id": session_id,
-                "caller_user_id": session_data.get("caller_user_id", "system"),
-                "target_user_id": session_data.get("target_user_id"),
-                "target_room": session_data.get("target_room"),
                 "target_entity_ids": session_data.get("target_entity_ids", []),
                 "session_type": session_data.get("session_type", "twoway"),
                 "status": "active",
-                "started_at": datetime.utcnow().isoformat(),
+                "started_at": datetime.now(timezone.utc).isoformat(),
                 "ended_at": None,
                 "room_name": session_data.get("target_room"),
             }),
             description=f"Intercom session: {session_id}",
         )
-        session.add(new_session)
+        session.add(intercom_session)
         session.commit()
         return {
             "session_id": session_id,
             "status": "active",
-            "started_at": new_session.value,
+            "started_at": intercom_session.value,
             "message": f"Intercom session '{session_id}' started",
         }
 
@@ -1705,7 +1708,7 @@ def start_intercom_session(session_data: dict, x_internal_secret: str = Header(.
 @app.delete("/api/intercom/sessions/{session_id}")
 def end_intercom_session(session_id: str, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
-    from datetime import datetime
+    from datetime import datetime, timezone
     key = f"intercom_session:{session_id}"
     with Session(engine) as session:
         intercom_session = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
@@ -1713,7 +1716,7 @@ def end_intercom_session(session_id: str, x_internal_secret: str = Header(...)):
             raise HTTPException(status_code=404, detail=f"Intercom session '{session_id}' not found")
         data = json.loads(intercom_session.value)
         data["status"] = "ended"
-        data["ended_at"] = datetime.utcnow().isoformat()
+        data["ended_at"] = datetime.now(tz=timezone.utc).isoformat()
         intercom_session.value = json.dumps(data)
         session.commit()
         return {"status": "SUCCESS", "message": f"Intercom session '{session_id}' ended"}
@@ -1855,7 +1858,7 @@ def get_all_user_locations(x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     locations = {}
     with Session(engine) as session:
-        settings = session.exec(select(GlobalSetting).where(GlobalSetting.key.like("user_location:%"))).all()
+        settings = session.exec(select(GlobalSetting).where(text("globalsetting.key LIKE 'user_location:%'"))).all()
         for setting in settings:
             user_id = setting.key.replace("user_location:", "")
             locations[user_id] = json.loads(setting.value)

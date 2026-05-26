@@ -185,13 +185,14 @@ async def handle_ha_config(req_data: dict) -> ExecutionResult:
                     "ha_version": config.get("version"),
                     "location_name": config.get("location_name"),
                     "time_zone": config.get("time_zone"),
-                    "components_count": len(config.get("components", [])),
-                    "components": sorted(config.get("components", [])),
+                  "components_count": len(config.get("components", [])),
+                   "components": sorted(config.get("components") or []) if isinstance(config.get("components"), (list, tuple)) else [],
                 }
                 if keyword:
                     kw = keyword.lower()
-                    summary["components"] = [c for c in summary["components"] if kw in c.lower()]
-                    summary["components_count"] = len(summary["components"])
+                    filtered = [c for c in summary["components"] if kw in c.lower()]  # pyright: ignore[reportGeneralTypeIssues]
+                    summary["components"] = filtered
+                    summary["components_count"] = len(filtered)
 
                 return ExecutionResult(
                     status="SUCCESS",

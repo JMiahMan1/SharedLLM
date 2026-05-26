@@ -59,7 +59,7 @@ async def test_calendar_events_proxy_no_calendar_name(monkeypatch):
     from fastapi import Request
     mock_request = MagicMock(spec=Request)
     
-    await main.proxy_read_calendar(mock_request, calendar_name=None)
+    await main.proxy_read_calendar(mock_request, calendar_name="")
     
     assert captured_payload["action"] == "read"
     assert "calendar_name" not in captured_payload

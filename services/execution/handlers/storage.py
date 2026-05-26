@@ -21,7 +21,8 @@ async def handle_storage_read(req: StorageFileReadRequest) -> ExecutionResult:
         url, user, pw = resolve_credentials(req.user_context)
         if not all([url, user, pw]):
             return _fail("Missing Nextcloud credentials.")
-            
+        assert url is not None and user is not None and pw is not None
+
         file_url = webdav_url(url, user, req.path)
         resp = requests.get(file_url, auth=(user, pw), timeout=30, verify=False)
         
@@ -42,7 +43,8 @@ async def handle_storage_write(req: StorageFileWriteRequest) -> ExecutionResult:
         url, user, pw = resolve_credentials(req.user_context)
         if not all([url, user, pw]):
             return _fail("Missing Nextcloud credentials.")
-            
+        assert url is not None and user is not None and pw is not None
+
         file_url = webdav_url(url, user, req.path)
         # Ensure parent directories exist (Nextcloud WebDAV doesn't do this automatically with PUT)
         # For simplicity in this handler, we'll just try the PUT
@@ -62,7 +64,8 @@ async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
         url, user, pw = resolve_credentials(req.user_context)
         if not all([url, user, pw]):
             return _fail("Missing Nextcloud credentials.")
-            
+        assert url is not None and user is not None and pw is not None
+
         # 1. Read input file
         input_url = webdav_url(url, user, req.input_path)
         log.info(f"[storage_tts] Reading input: {req.input_path}")

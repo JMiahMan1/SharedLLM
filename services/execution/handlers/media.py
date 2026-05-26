@@ -4,14 +4,15 @@ import asyncio
 import re
 import sys
 import os
+from typing import cast
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     import ha_client
-    from schemas import MediaPlayRequest, ExecutionResult
+    from schemas import MediaPlayRequest, ExecutionResult, AudiobookshelfRequest
     from config import MASS_CONFIG_ENTRY_ID
 except ImportError:
     import ha_client
-    from schemas import MediaPlayRequest, ExecutionResult
+    from schemas import MediaPlayRequest, ExecutionResult, AudiobookshelfRequest
     from config import MASS_CONFIG_ENTRY_ID
 
 log = logging.getLogger("execution.media")
@@ -22,7 +23,7 @@ AUDIOBOOK_PATTERNS = [r"audiobookshelf", r"abs", r"audiobook", r"book\s+"]
 PODCAST_PATTERNS = [r"podcast", r"episode", r"show\s+", r"itunes\.apple\.com", r"open\.spotify\.com/show"]
 MUSIC_PATTERNS = [r"spotify\.com/track", r"spotify\.com/album", r"soundcloud\.com", r"bandcamp\.com"]
 
-def detect_media_type(query: str, media_type_hint: str = None) -> str:
+def detect_media_type(query: str, media_type_hint: str | None = None) -> str:
     """Detect media type from query content and hints."""
     if media_type_hint and media_type_hint in ("music", "video", "podcast", "audiobook", "radio", "url", "announcement"):
         return media_type_hint
@@ -61,7 +62,7 @@ def detect_media_type(query: str, media_type_hint: str = None) -> str:
     # Default to music
     return "music"
 
-async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str = None) -> str:
+async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str | None = None) -> str:
     """Resolve entity_id from device_name if needed."""
     if req.entity_id:
         return ha_client.sanitize_entity_id("media_player", req.entity_id)
@@ -395,18 +396,27 @@ async def play_audiobook(req: MediaPlayRequest, entity_id: str, ctx) -> Executio
         return ExecutionResult(status="FAILURE", message="Audiobook title or query is required.", service="media_play")
     
     # Search ABS
+    class _ABSRequest:
+        def __init__(self, action, query=None, book_id=None, entity_id=None, limit=10):
+            self.user_context = ctx
+            self.action = action
+            self.query = query
+            self.book_id = book_id
+            self.entity_id = entity_id
+            self.limit = limit
+
     search_result = await abs_handler.handle_audiobookshelf(
-        type("ABSRequest", (), {"user_context": ctx, "action": "search", "query": req.query, "limit": 5, "entity_id": entity_id})()
+        cast(AudiobookshelfRequest, _ABSRequest("search", query=req.query, limit=5, entity_id=entity_id))
     )
     
     if search_result.status == "SUCCESS" and search_result.detail:
-        books = search_result.detail.get("results", [])
+        books = search_result.detail.get("books", [])
         if books:
             book = books[0]
             book_id = book.get("id")
             # Play the book
             play_result = await abs_handler.handle_audiobookshelf(
-                type("ABSRequest", (), {"user_context": ctx, "action": "play", "book_id": book_id, "entity_id": entity_id})()
+                cast(AudiobookshelfRequest, _ABSRequest("play", book_id=book_id, entity_id=entity_id))
             )
             return play_result
     
@@ -432,6 +442,8 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     ctx = req.user_context
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
+    assert ha_url is not None
+    assert ha_token is not None
     
     # Detect media type BEFORE resolving entity (needed for context-aware entity resolution)
     media_type = detect_media_type(req.query or req.media_content_id or "", req.media_type)
@@ -516,6 +528,7 @@ async def handle_media_transport(req) -> ExecutionResult:
         target_entity = full_entity_id.replace("media_player.", "remote.")
     else:
         service_cmd = service
+        assert service_cmd is not None
         data = {}
 
     if command in ("volume_up", "volume_down") and req.volume_level is not None:
