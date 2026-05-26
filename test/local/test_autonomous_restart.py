@@ -7,8 +7,8 @@ async def test_control_plane_integration():
     """
     Tests the full Control Plane integration: listing services, checking models, and restarting.
     """
-    base_url = os.getenv("LIVE_TEST_URL", "http://127.0.0.1:8002")
-    gateway_url = f"{base_url}/api" if base_url != "http://127.0.0.1:8002" else "http://127.0.0.1:8002/api"
+    base_url = os.getenv("LIVE_TEST_URL", "http://127.0.0.1:11435")
+    gateway_url = f"{base_url}/api" if base_url != "http://127.0.0.1:11435" else "http://127.0.0.1:11435/api"
     headers = {"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
     
     print(f"=== Testing SharedLLM Integration against {base_url} ===\n")

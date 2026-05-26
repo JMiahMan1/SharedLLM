@@ -35,6 +35,7 @@ def _get_user_credentials(username: str = "jeremiah") -> dict:
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_health_check_live():
     """Health endpoint responds correctly."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -46,6 +47,7 @@ async def test_identity_health_check_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_health_check_live():
     """Execution health endpoint responds correctly."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -57,6 +59,7 @@ async def test_execution_health_check_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_resolve_by_username_live():
     """Resolving by username returns valid credentials."""
     creds = _get_user_credentials("jeremiah")
@@ -65,6 +68,7 @@ async def test_identity_resolve_by_username_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_resolve_by_user_id_live():
     """Resolving by user_id returns valid credentials."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -82,6 +86,7 @@ async def test_identity_resolve_by_user_id_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_resolve_falls_back_to_first_user_live():
     """Resolving with unknown username falls back to first user."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -97,6 +102,7 @@ async def test_identity_resolve_falls_back_to_first_user_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_resolve_by_voice_id_live():
     """Resolving by voice_id returns valid credentials."""
     with httpx.Client(timeout=10.0) as client:
@@ -111,6 +117,7 @@ async def test_identity_resolve_by_voice_id_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_resolve_by_api_key_live():
     """Resolving by api_key returns valid credentials."""
     # Get a known api_key from the resolve-by-username call
@@ -140,6 +147,7 @@ async def test_identity_resolve_by_api_key_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_resolve_by_device_id_live():
     """Resolving by device_id returns valid credentials."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -154,6 +162,7 @@ async def test_identity_resolve_by_device_id_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_resolve_missing_user_returns_404_live():
     """Resolving with explicit user_id that doesn't exist returns 404."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -167,6 +176,7 @@ async def test_identity_resolve_missing_user_returns_404_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_credentials_have_all_types_live():
     """Credentials returned contain expected key types (HA, GitHub, etc.)."""
     creds = _get_user_credentials("jeremiah")
@@ -178,6 +188,7 @@ async def test_identity_credentials_have_all_types_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_light_endpoint_live():
     """POST /execute/light returns a response (may fail at HA layer, but endpoint works)."""
     creds = _get_user_credentials("jeremiah")
@@ -200,6 +211,7 @@ async def test_execution_light_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_security_lock_endpoint_live():
     """POST /execute/security returns a response for lock action."""
     creds = _get_user_credentials("jeremiah")
@@ -220,6 +232,7 @@ async def test_execution_security_lock_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_security_status_endpoint_live():
     """POST /execute/security with action=status returns state."""
     creds = _get_user_credentials("jeremiah")
@@ -241,6 +254,7 @@ async def test_execution_security_status_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_climate_endpoint_live():
     """POST /execute/climate returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -261,6 +275,7 @@ async def test_execution_climate_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_calendar_endpoint_live():
     """POST /execute/calendar returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -279,6 +294,7 @@ async def test_execution_calendar_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_note_endpoint_live():
     """POST /execute/note returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -298,6 +314,7 @@ async def test_execution_note_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_talk_endpoint_live():
     """POST /execute/talk returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -316,6 +333,7 @@ async def test_execution_talk_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_timers_list_endpoint_live():
     """GET /execute/timers returns a response."""
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -326,6 +344,7 @@ async def test_execution_timers_list_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_media_status_endpoint_live():
     """POST /execute/media/status returns media player state."""
     creds = _get_user_credentials("jeremiah")
@@ -347,6 +366,7 @@ async def test_execution_media_status_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_media_status_with_volume_live():
     """Media status response includes volume_level for active player."""
     creds = _get_user_credentials("jeremiah")
@@ -368,6 +388,7 @@ async def test_execution_media_status_with_volume_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_media_transport_endpoint_live():
     """POST /execute/media/transport returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -387,6 +408,7 @@ async def test_execution_media_transport_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_video_play_endpoint_live():
     """POST /execute/video/play returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -407,6 +429,7 @@ async def test_execution_video_play_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_web_search_endpoint_live():
     """POST /execute/web_search returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -425,6 +448,7 @@ async def test_execution_web_search_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_web_read_endpoint_live():
     """POST /execute/web_read returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -443,6 +467,7 @@ async def test_execution_web_read_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_entity_search_endpoint_live():
     """POST /execute/entity/search returns entity list."""
     creds = _get_user_credentials("jeremiah")
@@ -462,6 +487,7 @@ async def test_execution_entity_search_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_ltm_search_endpoint_live():
     """POST /execute/ltm/search returns a response."""
     creds = _get_user_credentials("jeremiah")
@@ -482,6 +508,7 @@ async def test_execution_ltm_search_endpoint_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_gateway_health_check_live():
     """Gateway health endpoint responds correctly."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -493,6 +520,7 @@ async def test_gateway_health_check_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_gateway_media_status_proxy_live():
     """Gateway proxy forwards identity resolution to execution."""
     _get_user_credentials("jeremiah")
@@ -510,6 +538,7 @@ async def test_gateway_media_status_proxy_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_gateway_media_transport_proxy_live():
     """Gateway media transport proxy forwards correctly."""
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -524,6 +553,7 @@ async def test_gateway_media_transport_proxy_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_gateway_media_play_proxy_live():
     """Gateway media play proxy forwards correctly."""
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -538,6 +568,7 @@ async def test_gateway_media_play_proxy_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_gateway_audiobookshelf_proxy_live():
     """Gateway audiobookshelf proxy forwards correctly."""
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -552,6 +583,7 @@ async def test_gateway_audiobookshelf_proxy_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_storage_health_check_live():
     """Storage service health endpoint responds."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -560,6 +592,7 @@ async def test_storage_health_check_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_rag_health_check_live():
     """RAG service health endpoint responds."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -568,6 +601,7 @@ async def test_rag_health_check_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_resolve_multiple_users_exist_live():
     """Multiple users should be resolvable by username."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -595,6 +629,7 @@ async def test_identity_resolve_multiple_users_exist_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_credential_isolation_live():
     """User A's credentials should not leak to User B."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -621,6 +656,7 @@ async def test_identity_credential_isolation_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_identity_decrypted_credentials_live():
     """Credentials returned from identity service are decrypted (not encrypted)."""
     creds = _get_user_credentials("jeremiah")
@@ -631,6 +667,7 @@ async def test_identity_decrypted_credentials_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_discovery_entities_live():
     """GET /discovery/entities returns entity list from HA."""
     _get_user_credentials("jeremiah")
@@ -646,6 +683,7 @@ async def test_execution_discovery_entities_live():
 
 
 @pytest.mark.asyncio
+@pytest.mark.local_only
 async def test_execution_tts_voices_live():
     """GET /execute/tts/voices returns available TTS voices."""
     async with httpx.AsyncClient(timeout=10.0) as client:

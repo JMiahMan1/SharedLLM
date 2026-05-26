@@ -12,7 +12,7 @@ os.environ["FERNET_KEY"] = _test_fernet_key
 os.environ.setdefault("INIT_DB", "false")
 os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
 os.environ.setdefault("IDENTITY_SVC_URL", "http://localhost:8001")
-os.environ.setdefault("EXECUTION_SVC_URL", "http://localhost:8002")
+os.environ.setdefault("EXECUTION_SVC_URL", "http://localhost:8003")
 os.environ.setdefault("RAG_SVC_URL", "http://localhost:8003")
 os.environ.setdefault("STORAGE_SVC_URL", "http://localhost:8005")
 os.environ.setdefault("LOGGING_SVC_URL", "http://localhost:8006")

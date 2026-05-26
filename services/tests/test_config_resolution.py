@@ -61,6 +61,7 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("FERNET_KEY", raising=False)
         if "config" in sys.modules:
             del sys.modules["config"]
         import config
@@ -96,6 +97,7 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("FERNET_KEY", raising=False)
         if "config" in sys.modules:
             del sys.modules["config"]
         import config
@@ -117,6 +119,7 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
+        monkeypatch.setenv("FERNET_KEY", "")
         if "config" in sys.modules:
             del sys.modules["config"]
         import config
