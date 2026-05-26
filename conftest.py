@@ -35,7 +35,7 @@ def test_fernet_key():
 @pytest.fixture(scope="session")
 def redis_container():
     try:
-        from testcontainers.redis import RedisContainer
+        from testcontainers.redis import RedisContainer  # pyright: ignore[reportMissingImports]
         with RedisContainer("redis:7-alpine") as redis:
             yield redis
     except Exception:
@@ -60,7 +60,7 @@ def redis_client(redis_container):
 def identity_db_session():
     from sqlmodel import SQLModel, create_engine, Session
     engine = create_engine("sqlite:///:memory:")
-    import services.identity.models  # noqa: F401 - registers models with SQLModel.metadata
+    import services.identity.models  # noqa: F401 - registers models with SQLModel.metadata  # pyright: ignore[reportUnusedImport]
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         yield session

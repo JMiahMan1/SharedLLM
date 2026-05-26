@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 log = logging.getLogger("app.logic.pipeline")
 
 
-async def _handle_single_command(
+async def _handle_single_command(  # pyright: ignore[reportUnusedFunction]
     command: str,
     user_creds: Optional[Dict[str, str]] = None,
     **kwargs: Any,

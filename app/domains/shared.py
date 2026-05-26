@@ -34,7 +34,7 @@ async def execute_ha_service(
     ha_url = HA_URL
     ha_token = HA_TOKEN
 
-    if user_creds and isinstance(user_creds, dict):
+    if user_creds:
         ha_url = user_creds.get("ha_url") or ha_url
         ha_token = user_creds.get("ha_token") or ha_token
 
