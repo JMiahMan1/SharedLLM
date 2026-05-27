@@ -99,9 +99,13 @@ Example streamed `/api/chat` chunks:
 ## Other Gateway Endpoints
 
 - `GET /health`: liveness check for the gateway service
-- `GET /health/ready`: downstream readiness across identity, execution, rag,
-  storage, logging, and redis
+- `GET /health/ready`: downstream readiness across identity, execution, rag, storage, logging, and redis
 - `POST /api/discovery/sync`: fetch Home Assistant entities and trigger RAG sync
 - `POST /api/generate`: Ollama-compatible generate proxy
-- `GET /api/tags`: model list proxy
+- `GET /api/tags`: model list proxy (Ollama style)
+- `POST /api/show`: model info inspector proxy (Ollama style)
+- `POST /api/embeddings`: single embedding generation proxy (Ollama style)
+- `POST /api/embed`: batch embedding generation proxy (Ollama style)
 - `GET /api/version`: lightweight version endpoint
+- `GET /v1/models`: OpenAI-compatible list models endpoint
+- `POST /v1/embeddings`: OpenAI-compatible batch embeddings generation endpoint
