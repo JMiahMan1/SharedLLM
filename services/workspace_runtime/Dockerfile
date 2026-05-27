@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
 COPY services/workspace_runtime/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir flake8 black mypy
-COPY services/workspace_runtime/ ./
-COPY services/config.py ./config.py
+COPY . .
+ENV PYTHONPATH=/app
 EXPOSE 8007
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8007"]
+CMD ["uvicorn", "services.workspace_runtime.main:app", "--host", "0.0.0.0", "--port", "8007"]

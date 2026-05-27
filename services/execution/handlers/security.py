@@ -1,11 +1,11 @@
 # services/execution/handlers/security.py
 import logging
 try:
-    from .. import ha_client
-    from ..schemas import UserContext, ExecutionResult
-except ImportError:
     import ha_client
     from schemas import UserContext, ExecutionResult
+except ImportError:
+    from .. import ha_client
+    from ..schemas import UserContext, ExecutionResult
 from pydantic import BaseModel
 from typing import Literal
 

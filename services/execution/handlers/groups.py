@@ -9,7 +9,10 @@ from typing import Dict, Optional
 
 import httpx
 
-from schemas import ExecutionResult, UserContext
+try:
+    from schemas import ExecutionResult, UserContext
+except ImportError:
+    from ..schemas import ExecutionResult, UserContext
 
 log = logging.getLogger("execution.groups")
 

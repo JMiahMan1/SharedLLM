@@ -5,9 +5,9 @@ import caldav
 import requests
 
 try:
-    from .nextcloud_client import ensure_webdav_dir, ocs_request, resolve_credentials, safe_filename, webdav_url
-except ImportError:
     from nextcloud_client import ensure_webdav_dir, ocs_request, resolve_credentials, safe_filename, webdav_url
+except ImportError:
+    from .nextcloud_client import ensure_webdav_dir, ocs_request, resolve_credentials, safe_filename, webdav_url
 
 
 class PersonalDataProvider(Protocol):

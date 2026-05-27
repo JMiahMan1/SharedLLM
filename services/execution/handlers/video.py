@@ -6,13 +6,15 @@ import re
 import os
 import httpx
 import urllib.parse
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
 try:
     import ha_client
     from schemas import VideoPlayRequest, ExecutionResult
 except ImportError:
-    import ha_client
-    from schemas import VideoPlayRequest, ExecutionResult
+    from .. import ha_client
+    from ..schemas import VideoPlayRequest, ExecutionResult
 
 log = logging.getLogger("execution.video")
 

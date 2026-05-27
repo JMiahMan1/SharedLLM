@@ -8,9 +8,9 @@ try:
     from schemas import MediaPlayRequest, ExecutionResult, AudiobookshelfRequest
     from config import MASS_CONFIG_ENTRY_ID
 except ImportError:
-    import ha_client
-    from schemas import MediaPlayRequest, ExecutionResult, AudiobookshelfRequest
-    from config import MASS_CONFIG_ENTRY_ID
+    from .. import ha_client
+    from ..schemas import MediaPlayRequest, ExecutionResult, AudiobookshelfRequest
+    from ...config import MASS_CONFIG_ENTRY_ID
 
 log = logging.getLogger("execution.media")
 

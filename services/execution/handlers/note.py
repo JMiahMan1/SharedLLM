@@ -3,15 +3,11 @@ import logging
 import os
 import requests
 import xml.etree.ElementTree as ET
-from config import LOCAL_NOTES_ROOT as _LOCAL_NOTES_ROOT
 from pathlib import Path
-
-try:
-    from schemas import NoteRequest, ExecutionResult
-    from personal_data import resolve_personal_data_provider
-except ImportError:
-    from schemas import NoteRequest, ExecutionResult
-    from personal_data import resolve_personal_data_provider
+from services.config import LOCAL_NOTES_ROOT as _LOCAL_NOTES_ROOT
+from services.execution import ha_client
+from services.execution.schemas import NoteRequest, ExecutionResult
+from ..personal_data import resolve_personal_data_provider
 
 log = logging.getLogger("execution.note")
 

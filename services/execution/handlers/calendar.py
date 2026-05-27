@@ -1,16 +1,13 @@
 # services/execution/handlers/calendar.py
-import logging
 import asyncio
-from config import TIMEZONE
-from datetime import datetime, timedelta, date
-from dateutil import tz
-
-try:
-    from schemas import CalendarRequest, ExecutionResult
-    from personal_data import resolve_personal_data_provider
-except ImportError:
-    from schemas import CalendarRequest, ExecutionResult
-    from personal_data import resolve_personal_data_provider
+import logging
+import time
+from datetime import date, datetime, timedelta
+import pytz as tz
+from services.config import TIMEZONE
+from services.execution import ha_client
+from services.execution.schemas import CalendarRequest, ExecutionResult
+from ..personal_data import resolve_personal_data_provider
 
 log = logging.getLogger("execution.calendar")
 

@@ -2,12 +2,9 @@
 import logging
 import subprocess
 try:
-    from ..schemas import ExecutionResult
+    from schemas import ExecutionResult
 except ImportError:
-    try:
-        from execution.schemas import ExecutionResult
-    except ImportError:
-        from schemas import ExecutionResult
+    from ..schemas import ExecutionResult
 
 log = logging.getLogger("execution.diagnostics")
 

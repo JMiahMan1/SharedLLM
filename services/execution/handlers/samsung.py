@@ -20,9 +20,9 @@ try:
     from schemas import ExecutionResult
     import device_discovery
 except ImportError:
-    import ha_client
-    from schemas import ExecutionResult
-    import device_discovery
+    from .. import ha_client
+    from ..schemas import ExecutionResult
+    from .. import device_discovery
 
 log = logging.getLogger("execution.samsung")
 

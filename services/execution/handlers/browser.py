@@ -13,7 +13,7 @@ from typing import Optional
 try:
     from schemas import ExecutionResult, WebSearchRequest, WebReadRequest
 except ImportError:
-    from schemas import ExecutionResult, WebSearchRequest, WebReadRequest
+    from ..schemas import ExecutionResult, WebSearchRequest, WebReadRequest
 
 log = logging.getLogger("execution.browser")
 

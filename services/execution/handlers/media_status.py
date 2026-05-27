@@ -4,8 +4,8 @@ try:
     import ha_client
     from schemas import MediaStatusRequest, ExecutionResult
 except ImportError:
-    import ha_client
-    from schemas import MediaStatusRequest, ExecutionResult
+    from .. import ha_client
+    from ..schemas import MediaStatusRequest, ExecutionResult
 
 log = logging.getLogger("execution.media_status")
 

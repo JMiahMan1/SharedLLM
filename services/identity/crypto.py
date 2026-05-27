@@ -4,14 +4,11 @@ Fernet encryption helpers for credential fields.
 The FERNET_KEY env var must be a URL-safe base64-encoded 32-byte key.
 Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 """
-import os
-import sys
 import logging
 import hmac
 import hashlib
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import FERNET_KEY
+from services.config import FERNET_KEY
 from cryptography.fernet import Fernet, InvalidToken
 
 log = logging.getLogger("identity.crypto")

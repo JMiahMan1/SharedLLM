@@ -4,7 +4,6 @@ Microservice 1: Identity & Profile Service
 Manages user profiles, device assignments, and secure credential resolution.
 """
 import os
-import sys
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -15,28 +14,16 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-try:
-    from .models import User, DeviceAssignment, GlobalSetting, APIKey, DEFAULT_GLOBAL_SETTINGS
-    from .schemas import (
-        ResolveRequest, ResolvedCredentials, 
-        UserCreate, UserRead, UserUpdate,
-        DeviceAssignmentRead, DeviceAssignmentCreate,
-        LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportResponse,
-        GlobalSettingRead, GlobalSettingUpdate
-    )
-    from .crypto import encrypt, decrypt, digest_secret
-    from .seed import seed_from_env, pwd_context
-except (ImportError, ModuleNotFoundError):
-    from models import User, DeviceAssignment, GlobalSetting, APIKey, DEFAULT_GLOBAL_SETTINGS
-    from schemas import (
-        ResolveRequest, ResolvedCredentials, 
-        UserCreate, UserRead, UserUpdate,
-        DeviceAssignmentRead, DeviceAssignmentCreate,
-        LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportResponse,
-        GlobalSettingRead, GlobalSettingUpdate
-    )
-    from crypto import encrypt, decrypt, digest_secret
-    from seed import seed_from_env, pwd_context
+from services.identity.models import User, DeviceAssignment, GlobalSetting, APIKey, DEFAULT_GLOBAL_SETTINGS
+from services.identity.schemas import (
+    ResolveRequest, ResolvedCredentials, 
+    UserCreate, UserRead, UserUpdate,
+    DeviceAssignmentRead, DeviceAssignmentCreate,
+    LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportResponse,
+    GlobalSettingRead, GlobalSettingUpdate
+)
+from services.identity.crypto import encrypt, decrypt, digest_secret
+from services.identity.seed import seed_from_env, pwd_context
 
 import httpx
 
@@ -45,9 +32,7 @@ import httpx
 log = logging.getLogger("identity")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from config import INTERNAL_SECRET, IDENTITY_DATABASE_URL
+from services.config import INTERNAL_SECRET, IDENTITY_DATABASE_URL
 
 def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
     if x_internal_secret != INTERNAL_SECRET:
@@ -1099,7 +1084,7 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
             nc_url_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_URL")).first()
             nc_user_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_USER")).first()
             nc_pass_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_PASS")).first()
-            from config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+            from services.config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
             nc_url = nc_url_setting.value if nc_url_setting else NEXTCLOUD_URL
             nc_admin_user = nc_user_setting.value if nc_user_setting else NEXTCLOUD_USER
             nc_admin_pass = nc_pass_setting.value if nc_pass_setting else NEXTCLOUD_PASS
