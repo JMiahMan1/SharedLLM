@@ -1,17 +1,10 @@
 import json
-import sys
-import os
 import importlib
 from collections import defaultdict
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-
-# Add execution service to path for absolute imports (from schemas import ...)
-_execution_path = os.path.join(os.path.dirname(__file__), '..', 'execution')
-if _execution_path not in sys.path:
-    sys.path.insert(0, _execution_path)
 
 from services.execution.handlers import git as git_handler
 from services.execution.handlers import workspace as workspace_handler

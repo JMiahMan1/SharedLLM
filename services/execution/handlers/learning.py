@@ -2,7 +2,7 @@
 import logging
 import httpx
 from services.config import RAG_SVC_URL, INTERNAL_SECRET
-from services.schemas import SystemLearningRequest, ExecutionResult
+from services.execution.schemas import SystemLearningRequest, ExecutionResult
 
 log = logging.getLogger("execution.learning")
 

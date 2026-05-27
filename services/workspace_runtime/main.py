@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import sys
 import re
 import subprocess
 import hashlib
@@ -13,7 +12,6 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import httpx
 import redis
@@ -22,7 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from config import (
+from services.config import (
     INTERNAL_SECRET, IDENTITY_SVC_URL, STORAGE_SVC_URL, REDIS_URL,
     WORKSPACE_REGISTRY_PATH as _WRP, WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS, WORKSPACE_RUNTIME_FILE_READ_LIMIT,
 )
@@ -359,7 +357,7 @@ def _seed_db_from_json():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Resolve runtime config from Identity service
-    from config import resolve_runtime_config
+    from services.config import resolve_runtime_config
     await resolve_runtime_config()
     
     # Startup logic
@@ -2377,7 +2375,7 @@ async def git_pull_webhook(
     Automated webhook endpoint for triggering a git pull.
     Expects a secret in the X-Webhook-Secret header or as a 'token' query parameter.
     """
-    from config import GIT_WEBHOOK_SECRET
+    from services.config import GIT_WEBHOOK_SECRET
     webhook_secret = GIT_WEBHOOK_SECRET
     
     # Resolve workspace using admin context (since it's a system webhook)

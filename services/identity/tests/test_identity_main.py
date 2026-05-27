@@ -6,16 +6,12 @@ os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, StaticPool, select
-import sys
 
-# Ensure parent directory is in sys.path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from identity.main import app, require_api_key, require_internal, resolve_identity
-from identity.models import User
-from identity.crypto import encrypt
-from identity.schemas import ResolveRequest
-import identity.main as main
+from services.identity.main import app, require_api_key, require_internal, resolve_identity
+from services.identity.models import User
+from services.identity.crypto import encrypt
+from services.identity.schemas import ResolveRequest
+import services.identity.main as main
 
 # Setup in-memory database for testing
 @pytest.fixture(name="session")

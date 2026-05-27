@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["IDENTITY_SVC_URL"] = "http://identity"
 
-from gateway.main import app
+from services.gateway.main import app
 
 @pytest.fixture
 def client(monkeypatch):

@@ -1,8 +1,6 @@
 import os
-import sys
 import tempfile
 import pytest
-from pathlib import Path
 from cryptography.fernet import Fernet
 
 _test_fernet_key = Fernet.generate_key().decode()
@@ -23,8 +21,6 @@ os.environ.setdefault("LLAMA_SERVER_PROXY_URL", "http://localhost:8009")
 os.environ.setdefault("FAST_PATH_THRESHOLD", "0.85")
 os.environ.setdefault("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 os.environ.setdefault("TEST_MODE", "true")
-
-sys.path.insert(0, str(Path(__file__).parent / "services"))
 
 
 @pytest.fixture(scope="session")

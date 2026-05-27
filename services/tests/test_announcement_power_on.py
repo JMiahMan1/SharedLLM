@@ -80,7 +80,7 @@ async def test_announcement_skips_power_on_when_already_on():
 
     with patch("execution.main.ha_client.get_state", mock_get_state), \
          patch("execution.main.ha_client.call_service", mock_call_service), \
-         patch("execution.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
+         patch("execution.main.asyncio.sleep", new_callable=AsyncMock), \
          patch("execution.main.ha_client.get_config", return_value={"components": []}), \
          patch("execution.main.ha_client.get_states", return_value=[{
              "entity_id": "media_player.kitchen_speaker",

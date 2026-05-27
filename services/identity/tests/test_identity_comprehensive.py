@@ -8,14 +8,11 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, StaticPool, select
 from fastapi import HTTPException
 
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import main as identity_main
-from identity.main import app, require_api_key, require_internal, resolve_identity
-from identity.models import User, DeviceAssignment
-from identity.schemas import ResolveRequest, ResolvedCredentials
-from identity.crypto import encrypt
+import services.identity.main as identity_main
+from services.identity.main import app, require_api_key, require_internal, resolve_identity
+from services.identity.models import User, DeviceAssignment
+from services.identity.schemas import ResolveRequest, ResolvedCredentials
+from services.identity.crypto import encrypt
 
 
 @pytest.fixture(name="session")

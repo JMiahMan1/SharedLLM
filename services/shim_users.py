@@ -3,13 +3,10 @@ Monolith Shim: Drop-in replacement for app/users.py.
 Makes a rapid requests.post() to the new Identity Service instead of reading .env.
 Ensures downstream monolith files do not break while refactoring.
 """
-import os
-import sys
 import requests
 import logging
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import IDENTITY_SVC_URL, INTERNAL_SECRET
+from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
 from typing import Dict, Optional
 from fastapi import Security, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials

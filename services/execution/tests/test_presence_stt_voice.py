@@ -3,11 +3,6 @@ Tests for presence detection, STT, and voice command features.
 Run from services/execution/ directory: python -m pytest tests/test_presence_stt_voice.py -v
 """
 import pytest
-import sys
-import os
-
-# Add execution service to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ─── Presence Tests ───────────────────────────────────────────────────────────

@@ -1,12 +1,8 @@
 import pytest
 import os
-import sys
 
-# Add services dir to path
-sys.path.append(os.path.join(os.getcwd(), "services"))
-
-from storage.providers import build_provider
-from storage.models import ProviderConfig
+from services.storage.providers import build_provider
+from services.storage.models import ProviderConfig
 
 # Live credentials from environment
 NC_URL = os.getenv("NC_URL")

@@ -1,21 +1,18 @@
 # services/tests/test_execution_handlers.py
-import pytest
-import sys
 import os
-os.environ["DEVICE_REGISTRY_PATH"] = ":memory:"
-_execution_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "execution"))
-if _execution_path not in sys.path:
-    sys.path.append(_execution_path)
+import pytest
 from unittest.mock import AsyncMock, Mock, patch
 from typing import Any, cast
 
-from execution.schemas import (
+os.environ["DEVICE_REGISTRY_PATH"] = ":memory:"
+
+from services.execution.schemas import (
     UserContext, LightControlRequest, MediaTransportRequest,
     TVCastRequest, TalkRequest, VolumeInventoryRequest
 )
-from execution.handlers import light, media, climate, security, talk, volumes
-from execution.handlers.security import SecurityRequest
-from execution.personal_data import resolve_personal_data_provider
+from services.execution.handlers import light, media, climate, security, talk, volumes
+from services.execution.handlers.security import SecurityRequest
+from services.execution.personal_data import resolve_personal_data_provider
 
 @pytest.fixture
 def user_ctx():

@@ -1,9 +1,4 @@
-import os
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from handlers.media import detect_media_type
+from services.execution.handlers.media import detect_media_type
 
 def test_detect_music_default():
     assert detect_media_type("The Beatles") == "music"

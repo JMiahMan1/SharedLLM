@@ -1,16 +1,9 @@
 # services/storage/providers_impl/nextcloud.py
 from typing import Any, Optional
-try:
-    from ..providers import StorageProvider
-    from ..models import StorageEntry
-    from ..nextcloud_client import NextCloudClient
-except (ImportError, ValueError):
-    import sys
-    import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-    from providers import StorageProvider
-    from models import StorageEntry
-    from nextcloud_client import NextCloudClient
+
+from services.storage.providers import StorageProvider
+from services.storage.models import StorageEntry
+from services.storage.nextcloud_client import NextCloudClient
 
 class NextcloudStorageProvider(StorageProvider):
     def __init__(self, settings: dict):

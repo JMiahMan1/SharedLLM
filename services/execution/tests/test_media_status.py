@@ -1,13 +1,9 @@
 """Integration tests for media_status handler - validates HA media player state parsing."""
-import os
-import sys
 import pytest
 from unittest.mock import AsyncMock, patch
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from handlers.media_status import handle_media_status
-from schemas import MediaStatusRequest, UserContext
+from services.execution.handlers.media_status import handle_media_status
+from services.execution.schemas import MediaStatusRequest, UserContext
 
 
 def _make_req(**overrides):

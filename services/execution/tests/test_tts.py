@@ -1,4 +1,3 @@
-import os
 import sys
 import pytest
 from unittest.mock import MagicMock
@@ -12,10 +11,7 @@ def mock_write(file, data, samplerate, **kwargs):
 
 mock_sf.write.side_effect = mock_write
 
-# Ensure parent directory is in sys.path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from tts import KokoroTTSEngine
+from services.execution.tts import KokoroTTSEngine
 
 @pytest.mark.asyncio
 async def test_kokoro_engine_generate_non_blocking(mocker):

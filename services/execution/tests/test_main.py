@@ -1,13 +1,9 @@
 import os
-import sys
 from fastapi.testclient import TestClient
-
-# Ensure parent directory is in sys.path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["EXECUTION_EXTERNAL_HOST"] = "localhost"
-from main import app
+from services.execution.main import app
 
 client = TestClient(app)
 

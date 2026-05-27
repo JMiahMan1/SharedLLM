@@ -1,13 +1,10 @@
 # services/logging/main.py
-import os
-import sys
 import json
 import re
 import time
 import asyncio
-sys.path.insert(0, os.path.dirname(__file__))
 
-from config import INTERNAL_SECRET, REDIS_URL, LOG_RETENTION_DAYS, LOG_MAX_ENTRIES
+from services.config import INTERNAL_SECRET, REDIS_URL, LOG_RETENTION_DAYS, LOG_MAX_ENTRIES
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, List, Optional
@@ -37,7 +34,7 @@ async def retention_cleanup_task():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Resolve runtime config from Identity service
-    from config import resolve_runtime_config
+    from services.config import resolve_runtime_config
     await resolve_runtime_config()
     
     py_logging.info(f"[Logging] Redis backend initialized (retention={LOG_RETENTION_DAYS}d, max_entries={LOG_MAX_ENTRIES})")

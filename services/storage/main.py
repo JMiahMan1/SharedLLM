@@ -1,30 +1,19 @@
 # services/storage/main.py
 import logging
-import os
-import sys
 import httpx
 import re
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import RAG_SVC_URL, INTERNAL_SECRET
+from services.config import RAG_SVC_URL, INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Body, Query
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-try:
-    from .indexer import (
-        build_content_index, extract_and_chunk_contents,
-        set_indexer_pause, is_indexer_paused, CheckpointManager
-    )
-    from .providers import build_provider, ProviderConfig
-    from .models import ProviderWriteRequest, ProviderMirrorRequest
-except (ImportError, ValueError):
-    from indexer import (
-        build_content_index, extract_and_chunk_contents,
-        set_indexer_pause, is_indexer_paused, CheckpointManager
-    )
-    from providers import build_provider, ProviderConfig
-    from models import ProviderWriteRequest, ProviderMirrorRequest
+from services.storage.indexer import (
+    build_content_index, extract_and_chunk_contents,
+    set_indexer_pause, is_indexer_paused, CheckpointManager
+)
+from services.storage.providers import build_provider, ProviderConfig
+from services.storage.models import ProviderWriteRequest, ProviderMirrorRequest
 
 log = logging.getLogger("storage")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")

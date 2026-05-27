@@ -1,14 +1,7 @@
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from config import WORKSPACE_DATABASE_URL
+from services.config import WORKSPACE_DATABASE_URL
 from sqlmodel import Session, SQLModel, create_engine
 from sqlalchemy import inspect, text
-try:
-    from .models import Workspace  # pyright: ignore[reportUnusedImport]
-except (ImportError, ValueError):
-    pass
+from services.workspace_runtime.models import Workspace  # pyright: ignore[reportUnusedImport]
 
 DATABASE_URL = WORKSPACE_DATABASE_URL
 engine = create_engine(

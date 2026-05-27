@@ -22,10 +22,7 @@ import logging
 import os
 import re
 import shlex
-try:
-    from config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
-except ImportError:
-    from ...config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
+from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
 from typing import Optional
 try:
     from schemas import GitOperationRequest, GitExecutionResult

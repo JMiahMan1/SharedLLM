@@ -196,7 +196,7 @@ class TestRokuVideoURL(unittest.TestCase):
 
     def test_roku_video_url_format(self):
         """Roku ECP needs a direct HTTP URL to an MP4 file."""
-        from config import EXECUTION_EXTERNAL_HOST
+        from services.config import EXECUTION_EXTERNAL_HOST
         # Even if not set, the format should be correct
         host = EXECUTION_EXTERNAL_HOST or "192.168.2.205"
         expected = f"http://{host}:8888/media/vid-roku-abc123"

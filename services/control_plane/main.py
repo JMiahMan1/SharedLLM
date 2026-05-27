@@ -1,10 +1,7 @@
-import os
-import sys
 import docker
 from docker.errors import NotFound
-sys.path.insert(0, os.path.dirname(__file__))
 
-from config import INTERNAL_SECRET
+from services.config import INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, Header, Depends
 
 import logging

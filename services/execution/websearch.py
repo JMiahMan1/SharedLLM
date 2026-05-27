@@ -1,11 +1,7 @@
 """Web search utility using SearXNG."""
 import logging
-import os
-import sys
 import urllib.parse
 from typing import Any, Dict, List
-
-sys.path.insert(0, os.path.dirname(__file__))
 
 log = logging.getLogger("execution.websearch")
 
@@ -16,7 +12,7 @@ async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
         import httpx
         searxng_url = None
         try:
-            from main import IDENTITY_SVC_URL, INTERNAL_SECRET
+            from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(
                     f"{IDENTITY_SVC_URL}/api/settings",

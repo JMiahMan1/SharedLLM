@@ -3,8 +3,7 @@ import os
 import sys
 import pytest
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path.insert(0, PROJECT_ROOT)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class TestConfigBootstrap:
@@ -15,9 +14,9 @@ class TestConfigBootstrap:
         monkeypatch.delenv("INTERNAL_SECRET", raising=False)
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
         # Force fresh import
-        if "config" in sys.modules:
-            del sys.modules["config"]
-        import config
+        if "services.config" in sys.modules:
+            del sys.modules["services.config"]
+        import services.config as config
         assert config.INTERNAL_SECRET == "__test_placeholder_INTERNAL_SECRET__"
 
     def test_identity_svc_default(self, monkeypatch):
@@ -25,9 +24,9 @@ class TestConfigBootstrap:
         monkeypatch.delenv("IDENTITY_SVC_URL", raising=False)
         monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
-        if "config" in sys.modules:
-            del sys.modules["config"]
-        import config
+        if "services.config" in sys.modules:
+            del sys.modules["services.config"]
+        import services.config as config
         assert config.IDENTITY_SVC_URL == "http://identity:8001"
 
     def test_no_env_getenv_in_config(self):
@@ -63,9 +62,9 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.delenv("FERNET_KEY", raising=False)
-        if "config" in sys.modules:
-            del sys.modules["config"]
-        import config
+        if "services.config" in sys.modules:
+            del sys.modules["services.config"]
+        import services.config as config
 
         # Override _is_testing to allow runtime resolution during tests
         monkeypatch.setattr(config, "_is_testing", lambda: False)
@@ -100,9 +99,9 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.delenv("FERNET_KEY", raising=False)
-        if "config" in sys.modules:
-            del sys.modules["config"]
-        import config
+        if "services.config" in sys.modules:
+            del sys.modules["services.config"]
+        import services.config as config
 
         monkeypatch.setattr(config, "_is_testing", lambda: False)
 
@@ -123,9 +122,9 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
         monkeypatch.setenv("FERNET_KEY", "")
-        if "config" in sys.modules:
-            del sys.modules["config"]
-        import config
+        if "services.config" in sys.modules:
+            del sys.modules["services.config"]
+        import services.config as config
 
         await config.resolve_runtime_config()
 

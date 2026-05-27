@@ -1,10 +1,6 @@
-import os
-import sys
 import asyncio
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from ha_client import resolve_entity_by_name
+from services.execution.ha_client import resolve_entity_by_name
 
 mock_states_store: list[dict] = []
 

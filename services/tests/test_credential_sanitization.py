@@ -1,10 +1,6 @@
 # services/tests/test_credential_sanitization.py
 """Tests to ensure credentials are never leaked to LLM or logs."""
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from gateway.agent_loop import sanitize_for_llm
+from services.gateway.agent_loop import sanitize_for_llm
 
 
 class TestSanitizeForLLM:

@@ -8,7 +8,7 @@ import httpx
 import urllib.parse
 from services.config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
 from services.execution import ha_client
-from services.schemas import VideoPlayRequest, ExecutionResult
+from services.execution.schemas import VideoPlayRequest, ExecutionResult
 
 log = logging.getLogger("execution.video")
 
@@ -36,7 +36,7 @@ async def _get_searxng_url() -> str | None:
     if _SEARXNG_URL_CACHE and (time.time() - _SEARXNG_CACHE_TS) < _SEARXNG_CACHE_TTL:
         return _SEARXNG_URL_CACHE
     try:
-        from main import IDENTITY_SVC_URL, INTERNAL_SECRET
+        from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
                 f"{IDENTITY_SVC_URL}/api/settings",
