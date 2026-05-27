@@ -12,7 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional, Any, Dict
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect # pyright: ignore[reportUnusedImport]
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import UploadFile
@@ -25,7 +25,7 @@ from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterPro
 from gateway.orchestrator import get_all_settings, _get, SINGLE_TURN_TOOL_GUIDE
 from gateway.config_validator import validate_config
 from gateway.intent_engine import engine
-from gateway.history import update_history, ping_redis
+from gateway.history import update_history, ping_redis, get_history # pyright: ignore[reportUnusedImport]
 from gateway.media_device_cache import get_last_used_device, set_last_used_device
 from gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 from gateway.messaging import InferenceJobQueue, JobStatus
@@ -1875,6 +1875,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
 
 
 @app.post("/api/chat")
+@app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
     log.info("Chat handler entered")
     client = get_http_client()
@@ -2671,6 +2672,57 @@ async def proxy_tags():
 @app.get("/api/version")
 async def proxy_version():
     return {"version": "0.1.32"}
+
+
+@app.post("/api/show")
+async def proxy_show(request: Request):
+    try:
+        body = await request.json()
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            return JSONResponse({"error": "Ollama not configured"}, status_code=503)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{ollama_url}/api/show", json=body)
+            if resp.status_code == 200:
+                return resp.json()
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except Exception as e:
+        return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/embeddings")
+async def proxy_embeddings(request: Request):
+    try:
+        body = await request.json()
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            return JSONResponse({"error": "Ollama not configured"}, status_code=503)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{ollama_url}/api/embeddings", json=body)
+            if resp.status_code == 200:
+                return resp.json()
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except Exception as e:
+        return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/embed")
+async def proxy_embed(request: Request):
+    try:
+        body = await request.json()
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            return JSONResponse({"error": "Ollama not configured"}, status_code=503)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{ollama_url}/api/embed", json=body)
+            if resp.status_code == 200:
+                return resp.json()
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except Exception as e:
+        return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 @app.get("/api/search")
 async def global_search(q: str, request: Request):
     """Global semantic search proxying to RAG service."""
@@ -3110,6 +3162,103 @@ async def list_models(request: Request):
         "models": [settings.get("assistant_model"), settings.get("coding_model"), settings.get("librarian_model")],
         "note": "Active config models returned for this provider."
     }
+
+
+
+
+
+
+@app.get("/v1/models")
+async def list_openai_models(request: Request):
+    """OpenAI-compatible endpoint to list models."""
+    settings = await get_llm_settings()
+    provider = await get_provider(settings)
+    
+    model_names = []
+    if isinstance(provider, OllamaProvider):
+        try:
+            async with borrow_http_client() as client:
+                resp = await client.get(f"{provider.base_url}/api/tags")
+                if resp.status_code == 200:
+                    tags = resp.json().get("models", [])
+                    model_names = [m["name"] for m in tags]
+        except Exception as e:
+            log.error(f"Error querying Ollama models for OpenAI list: {e}")
+            
+    if not model_names:
+        # Fallback to configured models
+        for model_key in ["assistant_model", "coding_model", "librarian_model"]:
+            model_name = settings.get(model_key)
+            if model_name and model_name not in model_names:
+                model_names.append(model_name)
+                
+    # Map to OpenAI list format
+    openai_models = []
+    for m in model_names:
+        openai_models.append({
+            "id": m,
+            "object": "model",
+            "created": int(time.time()),
+            "owned_by": "system"
+        })
+        
+    return JSONResponse(content={
+        "object": "list",
+        "data": openai_models
+    }, status_code=200)
+
+
+@app.post("/v1/embeddings")
+async def openai_embeddings(request: Request):
+    """OpenAI-compatible embeddings endpoint."""
+    try:
+        body = await request.json()
+        model = body.get("model", "default")
+        input_data = body.get("input", "")
+        
+        # input_data can be a string or a list of strings
+        inputs = []
+        if isinstance(input_data, str):
+            inputs = [input_data]
+        elif isinstance(input_data, list):
+            inputs = input_data
+            
+        settings = await get_all_settings()
+        ollama_url = _get(settings, "llm_local_url")
+        if not ollama_url:
+            return JSONResponse({"error": "Ollama not configured"}, status_code=503)
+            
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{ollama_url}/api/embed", 
+                json={"model": model, "input": inputs}
+            )
+            if resp.status_code != 200:
+                return JSONResponse(content=resp.json(), status_code=resp.status_code)
+                
+            data = resp.json()
+            embeddings_list = data.get("embeddings", [])
+            
+            # Map to OpenAI list format
+            openai_data = []
+            for idx, emb in enumerate(embeddings_list):
+                openai_data.append({
+                    "object": "embedding",
+                    "index": idx,
+                    "embedding": emb
+                })
+                
+            return JSONResponse(content={
+                "object": "list",
+                "data": openai_data,
+                "model": model,
+                "usage": {
+                    "prompt_tokens": 0,
+                    "total_tokens": 0
+                }
+            }, status_code=200)
+    except Exception as e:
+        return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
 @app.post("/api/admin/raven/queue/{id}/execute")
 async def execute_raven_mission(id: int, request: Request):
