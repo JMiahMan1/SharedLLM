@@ -18,6 +18,7 @@ warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 try:
     import ha_client
+    from tts import text_to_speech as _text_to_speech
     from schemas import (
         UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
         TVCastRequest, HAServiceRequest, AnnouncementRequest,
@@ -34,9 +35,11 @@ try:
     from handlers import volumes as volume_handler
     from handlers import media_status as media_status_handler
     from handlers import ha_config as ha_config_handler
+    from announce_handlers import detect_tv_type as _detect_tv_type
 except ImportError:
     try:
         from . import ha_client
+        from .tts import text_to_speech as _text_to_speech
         from .schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
@@ -44,7 +47,7 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
        DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, HAConfigRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, HAConfigRequest, EntitySearchRequest, LLMInfoRequest, NetworkDeviceScanRequest
         )
         from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
         from .handlers import docker_logs as docker_logs_handler
@@ -53,8 +56,10 @@ except ImportError:
         from .handlers import volumes as volume_handler
         from .handlers import media_status as media_status_handler
         from .handlers import ha_config as ha_config_handler
+        from .announce_handlers import detect_tv_type as _detect_tv_type
     except (ImportError, ValueError):
         from execution import ha_client
+        from execution.tts import text_to_speech as _text_to_speech
         from execution.schemas import (
             UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
             TVCastRequest, HAServiceRequest, AnnouncementRequest,
@@ -62,7 +67,7 @@ except ImportError:
             WebSearchRequest, WebReadRequest, ExecutionResult,
             DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
             WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, HAConfigRequest
+            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, HAConfigRequest, EntitySearchRequest, LLMInfoRequest, NetworkDeviceScanRequest
         )
         from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, groups
         from execution.handlers import docker_logs as docker_logs_handler
@@ -71,6 +76,7 @@ except ImportError:
         from execution.handlers import volumes as volume_handler
         from execution.handlers import media_status as media_status_handler
         from execution.handlers import ha_config as ha_config_handler
+        from execution.announce_handlers import detect_tv_type as _detect_tv_type
 
 import threading
 
@@ -87,6 +93,10 @@ from config import (
     HA_URL,
     HA_TOKEN,
 )
+
+# Expose for test mocking
+text_to_speech = _text_to_speech
+detect_tv_type = _detect_tv_type
 
 async def resolve_internal_user(user_id: Optional[int] = None, rag_user: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Query Identity Service for full user credentials using internal secret.
@@ -260,6 +270,21 @@ TEMP_AUDIO_DIR = os.path.join(TEMP_MEDIA_DIR, "tts")
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 TEMP_VIDEO_DIR = TEMP_MEDIA_DIR
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
+
+def get_public_host():
+    """Resolve the public host for media URLs (for external device access)."""
+    from config import EXECUTION_EXTERNAL_HOST
+    env_host = EXECUTION_EXTERNAL_HOST
+    if env_host:
+        return env_host
+    try:
+        with open("docker-compose.yml", "r") as f:
+            for line in f:
+                if "ai-server:" in line:
+                    return line.split(":")[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
 
 async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_media_url: str, timeout: int = 10, device_type: str = "unknown") -> Dict[str, Any]:
     """Verify that a media player actually started playing the expected content.
@@ -907,10 +932,9 @@ async def execute_tts(req: TTSRequest):
     Converts text to speech using the local Kokoro engine or Edge-TTS.
     Returns the audio bytes as a base64 encoded string in the detail.
     """
-    from tts import text_to_speech
     import base64
     try:
-        audio_bytes = await text_to_speech(req.text, voice=req.voice, storybook=req.storybook)
+        audio_bytes = await _text_to_speech(req.text, voice=req.voice, storybook=req.storybook)
         if not audio_bytes:
             return _fail("TTS generation returned empty bytes", "tts")
         
@@ -1100,7 +1124,7 @@ async def execute_announce(req: AnnouncementRequest):
     if was_off:
         log.info(f"[announce] Device was {initial_state.get('state') if initial_state else 'unknown'}, turning on...")
         # Detect device type for platform-specific power-on
-        from announce_handlers import detect_tv_type
+        detect_tv_type = _detect_tv_type
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
@@ -1124,10 +1148,9 @@ async def execute_announce(req: AnnouncementRequest):
     media_url = None
     
     if req.tts_engine == "kokoro":
-        from tts import text_to_speech
         try:
             log.info(f"[announce] Generating TTS audio (engine=kokoro, storybook={req.storybook})")
-            audio_bytes = await text_to_speech(req.message, storybook=req.storybook)
+            audio_bytes = await _text_to_speech(req.message, storybook=req.storybook)
             if not audio_bytes:
                 return _fail("Kokoro returned empty audio", "announce")
             
@@ -1135,18 +1158,6 @@ async def execute_announce(req: AnnouncementRequest):
             media_id = f"tts-{uuid4().hex[:8]}"
             TEMP_AUDIO_CACHE[media_id] = audio_bytes
             log.info(f"[announce] Audio cached: media_id={media_id}, cache_size={len(TEMP_AUDIO_CACHE)}")
-            
-            def get_public_host():
-                from config import EXECUTION_EXTERNAL_HOST
-                env_host = EXECUTION_EXTERNAL_HOST
-                if env_host: return env_host
-                try:
-                    with open("docker-compose.yml", "r") as f:
-                        for line in f:
-                            if "ai-server:" in line:
-                                return line.split(":")[1].strip().strip('"').strip("'")
-                except: pass
-                raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
             
             public_host = get_public_host()
             # Use dedicated media port 8888 (accessible externally)
@@ -1220,7 +1231,7 @@ async def execute_announce(req: AnnouncementRequest):
     if result.get("ok") and media_url:
         log.info(f"[announce] Verifying playback on {target_player}...")
         # Detect device type for lenient TV verification
-        from announce_handlers import detect_tv_type
+        detect_tv_type = _detect_tv_type
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
@@ -1251,7 +1262,7 @@ async def execute_announce(req: AnnouncementRequest):
     
     # 6. Restore initial state for ALL devices
     # Detect device type for restoration policy
-    from announce_handlers import detect_tv_type
+    detect_tv_type = _detect_tv_type
     device_type = detect_tv_type(target_player, initial_state.get("state", "unknown") if initial_state else "unknown", initial_state.get("attributes", {}) if initial_state else {}, loaded_components)
     
     # For Roku: restore the MA player entity (where volume/source/playback state lives)
