@@ -11,7 +11,7 @@ import time
 import hashlib
 sys.path.insert(0, os.path.dirname(__file__))
 
-from config import INTERNAL_SECRET, CHROMA_PERSIST_DIR, EMBEDDING_MODEL
+from services.config import INTERNAL_SECRET, CHROMA_PERSIST_DIR, EMBEDDING_MODEL
 from typing import Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, status

@@ -36,9 +36,8 @@ RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y \
 RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 
-# Copy the app contents directly (not the app/ folder itself)
-COPY app/ /app/
-COPY data/ /data/
+COPY . .
+ENV PYTHONPATH=/app
 
 # Expose FastAPI port
 EXPOSE 11435

@@ -14,8 +14,8 @@ try:
     import ha_client
     from schemas import ExecutionResult
 except ImportError:
-    import ha_client
-    from schemas import ExecutionResult
+    from .. import ha_client
+    from ..schemas import ExecutionResult
 
 log = logging.getLogger("execution.webos")
 

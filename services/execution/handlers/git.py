@@ -22,15 +22,15 @@ import logging
 import os
 import re
 import shlex
-from config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
+try:
+    from config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
+except ImportError:
+    from ...config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
 from typing import Optional
 try:
     from schemas import GitOperationRequest, GitExecutionResult
 except ImportError:
-    try:
-        from ..schemas import GitOperationRequest, GitExecutionResult
-    except ImportError:
-        from execution.schemas import GitOperationRequest, GitExecutionResult
+    from ..schemas import GitOperationRequest, GitExecutionResult
 
 log = logging.getLogger("execution.git")
 

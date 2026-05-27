@@ -26,17 +26,17 @@ Jarvis operates using a three-tier request handling hierarchy to balance speed a
 
 ### Core Services
 
-| Service           | Port  | Description                                                                                                                                                                                  |
-|-------------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Gateway**           | 11435 | Orchestrator & Intent Classifier. Routes requests to specialized services.                                                                                                                   |
-| **Identity**          | 8001  | Secure credential management and device-to-user resolution.                                                                                                                                  |
-| **Execution**         | 8003  | Home Assistant bridge for lights, media, climate, and security.                                                                                                                              |
-| **RAG**               | 8004  | Semantic memory layer using ChromaDB for knowledge retrieval.                                                                                                                                |
-| **Storage**           | 8005  | Shared persistence for documents and configuration.                                                                                                                                          |
-| **Logging**           | 8006  | Centralized observability hub for all microservices.                                                                                                                                         |
-| **Workspace Runtime** | 8007  | Sandboxed workspace inspection for Raven's coding and system repair tasks. |
-| **Automation**        | \-     | Background task processor for polling and scheduled events.                                                                                                                                  |
-| **Redis**             | 6379  | High-speed cache for session state and history.                                                                                                                                              |
+| Service             | Port  | Description                                                                                                |
+| ------------------- | ----- | ---------------------------------------------------------------------------------------------------------- |
+| **Gateway**         | 11435 | Orchestrator & Intent Classifier. Routes requests to specialized services.                                 |
+| **Identity**        | 8001  | Secure credential management and device-to-user resolution.                                                |
+| **Execution**       | 8003  | Home Assistant bridge for lights, media, climate, and security.                                            |
+| **RAG**             | 8004  | Semantic memory layer using ChromaDB for knowledge retrieval.                                              |
+| **Storage**         | 8005  | Shared persistence for documents and configuration.                                                        |
+| **Logging**         | 8006  | Centralized observability hub for all microservices.                                                       |
+| **Workspace Runtime** | 8007  | Sandboxed workspace inspection for Raven's coding and system repair tasks.                                 |
+| **Automation**      | -     | Background task processor for polling and scheduled events.                                                |
+| **Redis**           | 6379  | High-speed cache for session state and history.                                                            |
 
 ## 🚀 Deployment
 

@@ -19,10 +19,10 @@ try:
     import device_registry
     import device_discovery
 except ImportError:
-    import ha_client
-    from schemas import ExecutionResult
-    import device_registry
-    import device_discovery
+    from .. import ha_client
+    from ..schemas import ExecutionResult
+    from .. import device_registry
+    from .. import device_discovery
 
 log = logging.getLogger("execution.roku")
 
