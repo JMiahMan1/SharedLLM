@@ -1,12 +1,9 @@
 """
 Fernet encryption helpers for workspace-scoped secrets.
 """
-import os
-import sys
 import logging
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import FERNET_KEY
+from services.config import FERNET_KEY
 from cryptography.fernet import Fernet, InvalidToken
 
 log = logging.getLogger("workspace_runtime.crypto")

@@ -1,15 +1,8 @@
 import json
-import sys
-import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-# Path setup
-_services_path = os.path.join(os.path.dirname(__file__), "..")
-if _services_path not in sys.path:
-    sys.path.insert(0, _services_path)
 
 
 # =============================================================================

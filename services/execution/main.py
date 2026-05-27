@@ -1,6 +1,5 @@
 # services/execution/main.py
 import os
-import sys
 import logging
 import asyncio
 import httpx
@@ -12,18 +11,11 @@ from fastapi import FastAPI, Depends, HTTPException, status, Header, Request, Fi
 from fastapi.responses import JSONResponse
 import traceback
 
-# Ensure services/ is on sys.path so config.py resolves
-# When Docker COPY . . is used, structure is /app/services/execution/main.py
-# services/config.py is at /app/services/config.py
-_services_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _services_dir not in sys.path:
-    sys.path.insert(0, _services_dir)
-
 # Suppress InsecureRequestWarning for internal self-signed certs (homelab)
 from urllib3.exceptions import InsecureRequestWarning
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
-from config import (
+from services.config import (
     INTERNAL_SECRET,
     IDENTITY_SVC_URL,
     OLLAMA_URL,
@@ -117,12 +109,12 @@ async def lifespan(app: FastAPI):
         log.warning(f"DNS resolver patch failed: {e}")
     
     # Resolve runtime config from Identity service
-    from config import resolve_runtime_config
+    from services.config import resolve_runtime_config
     await resolve_runtime_config()
     
     log.info("Execution Bridge starting up.")
     # Auto-download Kokoro models if missing
-    from config import MODELS_DIR
+    from services.config import MODELS_DIR
     os.makedirs(MODELS_DIR, exist_ok=True)
     kokoro_path = os.path.join(MODELS_DIR, "kokoro-v1.0.onnx")
     voices_path = os.path.join(MODELS_DIR, "voices-v1.0.bin")
@@ -229,7 +221,7 @@ async def global_exception_handler(request, exc):
 # Transient cache for locally-generated media (TTS announcements)
 TEMP_AUDIO_CACHE: Dict[str, bytes] = {}
 # Persistent disk cache for TTS files (survives container restarts)
-from config import TEMP_MEDIA_DIR
+from services.config import TEMP_MEDIA_DIR
 TEMP_AUDIO_DIR = os.path.join(TEMP_MEDIA_DIR, "tts")
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 TEMP_VIDEO_DIR = TEMP_MEDIA_DIR
@@ -237,7 +229,7 @@ os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
 def get_public_host():
     """Resolve the public host for media URLs (for external device access)."""
-    from config import EXECUTION_EXTERNAL_HOST
+    from services.config import EXECUTION_EXTERNAL_HOST
     env_host = EXECUTION_EXTERNAL_HOST
     if env_host:
         return env_host
@@ -578,7 +570,7 @@ async def execute_docker(req: DockerComposeRequest):
         try:
             # We run this from the workspace root where docker-compose.yml is
             cmd = ["docker-compose", "up", "-d", "--build"] + list(services)
-            from config import COMPOSE_PROJECT_DIR
+            from services.config import COMPOSE_PROJECT_DIR
             compose_dir = COMPOSE_PROJECT_DIR or os.path.expanduser("~/workspace")
             res = subprocess.run(cmd, capture_output=True, text=True, cwd=compose_dir)
             if res.returncode == 0:
@@ -769,7 +761,7 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
     Proxies to Gateway internal discovery API.
     """
     # Note: Gateway is usually at http://gateway:11435 in docker
-    from config import GATEWAY_INTERNAL_URL
+    from services.config import GATEWAY_INTERNAL_URL
     GATEWAY_INTERNAL = GATEWAY_INTERNAL_URL or "http://localhost:11435"
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -941,7 +933,7 @@ async def execute_index_capabilities():
     import subprocess
     import sys
     
-    from config import SCRIPTS_DIR
+    from services.config import SCRIPTS_DIR
     script_path = os.path.join(os.getcwd(), "scripts", "index_capabilities.py")
     if not os.path.exists(script_path):
         # Fallback for Docker environment
@@ -1703,7 +1695,7 @@ async def execute_diagnostics(req: DiagnosticRequest):
 async def execute_llm_info(req: LLMInfoRequest):
     """Query Alpaca/Ollama for model and system information."""
     # Read Ollama URL from Identity settings at runtime
-    from config import IDENTITY_SVC_URL, INTERNAL_SECRET
+    from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
     ollama_url = ""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:

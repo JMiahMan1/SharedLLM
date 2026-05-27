@@ -1,9 +1,4 @@
-import os
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from announce_handlers import detect_tv_type
+from services.execution.announce_handlers import detect_tv_type
 
 def test_detect_cast_by_entity_id():
     assert detect_tv_type("media_player.office_tv_chrome", "idle", {}) == "cast"

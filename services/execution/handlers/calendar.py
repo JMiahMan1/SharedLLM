@@ -1,11 +1,9 @@
 # services/execution/handlers/calendar.py
 import asyncio
 import logging
-import time
-from datetime import date, datetime, timedelta
-import pytz as tz
+import pytz
+from datetime import date, datetime, timedelta, timezone
 from services.config import TIMEZONE
-from services.execution import ha_client
 from services.execution.schemas import CalendarRequest, ExecutionResult
 from ..personal_data import resolve_personal_data_provider
 
@@ -14,14 +12,14 @@ log = logging.getLogger("execution.calendar")
 LOCAL_TZ_NAME = TIMEZONE
 
 def _get_local_tz():
-    return tz.gettz(LOCAL_TZ_NAME)
+           return pytz.timezone(LOCAL_TZ_NAME)
 
 def _normalize_event_time(dt_value):
     """Converts ANY event time to AWARE local time."""
     local_tz = _get_local_tz()
     if isinstance(dt_value, datetime):
         if dt_value.tzinfo is None:
-            return dt_value.replace(tzinfo=tz.tzutc()).astimezone(local_tz)
+            return dt_value.replace(tzinfo=timezone.utc).astimezone(local_tz)
         return dt_value.astimezone(local_tz)
     elif isinstance(dt_value, date):
         target = datetime.combine(dt_value, datetime.min.time())
@@ -99,7 +97,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             local_tz = _get_local_tz()
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=local_tz)
-            dt_utc = dt.astimezone(tz.tzutc())
+            dt_utc = dt.astimezone(timezone.utc)
             
             def _add():
                 client = provider.calendar_client()

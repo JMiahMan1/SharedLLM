@@ -4,12 +4,10 @@ Microservice 4: Context & RAG Service
 Manages ChromaDB for vector search and ingestion.
 """
 import os
-import sys
 import json
 import logging
 import time
 import hashlib
-sys.path.insert(0, os.path.dirname(__file__))
 
 from services.config import INTERNAL_SECRET, CHROMA_PERSIST_DIR, EMBEDDING_MODEL
 from typing import Optional
@@ -21,10 +19,7 @@ from chromadb.config import Settings  # pyright: ignore[reportMissingTypeStubs]
 from chromadb.utils import embedding_functions  # pyright: ignore[reportMissingTypeStubs]
 import traceback
 
-try:
-    from .schemas import SearchRequest, SearchResponse, SearchResultItem, IngestRequest
-except ImportError:
-    from schemas import SearchRequest, SearchResponse, SearchResultItem, IngestRequest
+from services.rag.schemas import SearchRequest, SearchResponse, SearchResultItem, IngestRequest
 
 log = logging.getLogger("rag")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -39,7 +34,7 @@ embedding_fn = None
 async def lifespan(app: FastAPI):
     global chroma_client, embedding_fn
     # Resolve runtime config from Identity service
-    from config import resolve_runtime_config
+    from services.config import resolve_runtime_config
     await resolve_runtime_config()
     
     log.info(f"Initializing RAG Service. Chroma DB dir: {CHROMA_DIR}")

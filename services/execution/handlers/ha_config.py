@@ -17,7 +17,7 @@ log = logging.getLogger("execution.ha_config")
 
 async def _get_ha_credentials(user_context: dict) -> tuple:
     """Resolve HA URL and token from identity service."""
-    from config import INTERNAL_SECRET, IDENTITY_SVC_URL
+    from services.config import INTERNAL_SECRET, IDENTITY_SVC_URL
 
     rag_user = user_context.get("user", "default")
     async with httpx.AsyncClient(timeout=5.0) as client:

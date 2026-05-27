@@ -1,10 +1,7 @@
-import os
-import sys
 import re
 import urllib.parse
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+from services.config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
 from typing import Any, Optional
 
 import requests
