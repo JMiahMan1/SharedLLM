@@ -3,12 +3,10 @@ Semantic Router for the Gateway Service.
 Classifies intents rapidly using fastembed to bypass LLMs for known commands.
 """
 import os
-import sys
 import json
 import logging
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from gateway.config import FAST_PATH_THRESHOLD, EMBEDDING_MODEL, PHRASEBOOK_PATH
+from services.gateway.config import FAST_PATH_THRESHOLD, EMBEDDING_MODEL, PHRASEBOOK_PATH
 try:
     import numpy as np
 except ImportError:

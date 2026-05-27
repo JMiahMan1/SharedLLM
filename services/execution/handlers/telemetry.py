@@ -15,7 +15,7 @@ log = logging.getLogger("execution/telemetry")
 
 
 async def _get_identity_session() -> httpx.AsyncClient:
-    from config import IDENTITY_SVC_URL, INTERNAL_SECRET
+    from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
     return httpx.AsyncClient(
         base_url=IDENTITY_SVC_URL,
         headers={"X-Internal-Secret": INTERNAL_SECRET},

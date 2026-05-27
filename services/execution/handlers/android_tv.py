@@ -237,7 +237,7 @@ async def play_video(ha_url: str, ha_token: str, entity_id: str, video_url: str,
     if not media_id:
         return ExecutionResult(status="FAILURE", message=f"Failed to download video for '{query}'.", service="android_tv_video")
 
-    from config import EXECUTION_EXTERNAL_HOST
+    from services.config import EXECUTION_EXTERNAL_HOST
     if not EXECUTION_EXTERNAL_HOST:
         return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="android_tv_video")
 

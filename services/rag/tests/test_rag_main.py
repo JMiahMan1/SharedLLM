@@ -9,11 +9,8 @@ sys.modules['chromadb.config'] = MagicMock()
 sys.modules['chromadb.utils'] = MagicMock()
 sys.modules['sentence_transformers'] = MagicMock()
 
-# Ensure parent directory is in sys.path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 os.environ["INTERNAL_SECRET"] = "test-secret"
-from main import app
+from services.rag.main import app
 
 client = TestClient(app)
 

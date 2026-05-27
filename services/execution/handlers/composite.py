@@ -4,20 +4,10 @@ Composite workflows that chain multiple handlers together.
 These are "macro-actions" that combine existing capabilities.
 """
 import logging
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-try:
-    import ha_client
-    from schemas import ExecutionResult
-    import storage
-    from tts import text_to_speech
-except ImportError:
-    from .. import ha_client
-    from ..schemas import ExecutionResult
-    from . import storage
-    from ..tts import text_to_speech
+from services.execution import ha_client
+from services.execution.schemas import ExecutionResult
+from services.execution.handlers import storage
+from services.execution.tts import text_to_speech
 
 log = logging.getLogger("execution.composite")
 
@@ -46,7 +36,7 @@ async def handle_document_broadcast(req) -> ExecutionResult:
 
     # Step 1: Read the document from storage
     try:
-        from schemas import StorageFileReadRequest
+        from services.execution.schemas import StorageFileReadRequest
         read_req = StorageFileReadRequest(user_context=ctx, path=input_path)
         read_result = await storage.handle_storage_read(read_req)
         if read_result.status != "SUCCESS":
@@ -81,7 +71,7 @@ async def handle_document_broadcast(req) -> ExecutionResult:
     import time
     audio_cache_key = f"tts-{uuid4().hex[:8]}-{int(time.time())}"
     
-    from main import TEMP_AUDIO_CACHE, TEMP_AUDIO_DIR
+    from services.execution.main import TEMP_AUDIO_CACHE, TEMP_AUDIO_DIR
     import os
     TEMP_AUDIO_CACHE[audio_cache_key] = audio_bytes
     
@@ -95,7 +85,7 @@ async def handle_document_broadcast(req) -> ExecutionResult:
 
     # Build local media URL
     try:
-        from config import EXECUTION_EXTERNAL_HOST
+        from services.config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             raise RuntimeError("EXECUTION_EXTERNAL_HOST not configured")
         media_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{audio_cache_key}"
@@ -157,7 +147,7 @@ async def handle_night_mode(req) -> ExecutionResult:
     # Step 1: Turn off lights
     if lights:
         try:
-            from schemas import LightControlRequest
+            from services.execution.schemas import LightControlRequest
             if lights == "all":
                 all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
                 light_entities = [s["entity_id"] for s in all_states if s["entity_id"].startswith("light.") and s.get("state") == "on"]
@@ -166,7 +156,7 @@ async def handle_night_mode(req) -> ExecutionResult:
 
             for light_id in light_entities:
                 light_req = LightControlRequest(user_context=ctx, entity_id=light_id, action="turn_off", brightness_pct=0)
-                from handlers import light as light_handler
+                from services.execution.handlers import light as light_handler
                 r = await light_handler.handle_light(light_req)
                 results.append(f"light.{light_id}: {r.message}")
         except Exception as e:
@@ -175,7 +165,7 @@ async def handle_night_mode(req) -> ExecutionResult:
     # Step 2: Set climate to sleep temp
     if climate_entity:
         try:
-            from handlers import climate as climate_handler
+            from services.execution.handlers import climate as climate_handler
             climate_req = climate_handler.ClimateRequest(
                 user_context=ctx,
                 entity_id=climate_entity,
@@ -189,7 +179,7 @@ async def handle_night_mode(req) -> ExecutionResult:
     # Step 3: Optional media playback
     if media_entity and media_query:
         try:
-            from schemas import MediaPlayRequest
+            from services.execution.schemas import MediaPlayRequest
             media_req = MediaPlayRequest(
                 user_context=ctx,
                 entity_id=media_entity,
@@ -201,7 +191,7 @@ async def handle_night_mode(req) -> ExecutionResult:
                 enqueue="replace",
                 volume=None,
             )
-            from handlers import media as media_handler
+            from services.execution.handlers import media as media_handler
             r = await media_handler.handle_media_play(media_req)
             results.append(f"Media: {r.message}")
         except Exception as e:

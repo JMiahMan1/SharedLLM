@@ -1,15 +1,12 @@
 # services/automation/main.py
 import asyncio
 import logging
-import os
-import sys
 import json
 import httpx
 from datetime import datetime
 import redis.asyncio as redis
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import REDIS_URL, EXECUTION_SVC_URL, INTERNAL_SECRET
+from services.config import REDIS_URL, EXECUTION_SVC_URL, INTERNAL_SECRET
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 log = logging.getLogger("automation")

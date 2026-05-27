@@ -1,8 +1,6 @@
 {
   "extraPaths": [
-    "services",
-    "app",
-    "config"
+    "."
   ],
   "typeCheckingMode": "strict",
   "pythonVersion": "3.11",

@@ -1,13 +1,8 @@
 import asyncio
-import os
-import sys
 from fastapi.testclient import TestClient
 
-# Ensure parent directory is in sys.path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from storage.main import app, health, list_provider_entries, write_provider_content, IndexScanRequest
-from storage.models import ProviderConfig, ProviderWriteRequest, StorageEntry
+from services.storage.main import app, health, list_provider_entries, write_provider_content, IndexScanRequest
+from services.storage.models import ProviderConfig, ProviderWriteRequest, StorageEntry
 
 client = TestClient(app)
 

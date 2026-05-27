@@ -1,13 +1,11 @@
 """Comprehensive tests for gateway media proxy routes."""
 import os
+import sys
 os.environ["INTERNAL_SECRET"] = "test-secret"
 
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock, patch
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @pytest.fixture(name="client")
