@@ -22,10 +22,6 @@ Security:
     - Rebuild/rebuild_all require is_admin=True.
 """
 import logging
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 log = logging.getLogger("execution.deployment")
 
 CONTAINER_ALLOWLIST_PREFIX = "sharedllm_"

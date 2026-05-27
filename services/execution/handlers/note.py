@@ -1,11 +1,8 @@
 # services/execution/handlers/note.py
 import logging
-import sys
 import os
 import requests
 import xml.etree.ElementTree as ET
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from config import LOCAL_NOTES_ROOT as _LOCAL_NOTES_ROOT
 from pathlib import Path
 

@@ -6,8 +6,6 @@ import sys
 import time
 import html2text
 import httpx
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from urllib.parse import urlencode
 from playwright.async_api import async_playwright
 from typing import Optional

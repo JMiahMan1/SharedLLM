@@ -148,7 +148,7 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
         await asyncio.sleep(2)
 
     # Detect if this is a Roku device — needs two-step MASS flow
-    from handlers import roku as roku_handler
+    from . import roku as roku_handler
     is_roku = await roku_handler.is_roku_device(ha_url, ha_token, full_entity_id)
 
     if is_roku:
@@ -195,7 +195,7 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
     ha_token = ctx_ha_token(req)
 
     # Detect if this is a Roku device
-    from handlers import roku as roku_handler
+    from . import roku as roku_handler
     is_roku = await roku_handler.is_roku_device(ha_url, ha_token, full_entity_id)
 
     if is_roku:
@@ -369,7 +369,7 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
 
 async def _roku_play_audiobook(roku_entity: str, stream_url: str, title: str, ha_url: str, ha_token: str) -> ExecutionResult:
     """Play audiobook on Roku: ECP launch Media Assistant app + delegate audio to MA sibling."""
-    from handlers import roku as roku_handler
+    from . import roku as roku_handler
     import asyncio
     import httpx
 
