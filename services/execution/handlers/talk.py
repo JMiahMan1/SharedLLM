@@ -1,21 +1,17 @@
 import base64
 import json
 import logging
-import sys
-import os
 import urllib.parse
 from typing import Any
 from uuid import uuid4
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 try:
-    from schemas import ExecutionResult, TalkRequest
-    from personal_data import resolve_personal_data_provider
-    from tts import text_to_speech
+    from ..schemas import ExecutionResult, TalkRequest
+    from ..personal_data import resolve_personal_data_provider
+    from ..tts import text_to_speech
 except ImportError:
     from schemas import ExecutionResult, TalkRequest
     from personal_data import resolve_personal_data_provider
-    from tts import text_to_speech
+    from ..tts import text_to_speech
 
 log = logging.getLogger("execution.talk")
 
