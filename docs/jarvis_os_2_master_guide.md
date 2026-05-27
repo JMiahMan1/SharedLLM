@@ -25,7 +25,7 @@ Based on the system `README.md`, Jarvis utilizes a strict semantic routing hiera
 The entire microservice architecture is strictly isolated behind a Caddy reverse proxy acting as the sole entry point on **Port 80**.
 *   **Frontend Traffic (`/*`)**: Routed to the React `ui:8008` container.
 *   **API Traffic:**
-    *   `/api/chat`, `/api/generate`, `/api/admin/raven`: Routed to `gateway:11435`.
+    *   `/api/chat`, `/api/generate`, `/api/admin/raven`, `/v1/*`: Routed to `gateway:11435`.
     *   `/execute`: Routed directly to `execution:8003` (FastAPI API port). **Note:** media files (TTS audio, video) are served on the separate **media port `:8888`** by a lightweight `HTTPServer` thread running inside the execution container. This split was introduced to prevent the FastAPI event loop from blocking on large file transfers.
     *   `/api/auth`, `/api/users`: Routed to `identity:8001`.
     *   `/control_plane`: Routed to `control_plane:8008`.
@@ -1435,6 +1435,13 @@ This section breaks down the React/Ionic frontend page by page. It details exact
 | Endpoint | Method | Service | Purpose |
 | :--- | :--- | :--- | :--- |
 | `/api/chat` | POST | Gateway | LLM chat inference (tiered routing) |
+| `/v1/chat/completions` | POST | Gateway | OpenAI standard chat completions |
+| `/v1/models` | GET | Gateway | OpenAI standard model discovery list |
+| `/v1/embeddings` | POST | Gateway | OpenAI standard batch embeddings generation |
+| `/api/tags` | GET | Gateway | Ollama standard tag/model discovery list |
+| `/api/show` | POST | Gateway | Ollama standard model inspector |
+| `/api/embeddings` | POST | Gateway | Ollama standard single-text embeddings generation |
+| `/api/embed` | POST | Gateway | Ollama standard batch-text embeddings generation |
 | `/api/auth/login` | POST | Identity | User authentication (returns JWT) |
 | `/api/auth/test-connection` | POST | Identity | Test third-party credential connectivity |
 | `/api/users/create` | POST | Identity | Create a new user profile |
