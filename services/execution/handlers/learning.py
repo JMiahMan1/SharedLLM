@@ -1,10 +1,8 @@
 # services/execution/handlers/learning.py
 import logging
 import httpx
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from config import RAG_SVC_URL, INTERNAL_SECRET
-from schemas import SystemLearningRequest, ExecutionResult
+from services.config import RAG_SVC_URL, INTERNAL_SECRET
+from services.schemas import SystemLearningRequest, ExecutionResult
 
 log = logging.getLogger("execution.learning")
 
