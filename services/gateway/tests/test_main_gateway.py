@@ -134,3 +134,156 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert "Mocked" in data["message"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_completions(client: TestClient, monkeypatch):
+    import main
+    
+    # Mock resolve_identity, get_llm_settings, get_assistant_model, update_history
+    monkeypatch.setattr(main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
+    monkeypatch.setattr(main, "update_history", AsyncMock(return_value=None))
+    monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={"active_llm_provider": "ollama", "ollama_assistant_model": "qwen3:8b"}))
+    monkeypatch.setattr(main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
+    monkeypatch.setattr(main, "fetch_global_setting", AsyncMock(return_value="0.85"))
+    
+    # Mock the job queue to return a simulated response
+    mock_job_queue = MagicMock()
+    mock_job_queue.enqueue_job = AsyncMock(return_value="test-job-123")
+    mock_job_queue.get_job_status = AsyncMock(return_value={
+        "status": "completed",
+        "result": "Hello from OpenAI compatible endpoint!"
+    })
+    mock_job_queue.get_chunks = AsyncMock(return_value=["Hello from OpenAI compatible endpoint!"])
+    monkeypatch.setattr(main, "job_queue", mock_job_queue)
+    
+    # Post to /v1/chat/completions in standard OpenAI format
+    resp = client.post("/v1/chat/completions", json={
+        "model": "qwen3:8b",
+        "messages": [{"role": "user", "content": "hello"}],
+        "stream": False
+    }, headers={"X-Internal-Secret": "test-secret"})
+    
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object"] == "chat.completion"
+    assert data["choices"][0]["message"]["content"] == "Hello from OpenAI compatible endpoint!"
+
+
+@pytest.mark.asyncio
+async def test_list_openai_models(client: TestClient, monkeypatch):
+    import main
+    monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={
+        "assistant_model": "qwen3.6-35b-a3b:q4_k_m",
+        "coding_model": "qwen2.5-coder:7b",
+        "librarian_model": "qwen3:8b"
+    }))
+    
+    # Mock provider to be openrouter so we fall back to settings
+    from gateway.llm_providers import OpenRouterProvider
+    mock_provider = MagicMock(spec=OpenRouterProvider)
+    monkeypatch.setattr(main, "get_provider", AsyncMock(return_value=mock_provider))
+    
+    resp = client.get("/v1/models")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object"] == "list"
+    assert len(data["data"]) >= 3
+    model_ids = [m["id"] for m in data["data"]]
+    assert "qwen3.6-35b-a3b:q4_k_m" in model_ids
+
+
+@pytest.mark.asyncio
+async def test_list_ollama_tags(client: TestClient, monkeypatch):
+    import main
+    monkeypatch.setattr(main, "get_all_settings", AsyncMock(return_value={
+        "llm_local_url": "http://ollama.local"
+    }))
+    
+    class MockResponse:
+        def __init__(self, json_data, status_code=200):
+            self.json_data = json_data
+            self.status_code = status_code
+        def json(self): return self.json_data
+        def raise_for_status(self): pass
+        @property
+        def text(self): return str(self.json_data)
+        
+    class MockAsyncClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, exc_type, exc, tb): return False
+        async def get(self, url, params=None, headers=None):
+            if "/api/tags" in url:
+                return MockResponse({
+                    "models": [
+                        {
+                            "name": "qwen3.6-35b-a3b:q4_k_m",
+                            "model": "qwen3.6-35b-a3b:q4_k_m"
+                        }
+                    ]
+                })
+            return MockResponse({})
+            
+    monkeypatch.setattr(main.httpx, "AsyncClient", lambda *args, **kwargs: MockAsyncClient())
+    
+    resp = client.get("/api/tags")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "models" in data
+    assert len(data["models"]) >= 1
+    assert data["models"][0]["name"] == "qwen3.6-35b-a3b:q4_k_m"
+
+
+@pytest.mark.asyncio
+async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
+    import main
+    monkeypatch.setattr(main, "get_all_settings", AsyncMock(return_value={
+        "llm_local_url": "http://ollama.local"
+    }))
+    
+    class MockResponse:
+        def __init__(self, json_data, status_code=200):
+            self.json_data = json_data
+            self.status_code = status_code
+        def json(self): return self.json_data
+        def raise_for_status(self): pass
+        @property
+        def text(self): return str(self.json_data)
+        
+    class MockAsyncClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, exc_type, exc, tb): return False
+        async def post(self, url, json=None, headers=None):
+            if "/api/show" in url:
+                return MockResponse({"modelfile": "FROM qwen3.6-35b-a3b:q4_k_m"})
+            elif "/api/embeddings" in url:
+                return MockResponse({"embedding": [0.1, 0.2, 0.3]})
+            elif "/api/embed" in url:
+                return MockResponse({"embeddings": [[0.1, 0.2, 0.3]]})
+            return MockResponse({})
+            
+    monkeypatch.setattr(main.httpx, "AsyncClient", lambda *args, **kwargs: MockAsyncClient())
+    
+    # 1. /api/show
+    resp_show = client.post("/api/show", json={"name": "qwen3.6-35b-a3b:q4_k_m"})
+    assert resp_show.status_code == 200
+    assert "modelfile" in resp_show.json()
+    
+    # 2. /api/embeddings
+    resp_embeddings = client.post("/api/embeddings", json={"model": "qwen3.6-35b-a3b:q4_k_m", "prompt": "hello"})
+    assert resp_embeddings.status_code == 200
+    assert "embedding" in resp_embeddings.json()
+    
+    # 3. /api/embed
+    resp_embed = client.post("/api/embed", json={"model": "qwen3.6-35b-a3b:q4_k_m", "input": ["hello"]})
+    assert resp_embed.status_code == 200
+    assert "embeddings" in resp_embed.json()
+    
+    # 4. /v1/embeddings
+    resp_openai_embed = client.post("/v1/embeddings", json={"model": "qwen3.6-35b-a3b:q4_k_m", "input": "hello"})
+    assert resp_openai_embed.status_code == 200
+    openai_data = resp_openai_embed.json()
+    assert openai_data["object"] == "list"
+    assert len(openai_data["data"]) == 1
+    assert openai_data["data"][0]["object"] == "embedding"
+    assert openai_data["data"][0]["embedding"] == [0.1, 0.2, 0.3]
