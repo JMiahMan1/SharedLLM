@@ -1,16 +1,18 @@
 # services/execution/handlers/workspace.py
-import os
-import logging
 import difflib
+import logging
+import os
 import shlex
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from config import WORKSPACE_ROOT
 from typing import Optional
-try:
-    from schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceSearchRequest, WorkspaceShellRequest, ExecutionResult
-except ImportError:
-    from ..schemas import WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceSearchRequest, WorkspaceShellRequest, ExecutionResult
+from services.config import WORKSPACE_ROOT
+from services.execution.schemas import (
+    ExecutionResult,
+    WorkspaceFileReadRequest,
+    WorkspaceFileWriteRequest,
+    WorkspaceFilePatchRequest,
+    WorkspaceSearchRequest,
+    WorkspaceShellRequest,
+)
 
 log = logging.getLogger("execution.workspace")
 READ_ONLY_SHELL_COMMANDS = {

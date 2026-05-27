@@ -2,19 +2,13 @@
 import logging
 import asyncio
 import json
-import re
 import os
+import re
 import httpx
 import urllib.parse
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
-try:
-    import ha_client
-    from schemas import VideoPlayRequest, ExecutionResult
-except ImportError:
-    from .. import ha_client
-    from ..schemas import VideoPlayRequest, ExecutionResult
+from services.config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
+from services.execution import ha_client
+from services.schemas import VideoPlayRequest, ExecutionResult
 
 log = logging.getLogger("execution.video")
 
@@ -431,7 +425,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
                 service="video_play",
             )
         await wake_task
-        from config import EXECUTION_EXTERNAL_HOST
+        from services.config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             return ExecutionResult(
                 status="FAILURE",
@@ -454,7 +448,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
 
     # Step 4: Build the local media URL for HA to stream
     def get_public_host():
-        from config import EXECUTION_EXTERNAL_HOST
+        from services.config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set. Cannot build media URL.")
         return EXECUTION_EXTERNAL_HOST
