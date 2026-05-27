@@ -1,6 +1,13 @@
 # services/tests/test_execution_handlers.py
 import pytest
+import sys
+import os
+os.environ["DEVICE_REGISTRY_PATH"] = ":memory:"
+_execution_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "execution"))
+if _execution_path not in sys.path:
+    sys.path.append(_execution_path)
 from unittest.mock import AsyncMock, Mock, patch
+from typing import Any, cast
 
 from execution.schemas import (
     UserContext, LightControlRequest, MediaTransportRequest,
@@ -12,11 +19,15 @@ from execution.personal_data import resolve_personal_data_provider
 
 @pytest.fixture
 def user_ctx():
-    return UserContext(user="test_user", ha_url="http://ha", ha_token="test_tok")
+    return {"user": "test_user", "ha_url": "http://ha", "ha_token": "test_tok"}
 
 @pytest.mark.asyncio
 async def test_light_handler_success(user_ctx):
-    with patch("ha_client.call_service", new_callable=AsyncMock) as mock_call:
+    with patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("ha_client.call_service", mock_call), \
+         patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("ha_client.get_state", mock_get_state):
+        mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
         
         req = LightControlRequest(user_context=user_ctx, entity_id="light.test", action="turn_on", brightness_pct=50)
@@ -31,7 +42,11 @@ async def test_light_handler_success(user_ctx):
 @pytest.mark.asyncio
 async def test_hyphenated_entity_resolution(user_ctx):
     """Verify that 'piano-lamp' is correctly sanitized to 'light.piano_lamp'."""
-    with patch("ha_client.call_service", new_callable=AsyncMock) as mock_call:
+    with patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("ha_client.call_service", mock_call), \
+         patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("ha_client.get_state", mock_get_state):
+        mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
         
         # Test 1: Bare hyphenated name
@@ -51,7 +66,8 @@ async def test_hyphenated_entity_resolution(user_ctx):
         )
 @pytest.mark.asyncio
 async def test_security_status_check(user_ctx):
-    with patch("ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
+    with patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "open"}
         
         req = SecurityRequest(user_context=user_ctx, entity_id="cover.garage_door", action="status")
@@ -63,7 +79,11 @@ async def test_security_status_check(user_ctx):
 
 @pytest.mark.asyncio
 async def test_media_transport_volume(user_ctx):
-    with patch("ha_client.call_service", new_callable=AsyncMock) as mock_call:
+    with patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("ha_client.call_service", mock_call), \
+         patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("ha_client.get_state", mock_get_state):
+        mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
         
         req = MediaTransportRequest(user_context=user_ctx, entity_id="media_player.tv", command="volume_up", volume_level=0.5)
@@ -77,8 +97,10 @@ async def test_media_transport_volume(user_ctx):
 
 @pytest.mark.asyncio
 async def test_climate_handler(user_ctx):
-    with patch("ha_client.call_service", new_callable=AsyncMock) as mock_call, \
-         patch("ha_client.authorize_action", return_value=True):
+    with patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("ha_client.call_service", mock_call), \
+         patch("execution.ha_client.authorize_action", return_value=True) as mock_auth, \
+         patch("ha_client.authorize_action", mock_auth):
         mock_call.return_value = {"ok": True}
         
         # Use the handler's own ClimateRequest which imports UserContext from execution schemas
@@ -93,27 +115,36 @@ async def test_climate_handler(user_ctx):
 
 @pytest.mark.asyncio
 async def test_tv_cast_macro(user_ctx):
-    with patch("ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
-         patch("ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+    with patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("ha_client.get_state", mock_get_state), \
+         patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("ha_client.call_service", mock_call), \
+         patch("execution.handlers.video.download_video_progressive", new_callable=AsyncMock) as mock_download, \
+         patch("config.EXECUTION_EXTERNAL_HOST", "192.168.2.205"), \
          patch("asyncio.sleep", new_callable=AsyncMock):
         
-        mock_get_state.return_value = {"state": "off"}
+        mock_download.return_value = ("mock_media_id", "mock_title")
+        async def get_state_side_effect(url, token, entity_id):
+            if "remote." in entity_id:
+                return None
+            return {"state": "off"}
+        mock_get_state.side_effect = get_state_side_effect
         mock_call.return_value = {"ok": True}
         
         req = TVCastRequest(
             user_context=user_ctx, 
-            media_player_entity_id="media_player.roku",
-            media_content_id="http://video",
+            media_player_entity_id="media_player.generic_tv",
+            media_content_id="https://youtube.com/watch?v=mockvideo",
             media_content_type="url",
             power_on_wait_ms=100
         )
         res = await media.handle_tv_cast(req)
         
         assert res.status == "SUCCESS"
-        # Should have called turn_on AND play_media
-        assert mock_call.call_count == 2
+        assert mock_call.call_count == 3
         assert mock_call.call_args_list[0][0][3] == "turn_on"
-        assert mock_call.call_args_list[1][0][3] == "play_media"
+        assert mock_call.call_args_list[1][0][3] == "media_stop"
+        assert mock_call.call_args_list[2][0][3] == "play_media"
 
 
 def test_personal_data_provider_resolves_from_user_context():
@@ -150,10 +181,10 @@ async def test_talk_send_message_uses_provider_request():
         "",
     )
 
-    with patch("services.execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
+    with patch("execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
         result = await talk.handle_talk(
             TalkRequest(
-                user_context=UserContext(user="default"),
+                user_context={"user": "default"},
                 action="send",
                 token="room-alpha",
                 message="hello world",
@@ -172,10 +203,10 @@ async def test_talk_send_voice_uploads_and_shares():
     provider.upload_file.return_value = Mock(status_code=201)
     provider.request.return_value = (True, {"id": 44}, "")
 
-    with patch("services.execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
+    with patch("execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
         result = await talk.handle_talk(
             TalkRequest(
-                user_context=UserContext(user="default"),
+                user_context={"user": "default"},
                 action="send_voice",
                 token="room-alpha",
                 audio_base64="data:audio/webm;base64,bW9jay1hdWRpbw==",
@@ -194,7 +225,7 @@ async def test_talk_send_voice_uploads_and_shares():
 @pytest.mark.asyncio
 async def test_volume_inventory_requires_admin():
     result = await volumes.handle_volumes(
-        VolumeInventoryRequest(user_context=UserContext(user="default", is_admin=False))
+        VolumeInventoryRequest(user_context=cast(Any, {"user": "default", "is_admin": False}))
     )
 
     assert result["status"] == "FAILURE"
@@ -247,7 +278,7 @@ async def test_volume_inventory_merges_manifest_and_docker(monkeypatch):
     )
 
     result = await volumes.handle_volumes(
-        VolumeInventoryRequest(user_context=UserContext(user="admin", is_admin=True))
+        VolumeInventoryRequest(user_context=cast(Any, {"user": "admin", "is_admin": True}))
     )
 
     assert result["status"] == "SUCCESS"

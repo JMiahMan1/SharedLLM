@@ -1,10 +1,6 @@
 # services/execution/handlers/calendar.py
-import os
-import sys
 import logging
 import asyncio
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from config import TIMEZONE
 from datetime import datetime, timedelta, date
 from dateutil import tz

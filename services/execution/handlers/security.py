@@ -1,11 +1,8 @@
 # services/execution/handlers/security.py
 import logging
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
-    import ha_client
-    from schemas import UserContext, ExecutionResult
+    from .. import ha_client
+    from ..schemas import UserContext, ExecutionResult
 except ImportError:
     import ha_client
     from schemas import UserContext, ExecutionResult

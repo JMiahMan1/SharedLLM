@@ -4,11 +4,8 @@ import asyncio
 import json
 import re
 import os
-import sys
 import httpx
 import urllib.parse
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
 try:
     import ha_client
@@ -418,7 +415,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
             )
 
     # Step 2: Check if device is Roku
-    from handlers import roku as roku_handler
+    from . import roku as roku_handler
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, full_entity_id)
     if is_roku:
         log.info("[video/play] Detected Roku device, using Roku video handler")

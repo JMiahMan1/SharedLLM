@@ -2,10 +2,7 @@
 import logging
 import asyncio
 import re
-import sys
-import os
 from typing import cast
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     import ha_client
     from schemas import MediaPlayRequest, ExecutionResult, AudiobookshelfRequest
@@ -117,12 +114,12 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
 
 async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play music via Music Assistant or fallback."""
-    from handlers import roku as roku_handler
+    from . import roku as roku_handler
     
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
     
     # Samsung Tizen TV: use MASS search for music, then play URL via play_media
-    from handlers import samsung as samsung_handler
+    from . import samsung as samsung_handler
     is_samsung = await samsung_handler.is_samsung_tv(ctx.ha_url, ctx.ha_token, entity_id)
     
     # Resolve MA config entry at runtime if not seeded
@@ -226,8 +223,8 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
 
 async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play video via yt-dlp stream. Routes through Roku ECP for Roku devices."""
-    from handlers import video as video_handler
-    from handlers import roku as roku_handler
+    from . import video as video_handler
+    from . import roku as roku_handler
 
     query = req.query or req.media_content_id or ""
 
@@ -257,14 +254,14 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         )
 
     # Android TV: delegate video to Cast sibling (non-MA) for reliable playback
-    from handlers import android_tv as android_tv_handler
+    from . import android_tv as android_tv_handler
     is_android_tv = await android_tv_handler.is_android_tv(ctx.ha_url, ctx.ha_token, entity_id)
     if is_android_tv:
         log.info(f"[media.video] Android TV detected ({entity_id}), delegating to android_tv handler")
         return await android_tv_handler.play_video(ctx.ha_url, ctx.ha_token, entity_id, video_url, query)
 
     # Samsung Tizen TV: use dedicated handler with WOL wake and play_media
-    from handlers import samsung as samsung_handler
+    from . import samsung as samsung_handler
     is_samsung = await samsung_handler.is_samsung_tv(ctx.ha_url, ctx.ha_token, entity_id)
     if is_samsung:
         log.info(f"[media.video] Samsung Tizen TV detected ({entity_id}), using samsung handler")
@@ -332,7 +329,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
 
 async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play podcast via Music Assistant or URL."""
-    from handlers import roku as roku_handler
+    from . import roku as roku_handler
 
     if req.query and req.query.startswith(("http://", "https://")):
         # Direct podcast URL
@@ -390,7 +387,7 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
 
 async def play_audiobook(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play audiobook via Audiobookshelf."""
-    from handlers import audiobookshelf as abs_handler
+    from . import audiobookshelf as abs_handler
     
     if not req.query:
         return ExecutionResult(status="FAILURE", message="Audiobook title or query is required.", service="media_play")
@@ -482,8 +479,8 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
 
 async def handle_media_transport(req) -> ExecutionResult:
     """Handle media transport commands with TV-specific handling for Android TV, WebOS, Samsung, and Roku."""
-    from handlers import android_tv, webos, samsung, roku
-    from announce_handlers import detect_tv_type
+    from . import android_tv, webos, samsung, roku
+    from ..announce_handlers import detect_tv_type
 
     ctx = req.user_context
     ha_url = ctx.ha_url
@@ -545,7 +542,7 @@ async def handle_media_transport(req) -> ExecutionResult:
 
 async def handle_tv_cast(req) -> ExecutionResult:
     """Handle TV cast requests (legacy compatibility)."""
-    from schemas import MediaPlayRequest
+    from ..schemas import MediaPlayRequest
     play_req = MediaPlayRequest(
         user_context=req.user_context,
         entity_id=req.media_player_entity_id,

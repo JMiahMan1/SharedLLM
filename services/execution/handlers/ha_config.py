@@ -5,10 +5,6 @@ Allows diagnosing misconfigured integrations without treating HA as a black box.
 """
 import logging
 import json
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from schemas import ExecutionResult
 
 import httpx

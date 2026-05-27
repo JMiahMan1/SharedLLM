@@ -1,9 +1,6 @@
 # services/execution/handlers/diagnostics.py
 import logging
 import subprocess
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     from ..schemas import ExecutionResult
 except ImportError:

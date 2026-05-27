@@ -15,9 +15,6 @@ Samsung Tizen TVs support:
 """
 import logging
 import asyncio
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     import ha_client
     from schemas import ExecutionResult

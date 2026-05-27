@@ -7,9 +7,6 @@ Services:
   - media_player.*: Standard media controls (play, pause, stop, etc.)
 """
 import logging
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     import ha_client
     from schemas import ExecutionResult
@@ -203,7 +200,7 @@ async def play_video(ha_url: str, ha_token: str, entity_id: str, video_url: str,
     to the Cast sibling (e.g., media_player.office_tv_chrome) which handles
     video/mp4 streaming reliably.
     """
-    from handlers import video as video_handler
+    from . import video as video_handler
 
     log.info(f"[android_tv/video] Delegating video playback for {entity_id}")
 

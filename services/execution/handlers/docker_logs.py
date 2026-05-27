@@ -9,9 +9,6 @@ Security: Only sharedllm_* containers may be queried. The Docker SDK talks
 to the host socket at /var/run/docker.sock (mounted read-only in compose).
 """
 import logging
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import re
 from typing import Optional
 

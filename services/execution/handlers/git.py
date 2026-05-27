@@ -20,11 +20,8 @@ Security:
 import asyncio
 import logging
 import os
-import sys
 import re
 import shlex
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
 from typing import Optional
 try:
