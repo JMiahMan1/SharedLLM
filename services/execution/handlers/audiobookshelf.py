@@ -4,18 +4,8 @@ Audiobookshelf (ABS) handler — search, play, resume, and track audiobook progr
 Integrates with Home Assistant media_player for playback on any supported device.
 """
 import logging
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-try:
-    import ha_client
-    import abs_client
-    from schemas import AudiobookshelfRequest, ExecutionResult
-except ImportError:
-    import ha_client
-    import abs_client
-    from schemas import AudiobookshelfRequest, ExecutionResult
+from services.execution import ha_client, abs_client
+from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
 
 log = logging.getLogger("execution.audiobookshelf")
 

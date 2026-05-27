@@ -11,21 +11,14 @@ import logging
 from sqlmodel import Session, select, text
 from dotenv import load_dotenv
 
-try:
-    from .models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
-    from .crypto import encrypt
-except ImportError:
-    from models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
-    from crypto import encrypt
+from services.identity.models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
+from services.identity.crypto import encrypt
 
 from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Load legacy .env if available
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from config import LEGACY_ENV_PATH
+from services.config import LEGACY_ENV_PATH
 if os.path.exists(LEGACY_ENV_PATH):
     load_dotenv(LEGACY_ENV_PATH)
 
@@ -192,7 +185,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
 
     # ── Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS) ─
-    from config import OLLAMA_URL as env_ollama_url
+    from services.config import OLLAMA_URL as env_ollama_url
     if env_ollama_url:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "llm_local_url")).first()
         if not existing:

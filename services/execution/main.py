@@ -12,79 +12,16 @@ from fastapi import FastAPI, Depends, HTTPException, status, Header, Request, Fi
 from fastapi.responses import JSONResponse
 import traceback
 
+# Ensure services/ is on sys.path so config.py resolves
+# When Docker COPY . . is used, structure is /app/services/execution/main.py
+# services/config.py is at /app/services/config.py
+_services_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _services_dir not in sys.path:
+    sys.path.insert(0, _services_dir)
+
 # Suppress InsecureRequestWarning for internal self-signed certs (homelab)
 from urllib3.exceptions import InsecureRequestWarning
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-
-try:
-    import ha_client
-    from tts import text_to_speech as _text_to_speech
-    from schemas import (
-        UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-        TVCastRequest, HAServiceRequest, AnnouncementRequest,
-        CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
-        WebSearchRequest, WebReadRequest, ExecutionResult,
-           DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
-        WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-          SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest
-    )
-    from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
-    from handlers import docker_logs as docker_logs_handler
-    from handlers import git as git_handler
-    from handlers import deployment as deployment_handler
-    from handlers import volumes as volume_handler
-    from handlers import media_status as media_status_handler
-    from handlers import ha_config as ha_config_handler
-    from announce_handlers import detect_tv_type as _detect_tv_type
-except ImportError:
-    try:
-        from . import ha_client
-        from .tts import text_to_speech as _text_to_speech
-        from .schemas import (
-            UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-            TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
-            WebSearchRequest, WebReadRequest, ExecutionResult,
-       DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
-            WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, HAConfigRequest, EntitySearchRequest, LLMInfoRequest, NetworkDeviceScanRequest
-        )
-        from .handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
-        from .handlers import docker_logs as docker_logs_handler
-        from .handlers import git as git_handler
-        from .handlers import deployment as deployment_handler
-        from .handlers import volumes as volume_handler
-        from .handlers import media_status as media_status_handler
-        from .handlers import ha_config as ha_config_handler
-        from .announce_handlers import detect_tv_type as _detect_tv_type
-    except (ImportError, ValueError):
-        from execution import ha_client
-        from execution.tts import text_to_speech as _text_to_speech
-        from execution.schemas import (
-            UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-            TVCastRequest, HAServiceRequest, AnnouncementRequest,
-            CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest,
-            WebSearchRequest, WebReadRequest, ExecutionResult,
-            DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
-            WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-            SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, HAConfigRequest, EntitySearchRequest, LLMInfoRequest, NetworkDeviceScanRequest
-        )
-        from execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, groups
-        from execution.handlers import docker_logs as docker_logs_handler
-        from execution.handlers import git as git_handler
-        from execution.handlers import deployment as deployment_handler
-        from execution.handlers import volumes as volume_handler
-        from execution.handlers import media_status as media_status_handler
-        from execution.handlers import ha_config as ha_config_handler
-        from execution.announce_handlers import detect_tv_type as _detect_tv_type
-
-import threading
-
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
-log = logging.getLogger("execution")
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config import (
     INTERNAL_SECRET,
@@ -93,6 +30,33 @@ from config import (
     HA_URL,
     HA_TOKEN,
 )
+
+# Now import everything from sibling modules
+import ha_client
+from tts import text_to_speech as _text_to_speech
+from schemas import (
+    UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
+    TVCastRequest, HAServiceRequest, AnnouncementRequest,
+    CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
+    WebSearchRequest, WebReadRequest, ExecutionResult,
+       DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
+    WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
+      SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest
+)
+from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
+from handlers import docker_logs as docker_logs_handler
+from handlers import git as git_handler
+from handlers import deployment as deployment_handler
+from handlers import volumes as volume_handler
+from handlers import media_status as media_status_handler
+from handlers import ha_config as ha_config_handler
+from announce_handlers import detect_tv_type as _detect_tv_type
+
+import threading
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
+log = logging.getLogger("execution")
 
 # Expose for test mocking
 text_to_speech = _text_to_speech

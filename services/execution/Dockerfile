@@ -6,8 +6,7 @@ COPY services/execution/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install --with-deps chromium
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
-COPY services/execution/ ./
-COPY services/config.py ./config.py
-COPY services/tests/ ./tests/
+COPY . .
+ENV PYTHONPATH=/app
 EXPOSE 8003
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]

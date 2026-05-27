@@ -459,7 +459,7 @@ _config_validation_result = None
 async def lifespan(app: FastAPI):
     global _config_validation_result
     # Resolve runtime config from Identity service
-    from config import resolve_runtime_config
+    from services.config import resolve_runtime_config
     await resolve_runtime_config()
     
     log.info("Gateway starting up...")

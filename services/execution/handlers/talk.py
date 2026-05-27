@@ -5,12 +5,12 @@ import urllib.parse
 from typing import Any
 from uuid import uuid4
 try:
-    from ..schemas import ExecutionResult, TalkRequest
-    from ..personal_data import resolve_personal_data_provider
-    from ..tts import text_to_speech
-except ImportError:
     from schemas import ExecutionResult, TalkRequest
     from personal_data import resolve_personal_data_provider
+    from tts import text_to_speech
+except ImportError:
+    from ..schemas import ExecutionResult, TalkRequest
+    from ..personal_data import resolve_personal_data_provider
     from ..tts import text_to_speech
 
 log = logging.getLogger("execution.talk")

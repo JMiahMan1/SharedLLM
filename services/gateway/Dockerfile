@@ -6,9 +6,7 @@ COPY services/gateway/requirements.txt ./requirements.txt
 RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')"
-COPY services/ ./services/
-COPY docs ./docs
-COPY README.md ./
+COPY . .
 
 # --- Privilege Drop: create dedicated sharedllm user ---
 ARG PUID=1000
@@ -19,7 +17,7 @@ RUN groupadd -g ${PGID} sharedllm || true \
     && mkdir -p /home/sharedllm/.cache/huggingface /home/sharedllm/.cache/qdrant \
     && chown -R ${PUID}:${PGID} /home/sharedllm
 ENV HOME=/home/sharedllm
-ENV PYTHONPATH=/app/services
+ENV PYTHONPATH=/app
 
 EXPOSE 11435
-CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "11435"]
+CMD ["uvicorn", "services.gateway.main:app", "--host", "0.0.0.0", "--port", "11435"]

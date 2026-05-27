@@ -5,7 +5,10 @@ Allows diagnosing misconfigured integrations without treating HA as a black box.
 """
 import logging
 import json
-from schemas import ExecutionResult
+try:
+    from schemas import ExecutionResult
+except ImportError:
+    from ..schemas import ExecutionResult
 
 import httpx
 

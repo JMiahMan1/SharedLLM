@@ -1,11 +1,11 @@
 # services/execution/handlers/light.py
 import logging
 try:
-    from .. import ha_client
-    from ..schemas import LightControlRequest, ExecutionResult
-except ImportError:
     import ha_client
     from schemas import LightControlRequest, ExecutionResult
+except ImportError:
+    from .. import ha_client
+    from ..schemas import LightControlRequest, ExecutionResult
 
 log = logging.getLogger("execution.light")
 

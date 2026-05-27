@@ -5,7 +5,10 @@ import re
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import DEFAULT_TTS_VOICE, MODELS_DIR
+try:
+    from config import DEFAULT_TTS_VOICE, MODELS_DIR
+except ImportError:
+    from ...config import DEFAULT_TTS_VOICE, MODELS_DIR
 from typing import Optional, Protocol, List, TYPE_CHECKING
 import numpy as np
 

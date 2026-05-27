@@ -1,16 +1,8 @@
 # services/execution/handlers/timer.py
 import logging
-import json
-import uuid
-from config import REDIS_URL
-from datetime import datetime, timedelta
-import redis.asyncio as redis
-from typing import Optional
-
-try:
-    from schemas import TimerRequest, ExecutionResult
-except ImportError:
-    from schemas import TimerRequest, ExecutionResult
+from services.execution import ha_client
+from services.storage import client as storage
+from services.execution.schemas import TimerRequest, ExecutionResult
 
 log = logging.getLogger("execution.timer")
 

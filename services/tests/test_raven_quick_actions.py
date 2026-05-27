@@ -160,7 +160,7 @@ def test_raven_prompt_includes_context_search_tool():
 def test_context_search_in_single_turn_endpoints():
     from gateway.orchestrator import SINGLE_TURN_TOOL_ENDPOINTS
     assert "contextsearchrequest" in SINGLE_TURN_TOOL_ENDPOINTS
-    _, endpoint = SINGLE_TURN_TOOL_ENDPOINTS["contextsearchrequest"]
+    endpoint = SINGLE_TURN_TOOL_ENDPOINTS["contextsearchrequest"]
     assert endpoint == "/rag/search"
 
 

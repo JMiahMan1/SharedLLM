@@ -3,6 +3,8 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from config import VOLUME_MANIFEST_PATH, VOLUME_BACKUP_ROOT
 
 log = logging.getLogger("execution.volumes")
