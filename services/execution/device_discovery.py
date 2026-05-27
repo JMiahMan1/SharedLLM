@@ -21,8 +21,12 @@ import os
 import socket
 from typing import Optional, cast
 
-import device_registry
-import ha_client
+try:
+    from . import device_registry
+    from . import ha_client
+except ImportError:
+    import device_registry
+    import ha_client
 
 log = logging.getLogger("execution.discovery")
 

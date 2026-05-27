@@ -138,7 +138,9 @@ async def test_chat_handler_routes_direct_file_edit_requests_to_code_orchestrati
     monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
     mock_orchestrate = AsyncMock(return_value=gateway_main._make_ollama_response("orchestrated", "qwen2.5-coder:7b"))
     monkeypatch.setattr(gateway_main, "orchestrate_code_change", mock_orchestrate)
-    monkeypatch.setattr(gateway_main.job_queue, "enqueue_job", AsyncMock(return_value="test-job-id"))
+    mock_jq = AsyncMock()
+    mock_jq.enqueue_job = AsyncMock(return_value="test-job-id")
+    monkeypatch.setattr(gateway_main, "job_queue", mock_jq)
 
     response = await gateway_main.chat_handler(
         _json_request(

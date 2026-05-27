@@ -80,7 +80,7 @@ def test_resolve_media_target_rejects_nearby_non_matching_music_assistant_queue(
 
     target = resolve_media_target("Play worship music on Office TV", entities)
 
-    assert target == "auto"
+    assert target is None
 
 
 def test_resolve_video_target_prefers_cast_like_device_for_matching_tv():
