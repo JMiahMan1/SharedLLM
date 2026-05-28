@@ -97,9 +97,6 @@ def _sync_main_constants(settings: Dict[str, str]) -> None:
         val = settings.get(key)
         if val and hasattr(main_mod, attr):
             setattr(main_mod, attr, val)
-    # Sync LOGGING_SVC_URL alias
-    if hasattr(main_mod, "LOGGING_SVC_URL"):
-        main_mod.LOGGING_SVC_URL = settings.get("logging_svc_url", main_mod.LOGGING_SVC)
 
 
 _MODEL_KEYS = {

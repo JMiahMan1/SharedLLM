@@ -36,16 +36,12 @@ log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
 
-# Backward-compatible aliases (updated by get_all_settings calls)
-IDENTITY_SVC = "http://identity:8001"
-EXECUTION_SVC = "http://execution:8003"
-RAG_SVC = "http://rag:8004"
-STORAGE_SVC = "http://storage:8005"
-LOGGING_SVC = "http://logging:8006"
-WORKSPACE_RUNTIME_SVC = "http://workspace_runtime:8007"
-CONTROL_PLANE_URL = "http://control_plane:8008"
-OLLAMA_TIMEOUT = 600.0
-LOGGING_SVC_URL = LOGGING_SVC
+# Backward-compatible aliases — sourced from config.py, updated by _sync_main_constants from Identity settings
+from services.gateway.config import (
+    IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC, LOGGING_SVC,
+    WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
+)
+
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -556,7 +552,7 @@ async def readiness():
       "execution": f"{EXECUTION_SVC}/health",
       "rag": f"{RAG_SVC}/health",
       "storage": f"{STORAGE_SVC}/health",
-      "logging": f"{LOGGING_SVC_URL}/health",
+      "logging": f"{LOGGING_SVC}/health",
       "workspace_runtime": f"{WORKSPACE_RUNTIME_SVC}/health",
       "control_plane": f"{CONTROL_PLANE_URL}/health",
     }
@@ -675,7 +671,7 @@ async def emit_log(level: str, message: str, context: dict | None = None):
       safe_message = sanitize_for_llm(message)
       async with httpx.AsyncClient() as client:
           await client.post(
-            f"{LOGGING_SVC_URL}/log",
+            f"{LOGGING_SVC}/log",
             json={"service": "gateway", "level": level, "message": safe_message, "context": safe_context},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=1.0
@@ -686,7 +682,7 @@ async def emit_log(level: str, message: str, context: dict | None = None):
 @app.get("/api/logs")
 async def get_api_logs(limit: int = 50):
     async with httpx.AsyncClient() as client:
-      resp = await client.get(f"{LOGGING_SVC_URL}/logs", params={"limit": limit})
+      resp = await client.get(f"{LOGGING_SVC}/logs", params={"limit": limit})
       return resp.json()
 
 # --- Contextualization Logic ---
