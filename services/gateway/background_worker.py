@@ -170,13 +170,27 @@ class RavenWorker:
             import redis.asyncio as redis
             r = redis.from_url(REDIS_URL, decode_responses=True)
             
-            try:
-                # Verify connection is alive before proceeding.
-                await r.ping()
-            except Exception as ping_e:
-                log.error(f"Talk Monitor: Redis connection failed ({REDIS_URL}): {ping_e}")
-                await asyncio.sleep(30)
-                await r.aclose()
+            # Retry with exponential backoff on startup / Redis restart
+            connected = False
+            for attempt in range(30):
+                try:
+                    await r.ping()
+                    connected = True
+                    break
+                except Exception as ping_e:
+                    delay = min(2 ** attempt, 30)
+                    log.warning(f"Talk Monitor: Redis connection attempt {attempt+1}/30 failed ({REDIS_URL}): {ping_e}. Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                    try:
+                        await r.aclose()
+                    except Exception:
+                        pass
+                    import redis.asyncio as redis
+                    r = redis.from_url(REDIS_URL, decode_responses=True)
+            
+            if not connected:
+                log.error(f"Talk Monitor: Redis connection failed after 30 attempts ({REDIS_URL}). Will retry next cycle.")
+                await asyncio.sleep(60)
                 continue
             
             try:
