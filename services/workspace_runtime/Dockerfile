@@ -16,10 +16,9 @@ RUN apt-get update && apt-get install -y \
     yamllint \
     shellcheck \
     && rm -rf /var/lib/apt/lists/*
-COPY services/workspace_runtime/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir flake8 black mypy
 COPY . .
+RUN pip install --no-cache-dir -r services/workspace_runtime/requirements.txt \
+    && pip install --no-cache-dir flake8 black mypy
 ENV PYTHONPATH=/app
 EXPOSE 8007
 CMD ["uvicorn", "services.workspace_runtime.main:app", "--host", "0.0.0.0", "--port", "8007"]
