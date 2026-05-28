@@ -3,7 +3,7 @@ import logging
 import asyncio
 import re
 from typing import cast
-import ha_client
+from services.execution import ha_client
 from services.execution.schemas import MediaPlayRequest, ExecutionResult, AudiobookshelfRequest
 from services.config import MASS_CONFIG_ENTRY_ID
 
