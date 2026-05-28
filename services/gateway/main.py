@@ -4086,58 +4086,74 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
 @app.post("/execute/media/status")
 async def proxy_media_status(request: Request):
     """Proxy media status requests from UI to execution service."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/media/status",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            body = await request.json() if await request.body() else {}
+            user_ctx = await _resolve_user_context(request, body)
+            exec_body = {**body, "user_context": user_ctx}
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/media/status",
+                json=exec_body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except httpx.RequestError as e:
+        log.error(f"Execution service unreachable for media status: {e}")
+        raise HTTPException(status_code=503, detail="Execution service unreachable")
 
 
 @app.post("/execute/media/transport")
 async def proxy_media_transport(request: Request):
     """Proxy media transport requests from UI to execution service."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/media/transport",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            body = await request.json() if await request.body() else {}
+            user_ctx = await _resolve_user_context(request, body)
+            exec_body = {**body, "user_context": user_ctx}
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/media/transport",
+                json=exec_body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except httpx.RequestError as e:
+        log.error(f"Execution service unreachable for media transport: {e}")
+        raise HTTPException(status_code=503, detail="Execution service unreachable")
 
 
 @app.post("/execute/media/play")
 async def proxy_media_play(request: Request):
     """Proxy media play requests from UI to execution service."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/media/play",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            body = await request.json() if await request.body() else {}
+            user_ctx = await _resolve_user_context(request, body)
+            exec_body = {**body, "user_context": user_ctx}
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/media/play",
+                json=exec_body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except httpx.RequestError as e:
+        log.error(f"Execution service unreachable for media play: {e}")
+        raise HTTPException(status_code=503, detail="Execution service unreachable")
 
 
 @app.post("/execute/audiobookshelf")
 async def proxy_audiobookshelf(request: Request):
     """Proxy audiobookshelf requests from UI to execution service."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/audiobookshelf",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            body = await request.json() if await request.body() else {}
+            user_ctx = await _resolve_user_context(request, body)
+            exec_body = {**body, "user_context": user_ctx}
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/audiobookshelf",
+                json=exec_body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except httpx.RequestError as e:
+        log.error(f"Execution service unreachable for audiobookshelf: {e}")
+        raise HTTPException(status_code=503, detail="Execution service unreachable")
