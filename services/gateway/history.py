@@ -8,7 +8,7 @@ import httpx
 log = logging.getLogger("gateway.history")
 
 # INTERNAL_SECRET sourced from config.py which enforces fail-secure at gateway startup.
-from gateway.config import INTERNAL_SECRET, REDIS_URL
+from services.gateway.config import INTERNAL_SECRET, REDIS_URL
 
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 
@@ -17,7 +17,7 @@ def _get_history_key(user: str) -> str:
 
 async def fetch_librarian_model() -> str:
     """Fetches the designated Librarian model from Identity Service GlobalSettings."""
-    from gateway.orchestrator import get_all_settings, _get
+    from services.gateway.orchestrator import get_all_settings, _get
     settings = await get_all_settings()
     return _get(settings, "ollama_librarian_model", "")
 
@@ -57,7 +57,7 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
     """
     Retrieves relevant 'User Facts' from the RAG service to provide semantic memory.
     """
-    from gateway.orchestrator import get_all_settings, _get
+    from services.gateway.orchestrator import get_all_settings, _get
     settings = await get_all_settings()
     rag_svc = _get(settings, "rag_svc_url")
     secret = _get(settings, "internal_secret", INTERNAL_SECRET)
@@ -98,7 +98,7 @@ async def extract_and_store_user_facts(user_id: str, history: list):
         return
 
     try:
-        from gateway.orchestrator import get_all_settings, _get
+        from services.gateway.orchestrator import get_all_settings, _get
         settings = await get_all_settings()
         LIBRARIAN_MODEL = _get(settings, "ollama_librarian_model") or _get(settings, "librarian_model") or _get(settings, "assistant_model")
         if not LIBRARIAN_MODEL:

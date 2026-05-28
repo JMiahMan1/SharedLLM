@@ -5,8 +5,8 @@ import subprocess
 import pytest
 from fastapi import HTTPException
 
-import workspace_runtime.main as runtime
-from workspace_runtime.main import (
+import services.workspace_runtime.main as runtime
+from services.workspace_runtime.main import (
     FileReadRequest,
     FileWriteRequest,
     GitPushRequest,

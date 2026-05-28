@@ -7,9 +7,9 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Awaitable, Any
 
-from gateway.config import INTERNAL_SECRET
-from gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
-from gateway.schemas import ResolvedCredentials
+from services.gateway.config import INTERNAL_SECRET
+from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
+from services.gateway.schemas import ResolvedCredentials
 
 log = logging.getLogger("gateway.orchestrator")
 
@@ -82,7 +82,7 @@ async def get_all_settings() -> Dict[str, str]:
 
 def _sync_main_constants(settings: Dict[str, str]) -> None:
     """Update module-level constants in main.py for backward compatibility."""
-    import gateway.main as main_mod
+    import services.gateway.main as main_mod
     mappings = {
         "identity_svc_url": "IDENTITY_SVC",
         "execution_svc_url": "EXECUTION_SVC",
@@ -341,7 +341,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     # 4. Final Inference
     full_system = job_payload.get("system", "")
     if is_autonomous:
-        from gateway.agent_loop import AgentLoop
+        from services.gateway.agent_loop import AgentLoop
         # Raven handles autonomous loops
         mission_id = job_payload.get("_mission_id")
         ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking)
@@ -451,7 +451,7 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
             return ""
         
         # Cache all states for future lookups
-        from gateway.ha_state_cache import cache_all_states
+        from services.gateway.ha_state_cache import cache_all_states
         cache_all_states(entities)
         
         parts = []
@@ -498,7 +498,7 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     entity_id is the stable join key between RAG metadata and live state.
     Even if friendly_name changes in HA, entity_id remains constant.
     """
-    from gateway.ha_state_cache import get_cached_state, fetch_live_states
+    from services.gateway.ha_state_cache import get_cached_state, fetch_live_states
     
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)
@@ -660,7 +660,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     MAX_INFERENCE_RETRIES = 3
     MAX_TURNS = 3
 
-    from gateway.agent_loop import extract_action_json
+    from services.gateway.agent_loop import extract_action_json
 
     for turn in range(MAX_TURNS):
         log.info(f"[_single_turn_inference] Turn {turn + 1}/{MAX_TURNS}")
@@ -739,7 +739,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             payload = tool_data["payload"]
             file_path = payload.get("file_path", "") or payload.get("path", "") or payload.get("relative_path", "")
             if file_path:
-                from gateway.agent_loop import run_post_write_lint
+                from services.gateway.agent_loop import run_post_write_lint
                 settings = await get_all_settings()
                 exec_svc = _get(settings, "execution_svc_url")
                 user_ctx = payload.get("user_context") or creds.model_dump()

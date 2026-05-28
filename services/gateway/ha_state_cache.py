@@ -18,7 +18,7 @@ _TTL = 60  # Cache states for 60 seconds
 def get_redis() -> redis.Redis:
     global _redis
     if _redis is None:
-        from gateway.config import REDIS_URL
+        from services.gateway.config import REDIS_URL
         _redis = redis.from_url(REDIS_URL, decode_responses=True)
     return _redis
 

@@ -22,10 +22,10 @@ from starlette.requests import Request
 from starlette.responses import Response as StarletteResponse
 import pytest
 
-import gateway.main as gateway_main
-import gateway.orchestrator as gateway_orchestrator
-from gateway.main import app, select_model_for_query, select_system_instruction_for_query
-from gateway.prompts import (
+import services.gateway.main as gateway_main
+import services.gateway.orchestrator as gateway_orchestrator
+from services.gateway.main import app, select_model_for_query, select_system_instruction_for_query
+from services.gateway.prompts import (
     ASSIST_SYSTEM_INSTRUCTION,
     CODE_HELPER_SYSTEM_INSTRUCTION,
     LIBRARIAN_SYSTEM_INSTRUCTION,
@@ -486,14 +486,14 @@ def test_chat_slow_path_uses_coding_model_for_code_requests(client):
     async def passthrough_query(query, history):
         return query
 
-    with patch("gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
+         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
+         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.engine.classify", return_value=("unknown", 0.10)), \
+         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
             json={"query": "Help me fix this Python traceback in the gateway service", "voice_id": "alice"},
@@ -518,14 +518,14 @@ def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies(c
     async def passthrough_query(query, history):
         return query
 
-    with patch("gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.engine.classify", return_value=("media_transport", 0.99)), \
-         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
+         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
+         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.engine.classify", return_value=("media_transport", 0.99)), \
+         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
             json={"query": "Fix this Python code bug in math_utils.py", "voice_id": "alice", "model": "qwen2.5-coder:7b"},
@@ -548,14 +548,14 @@ def test_chat_slow_path_respects_explicit_coding_model_for_plain_edit_prompts(cl
     async def passthrough_query(query, history):
         return query
 
-    with patch("gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
+         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
+         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.engine.classify", return_value=("unknown", 0.10)), \
+         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
             json={
@@ -584,14 +584,14 @@ def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
     async def passthrough_query(query, history):
         return query
 
-    with patch("gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
+    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
+         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
+         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.engine.classify", return_value=("unknown", 0.10)), \
+         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
             json={"query": "What should I make for dinner?", "voice_id": "alice"},
@@ -679,13 +679,13 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
     async def passthrough_query(query, history):
         return query
 
-    with patch("gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)), \
+    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
+         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
+         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
+         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
+         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)), \
          patch.object(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request, post=fake_post, get=fake_get)):
         response = await gateway_main.generate_workspace_readme_via_coding_model(
             body={
@@ -754,7 +754,7 @@ def test_gateway_top_level_import_loads_prompts():
         [
             sys.executable,
             "-c",
-            "import gateway.main as m; assert hasattr(m, 'ASSIST_SYSTEM_INSTRUCTION'); "
+            "import services.gateway.main as m; assert hasattr(m, 'ASSIST_SYSTEM_INSTRUCTION'); "
             "assert m.ASSIST_SYSTEM_INSTRUCTION",
         ],
         cwd=gateway_dir,

@@ -14,7 +14,7 @@ os.environ.setdefault("STORAGE_SVC_URL", "http://storage")
 os.environ.setdefault("LOGGING_SVC_URL", "http://logging")
 os.environ.setdefault("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime")
 
-import gateway.main as gateway_main
+import services.gateway.main as gateway_main
 
 
 def _request_with_auth() -> Request:
@@ -42,7 +42,7 @@ def test_auth_body_merges_bearer_token():
 async def test_proxy_execution_with_identity_posts_talk_payload(mocker):
     request = _request_with_auth()
     mocker.patch(
-        "gateway.main._resolve_identity_from_request",
+        "services.gateway.main._resolve_identity_from_request",
         new_callable=AsyncMock,
         return_value={
             "user": "default",

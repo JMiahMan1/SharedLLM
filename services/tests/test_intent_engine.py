@@ -1,5 +1,5 @@
 import pytest
-from gateway.intent_engine import IntentEngine
+from services.gateway.intent_engine import IntentEngine
 
 
 def test_keyword_fallback_play():

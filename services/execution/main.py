@@ -26,7 +26,7 @@ from services.config import (
 # Now import everything from sibling modules
 import ha_client
 from tts import text_to_speech as _text_to_speech
-from schemas import (
+from services.execution.schemas import (
     UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
     TVCastRequest, HAServiceRequest, AnnouncementRequest,
     CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
@@ -35,13 +35,13 @@ from schemas import (
     WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
       SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest
 )
-from handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
-from handlers import docker_logs as docker_logs_handler
-from handlers import git as git_handler
-from handlers import deployment as deployment_handler
-from handlers import volumes as volume_handler
-from handlers import media_status as media_status_handler
-from handlers import ha_config as ha_config_handler
+from services.execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
+from services.execution.handlers import docker_logs as docker_logs_handler
+from services.execution.handlers import git as git_handler
+from services.execution.handlers import deployment as deployment_handler
+from services.execution.handlers import volumes as volume_handler
+from services.execution.handlers import media_status as media_status_handler
+from services.execution.handlers import ha_config as ha_config_handler
 from announce_handlers import detect_tv_type as _detect_tv_type
 
 import threading
@@ -1154,7 +1154,7 @@ async def execute_announce(req: AnnouncementRequest):
             log.info(f"[announce] Dispatch result: {result}")
             
             if req.save_path:
-                from handlers import storage as storage_handler
+                from services.execution.handlers import storage as storage_handler
                 from schemas import StorageFileWriteRequest
                 await storage_handler.handle_storage_write(StorageFileWriteRequest(
                     user_context=ctx, path=req.save_path, content=audio_bytes.decode('utf-8', errors='replace')
@@ -1919,7 +1919,7 @@ async def transcribe_audio(file: UploadFile = File(...), model: str = "base", la
 async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)):
     """Route voice command transcript to appropriate handler."""
     await _check_internal_secret(x_internal_secret)
-    from handlers import light, media
+    from services.execution.handlers import light, media
     from schemas import UserContext, LightControlRequest, MediaPlayRequest
 
     transcript = req.get("transcript", "").strip().lower()

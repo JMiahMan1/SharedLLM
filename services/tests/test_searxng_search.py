@@ -3,8 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from execution.schemas import UserContext, WebSearchRequest
-from execution.handlers import browser
+from services.execution.schemas import UserContext, WebSearchRequest
+from services.execution.handlers import browser
 
 
 @pytest.fixture

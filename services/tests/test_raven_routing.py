@@ -1,13 +1,13 @@
 import pytest
 from unittest.mock import patch, AsyncMock
 
-from gateway.main import select_model_for_query, select_system_instruction_for_query
-from gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, RAVEN_AUTONOMOUS_PROTOCOL
+from services.gateway.main import select_model_for_query, select_system_instruction_for_query
+from services.gateway.prompts import CODE_HELPER_SYSTEM_INSTRUCTION, RAVEN_AUTONOMOUS_PROTOCOL
 
 
 @pytest.mark.asyncio
 async def test_use_raven_routes_to_raven_prompt_and_coding_model():
-    with patch("gateway.main.get_coding_model", new=AsyncMock(return_value="qwen2.5-coder:7b")):
+    with patch("services.gateway.main.get_coding_model", new=AsyncMock(return_value="qwen2.5-coder:7b")):
         model = await select_model_for_query("Use Raven to self repair the gateway service")
         prompt = select_system_instruction_for_query("Use Raven to self repair the gateway service", model)
 

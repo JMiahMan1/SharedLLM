@@ -25,14 +25,14 @@ def test_gateway_extracts_bearer_token(client, mocker):
     and passes it to the Identity service's /api/resolve endpoint.
     """
     # FIX: Use AsyncMock for all awaited functions
-    mock_resolve = mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={"user": "testuser"})
+    mock_resolve = mocker.patch("services.gateway.main.resolve_identity", new_callable=AsyncMock, return_value={"user": "testuser"})
     
     # Mock other downstream calls to prevent errors
-    mocker.patch("gateway.main.get_history", new_callable=AsyncMock, return_value=[])
-    mocker.patch("gateway.main.fetch_ha_entities", new_callable=AsyncMock, return_value=[])
-    mocker.patch("gateway.main.contextualize_query", new_callable=AsyncMock, return_value="test query")
-    mocker.patch("gateway.main.decompose_command_query", new_callable=AsyncMock, return_value=[])
-    mocker.patch("gateway.main.update_history", new_callable=AsyncMock, return_value=None)
+    mocker.patch("services.gateway.main.get_history", new_callable=AsyncMock, return_value=[])
+    mocker.patch("services.gateway.main.fetch_ha_entities", new_callable=AsyncMock, return_value=[])
+    mocker.patch("services.gateway.main.contextualize_query", new_callable=AsyncMock, return_value="test query")
+    mocker.patch("services.gateway.main.decompose_command_query", new_callable=AsyncMock, return_value=[])
+    mocker.patch("services.gateway.main.update_history", new_callable=AsyncMock, return_value=None)
     
     # Mock the LLM response
     class MockResponse:
@@ -41,7 +41,7 @@ def test_gateway_extracts_bearer_token(client, mocker):
         def json(self):
             return {"message": {"content": "Test response"}}
     
-    mocker.patch("gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockResponse())
+    mocker.patch("services.gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockResponse())
 
     # Send a request with a Bearer token
     resp = client.post(
@@ -65,13 +65,13 @@ async def test_gateway_enforces_capabilities_for_coding(client, mocker):
     In this case, intent 'workspace_coding' requires 'github_token'.
     """
     # 1. Resolve identity with NO github_token
-    mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={
+    mocker.patch("services.gateway.main.resolve_identity", new_callable=AsyncMock, return_value={
         "user": "testuser",
         "github_token": None  # MISSING!
     })
     
     # 2. Force intent to 'workspace_coding'
-    mocker.patch("gateway.main.engine.classify", return_value=("workspace_coding", 1.0))
+    mocker.patch("services.gateway.main.engine.classify", return_value=("workspace_coding", 1.0))
     
     # 3. Mock Ollama for the persona-driven redirection message
     class MockPersonaResponse:
@@ -80,10 +80,10 @@ async def test_gateway_enforces_capabilities_for_coding(client, mocker):
         def json(self):
             return {"response": "Please set up your GitHub token in the Identity page."}
             
-    mocker.patch("gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockPersonaResponse())
+    mocker.patch("services.gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockPersonaResponse())
     
     # 4. Mock the downstream service (should NOT be called)
-    mock_workspace = mocker.patch("gateway.main.orchestrate_code_change", new_callable=AsyncMock)
+    mock_workspace = mocker.patch("services.gateway.main.orchestrate_code_change", new_callable=AsyncMock)
 
     # Send request
     resp = client.post(
@@ -107,23 +107,23 @@ async def test_gateway_rejects_missing_ha_token(client, mocker):
     Test that the Gateway intercepts 'turn_on' if ha_token is missing.
     """
     # 1. Resolve identity with NO ha_token
-    mocker.patch("gateway.main.resolve_identity", new_callable=AsyncMock, return_value={
+    mocker.patch("services.gateway.main.resolve_identity", new_callable=AsyncMock, return_value={
         "user": "testuser",
         "ha_token": None, # MISSING
         "ha_url": "http://ha"
     })
     
     # 2. Force intent to 'turn_on'
-    mocker.patch("gateway.main.engine.classify", return_value=("turn_on", 1.0))
+    mocker.patch("services.gateway.main.engine.classify", return_value=("turn_on", 1.0))
     
     # 3. Mock Ollama for the persona-driven redirection message
-    mocker.patch("gateway.main.call_ollama", new_callable=AsyncMock, return_value=MagicMock(
+    mocker.patch("services.gateway.main.call_ollama", new_callable=AsyncMock, return_value=MagicMock(
         status_code=200, 
         json=lambda: {"response": "Please set up your Home Assistant token."}
     ))
     
     # 4. Mock execution service (should NOT be called)
-    mock_exec = mocker.patch("gateway.main.execute_command", new_callable=AsyncMock)
+    mock_exec = mocker.patch("services.gateway.main.execute_command", new_callable=AsyncMock)
 
     # Send request
     resp = client.post(

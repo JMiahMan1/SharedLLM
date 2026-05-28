@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 @pytest.mark.asyncio
 async def test_announcement_powers_on_tv_with_longer_timeout():
     """TVs need a wake timeout (duration may vary by device type)."""
-    from execution.main import execute_announce
-    from execution.schemas import AnnouncementRequest, UserContext
+    from services.execution.main import execute_announce
+    from services.execution.schemas import AnnouncementRequest, UserContext
 
     ctx = UserContext(
         user="test",
@@ -28,20 +28,20 @@ async def test_announcement_powers_on_tv_with_longer_timeout():
     })
     mock_call_service = AsyncMock(return_value={"ok": True})
 
-    with patch("execution.main.ha_client.get_state", mock_get_state), \
-         patch("execution.main.ha_client.call_service", mock_call_service), \
-         patch("execution.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
-         patch("execution.main.ha_client.get_config", return_value={"components": []}), \
-         patch("execution.main.ha_client.get_states", return_value=[{
+    with patch("services.execution.main.ha_client.get_state", mock_get_state), \
+         patch("services.execution.main.ha_client.call_service", mock_call_service), \
+         patch("services.execution.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
+         patch("services.execution.main.ha_client.get_config", return_value={"components": []}), \
+         patch("services.execution.main.ha_client.get_states", return_value=[{
              "entity_id": "media_player.living_room_tv",
              "state": "off",
              "attributes": {"friendly_name": "Living Room TV", "device_class": "tv"},
          }]), \
-         patch("execution.main.text_to_speech", return_value=b"mock-audio"), \
-         patch("execution.main.TEMP_AUDIO_CACHE", {}), \
-         patch("execution.main.verify_playback", return_value={"verified": True}), \
-         patch("execution.main.detect_tv_type", return_value="generic_tv"), \
-         patch("execution.main.get_public_host", return_value="192.168.2.205"):
+         patch("services.execution.main.text_to_speech", return_value=b"mock-audio"), \
+         patch("services.execution.main.TEMP_AUDIO_CACHE", {}), \
+         patch("services.execution.main.verify_playback", return_value={"verified": True}), \
+         patch("services.execution.main.detect_tv_type", return_value="generic_tv"), \
+         patch("services.execution.main.get_public_host", return_value="192.168.2.205"):
         await execute_announce(req)
 
     # Verify turn_on was called with the target
@@ -56,8 +56,8 @@ async def test_announcement_powers_on_tv_with_longer_timeout():
 @pytest.mark.asyncio
 async def test_announcement_skips_power_on_when_already_on():
     """Should not call turn_on if device is already playing."""
-    from execution.main import execute_announce
-    from execution.schemas import AnnouncementRequest, UserContext
+    from services.execution.main import execute_announce
+    from services.execution.schemas import AnnouncementRequest, UserContext
 
     ctx = UserContext(
         user="test",
@@ -78,19 +78,19 @@ async def test_announcement_skips_power_on_when_already_on():
     })
     mock_call_service = AsyncMock(return_value={"ok": True})
 
-    with patch("execution.main.ha_client.get_state", mock_get_state), \
-         patch("execution.main.ha_client.call_service", mock_call_service), \
-         patch("execution.main.asyncio.sleep", new_callable=AsyncMock), \
-         patch("execution.main.ha_client.get_config", return_value={"components": []}), \
-         patch("execution.main.ha_client.get_states", return_value=[{
+    with patch("services.execution.main.ha_client.get_state", mock_get_state), \
+         patch("services.execution.main.ha_client.call_service", mock_call_service), \
+         patch("services.execution.main.asyncio.sleep", new_callable=AsyncMock), \
+         patch("services.execution.main.ha_client.get_config", return_value={"components": []}), \
+         patch("services.execution.main.ha_client.get_states", return_value=[{
              "entity_id": "media_player.kitchen_speaker",
              "state": "playing",
              "attributes": {"friendly_name": "Kitchen Speaker", "device_class": "speaker"},
          }]), \
-         patch("execution.main.text_to_speech", return_value=b"mock-audio"), \
-         patch("execution.main.TEMP_AUDIO_CACHE", {}), \
-         patch("execution.main.verify_playback", return_value={"verified": True}), \
-         patch("execution.main.detect_tv_type", return_value="speaker"):
+         patch("services.execution.main.text_to_speech", return_value=b"mock-audio"), \
+         patch("services.execution.main.TEMP_AUDIO_CACHE", {}), \
+         patch("services.execution.main.verify_playback", return_value={"verified": True}), \
+         patch("services.execution.main.detect_tv_type", return_value="speaker"):
         await execute_announce(req)
 
     # Verify turn_on was NOT called
@@ -101,8 +101,8 @@ async def test_announcement_skips_power_on_when_already_on():
 @pytest.mark.asyncio
 async def test_announcement_fails_gracefully_when_device_cant_wake():
     """Should return failure if device stays off after wake attempt."""
-    from execution.main import execute_announce
-    from execution.schemas import AnnouncementRequest, UserContext
+    from services.execution.main import execute_announce
+    from services.execution.schemas import AnnouncementRequest, UserContext
 
     ctx = UserContext(
         user="test",
@@ -127,19 +127,19 @@ async def test_announcement_fails_gracefully_when_device_cant_wake():
 
     mock_call_service = AsyncMock(return_value={"ok": True})
 
-    with patch("execution.main.ha_client.get_state", mock_get_state), \
-         patch("execution.main.ha_client.call_service", mock_call_service), \
-         patch("execution.main.asyncio.sleep", new_callable=AsyncMock), \
-         patch("execution.main.ha_client.get_config", return_value={"components": []}), \
-         patch("execution.main.ha_client.get_states", return_value=[{
+    with patch("services.execution.main.ha_client.get_state", mock_get_state), \
+         patch("services.execution.main.ha_client.call_service", mock_call_service), \
+         patch("services.execution.main.asyncio.sleep", new_callable=AsyncMock), \
+         patch("services.execution.main.ha_client.get_config", return_value={"components": []}), \
+         patch("services.execution.main.ha_client.get_states", return_value=[{
              "entity_id": "media_player.bedroom_tv",
              "state": "unavailable",
              "attributes": {"friendly_name": "Bedroom TV", "device_class": "tv"},
          }]), \
-         patch("execution.main.text_to_speech", return_value=b"mock-audio"), \
-         patch("execution.main.TEMP_AUDIO_CACHE", {}), \
-         patch("execution.main.verify_playback", return_value={"verified": True}), \
-         patch("execution.main.detect_tv_type", return_value="generic_tv"):
+         patch("services.execution.main.text_to_speech", return_value=b"mock-audio"), \
+         patch("services.execution.main.TEMP_AUDIO_CACHE", {}), \
+         patch("services.execution.main.verify_playback", return_value={"verified": True}), \
+         patch("services.execution.main.detect_tv_type", return_value="generic_tv"):
         result = await execute_announce(req)
 
     # Should complete without raising - the flow handles failure gracefully

@@ -18,18 +18,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import UploadFile
 from pydantic import BaseModel
 
-from gateway.schemas import ResolvedCredentials, StorageListRequest, StorageIndexRequest
-from gateway.agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
-from gateway.config import INTERNAL_SECRET, CONFIG
-from gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-from gateway.orchestrator import get_all_settings, _get, SINGLE_TURN_TOOL_GUIDE
-from gateway.config_validator import validate_config
-from gateway.intent_engine import engine
-from gateway.history import update_history, ping_redis, get_history # pyright: ignore[reportUnusedImport]
-from gateway.media_device_cache import get_last_used_device, set_last_used_device
-from gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
-from gateway.messaging import InferenceJobQueue, JobStatus
-from gateway.background_worker import worker as raven_worker
+from services.gateway.schemas import ResolvedCredentials, StorageListRequest, StorageIndexRequest
+from services.gateway.agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
+from services.gateway.config import INTERNAL_SECRET, CONFIG
+from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+from services.gateway.orchestrator import get_all_settings, _get, SINGLE_TURN_TOOL_GUIDE
+from services.gateway.config_validator import validate_config
+from services.gateway.intent_engine import engine
+from services.gateway.history import update_history, ping_redis
+from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
+from services.gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+from services.gateway.messaging import InferenceJobQueue, JobStatus
+from services.gateway.background_worker import worker as raven_worker
 
 # --- Setup Logging IMMEDIATELY ---
 log = logging.getLogger("gateway")
@@ -534,7 +534,7 @@ async def clear_history_endpoint(request: Request):
         creds_data = await resolve_identity(body)
         user_id = creds_data.get("user") or ""
         
-        from gateway.history import _redis, _get_history_key
+        from services.gateway.history import _redis, _get_history_key
         key = _get_history_key(user_id)
         _redis.delete(key)
         
@@ -670,7 +670,7 @@ async def get_documentation(
 # --- Logging Helper ---
 async def emit_log(level: str, message: str, context: dict | None = None):
     try:
-      from gateway.agent_loop import sanitize_for_llm
+      from services.gateway.agent_loop import sanitize_for_llm
       safe_context = sanitize_for_llm(context) if context else None
       safe_message = sanitize_for_llm(message)
       async with httpx.AsyncClient() as client:
@@ -745,7 +745,7 @@ async def select_model_for_query(query: str) -> str:
 
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
-    from gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL, RAVEN_NARRATOR_PROTOCOL
+    from services.gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL, RAVEN_NARRATOR_PROTOCOL
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
       return RAVEN_NARRATOR_PROTOCOL
@@ -860,7 +860,7 @@ def is_time_or_date_query(query: str) -> bool:
 async def build_time_or_date_response(query: str) -> str:
     """Get timezone from Identity settings at runtime, not hardcoded."""
     try:
-        from gateway.orchestrator import get_all_settings
+        from services.gateway.orchestrator import get_all_settings
         settings = await get_all_settings()
         tz_name = settings.get("timezone", "America/Phoenix")
     except Exception:
@@ -1671,7 +1671,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                             result = resp.json()
                             orphaned = result.get("orphaned_entity_ids", [])
                             if orphaned:
-                                from gateway.ha_state_cache import get_redis
+                                from services.gateway.ha_state_cache import get_redis
                                 r = get_redis()
                                 for eid in orphaned:
                                     try:
@@ -3405,7 +3405,7 @@ async def kill_mission(request: Request, id_or_slug: str):
             raise HTTPException(status_code=resp.status_code, detail="Failed to update mission status")
         
         # 2. Publish kill signal to Redis
-        from gateway.history import REDIS_URL
+        from services.gateway.history import REDIS_URL
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
@@ -3428,7 +3428,7 @@ async def pause_mission(request: Request, id_or_slug: str):
         mission_data = m_resp.json()
         real_id = mission_data["id"]
 
-        from gateway.history import REDIS_URL
+        from services.gateway.history import REDIS_URL
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.set(f"raven:mission:pause:{real_id}", "PAUSED", ex=3600)
@@ -3449,7 +3449,7 @@ async def resume_mission(request: Request, id_or_slug: str):
         mission_data = m_resp.json()
         real_id = mission_data["id"]
 
-        from gateway.history import REDIS_URL
+        from services.gateway.history import REDIS_URL
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.delete(f"raven:mission:pause:{real_id}")
@@ -3567,7 +3567,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
             mission_data = resp.json()
             real_id = mission_data["id"]
 
-        from gateway.history import REDIS_URL
+        from services.gateway.history import REDIS_URL
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
         

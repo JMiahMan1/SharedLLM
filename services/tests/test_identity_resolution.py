@@ -12,10 +12,10 @@ if "FERNET_KEY" not in os.environ:
 if "INIT_DB" not in os.environ:
     os.environ["INIT_DB"] = "false"
 
-import identity.main as identity_main
-from identity.main import app, get_session, _store_user_api_key
-from identity.models import User, APIKey
-from identity.crypto import digest_secret
+import services.identity.main as identity_main
+from services.identity.main import app, get_session, _store_user_api_key
+from services.identity.models import User, APIKey
+from services.identity.crypto import digest_secret
 
 # Use an in-memory SQLite database for testing
 test_engine = create_engine(
