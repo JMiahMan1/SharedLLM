@@ -42,7 +42,7 @@ from services.execution.handlers import deployment as deployment_handler
 from services.execution.handlers import volumes as volume_handler
 from services.execution.handlers import media_status as media_status_handler
 from services.execution.handlers import ha_config as ha_config_handler
-from announce_handlers import detect_tv_type as _detect_tv_type
+from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
 
 import threading
 
