@@ -20,9 +20,9 @@ def user_ctx():
 
 @pytest.mark.asyncio
 async def test_light_handler_success(user_ctx):
-    with patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("ha_client.call_service", mock_call), \
-         patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
@@ -39,9 +39,9 @@ async def test_light_handler_success(user_ctx):
 @pytest.mark.asyncio
 async def test_hyphenated_entity_resolution(user_ctx):
     """Verify that 'piano-lamp' is correctly sanitized to 'light.piano_lamp'."""
-    with patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("ha_client.call_service", mock_call), \
-         patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
@@ -63,7 +63,7 @@ async def test_hyphenated_entity_resolution(user_ctx):
         )
 @pytest.mark.asyncio
 async def test_security_status_check(user_ctx):
-    with patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+    with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "open"}
         
@@ -76,9 +76,9 @@ async def test_security_status_check(user_ctx):
 
 @pytest.mark.asyncio
 async def test_media_transport_volume(user_ctx):
-    with patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("ha_client.call_service", mock_call), \
-         patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+         patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
@@ -94,9 +94,9 @@ async def test_media_transport_volume(user_ctx):
 
 @pytest.mark.asyncio
 async def test_climate_handler(user_ctx):
-    with patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("ha_client.call_service", mock_call), \
-         patch("execution.ha_client.authorize_action", return_value=True) as mock_auth, \
+         patch("services.execution.ha_client.authorize_action", return_value=True) as mock_auth, \
          patch("ha_client.authorize_action", mock_auth):
         mock_call.return_value = {"ok": True}
         
@@ -112,11 +112,11 @@ async def test_climate_handler(user_ctx):
 
 @pytest.mark.asyncio
 async def test_tv_cast_macro(user_ctx):
-    with patch("execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+    with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("ha_client.get_state", mock_get_state), \
-         patch("execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("ha_client.call_service", mock_call), \
-         patch("execution.handlers.video.download_video_progressive", new_callable=AsyncMock) as mock_download, \
+         patch("services.execution.handlers.video.download_video_progressive", new_callable=AsyncMock) as mock_download, \
          patch("config.EXECUTION_EXTERNAL_HOST", "192.168.2.205"), \
          patch("asyncio.sleep", new_callable=AsyncMock):
         
@@ -178,7 +178,7 @@ async def test_talk_send_message_uses_provider_request():
         "",
     )
 
-    with patch("execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
+    with patch("services.execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
         result = await talk.handle_talk(
             TalkRequest(
                 user_context={"user": "default"},
@@ -200,7 +200,7 @@ async def test_talk_send_voice_uploads_and_shares():
     provider.upload_file.return_value = Mock(status_code=201)
     provider.request.return_value = (True, {"id": 44}, "")
 
-    with patch("execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
+    with patch("services.execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
         result = await talk.handle_talk(
             TalkRequest(
                 user_context={"user": "default"},

@@ -6,7 +6,7 @@ import json
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_get_dns_config_returns_mappings():
-    from gateway.main import get_dns_config
+    from services.gateway.main import get_dns_config
     from starlette.requests import Request
 
     mock_request = Request({
@@ -17,7 +17,7 @@ async def test_get_dns_config_returns_mappings():
         "headers": [],
     })
 
-    with patch("gateway.main.fetch_global_setting", new_callable=AsyncMock) as mock_fetch:
+    with patch("services.gateway.main.fetch_global_setting", new_callable=AsyncMock) as mock_fetch:
         async def side_effect(key, default=""):
             return {
                 "dns_mappings": '{"ollama-server.local": "192.168.4.179"}',
@@ -36,7 +36,7 @@ async def test_get_dns_config_returns_mappings():
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_register_dns_entry_adds_mapping():
-    from gateway.main import register_dns_entry
+    from services.gateway.main import register_dns_entry
     from starlette.requests import Request
 
     body = json.dumps({"hostname": "new-host", "ip": "192.168.4.179"}).encode()
@@ -57,8 +57,8 @@ async def test_register_dns_entry_adds_mapping():
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("gateway.main.fetch_global_setting", new_callable=AsyncMock, return_value='{"existing": "10.0.0.1"}'), \
-         patch("gateway.main.httpx.AsyncClient", return_value=mock_client):
+    with patch("services.gateway.main.fetch_global_setting", new_callable=AsyncMock, return_value='{"existing": "10.0.0.1"}'), \
+         patch("services.gateway.main.httpx.AsyncClient", return_value=mock_client):
         result = await register_dns_entry(mock_request)
 
     assert result["status"] == "SUCCESS"
@@ -71,7 +71,7 @@ async def test_register_dns_entry_adds_mapping():
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_remove_dns_entry_deletes_mapping():
-    from gateway.main import remove_dns_entry
+    from services.gateway.main import remove_dns_entry
     from starlette.requests import Request
 
     async def receive():
@@ -91,8 +91,8 @@ async def test_remove_dns_entry_deletes_mapping():
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("gateway.main.fetch_global_setting", new_callable=AsyncMock, return_value='{"old-host": "10.0.0.5", "keep": "10.0.0.6"}'), \
-         patch("gateway.main.httpx.AsyncClient", return_value=mock_client):
+    with patch("services.gateway.main.fetch_global_setting", new_callable=AsyncMock, return_value='{"old-host": "10.0.0.5", "keep": "10.0.0.6"}'), \
+         patch("services.gateway.main.httpx.AsyncClient", return_value=mock_client):
         result = await remove_dns_entry("old-host", mock_request)
 
     assert result["status"] == "SUCCESS"

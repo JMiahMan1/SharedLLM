@@ -177,7 +177,7 @@ async def test_list_openai_models(client: TestClient, monkeypatch):
     }))
     
     # Mock provider to be openrouter so we fall back to settings
-    from gateway.llm_providers import OpenRouterProvider
+    from services.gateway.llm_providers import OpenRouterProvider
     mock_provider = MagicMock(spec=OpenRouterProvider)
     monkeypatch.setattr(main, "get_provider", AsyncMock(return_value=mock_provider))
     

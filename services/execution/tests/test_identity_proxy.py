@@ -2,9 +2,9 @@ import respx
 from httpx import Response
 from fastapi.testclient import TestClient
 try:
-    from main import app, INTERNAL_SECRET, IDENTITY_SVC_URL
+    from services.execution.main import app, INTERNAL_SECRET, IDENTITY_SVC_URL
 except ImportError:
-    from execution.main import app, INTERNAL_SECRET, IDENTITY_SVC_URL
+    from services.execution.main import app, INTERNAL_SECRET, IDENTITY_SVC_URL
 
 client = TestClient(app)
 

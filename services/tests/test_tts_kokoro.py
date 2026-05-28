@@ -8,7 +8,7 @@ sys.modules['kokoro_onnx'] = MagicMock()
 sys.modules['onnxruntime'] = MagicMock()
 
 import numpy as np
-from execution.tts import KokoroTTSEngine, get_tts_engine
+from services.execution.tts import KokoroTTSEngine, get_tts_engine
 
 def test_normalization():
     engine = KokoroTTSEngine()

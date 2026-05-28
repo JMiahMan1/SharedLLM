@@ -6,7 +6,7 @@ Related code: services/gateway/main.py
 from contextlib import asynccontextmanager
 import pytest
 from fastapi.testclient import TestClient
-from gateway.main import app
+from services.gateway.main import app
 
 pytestmark = pytest.mark.local_only
 

@@ -1,4 +1,4 @@
-from gateway.main import resolve_media_target, resolve_video_target
+from services.gateway.main import resolve_media_target, resolve_video_target
 
 
 def test_resolve_media_target_prefers_same_name_music_assistant_queue():
