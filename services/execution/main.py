@@ -24,8 +24,8 @@ from services.config import (
 )
 
 # Now import everything from sibling modules
-import ha_client
-from tts import text_to_speech as _text_to_speech
+from services.execution import ha_client
+from services.execution.tts import text_to_speech as _text_to_speech
 from services.execution.schemas import (
     UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
     TVCastRequest, HAServiceRequest, AnnouncementRequest,
