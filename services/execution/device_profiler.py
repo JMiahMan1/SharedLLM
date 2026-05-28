@@ -66,7 +66,7 @@ import logging
 import socket
 import asyncio
 
-import ha_client
+from services.execution import ha_client
 
 log = logging.getLogger("execution.profiler")
 

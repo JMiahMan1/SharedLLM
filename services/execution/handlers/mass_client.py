@@ -1,7 +1,7 @@
 """Music Assistant client wrapper for HA service calls."""
 import logging
 from typing import List, Dict, Any
-from ha_client import call_service, find_mass_config_entry
+from services.execution.ha_client import call_service, find_mass_config_entry
 
 log = logging.getLogger(__name__)
 
