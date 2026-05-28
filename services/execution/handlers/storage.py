@@ -1,7 +1,7 @@
 # services/execution/handlers/storage.py
 import logging
 import requests
-from schemas import StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest, ExecutionResult
+from services.execution.schemas import StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest, ExecutionResult
 from ..tts import text_to_speech
 from ..nextcloud_client import resolve_credentials, webdav_url
 

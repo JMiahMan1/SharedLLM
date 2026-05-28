@@ -9,10 +9,10 @@ import os
 import unittest
 from unittest.mock import patch, MagicMock
 
-from execution.announce_handlers import detect_tv_type
-from execution.handlers.media import detect_media_type
-from execution.handlers.video import handle_video_play
-from execution.schemas import VideoPlayRequest, UserContext
+from services.execution.announce_handlers import detect_tv_type
+from services.execution.handlers.media import detect_media_type
+from services.execution.handlers.video import handle_video_play
+from services.execution.schemas import VideoPlayRequest, UserContext
 
 
 class TestDeviceDetection(unittest.TestCase):

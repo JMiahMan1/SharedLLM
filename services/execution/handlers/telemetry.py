@@ -9,7 +9,7 @@ from typing import Dict, Optional
 
 import httpx
 
-from schemas import ExecutionResult, UserContext
+from services.execution.schemas import ExecutionResult, UserContext
 
 log = logging.getLogger("execution/telemetry")
 

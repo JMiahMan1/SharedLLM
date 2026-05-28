@@ -4,7 +4,7 @@ import os
 import pytest
 import tempfile
 
-from execution import device_registry
+from services.execution import device_registry
 
 
 @pytest.fixture(autouse=True)

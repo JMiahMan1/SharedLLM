@@ -38,7 +38,7 @@ def mock_http_client():
 
 @pytest.mark.asyncio
 async def test_should_search_storage_for_code_query_detects_file_references():
-    from gateway.main import should_search_storage_for_code_query
+    from services.gateway.main import should_search_storage_for_code_query
 
     assert should_search_storage_for_code_query("Fix the bug in gateway/main.py") is True
     assert should_search_storage_for_code_query("Update the light handler module") is True
@@ -48,7 +48,7 @@ async def test_should_search_storage_for_code_query_detects_file_references():
 
 @pytest.mark.asyncio
 async def test_should_search_storage_for_code_query_detects_path_references():
-    from gateway.main import should_search_storage_for_code_query
+    from services.gateway.main import should_search_storage_for_code_query
 
     assert should_search_storage_for_code_query("Check the /config directory") is True
     assert should_search_storage_for_code_query("Look at the workspace folder") is True
@@ -56,7 +56,7 @@ async def test_should_search_storage_for_code_query_detects_path_references():
 
 @pytest.mark.asyncio
 async def test_has_explicit_action_request_detects_commands():
-    from gateway.main import has_explicit_action_request
+    from services.gateway.main import has_explicit_action_request
 
     assert has_explicit_action_request("Turn on the living room light") is True
     assert has_explicit_action_request("Switch off the kitchen speaker") is True
@@ -67,7 +67,7 @@ async def test_has_explicit_action_request_detects_commands():
 
 @pytest.mark.asyncio
 async def test_extract_media_transport_command_parses_commands():
-    from gateway.main import extract_media_transport_command
+    from services.gateway.main import extract_media_transport_command
 
     assert extract_media_transport_command("Pause the music") == "pause"
     assert extract_media_transport_command("Resume playback") == "resume"
@@ -79,7 +79,7 @@ async def test_extract_media_transport_command_parses_commands():
 
 @pytest.mark.asyncio
 async def test_requests_status_followup_detects_followup_queries():
-    from gateway.main import requests_status_followup
+    from services.gateway.main import requests_status_followup
 
     assert requests_status_followup("Check again") is True
     assert requests_status_followup("Recheck the status") is True

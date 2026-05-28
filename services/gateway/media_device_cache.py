@@ -20,7 +20,7 @@ _TTL = 86400 * 7  # 7 days
 def get_redis() -> redis.Redis:
     global _redis
     if _redis is None:
-        from gateway.config import REDIS_URL
+        from services.gateway.config import REDIS_URL
         _redis = redis.from_url(REDIS_URL, decode_responses=True)
     return _redis
 

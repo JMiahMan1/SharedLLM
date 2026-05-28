@@ -9,13 +9,13 @@ import logging
 import httpx
 import os
 from typing import Any, Dict, Optional
-from gateway.orchestrator import process_full_orchestration
-from gateway.config import (
+from services.gateway.orchestrator import process_full_orchestration
+from services.gateway.config import (
     SYSTEM_IDENTITY, INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC,
     RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL,
 )
-from gateway.messaging import InferenceJobQueue, TIER2_SEMAPHORE, TIER3_LOCK
-from gateway.agent_loop import should_persist_learning
+from services.gateway.messaging import InferenceJobQueue, TIER2_SEMAPHORE, TIER3_LOCK
+from services.gateway.agent_loop import should_persist_learning
 
 log = logging.getLogger("gateway.background_worker")
 
@@ -50,7 +50,7 @@ class RavenWorker:
     async def _get_coding_model_from_settings(self) -> str:
         """Resolve coding model from Identity settings. Never hardcode."""
         try:
-            from gateway.orchestrator import get_all_settings
+            from services.gateway.orchestrator import get_all_settings
             settings = await get_all_settings()
             model = settings.get("ollama_coding_model") or settings.get("coding_model") or settings.get("assistant_model")
             if model:
@@ -123,7 +123,7 @@ class RavenWorker:
     async def _health_loop(self):
         while self.is_running:
             try:
-                from gateway.agent_loop import get_dynamic_llm_settings
+                from services.gateway.agent_loop import get_dynamic_llm_settings
                 settings = await get_dynamic_llm_settings()
                 
                 is_suspended = settings.get("raven_suspended", "false").lower() == "true"
@@ -163,16 +163,30 @@ class RavenWorker:
     async def _talk_monitor_loop(self):
         """Polls Nextcloud Talk for @jarvis mentions."""
         log.info("Talk Monitor worker started.")
-        import redis.asyncio as redis
-        r = redis.from_url(REDIS_URL, decode_responses=True)
         
         while self.is_running:
+            # Create a fresh Redis connection each iteration so stale connections
+            # from early startup or Redis restarts are always replaced.
+            import redis.asyncio as redis
+            r = redis.from_url(REDIS_URL, decode_responses=True)
+            
+            try:
+                # Verify connection is alive before proceeding.
+                await r.ping()
+            except Exception as ping_e:
+                log.error(f"Talk Monitor: Redis connection failed ({REDIS_URL}): {ping_e}")
+                await asyncio.sleep(30)
+                await r.aclose()
+                continue
+            
             try:
                 await self._check_talk_once(r)
                 await asyncio.sleep(10) # Poll every 10 seconds
             except Exception as e:
                 log.error(f"Error in Talk Monitor loop: {e}")
                 await asyncio.sleep(30)
+            finally:
+                await r.aclose()
 
     async def _check_talk_once(self, r):
         """Perform a single poll of Nextcloud Talk."""
@@ -343,13 +357,13 @@ class RavenWorker:
             # --- TALK CALLBACK ---
             talk_token = payload.get("_talk_token")
             if talk_token:
-                from gateway.orchestrator import strip_json_from_response
+                from services.gateway.orchestrator import strip_json_from_response
                 await self._trigger_talk_callback(payload, strip_json_from_response(str(ans)))
 
             # --- TTS CALLBACK (for voice clients with device_id) ---
             device_id = payload.get("device_id")
             if device_id:
-                from gateway.orchestrator import strip_json_from_response
+                from services.gateway.orchestrator import strip_json_from_response
                 await self._trigger_tts_callback(payload, strip_json_from_response(str(ans)))
 
             mission_id = payload.get("_mission_id")
@@ -440,7 +454,7 @@ class RavenWorker:
         Dynamically find the largest available model that isn't the current one.
         Queries Ollama's /api/tags and picks the model with the largest size.
         """
-        from gateway.orchestrator import get_all_settings, _get
+        from services.gateway.orchestrator import get_all_settings, _get
         try:
             settings = await get_all_settings()
             ollama_url = _get(settings, "llm_local_url")
@@ -635,7 +649,7 @@ class RavenWorker:
 
     async def _run_cleanup(self):
         """Single cleanup pass: sync HA entities, prune orphans, clean Redis cache."""
-        from gateway.ha_state_cache import get_redis
+        from services.gateway.ha_state_cache import get_redis
         
         # 1. Fetch all users from Identity to sync their HA entities
         try:
@@ -699,7 +713,7 @@ class RavenWorker:
                                 pass
                 
                 # Update Redis cache with fresh states
-                from gateway.ha_state_cache import cache_all_states
+                from services.gateway.ha_state_cache import cache_all_states
                 cache_all_states(entities)
                 
             except Exception as e:

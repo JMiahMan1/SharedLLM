@@ -186,7 +186,7 @@ def test_quarantine_clear_on_success():
 
 def test_quarantine_config_defaults():
     """Verify quarantine configuration defaults are sensible."""
-    import workspace_runtime.main as wr_module
+    import services.workspace_runtime.main as wr_module
     assert wr_module.RAVEN_QUARANTINE_THRESHOLD == 3
     assert wr_module.RAVEN_QUARANTINE_WINDOW_SECONDS == 600
 

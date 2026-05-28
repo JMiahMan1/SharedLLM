@@ -7,15 +7,15 @@ import redis.asyncio as redis
 from datetime import datetime
 from typing import Optional, Any, Dict, List, Callable, Awaitable
 
-from gateway.history import REDIS_URL
-from gateway.config import (
+from services.gateway.history import REDIS_URL
+from services.gateway.config import (
     IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
     STORAGE_SVC, RAG_SVC, INTERNAL_SECRET,
     RAVEN_MAX_TOTAL_SECONDS,
     RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
 )
-from gateway.schemas import ResolvedCredentials
-from gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
+from services.gateway.schemas import ResolvedCredentials
+from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
 
 CREDENTIAL_PATTERNS = [
     re.compile(r'(?:api[_-]?key|apikey)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{8,})["\']?', re.IGNORECASE),
@@ -311,7 +311,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
 
 async def get_provider(settings: dict) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
-    from gateway.config import OLLAMA_TIMEOUT
+    from services.gateway.config import OLLAMA_TIMEOUT
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
     if active_provider == "openrouter":
@@ -1122,7 +1122,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 ans = data.get("message", {}).get("content", ans)
             except Exception as e:
                 log.warning(f"[AgentLoop] Summarization phase failed: {e}")
-                from gateway.orchestrator import strip_json_from_response
+                from services.gateway.orchestrator import strip_json_from_response
                 ans = strip_json_from_response(ans)
 
     if action_log and not (isinstance(exec_data, dict) and exec_data.get("status") == "ERROR"):

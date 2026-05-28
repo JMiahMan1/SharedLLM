@@ -3,14 +3,13 @@ import asyncio
 from unittest.mock import MagicMock
 from fastapi import BackgroundTasks
 
-# These work with PYTHONPATH=services
-from storage.indexer import chunk_text, CheckpointManager, extract_and_chunk_contents
-from storage.models import ContentIndexItem
-from storage.main import IndexScanRequest
+from services.storage.indexer import chunk_text, CheckpointManager, extract_and_chunk_contents
+from services.storage.models import ContentIndexItem
+from services.storage.main import IndexScanRequest
 
 @pytest.mark.server_only
 def test_storage_main_functions():
-    from storage.main import full_content_index, pause_indexing, resume_indexing
+    from services.storage.main import full_content_index, pause_indexing, resume_indexing
     assert callable(full_content_index)
     assert callable(pause_indexing)
     assert callable(resume_indexing)
@@ -60,7 +59,7 @@ def test_extract_and_chunk_contents_logic():
 
 @pytest.mark.server_only
 def test_storage_api_control_endpoints():
-    from storage.main import pause_indexing, resume_indexing
+    from services.storage.main import pause_indexing, resume_indexing
     resp = pause_indexing()
     assert resp["status"] == "PAUSED"
 
@@ -69,8 +68,8 @@ def test_storage_api_control_endpoints():
 
 @pytest.mark.server_only
 def test_full_index_endpoint_mocks(monkeypatch):
-    from storage.models import ProviderConfig
-    from storage.main import full_content_index
+    from services.storage.models import ProviderConfig
+    from services.storage.main import full_content_index
     request = IndexScanRequest(
         provider=ProviderConfig(kind="nextcloud", settings={"url": "http://x", "username": "u", "password": "p"}),
         path="/",

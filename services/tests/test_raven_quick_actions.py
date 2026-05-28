@@ -26,9 +26,9 @@ os.environ.setdefault("CONTROL_PLANE_URL", "http://control_plane:8008")
 os.environ.setdefault("SEARXNG_URL", "http://searxng:8080")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
-from gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL
-from gateway.main import select_model_for_query, select_system_instruction_for_query, AUTONOMOUS_SIGNALS
-from gateway.agent_loop import extract_action_json
+from services.gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL
+from services.gateway.main import select_model_for_query, select_system_instruction_for_query, AUTONOMOUS_SIGNALS
+from services.gateway.agent_loop import extract_action_json
 
 
 MISSION_TEMPLATES: list[dict[str, str | list[str]]] = [
@@ -56,7 +56,7 @@ MISSION_TEMPLATES: list[dict[str, str | list[str]]] = [
 
 
 def _patch_model_selection():
-    return patch("gateway.main.get_coding_model", new=AsyncMock(return_value="qwen2.5-coder:7b"))
+    return patch("services.gateway.main.get_coding_model", new=AsyncMock(return_value="qwen2.5-coder:7b"))
 
 
 @pytest.mark.asyncio
@@ -158,20 +158,20 @@ def test_raven_prompt_includes_context_search_tool():
 
 
 def test_context_search_in_single_turn_endpoints():
-    from gateway.orchestrator import SINGLE_TURN_TOOL_ENDPOINTS
+    from services.gateway.orchestrator import SINGLE_TURN_TOOL_ENDPOINTS
     assert "contextsearchrequest" in SINGLE_TURN_TOOL_ENDPOINTS
     endpoint = SINGLE_TURN_TOOL_ENDPOINTS["contextsearchrequest"]
     assert endpoint == "/rag/search"
 
 
 def test_context_search_in_agent_action_map():
-    from gateway.agent_loop import RAG_SVC
+    from services.gateway.agent_loop import RAG_SVC
     # Verify RAG_SVC is importable in agent_loop
     assert RAG_SVC is not None
 
 
 def test_context_search_schema_exists():
-    from gateway.schemas import ContextSearchRequest
+    from services.gateway.schemas import ContextSearchRequest
     schema = ContextSearchRequest(query="test", collection_name="ha_entities", k=5)
     assert schema.query == "test"
     assert schema.collection_name == "ha_entities"
