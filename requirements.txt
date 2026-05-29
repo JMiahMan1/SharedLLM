@@ -12,7 +12,6 @@ python-dateutil
 dateparser
 caldav
 numpy
-sentence-transformers
 torch==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu
 torchaudio==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu
 torchvision==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu

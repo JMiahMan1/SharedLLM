@@ -41,7 +41,8 @@ async def lifespan(app: FastAPI):
     
     os.makedirs(CHROMA_DIR, exist_ok=True)
     chroma_client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(anonymized_telemetry=False))  # pyright: ignore[reportAttributeAccessIssue]
-    embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL)
+    # Use fastembed for CPU-only embedding (avoids CUDA torch dependency)
+    embedding_fn = embedding_functions.FastembedEmbeddingFunction(model_name=EMBEDDING_MODEL)
     
     log.info("RAG Service Ready.")
     yield
