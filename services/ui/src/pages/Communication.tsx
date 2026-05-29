@@ -40,7 +40,7 @@ import type {
 } from '../services/api';
 import { MonacoEditor } from '../components/editor';
 
-const EMPTY_ARRAY: any[] = [];
+const EMPTY_ARRAY: unknown[] = [];
 
 const detailList = <T,>(response: ExecutionResponse | undefined, key: string): T[] => {
   const detail = response?.detail as Record<string, unknown> | null | undefined;
@@ -101,7 +101,7 @@ const Communication = () => {
     end: '',
   });
 
-  const editorRef = useRef<{ editor: any } | null>(null);
+  const editorRef = useRef<{ editor: Record<string, unknown> } | null>(null);
 
   const insertMd = (before: string, after: string) => {
     const editor = editorRef.current?.editor;
@@ -187,18 +187,21 @@ const Communication = () => {
 
   useEffect(() => {
     if (calendars.length > 0 && !selectedCalendar) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedCalendar(calendars[0].id);
     }
   }, [calendars, selectedCalendar]);
 
   useEffect(() => {
     if (!announcementDevice && mediaTargets.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAnnouncementDevice(mediaTargets[0].device_id);
     }
   }, [announcementDevice, mediaTargets]);
 
   useEffect(() => {
     if (!selectedTalkToken && talkConversations.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedTalkToken(talkConversations[0].token);
     }
   }, [selectedTalkToken, talkConversations]);

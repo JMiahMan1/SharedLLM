@@ -37,7 +37,7 @@ export default function RavenOpsPanel() {
       setDraftConfig({});
       toast.success('Raven Configuration Updated');
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to update configuration'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to update configuration'),
   });
 
   const executeMissionMutation = useMutation({
@@ -46,7 +46,7 @@ export default function RavenOpsPanel() {
       queryClient.invalidateQueries({ queryKey: ['raven-missions-admin'] });
       toast.success('Mission Dispatched to Raven ROZ');
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to dispatch mission'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to dispatch mission'),
   });
 
   const killMissionMutation = useMutation({
@@ -55,7 +55,7 @@ export default function RavenOpsPanel() {
       queryClient.invalidateQueries({ queryKey: ['raven-missions-admin'] });
       toast.success('Kill Signal Dispatched');
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to kill mission'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to kill mission'),
   });
 
   const { data: voicesRes } = useQuery({
@@ -70,7 +70,7 @@ export default function RavenOpsPanel() {
       toast.success('Model provisioning started: ' + data.results.join(', '));
       queryClient.invalidateQueries({ queryKey: ['raven-voices'] });
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to start download'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to start download'),
   });
 
   const testSearxngMutation = useMutation({

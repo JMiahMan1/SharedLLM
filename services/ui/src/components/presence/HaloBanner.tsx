@@ -10,6 +10,13 @@ interface Room {
   confidence: number;
 }
 
+interface PresenceData {
+  presence?: {
+    room: string;
+    confidence: number;
+  };
+}
+
 interface HaloBannerProps {
   rooms?: Room[];
   userId?: string;
@@ -24,9 +31,10 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
 
   useEffect(() => {
     if (!userId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     api.getUserPresence(userId)
-      .then((data: any) => {
+      .then((data: PresenceData) => {
         if (data?.presence) {
           setPresenceRoom({
             id: data.presence.room,
@@ -36,7 +44,10 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
         }
       })
       .catch(() => setPresenceRoom(null))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        loadingRef.current = false;
+      });
   }, [userId]);
 
   const displayRooms = rooms || (presenceRoom ? [presenceRoom] : []);
