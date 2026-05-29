@@ -4,8 +4,13 @@ import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { AuthProvider } from '../context/AuthContext';
 
-export const renderWithProviders = (ui: ReactElement) => {
-  const queryClient = new QueryClient({
+interface RenderOptions {
+  queryClient?: QueryClient;
+}
+
+export const renderWithProviders = (ui: ReactElement, options: RenderOptions = {}) => {
+  const { queryClient: providedQueryClient } = options;
+  const queryClient = providedQueryClient || new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
@@ -13,11 +18,16 @@ export const renderWithProviders = (ui: ReactElement) => {
     },
   });
 
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <AuthProvider>{ui}</AuthProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
+
+  return {
+    ...result,
+    queryClient,
+  };
 };

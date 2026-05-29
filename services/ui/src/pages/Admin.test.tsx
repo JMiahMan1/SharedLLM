@@ -2,10 +2,43 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import Admin from './Admin';
 import { renderWithProviders } from '../test/render';
+import { api } from '../services/api';
+
+vi.mock('../components/ui/EntitySearchDropdown', () => ({
+  default: ({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) => (
+    <input
+      data-testid="entity-search"
+      type="text"
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}));
 
 vi.stubGlobal('confirm', vi.fn(() => true));
 
 describe('Admin page', () => {
+  it('api.discoverUsers returns discovered users via MSW', async () => {
+    const result = await api.discoverUsers();
+    expect(result.users).toHaveLength(2);
+    expect(result.users[0].username).toBe('jeremiah');
+  });
+
+  it('renders discovery users when no filter is applied', async () => {
+    renderWithProviders(<Admin />);
+    
+    await screen.findByText('User Management');
+    await screen.findByText('Discovery Import');
+    await screen.findByText('Shared/Default User');
+    
+    await waitFor(() => {
+      expect(screen.getByText('Jeremiah')).toBeInTheDocument();
+    }, { timeout: 5000 });
+    
+    expect(screen.getByText('Jeremiah')).toBeInTheDocument();
+    expect(screen.getByText('Michele')).toBeInTheDocument();
+  });
   it('renders tab navigation and default users tab', async () => {
     renderWithProviders(<Admin />);
 
@@ -31,7 +64,13 @@ describe('Admin page', () => {
   it('imports a discovered user into the user list', async () => {
     renderWithProviders(<Admin />);
 
+    await screen.findByText('Discovery Import');
+    
+    const jeremiahElement = await screen.findByText('Jeremiah');
+    expect(jeremiahElement).toBeInTheDocument();
+    
     const importButtons = await screen.findAllByText('Import');
+    expect(importButtons.length).toBeGreaterThan(0);
     fireEvent.click(importButtons[0]);
 
     await waitFor(() => expect(screen.getAllByText('Jeremiah').length).toBeGreaterThan(0));
@@ -40,7 +79,7 @@ describe('Admin page', () => {
   it('saves a new device assignment and a new setting', async () => {
     renderWithProviders(<Admin />);
 
-    fireEvent.change(await screen.findByPlaceholderText('Home Assistant entity ID'), {
+    fireEvent.change(await screen.findByTestId('entity-search'), {
       target: { value: 'media_player.kitchen_echo' },
     });
     fireEvent.change(screen.getByLabelText('Device User'), {

@@ -133,7 +133,14 @@ export const server = setupServer(
     users = users.filter((user) => user.username !== username);
     return HttpResponse.json({ status: 'SUCCESS' });
   }),
-  http.get('/api/auth/discover', () => HttpResponse.json(discoveredUsers)),
+  http.get('/api/auth/discover', () => {
+    console.log('[MSW] /api/auth/discover called, discoveredUsers:', JSON.stringify(discoveredUsers));
+    return HttpResponse.json({
+      users: discoveredUsers,
+      warnings: [],
+      errors: [],
+    });
+  }),
   http.get('/api/users/devices', () => HttpResponse.json(devices)),
   http.post('/api/users/devices', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
@@ -374,6 +381,7 @@ export const server = setupServer(
   http.get('/api/docs/:docName', () => HttpResponse.json({ content: '# Docs\n\nUseful documentation.' })),
   http.post('/api/auth/test-connection', () => HttpResponse.json({ status: 'SUCCESS', message: 'Connected' })),
   http.post('/api/users/me/enroll', () => HttpResponse.json({ status: 'SUCCESS', message: 'Enrolled' })),
+  http.post('/api/auth/import/nextcloud', () => HttpResponse.json({ status: 'SUCCESS', message: 'Users imported from Nextcloud' })),
   http.post('/api/storage/list', () => HttpResponse.json({
     status: 'SUCCESS',
     entries: [
@@ -389,7 +397,45 @@ export const server = setupServer(
     total_chunks: 1234,
     total_documents: 42,
     last_indexed: '2026-05-06T10:00:00Z',
-    providers: ['nextcloud']
+    providers: ['nextcloud'],
+    breakdown: { home_assistant: { chunks: 500, documents: 200 }, notes: { chunks: 200, documents: 50 } }
+  })),
+  http.get('/api/storage/collection/:name', () => HttpResponse.json({ items: [] })),
+  http.get('/api/entities', () => HttpResponse.json([
+    { entity_id: 'media_player.kitchen_echo', domain: 'media_player', friendly_name: 'Kitchen Echo' },
+    { entity_id: 'light.living_room', domain: 'light', friendly_name: 'Living Room Light' },
+    { entity_id: 'media_player.living_room_tv', domain: 'media_player', friendly_name: 'Living Room TV' },
+  ])),
+
+  // Media groups / light clusters / light patterns
+  http.get('/api/groups/media', () => HttpResponse.json({ groups: [] })),
+  http.post('/api/groups/media', () => HttpResponse.json({ status: 'SUCCESS', message: 'Group created' })),
+  http.delete('/api/groups/media/:name', () => HttpResponse.json({ status: 'SUCCESS', message: 'Group deleted' })),
+  http.get('/api/groups/lights', () => HttpResponse.json({ clusters: [] })),
+  http.post('/api/groups/lights', () => HttpResponse.json({ status: 'SUCCESS', message: 'Cluster created' })),
+  http.delete('/api/groups/lights/:name', () => HttpResponse.json({ status: 'SUCCESS', message: 'Cluster deleted' })),
+  http.get('/api/groups/patterns', () => HttpResponse.json({ patterns: [] })),
+  http.post('/api/groups/patterns', () => HttpResponse.json({ status: 'SUCCESS', message: 'Pattern created' })),
+  http.delete('/api/groups/patterns/:name', () => HttpResponse.json({ status: 'SUCCESS', message: 'Pattern deleted' })),
+  http.post('/execute/groups/lights', () => HttpResponse.json({ status: 'SUCCESS', message: 'Pattern executed' })),
+
+  // Telemetry
+  http.get('/api/telemetry/enroll', () => HttpResponse.json({ enrollments: [] })),
+  http.post('/api/telemetry/enroll', () => HttpResponse.json({ status: 'SUCCESS', message: 'Device enrolled' })),
+  http.delete('/api/telemetry/enroll/:entityId', () => HttpResponse.json({ status: 'SUCCESS', message: 'Device unenrolled' })),
+  http.post('/api/telemetry/analyze', () => HttpResponse.json({ status: 'SUCCESS', message: 'Analysis queued' })),
+
+  // Intercom
+  http.get('/api/intercom/sessions', () => HttpResponse.json([])),
+  http.post('/api/intercom/sessions', () => HttpResponse.json({ session_id: 'mock-session-1', status: 'active' })),
+  http.delete('/api/intercom/sessions/:sessionId', () => HttpResponse.json({ status: 'SUCCESS', message: 'Session ended' })),
+  http.post('/api/intercom/broadcast', () => HttpResponse.json({ status: 'SUCCESS', targets_count: 0 })),
+  http.post('/api/intercom/announce', () => HttpResponse.json({ status: 'SUCCESS', targets_count: 0 })),
+  http.get('/api/intercom/config', () => HttpResponse.json({
+    default_tts_engine: 'kokoro',
+    default_voice: 'af_heart',
+    default_volume: 0.8,
+    enable_espresense_routing: true,
   })),
 
   // Raven endpoints
