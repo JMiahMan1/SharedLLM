@@ -24,8 +24,14 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'jsdom',
+    environment: 'happy-dom',
     setupFiles: './src/test/setup.ts',
+    exclude: [
+      '**/e2e/**/*.spec.ts',
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/android/**',
+    ],
   },
   server: {
     proxy: {

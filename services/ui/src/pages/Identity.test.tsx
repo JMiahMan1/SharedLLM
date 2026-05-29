@@ -4,11 +4,15 @@ import Identity from './Identity';
 import { renderWithProviders } from '../test/render';
 
 vi.stubGlobal('prompt', vi.fn(() => 'CLI Client'));
-Object.assign(navigator, {
-  clipboard: {
-    writeText: vi.fn(),
-  },
-});
+if (!Object.getOwnPropertyDescriptor(navigator, 'clipboard')) {
+  Object.defineProperty(navigator, 'clipboard', {
+    value: {
+      writeText: vi.fn().mockResolvedValue(undefined),
+    },
+    writable: true,
+    configurable: true,
+  });
+}
 
 describe('Identity page', () => {
   it('renders integrations, keys, and persona data from the live contract', async () => {
