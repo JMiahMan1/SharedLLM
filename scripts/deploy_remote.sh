@@ -4,7 +4,10 @@
 
 # Load variables from .env
 if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | xargs)
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
 fi
 
 # Fallback or Override
@@ -32,12 +35,20 @@ fi
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 echo "Branch: $BRANCH"
 
-ssh "$HOST" << EOF
+# shellcheck disable=SC2087
+if ssh "$HOST" << EOF
     cd "$DIR"
+
+    # Detect Docker group GID dynamically (not hardcoded)
+    export DOCKER_GID=\$(getent group docker | cut -d: -f3)
+    if [ -z "\$DOCKER_GID" ]; then
+        export DOCKER_GID=\$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 980)
+    fi
+
     # Prune pycache using Docker to bypass root permission issues BEFORE git ops
     echo "Pruning __pycache__ via Docker..."
     if [ -d "app" ]; then
-        docker run --rm -v "$(pwd)/app:/app" -w /app alpine find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+        docker run --rm -v "\$(pwd)/app:/app" -w /app alpine find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
     fi
     # Prune root-owned test reports/directory that block git reset
     echo "Pruning root-owned test reports..."
@@ -45,12 +56,11 @@ ssh "$HOST" << EOF
 
     echo "Fetching latest code..."
     git fetch origin
-    
+
     # Ensure we are on the correct branch and sync hard
     git checkout $BRANCH || git checkout -b $BRANCH origin/$BRANCH
     git reset --hard origin/$BRANCH
     git pull origin $BRANCH
-    
 
     echo "Recreating Docker container to apply config..."
     docker compose up -d --build --force-recreate
@@ -61,7 +71,7 @@ ssh "$HOST" << EOF
     TIMEOUT=120
     ELAPSED=0
     SUCCESS=0
-    
+
     # Check logs until success message or timeout
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
         if docker logs --tail 200 sharedllm_gateway 2>&1 | grep -q "Application startup complete"; then
@@ -69,7 +79,7 @@ ssh "$HOST" << EOF
             SUCCESS=1
             break
         fi
-        
+
         # Check for immediate failure (Traceback)
         if docker logs --tail 20 sharedllm_gateway 2>&1 | grep -q "Traceback"; then
             echo "[FAIL] Application failed to start! Traceback detected."
@@ -90,8 +100,7 @@ ssh "$HOST" << EOF
         exit 1
     fi
 EOF
-
-if [ $? -eq 0 ]; then
+then
     echo "[OK] Deployment Verification Successful."
 else
     echo "[FAIL] Deployment Failed."
