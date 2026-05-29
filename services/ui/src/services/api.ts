@@ -467,12 +467,12 @@ export const api = {
   },
 
   // Presence
-  async getUserPresence(userId: string): Promise<{ status: string; user_id: string; presence: any }> {
+  async getUserPresence(userId: string): Promise<{ status: string; user_id: string; presence: { room: string; confidence: number } | null }> {
     const resp = await apiClient.get(`/api/presence/${userId}`);
     return resp.data;
   },
 
-  async getAllPresence(): Promise<{ status: string; presence: Record<string, any> }> {
+  async getAllPresence(): Promise<{ status: string; presence: Record<string, { room: string; confidence: number }> }> {
     const resp = await apiClient.get('/api/presence/all');
     return resp.data;
   },

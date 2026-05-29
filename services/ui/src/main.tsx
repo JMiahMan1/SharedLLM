@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
@@ -57,6 +58,7 @@ createRoot(rootElement).render(
   </StrictMode>,
 );
 
+/* eslint-enable react-refresh/only-export-components */
 const splash = document.getElementById('splash');
 if (splash) {
   requestAnimationFrame(() => {
