@@ -8,16 +8,39 @@ import json
 import logging
 import time
 import hashlib
+import traceback
 
 from services.config import INTERNAL_SECRET, CHROMA_PERSIST_DIR, EMBEDDING_MODEL
-from typing import Optional
+from typing import Any, Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
 from fastapi.responses import JSONResponse
 import chromadb  # pyright: ignore[reportMissingTypeStubs]
 from chromadb.config import Settings  # pyright: ignore[reportMissingTypeStubs]
-from chromadb.utils import embedding_functions  # pyright: ignore[reportMissingTypeStubs]
-import traceback
+
+
+class FastembedEmbeddingFunction:
+    """Wraps fastembed's TextEmbedding for use with ChromaDB."""
+
+    def __init__(self, model_name: str, **kwargs: Any) -> None:
+        from fastembed import TextEmbedding  # pyright: ignore[reportMissingImports]
+
+        self._embedder = TextEmbedding(model_name=model_name, **kwargs)
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        return [emb.tolist() for emb in self._embedder.embed(input)]
+
+    def embed_query(self, input: list[str]) -> list[list[float]]:
+        return [emb.tolist() for emb in self._embedder.embed(input)]
+
+    def name(self) -> str:
+        return f"fastembed:{self._embedder.model_name}"
+
+
+# pyright: ignore reportGeneralTypeIssues
+# The class implements chromadb's EmbeddingFunction protocol at runtime
+# (via __call__), but pyright can't verify the protocol match statically.
+
 
 from services.rag.schemas import SearchRequest, SearchResponse, SearchResultItem, IngestRequest
 
@@ -42,7 +65,7 @@ async def lifespan(app: FastAPI):
     os.makedirs(CHROMA_DIR, exist_ok=True)
     chroma_client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(anonymized_telemetry=False))  # pyright: ignore[reportAttributeAccessIssue]
     # Use fastembed for CPU-only embedding (avoids CUDA torch dependency)
-    embedding_fn = embedding_functions.FastembedEmbeddingFunction(model_name=EMBEDDING_MODEL)
+    embedding_fn = FastembedEmbeddingFunction(model_name=EMBEDDING_MODEL)
     
     log.info("RAG Service Ready.")
     yield
