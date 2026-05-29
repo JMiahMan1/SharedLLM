@@ -158,7 +158,7 @@ const Admin = () => {
     queryKey: ['discovered-users'],
     queryFn: () => api.discoverUsers(),
   });
-  const discoveredUsers = discoveryData?.users ?? [];
+  const discoveredUsers = useMemo(() => discoveryData?.users ?? [], [discoveryData]);
   const discoveryWarnings = discoveryData?.warnings ?? [];
   const discoveryErrors = discoveryData?.errors ?? [];
 
