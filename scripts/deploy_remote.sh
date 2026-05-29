@@ -39,7 +39,9 @@ echo "Branch: $BRANCH"
 if ssh "$HOST" << EOF
     cd "$DIR"
 
-    # Detect Docker group GID dynamically (not hardcoded)
+    # Detect Docker user/group IDs dynamically (not hardcoded)
+    export PUID=\$(id -u)
+    export PGID=\$(id -g)
     export DOCKER_GID=\$(getent group docker | cut -d: -f3)
     if [ -z "\$DOCKER_GID" ]; then
         export DOCKER_GID=\$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 980)
@@ -62,8 +64,8 @@ if ssh "$HOST" << EOF
     git reset --hard origin/$BRANCH
     git pull origin $BRANCH
 
-    echo "Recreating Docker container to apply config..."
-    docker compose up -d --build --force-recreate
+    echo "Rebuilding and starting Docker containers..."
+    docker compose up -d --build
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure
