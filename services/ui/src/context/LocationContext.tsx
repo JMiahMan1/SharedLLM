@@ -19,6 +19,7 @@ interface LocationContextValue extends LocationState {
   stopTracking: () => void;
 }
 
+/* eslint-disable react-refresh/only-export-components */
 export const LocationContext = createContext<LocationContextValue | null>(null);
 
 const SPEED_THRESHOLD_MPH = 15;
@@ -153,3 +154,4 @@ export function useLocation() {
 export function useBackgroundLocation() {
   return useLocation();
 }
+/* eslint-enable react-refresh/only-export-components */

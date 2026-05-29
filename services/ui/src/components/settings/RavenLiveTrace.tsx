@@ -22,12 +22,12 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
   useEffect(() => {
     if (!isOpen || !missionId) return;
 
-    setLogs([{ type: 'system', data: `Initializing connection to Raven Mission #${missionId}...` }]);
-    
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const token = localStorage.getItem('jarvis_api_key') || '';
     const wsUrl = `${protocol}//${window.location.host}/api/raven/missions/${missionId}/stream?token=${encodeURIComponent(token)}`;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLogs([{ type: 'system', data: `Initializing connection to Raven Mission #${missionId}...` }]);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

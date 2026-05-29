@@ -291,7 +291,7 @@ const MissionsPane = () => {
       toast.success('Mission Dispatched');
       refetch();
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to dispatch mission'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to dispatch mission'),
   });
 
   const killMissionMutation = useMutation({
@@ -300,7 +300,7 @@ const MissionsPane = () => {
       toast.success('Kill Signal Dispatched');
       refetch();
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to kill mission'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to kill mission'),
   });
 
   const deleteMissionMutation = useMutation({
@@ -309,7 +309,7 @@ const MissionsPane = () => {
       toast.success('Mission Deleted');
       refetch();
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to delete mission'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to delete mission'),
   });
 
   const pauseMissionMutation = useMutation({
@@ -318,7 +318,7 @@ const MissionsPane = () => {
       toast.success('Mission Paused');
       refetch();
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to pause mission'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to pause mission'),
   });
 
   const resumeMissionMutation = useMutation({
@@ -327,12 +327,12 @@ const MissionsPane = () => {
       toast.success('Mission Resumed');
       refetch();
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to resume mission'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to resume mission'),
   });
 
   const filteredMissions = statusFilter === 'all'
     ? missions
-    : missions.filter((m: any) => m.status === statusFilter);
+    : missions.filter((m: { status: string }) => m.status === statusFilter);
 
   return (
     <section className="glass-panel p-6">
@@ -416,7 +416,7 @@ const MissionsPane = () => {
             No missions match the current filter.
           </div>
         ) : (
-          filteredMissions.map((mission: any) => (
+          filteredMissions.map((mission: { id: number; status: string; mission_type: string; progress?: number; created_at: string; error_summary?: string; proposed_mission?: string; target_container?: string }) => (
             <div key={mission.id} className="glass-card p-4 border-l-4 border-l-indigo-500/50 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0 flex-1">
