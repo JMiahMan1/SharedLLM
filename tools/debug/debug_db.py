@@ -1,7 +1,7 @@
 # debug_db.py
 import os
 from langchain_chroma import Chroma  # pyright: ignore[reportMissingImports]
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 
 # Point this to your actual DB folder defined in .env or settings
 CHROMA_DIR = "/data/chroma_db" 
@@ -14,7 +14,7 @@ def inspect():
     print(f"🔍 Inspecting Database at: {CHROMA_DIR}")
     
     # Initialize Embedding function (required to load Chroma, even just to peek)
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
     
     # 1. Check Home Assistant Collection
     # Try common names

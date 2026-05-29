@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 sys.modules['chromadb'] = MagicMock()
 sys.modules['chromadb.config'] = MagicMock()
 sys.modules['chromadb.utils'] = MagicMock()
-sys.modules['sentence_transformers'] = MagicMock()
+sys.modules['chromadb.utils.embedding_functions'] = MagicMock()
+sys.modules['fastembed'] = MagicMock()
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
 from services.rag.main import app
