@@ -1600,13 +1600,13 @@ async def get_ma_playlists(user_id: str = ""):
     """Get Music Assistant playlists (per-user credentials)."""
     try:
         creds = await resolve_internal_user(rag_user=user_id)
-        ha_url = creds.get("ha_url") if creds else (HA_URL if HA_URL else None)
-        ha_token = creds.get("ha_token") if creds else (HA_TOKEN if HA_TOKEN else None)
-        if not ha_url or not ha_token:
-            log.error(f"[ma/playlists] No HA credentials for user {user_id}")
+        mass_url = creds.get("mass_url") if creds else (None)
+        mass_token = creds.get("mass_token") if creds else (None)
+        if not mass_url or not mass_token:
+            log.error(f"[ma/playlists] No MA credentials for user {user_id}")
             return {"status": "SUCCESS", "playlists": []}
         from handlers.mass_client import get_playlists
-        playlists = await get_playlists(ha_url, ha_token)
+        playlists = await get_playlists(mass_url, mass_token)
         return {"status": "SUCCESS", "playlists": playlists}
     except Exception as e:
         log.error(f"[ma/playlists] Error: {e}")
@@ -1618,13 +1618,13 @@ async def get_ma_recent(user_id: str = ""):
     """Get Music Assistant recently played items (per-user credentials)."""
     try:
         creds = await resolve_internal_user(rag_user=user_id)
-        ha_url = creds.get("ha_url") if creds else (HA_URL if HA_URL else None)
-        ha_token = creds.get("ha_token") if creds else (HA_TOKEN if HA_TOKEN else None)
-        if not ha_url or not ha_token:
-            log.error(f"[ma/recent] No HA credentials for user {user_id}")
+        mass_url = creds.get("mass_url") if creds else (None)
+        mass_token = creds.get("mass_token") if creds else (None)
+        if not mass_url or not mass_token:
+            log.error(f"[ma/recent] No MA credentials for user {user_id}")
             return {"status": "SUCCESS", "recent": []}
         from handlers.mass_client import get_recent
-        recent = await get_recent(ha_url, ha_token)
+        recent = await get_recent(mass_url, mass_token)
         return {"status": "SUCCESS", "recent": recent}
     except Exception as e:
         log.error(f"[ma/recent] Error: {e}")
