@@ -608,16 +608,25 @@ This replaces the old `extra_hosts` static IP mapping in `docker-compose.yml` an
 *   [ ] **Task 1.5:** Build the `MQTTPublishRequest` schema and handler for direct ESPHome communication.
 
 ### Phase 2: React Frontend UI Overhaul ("Neon Glass")
-*   [ ] **Task 2.1:** Implement the Fluid Grid / Bottom Nav responsive shell.
-*   [ ] **Task 2.2:** Build the Normalized Capability Widgets (MASS Media, ABS Progress, Notes, Chores).
-*   [ ] **Task 2.3:** Overhaul `Communication.tsx` into the Smart Inbox with Full-Screen Expansion.
+*   [x] **Task 2.1:** Implement the Fluid Grid / Bottom Nav responsive shell. *(Layout shell exists: `Sidebar.tsx` on desktop, `BottomNav.tsx` on mobile. Routes: `/`, `/communication`, no `/chat`/`/intercom`/`/calendar` yet.)*
+*   [🔨] **Task 2.2:** Build the Normalized Capability Widgets (MASS Media, ABS Progress, Notes, Chores) + Bento Box Dashboard. *(In progress: Dashboard redesign to match Section 10.2 spec. Requires: Zustand widget store, recharts, `react-grid-layout` or CSS subgrid, backend energy endpoints, widget components for Energy Insights, Ambient Countdown Timer, Quick Notes, Active Media, Chores Progress, Upcoming Events, Quick Chat floating pill [disabled by default], Device Control widget.)*
+*   [ ] **Task 2.3:** Overhaul `Communication.tsx` into the Smart Inbox with Full-Screen Expansion + add `/chat` and `/intercom` routes.
 *   [ ] **Task 2.4:** Build the Nextcloud Avatar Picker and Vision stylization UI.
-*   [ ] **Task 2.5:** Build the Ambient Timer Widget and dynamic routing logic.
+*   [ ] **Task 2.5:** Build the Ambient Timer Widget and dynamic routing logic. *(Partially overlaps with Task 2.2 — the Ambient Countdown Timer is part of the Bento Dashboard.)*
+*   [ ] **Task 2.6:** Build `/calendar` page (monthly grid + daily agenda).
+*   [ ] **Task 2.7:** Build `/media` page (full MASS controller with queue viewer).
+*   [ ] **Task 2.8:** Build `/remote` page (device-aware universal remote control).
+*   [ ] **Task 2.9:** Build `/settings/integrations` page (personal settings for per-user credential linking).
+*   [ ] **Task 2.10:** Build admin pages: `/admin/ops`, `/admin/integrations`, `/admin/users`, `/admin/monitor`, `/admin/sounds`, `/admin/groups`.
+*   [ ] **Task 2.11:** Build Widget Customization System (context menu: hide/remove/reorder/resize/pin, per-user persistence in `identity.db`, cross-device sync via Zustand + WebSocket).
+*   [ ] **Task 2.12:** Build Device Control Widget with smart sorting (Most Used, By Time, Favorites/Pinned, Off), bulk controls, and device grouping by room/type.
+*   [ ] **Task 2.13:** Build Quick Chat toggle in `/settings` UI (enables/disables floating pill, persisted to `identity.db`).
 
 ### Phase 3: Real-Time State Sync & Presence
 *   [ ] **Task 3.1:** Build a centralized WebSocket manager (`/ws/capabilities`).
-*   [ ] **Task 3.2:** Build the React Zustand global store to auto-mount widgets.
+*   [ ] **Task 3.2:** Build the React Zustand global store to auto-mount widgets with customization state (hide/reorder/resize/pin, quick_chat toggle, device sorting mode).
 *   [ ] **Task 3.3:** Integrate ESPresense MQTT to drive the "Halo" Hero Banner.
+*   [ ] **Task 3.4:** Build `user_widgets` table migration for `identity.db` and CRUD API endpoints (`GET/PUT /api/widgets/settings/:widget_key`).
 
 ### Phase 4: LLM Preemption & The Lock Manager
 *   [ ] **Task 4.1:** Implement the Asyncio/Redis Global Inference Lock Manager inside `orchestrator.py`.
@@ -1397,7 +1406,7 @@ The SharedLLM backend is organized into strictly isolated, purpose-built contain
 | **`workspace_runtime`** | **Operational.** A secure sandbox (port 8007) for executing raw Python/shell scripts and receiving webhooks. Enforces granular, per-workspace security policies (read, write, git_status). | Isolate network access so sandboxed code cannot probe the internal `192.168.x.x` home subnet. | **Code Execution Blocks.** Renders live `stdout`/`stderr` terminal windows inside the chat when Raven runs a script. |
 | **`automation`** | **Operational.** A dedicated background processor container that handles scheduled polling events without blocking the Gateway. | Needs robust retry queues for flaky APIs. | *Invisible.* Triggers scheduled alarms and macros. |
 | **`logging`** | **Functional.** Aggregates logs across all containers. | Implement log retention policies (logrotate) to prevent NVMe exhaustion. | **Telemetry Viewer.** A searchable log table inside the Admin Panel. |
-| **`ui`** | **Legacy.** Currently serving the older React dashboard. | **Complete Overhaul.** Needs to be entirely rewritten into the mobile-first "Neon Glass" aesthetic with Zustand state management. | **The Shell.** The entire visual experience of Jarvis OS 2.0. |
+| **`ui`** | **Overhauled (In Progress).** Layout shell (`Sidebar.tsx` / `BottomNav.tsx`) exists and is functional. Bento Box Dashboard redesign is in progress (Section 10.2 spec): Zustand widget store, recharts, responsive CSS Grid, 8 widget types (Energy Insights, Ambient Countdown Timer, Quick Notes, Active Media, Chores Progress, Upcoming Events, Quick Chat floating pill [disabled by default], Device Control with smart sorting). Widget customization system (hide/remove/reorder/resize/pin) with per-user persistence in `identity.db`. Routes `/chat`, `/intercom`, `/calendar`, `/media`, `/remote`, `/settings`, `/admin/*` are pending. | Complete remaining routes (Tasks 2.3–2.13). Add energy/power tracking backend endpoints. Implement WebSocket capability sync. Build `user_widgets` table migration and CRUD API. | **The Shell.** The entire visual experience of Jarvis OS 2.0. Bento Box Dashboard + responsive navigation + deep-link widget expansion + widget customization. |
 | **`Alpaca` (External)** | **Operational.** Running remotely on the Ryzen/RTX 4060 Inference Node managing the TurboQuant image. | No immediate backend fixes, but needs rigorous monitoring for OOM errors. | **Model Selector.** Appears in Settings as a dropdown to toggle between standard Ollama models and TurboQuant models. |
 
 ---
@@ -1457,6 +1466,8 @@ This section breaks down the React/Ionic frontend page by page. It details exact
 | `/api/groups/patterns` | GET/POST/DELETE | Identity | CRUD for light patterns |
 | `/api/telemetry/enroll` | POST | Identity | Enroll devices in telemetry monitoring |
 | `/api/telemetry/enrolled` | GET | Identity | List enrolled telemetry devices |
+| `/api/widgets/settings` | GET | Identity | Get all widget customization settings for current user |
+| `/api/widgets/settings/{widget_key}` | PUT | Identity | Update widget customization (visibility, order, size, pin, sort mode, config) |
 | `/api/raven/missions/{id}/stream` | WS | Gateway | Live mission telemetry via Redis PubSub |
 | `/api/raven/missions/{id}/diff` | GET | Gateway | Retrieve code diff for review |
 | `/api/raven/missions/{id}/approve` | POST | Gateway | Approve and merge autonomous code patch |
@@ -1493,20 +1504,162 @@ This section breaks down the React/Ionic frontend page by page. It details exact
     *   *Type:* Icon + Text Buttons.
     *   *Routes:* `[ Home ]` | `[ Chat ]` | `[ Media Controller ]` | `[ Admin Ops ]` (hidden for non-admins).
 
-### 10.2 Home Dashboard (`/`)
+### 10.2 Home Dashboard (`/`) — Bento Box Layout
 *   **Target Audience:** Standard Users
-*   **Purpose:** The ambient capability matrix. Widgets auto-mount here via the Zustand store. On Mobile, widgets stack vertically. On Desktop/Tablet, they form a multi-column masonry grid.
-*   **Energy Insights Widget:**
-    *   *Type:* Spline Chart (React-Recharts) + Dynamic Text Block.
-    *   *Controls:* Displays real-time KwH. Text shows LLM-generated summaries. Tapping the card opens a detailed breakdown modal.
-*   **Ambient Countdown Timer:**
-    *   *Type:* Circular Progress SVG + Large Digital Text.
-    *   *Controls:* Pulses visually. Tapping reveals `[+1 Min]`, `[Pause]`, and `[Cancel]` buttons. Calls `timer.py` backend.
-*   **Quick Notes Widget:**
-    *   *Type:* Masonry Grid Cards.
-    *   *Controls:* Shows recent Nextcloud Notes. Tapping expands into a full-screen markdown text editor. Includes a `[+ New Note]` floating action button.
+*   **Purpose:** The ambient capability matrix. Widgets auto-mount here via the Zustand store based on user profile, enabled integrations, and ESPresense room context.
+*   **Layout Shell:** The dashboard uses a responsive CSS Grid "Bento Box" layout — a single-column grid on mobile (widgets stack vertically), a 2-column grid on tablet, and a 3-column grid on desktop. Widget cards use `grid-row: span N` and `grid-column: span M` to create varied card sizes that fill the grid efficiently. The layout is implemented with `react-grid-layout` or a CSS `subgrid`-based masonry approach. The layout shell (`Sidebar.tsx` on desktop, `BottomNav.tsx` on mobile) is preserved; the Bento Grid renders in the main content area below the "Halo" presence banner.
+*   **Widget Auto-Mounting System:** Widgets are defined as a registry of `WidgetDef` objects in `widgets/registry.ts`. Each widget has a `mountCondition` function that returns `true` when the widget should appear (e.g., `hasEnergyData && user.has_subscription`, `hasActiveTimers`). The Zustand store evaluates all mount conditions on page load and whenever WebSocket events arrive (`/ws/capabilities`). Widgets that match are auto-mounted into the grid. Users can manually pin/unpin widgets (stored in `identity.db` per user — synced across devices). Admin-defined widgets always mount; user-defined widgets are opt-in.
 
-### 10.3 Native Chat Client & Smart Inbox (`/chat`)
+*   **Widget Customization (Hide/Remove/Reorder/Resize):** Every widget card exposes a context menu (`right-click` on desktop, `long-press` on mobile/tablet) with:
+    - **Hide** — Removes the widget from the dashboard grid entirely. Persisted per-user in `identity.db`.
+    - **Remove** — Same as hide but with a confirmation dialog. Also hidden from auto-mount evaluation for the user.
+    - **Reorder** — Drag-and-drop repositioning within the grid. Widget order is stored as a priority list in `identity.db` and determines mount order.
+    - **Resize** — Toggles between `small` (1x1), `medium` (2x1), `wide` (3x1), and `tall` (1x2) sizes. Persisted per-user.
+    - **Pin** — Locks the widget in place so auto-hide rules don't remove it (e.g., Active Media stays even when playback stops).
+
+    All customization state is stored in `identity.db` (see `user_widgets` schema below) and synced across devices via the Zustand store. LocalStorage is used as a cache fallback during offline sessions.
+*   **Glass-Panel Aesthetic:** All widget cards use the established glass-panel style: `backdrop-filter: blur(16px)`, semi-transparent backgrounds, subtle border glow, and brand-specific accent colors (cyan for media, amber for timers, emerald for energy, yellow for notes).
+
+#### Bento Widget Definitions
+
+**Energy Insights Widget (Emerald Glow `#10b981`):**
+*   *Type:* Spline Chart (React-Recharts) + Dynamic Text Block.
+*   *Size:* Medium (2 columns on desktop, 1 on mobile/tablet).
+*   *Data Source:* `GET /api/energy/realtime` + `GET /api/energy/history?hours=24`.
+*   *Controls:* Displays real-time wattage/KwH. Chart shows 24-hour consumption trend. LLM-generated summary text rendered below the chart ("Power usage is 30% lower than yesterday. Solar production is covering all active loads."). Tapping the card opens a detailed breakdown modal with per-device power draw.
+*   *Mount Condition:* `energy_tracking_enabled && has_power_sensors`.
+
+**Ambient Countdown Timer Widget (Amber Glow `#f59e0b`):**
+*   *Type:* Circular Progress SVG (animated ring depleting) + Large Digital Text (MM:SS).
+*   *Size:* Small (1 column on desktop, 1 on mobile/tablet).
+*   *Data Source:* `GET /api/communication/timers` → filters active countdown timers for the current user.
+*   *Controls:* The ring pulses gently with an amber glow. Tapping reveals expanded controls: `[+1 Min]`, `[Pause]`, `[Cancel]`. Calls `timer.py` backend for all actions. When the timer reaches zero, the ring fills fully and a toast notification appears.
+*   *Mount Condition:* `active_countdown_timers > 0`.
+
+**Quick Notes Widget (Yellow Glow `#eab308`):**
+*   *Type:* Masonry Grid Cards — each card shows note title (truncated), preview text (first 80 chars), and last-modified timestamp.
+*   *Size:* Medium (2 columns on desktop, 1 on mobile/tablet).
+*   *Data Source:* `GET /api/communication/notes?limit=6&sort=modified_at DESC`.
+*   *Controls:* Tapping a note expands it into a full-screen markdown editor (pushed onto the route stack as `/notes/:id`). Includes a `[+ New Note]` floating action button that creates a note and navigates to the editor. Notes are saved via `POST /api/communication/notes` and synced to Nextcloud via `sync_rag`.
+*   *Mount Condition:* `notes_enabled` (always shown for standard users).
+
+**Active Media Widget (Cyan Glow `#06b6d4`):**
+*   *Type:* Album/Book Art Thumbnail + Scrolling Marquee (Title/Artist) + Transport Controls Row.
+*   *Size:* Wide (3 columns on desktop, 2 on tablet, 1 on mobile).
+*   *Data Source:* WebSocket `/ws/capabilities` — mounts automatically when `media_status` event arrives.
+*   *Controls:* `[Prev]`, `[Play/Pause]`, `[Next]` buttons map to `MediaTransportRequest`. Volume slider at the bottom. Tapping the art thumbnail navigates to the full `/media` page.
+*   *Mount Condition:* `media_playing || media_paused`.
+*   *Unmount:* Automatically unmounts when `media_stopped` event arrives — UNLESS the widget has been manually pinned by the user (via context menu). Pinned widgets persist regardless of playback state.
+
+**Chores Progress Widget (Emerald Glow `#10b981`):**
+*   *Type:* Concentric Progress Rings — one ring per child, showing completion percentage.
+*   *Size:* Medium (2 columns on desktop, 1 on mobile/tablet).
+*   *Data Source:* `GET /api/integrations/skylight/chores?date=today`.
+*   *Controls:* Tapping a ring navigates to `/chores` for that child. When all daily tasks are completed, the ring transitions to a rotating rainbow gradient animation.
+*   *Mount Condition:* `skylight_enabled && has_children`.
+*   *Dynamic Navigation:* When this widget mounts, the `/chores` route is automatically added to the navigation shell (Sidebar.tsx / BottomNav.tsx).
+
+**Upcoming Events Widget (Blue Glow `#3b82f6`):**
+*   *Type:* Timeline list — next 3 events with time, title, and source icon (📅 for CalDAV, ⭐ for Skylight).
+*   *Size:* Small (1 column on desktop, 1 on mobile/tablet).
+*   *Data Source:* `GET /api/communication/calendar?limit=3` + Skylight chore deadlines.
+*   *Controls:* Tapping an event opens a detail modal. Tapping the widget card navigates to `/calendar`.
+*   *Mount Condition:* `upcoming_events_count > 0`.
+
+**Quick Chat Floating Pill (Cyan Glow `#06b6d4`):**
+*   *Type:* Persistent floating button (bottom-right on desktop, bottom-center on mobile) — a small pill-shaped button with a chat icon.
+*   *Controls:* Tapping opens a compact chat drawer (slides up from bottom on mobile, slides in from right on desktop) showing the last 5 messages. Includes a text input for quick queries. Full chat experience available via `/chat`.
+*   *Mount Condition:* **Disabled by default.** Visible only if the user has enabled it via the `/settings` toggle (`quick_chat_enabled`). Admins can enable it globally for all users via system settings.
+*   *Behavior:* Messages sent from the floating pill use the same `/api/chat` endpoint as the full chat page. The drawer supports swipe-to-close on mobile.
+
+**Device Control Widget (Violet Glow `#8b5cf6`):**
+*   *Type:* Interactive device grid — one toggle/card per device. Grouped by type (lights, TVs) with quick-access bulk controls.
+*   *Size:* Medium (2 columns on desktop, 1 on mobile/tablet) — expands to wide when showing detailed device info.
+*   *Data Source:* `GET /api/devices?category=lights&category=tv` — resolves all `light.*` and `media_player` entities with `device_class=tv` assigned to the authenticated user.
+*   *Controls:*
+    - Each device card shows: icon, name, current state (on/off + brightness/color for lights), and a toggle switch.
+    - `[All On]` / `[All Off]` bulk controls at top of widget.
+    - `[Group by Room]` toggle groups devices by HA area/room.
+    - `[Group by Type]` toggle groups by device type (lights vs TVs).
+    - Tapping a device card opens a detailed control modal (brightness slider, color picker for RGB lights, transport controls for TVs).
+*   *Smart Sorting Modes* (configurable per user via dropdown in widget header):
+    - **Most Used (default)** — devices sorted by last-activated timestamp (most recent first). The LLM tracks activation frequency via `/ws/capabilities` events and the backend stores last-activated timestamps in Redis.
+    - **By Time** — devices sorted by time of day they're most frequently used (e.g., bedroom lights in the morning, living room TV in the evening). Requires ≥7 days of usage data for meaningful sorting.
+    - **Favorites / Pinned** — user-pinable device list. Devices can be pinned via the Device Control widget's context menu. Pinned devices always appear at the top in pinned order.
+    - **Off** — raw list of devices in their current pinned order or entity-ID alphabetical order.
+*   *Mount Condition:* `has_assignable_devices && (has_lights || has_tvs)`. Shows only when the user has at least one light or TV entity assigned to their profile.
+*   *Initial Scope:* Lights (`light.*` entities) and TVs (`media_player` with `device_class=tv` and app IDs containing `com.google.*`, `org.tizen.`, `roku`, or `webostv`). Other device classes (climate, locks, sensors) can be added in future phases.
+
+#### Widget Customization Persistence: `user_widgets` Table
+
+All widget customization state (visibility, order, size, pinned status, sorting mode) is persisted per-user in `identity.db` via a new `user_widgets` table:
+
+```sql
+CREATE TABLE user_widgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,              -- FK to users.id
+    widget_key TEXT NOT NULL,           -- unique identifier: "energy_insights", "quick_chat", "device_control", etc.
+    visibility TEXT NOT NULL DEFAULT 'visible',  -- 'visible', 'hidden', 'removed'
+    order_index INTEGER NOT NULL DEFAULT 0,      -- mount order in grid
+    size TEXT NOT NULL DEFAULT 'medium',         -- 'small', 'medium', 'wide', 'tall'
+    is_pinned INTEGER NOT NULL DEFAULT 0,        -- 1 = pinned (auto-hide disabled)
+    sort_mode TEXT DEFAULT 'most_used',          -- for Device Control: 'most_used', 'by_time', 'favorites', 'off'
+    pinned_devices TEXT DEFAULT '[]',            -- JSON array of device entity_ids (for Device Control favorites)
+    config TEXT DEFAULT '{}',                    -- JSON blob for widget-specific settings
+    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    UNIQUE(user_id, widget_key)
+);
+
+CREATE INDEX idx_user_widgets_visibility ON user_widgets(user_id, visibility);
+```
+
+**Key behaviors:**
+- **On user login:** The backend (or Zustand store with server fetch) queries `user_widgets WHERE user_id=? AND visibility='visible' ORDER BY order_index` to reconstruct the user's dashboard layout.
+- **Sync across devices:** Changes are written to `identity.db` immediately. The Zustand store receives updates via WebSocket (`/ws/capabilities` → `widget_settings_updated` event).
+- **LocalStorage fallback:** During offline sessions, customization state is cached in `localStorage` and synced to the server on next connection.
+- **Admin overrides:** Admins can set global defaults (e.g., "all users get Quick Chat enabled") that apply to new users or reset existing user preferences.
+
+#### Zustand Widget Store Architecture
+
+The Zustand store (`stores/widgetStore.ts`) manages both widget mount evaluation and customization state:
+
+```typescript
+interface WidgetState {
+  // Widget definitions & evaluation
+  widgetRegistry: WidgetDef[];
+  activeWidgets: WidgetInstance[];
+  mountedWidgetIds: string[];
+
+  // Customization state
+  userWidgets: Record<string, UserWidgetSettings>;
+  sortingMode: 'most_used' | 'by_time' | 'favorites' | 'off';
+
+  // Actions
+  evaluateMountConditions: (capabilities: CapabilityPayload) => void;
+  togglePin: (widgetKey: string) => void;
+  updateOrder: (widgetKey: string, newIndex: number) => void;
+  updateSize: (widgetKey: string, newSize: Size) => void;
+  hideWidget: (widgetKey: string) => void;
+  showWidget: (widgetKey: string) => void;
+  setSortingMode: (mode: SortMode) => void;
+  setQuickChatEnabled: (enabled: boolean) => void;
+  syncWithServer: () => Promise<void>;
+}
+```
+
+**Mount Evaluation Flow:**
+1. On page load: fetch `user_widgets` from `GET /api/widgets/settings`, load into Zustand.
+2. Evaluate `mountConditions` from `widgets/registry.ts` against current capabilities from WebSocket.
+3. Filter by user's `visibility` setting — only visible widgets appear.
+4. Filter by user-enabled toggles (e.g., `quick_chat_enabled`).
+5. Sort by `order_index` and render.
+
+**WebSocket Sync Flow:**
+1. Any widget action (toggle, resize, reorder) updates Zustand locally (optimistic UI).
+2. Action is dispatched to backend via `PUT /api/widgets/settings/{widget_key}`.
+3. On success: server persists to `identity.db`, broadcasts `widget_settings_updated` event to WebSocket.
+4. All connected devices receive the event and update their Zustand stores (cross-device sync).
+5. On failure: revert optimistic state, show error toast.
 *   **Target Audience:** Standard Users
 *   **Purpose:** Direct interface to Nextcloud Talk and Jarvis LLM interactions.
 *   **Message Feed:**
