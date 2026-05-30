@@ -51,6 +51,8 @@ def _parse_env_users() -> dict:
         "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL") or os.getenv("ABS_URL"),
         "audiobookshelf_user": os.getenv("AUDIOBOOKSHELF_USER") or os.getenv("ABS_USER"),
         "audiobookshelf_pass": os.getenv("AUDIOBOOKSHELF_PASS") or os.getenv("ABS_PASS"),
+        "mass_url": os.getenv("MA_URL") or os.getenv("MUSIC_ASSISTANT_URL"),
+        "mass_token": os.getenv("MA_TOKEN") or os.getenv("MUSIC_ASSISTANT_TOKEN"),
         "skylight_url": os.getenv("SKYLIGHT_URL"),
         "skylight_email": os.getenv("SKYLIGHT_EMAIL"),
         "skylight_pass": os.getenv("SKYLIGHT_PASS"),
@@ -99,6 +101,10 @@ def _parse_env_users() -> dict:
             "audiobookshelf_user": "audiobookshelf_user",
             "audiobookshelf_pass": "audiobookshelf_pass",
             "audiobookshelf_password": "audiobookshelf_pass",
+            "mass_url": "mass_url",
+            "mass_token": "mass_token",
+            "music_assistant_url": "mass_url",
+            "music_assistant_token": "mass_token",
             "skylight_url": "skylight_url",
             "skylight_email": "skylight_email",
             "skylight_pass": "skylight_pass",
@@ -161,12 +167,14 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             gitlab_user=udata.get("gitlab_user"),
             audiobookshelf_url=udata.get("audiobookshelf_url"),
             audiobookshelf_user=udata.get("audiobookshelf_user"),
+            mass_url=udata.get("mass_url"),
             # Encrypt sensitive fields
             nextcloud_pass_enc=encrypt(udata.get("nextcloud_pass")),
             ha_token_enc=encrypt(udata.get("ha_token")),
             github_token_enc=encrypt(udata.get("github_token")),
             gitlab_token_enc=encrypt(udata.get("gitlab_token")),
             audiobookshelf_pass_enc=encrypt(udata.get("audiobookshelf_pass")),
+            mass_token_enc=encrypt(udata.get("mass_token")),
         )
         session.add(user)
         count += 1
