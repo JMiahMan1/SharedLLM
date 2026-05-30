@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
+import { LocalAudioPlayer } from '../components/LocalAudioPlayer';
 
 interface MediaStatus {
   entity_id?: string;
@@ -302,13 +303,14 @@ const PlaylistItem = ({
 /* ── explorer modal ─────────────────────────────────────────────────── */
 
 const MediaExplorerModal = ({
-  show, onClose, playAudiobook, playPlaylist, playMedia, isDisabled,
+  show, onClose, playAudiobook, playPlaylist, playMedia, playLocal, selectedTarget,
 }: {
   show: boolean; onClose: () => void;
   playAudiobook: (id: string) => void;
   playPlaylist: (uri: string) => void;
   playMedia: (query: string, mediaType?: string) => void;
-  isDisabled: boolean;
+  playLocal: (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => void;
+  selectedTarget: string;
 }) => {
   const { trigger } = useHaptics();
   const [tab, setTab] = useState<'ma' | 'abs'>('ma');
@@ -357,8 +359,18 @@ const MediaExplorerModal = ({
   });
 
   const handlePlay = useCallback(
-    (id: string, type: 'audiobook' | 'music' | 'playlist') => {
-      if (isDisabled) return;
+    (id: string, type: 'audiobook' | 'music' | 'playlist', title?: string, subtitle?: string) => {
+      if (!selectedTarget) {
+        if (title && subtitle) {
+          trigger('heavy');
+          setItemLoading(id);
+          try {
+            const source = type === 'audiobook' ? 'abs' : 'ma';
+            playLocal(id, title, subtitle, type === 'audiobook' ? 'audiobook' : 'music', source);
+          } finally { setItemLoading(null); }
+        }
+        return;
+      }
       trigger('heavy');
       setItemLoading(id);
       try {
@@ -367,7 +379,7 @@ const MediaExplorerModal = ({
         else playMedia(id, 'music');
       } finally { setItemLoading(null); }
     },
-    [isDisabled, trigger, playAudiobook, playPlaylist, playMedia],
+    [selectedTarget, trigger, playAudiobook, playPlaylist, playMedia, playLocal],
   );
 
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -450,8 +462,8 @@ const MediaExplorerModal = ({
                       .filter((pl) => !search || pl.name.toLowerCase().includes(search.toLowerCase()))
                       .map((pl) => (
                         <PlaylistItem key={pl.uri} name={pl.name} trackCount={pl.items}
-                          onPlay={() => handlePlay(pl.uri, 'playlist')}
-                          isDisabled={isDisabled} isLoading={itemLoading === `pl-${pl.uri}`} />
+                          onPlay={() => handlePlay(pl.uri, 'playlist', pl.name, `${pl.items} tracks`)}
+                          isDisabled={!selectedTarget} isLoading={itemLoading === `pl-${pl.uri}`} />
                       ))}
                   </div>
                 )}
@@ -475,7 +487,7 @@ const MediaExplorerModal = ({
                     {maRecent.recent
                       .filter((i) => !search || i.name.toLowerCase().includes(search.toLowerCase()) || i.artist.toLowerCase().includes(search.toLowerCase()))
                       .map((item) => (
-                        <button key={item.uri} onClick={() => handlePlay(item.name, 'music')} disabled={isDisabled}
+                        <button key={item.uri} onClick={() => handlePlay(item.uri, 'music', item.name, item.artist)} disabled={!selectedTarget}
                           className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
                           {itemLoading === `ma-${item.uri}` ?
                             <Loader2 size={18} className="text-purple-400 animate-spin shrink-0" /> :
@@ -545,7 +557,7 @@ const MediaExplorerModal = ({
                       {absLibraryItems.books
                         .filter((b) => !search || b.title.toLowerCase().includes(search.toLowerCase()) || b.author.toLowerCase().includes(search.toLowerCase()))
                         .map((book) => (
-                          <button key={book.id} onClick={() => handlePlay(book.id, 'audiobook')} disabled={isDisabled}
+<button key={book.id} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!selectedTarget}
                             className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
                             {itemLoading === `abs-${book.id}` ?
                               <Loader2 size={18} className="text-amber-400 animate-spin shrink-0" /> :
@@ -574,7 +586,7 @@ const MediaExplorerModal = ({
                   ) : !absSearchResults?.books?.length ? emptySection(`No results for "${search}"`) : (
                     <div className="space-y-1.5">
                       {absSearchResults.books.map((book) => (
-                        <button key={book.id} onClick={() => handlePlay(book.id, 'audiobook')} disabled={isDisabled}
+                        <button key={book.id} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!selectedTarget}
                           className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
                           {itemLoading === `abs-${book.id}` ?
                             <Loader2 size={18} className="text-amber-400 animate-spin shrink-0" /> :
@@ -610,6 +622,7 @@ const Media = () => {
   const [error, setError] = useState<string | null>(null);
   const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
+  const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
 
   const { data: maPlaylists } = useQuery({
     queryKey: ['ma-playlists'],
@@ -756,6 +769,12 @@ const Media = () => {
     }
   }, [selectedTarget, trigger, fetchMediaStatus]);
 
+  const playLocal = useCallback((id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => {
+    trigger('heavy');
+    setError(null);
+    setLocalTrack({ id, title, subtitle, type, source });
+  }, [trigger]);
+
   const handleVolume = useCallback(async (v: number) => {
     if (!selectedTarget) return;
     setVolume(v);
@@ -772,8 +791,6 @@ const Media = () => {
   }, [selectedTarget, muted, volume]);
 
   /* ── render ───────────────────────────────────────────────────── */
-
-  const isDisabled = !selectedTarget;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-24">
@@ -803,6 +820,11 @@ const Media = () => {
          onMuteToggle={toggleMute}
        />
 
+      {/* Local Audio Player */}
+      {localTrack && (
+        <LocalAudioPlayer initialTrack={localTrack} />
+      )}
+
       {/* 2. Jump Back In */}
       <section>
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Jump Back In</h2>
@@ -815,12 +837,24 @@ const Media = () => {
             {quickResumeItems.map((item) => {
               const id = item.id;
               const handlePlay = item.type === 'audiobook'
-                ? () => playAudiobook(item.id.replace('abs-', ''))
-                : () => playMedia(item.title, 'music');
+                ? () => {
+                    if (!selectedTarget) {
+                      playLocal(item.id.replace('abs-', ''), item.title, item.subtitle, 'audiobook', 'abs');
+                      return;
+                    }
+                    playAudiobook(item.id.replace('abs-', ''));
+                  }
+                : () => {
+                    if (!selectedTarget) {
+                      playLocal(item.id.replace('ma-', ''), item.title, item.subtitle, 'music', 'ma');
+                      return;
+                    }
+                    playMedia(item.title, 'music');
+                  };
               return (
                 <QuickResumeItem
                   key={id} item={item}
-                  onPlay={handlePlay} isDisabled={isDisabled}
+                  onPlay={handlePlay} isDisabled={false}
                   isLoading={loading !== null}
                 />
               );
@@ -839,8 +873,14 @@ const Media = () => {
             {maPlaylists.playlists.map((pl) => (
               <PlaylistItem
                 key={pl.uri} name={pl.name} trackCount={pl.items}
-                onPlay={() => playPlaylist(pl.uri)}
-                isDisabled={isDisabled} isLoading={loading !== null}
+                onPlay={() => {
+                  if (!selectedTarget) {
+                    playLocal(pl.uri, pl.name, `${pl.items} tracks`, 'music', 'ma');
+                    return;
+                  }
+                  playPlaylist(pl.uri);
+                }}
+                isDisabled={false} isLoading={loading !== null}
               />
             ))}
           </div>
@@ -863,7 +903,8 @@ const Media = () => {
         playAudiobook={playAudiobook}
         playPlaylist={playPlaylist}
         playMedia={playMedia}
-        isDisabled={isDisabled}
+        playLocal={playLocal}
+        selectedTarget={selectedTarget}
       />
     </div>
   );
