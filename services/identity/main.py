@@ -6,6 +6,7 @@ Manages user profiles, device assignments, and secure credential resolution.
 import os
 import json
 import logging
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict
 
@@ -14,13 +15,14 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from services.identity.models import User, DeviceAssignment, GlobalSetting, APIKey, DEFAULT_GLOBAL_SETTINGS
+from services.identity.models import User, DeviceAssignment, GlobalSetting, APIKey, DEFAULT_GLOBAL_SETTINGS, UserWidget
 from services.identity.schemas import (
     ResolveRequest, ResolvedCredentials, 
     UserCreate, UserRead, UserUpdate,
     DeviceAssignmentRead, DeviceAssignmentCreate,
     LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportResponse,
-    GlobalSettingRead, GlobalSettingUpdate
+    GlobalSettingRead, GlobalSettingUpdate,
+    UserWidgetRead, UserWidgetUpdate, WidgetSettingsRead
 )
 from services.identity.crypto import encrypt, decrypt, digest_secret
 from services.identity.seed import seed_from_env, pwd_context
@@ -95,6 +97,25 @@ def _ensure_schema_upgrades() -> None:
         with engine.connect() as conn:
             if "slug" not in raven_columns:
                 conn.execute(text("ALTER TABLE ravenmission ADD COLUMN slug VARCHAR"))
+            conn.commit()
+
+    if "user_widgets" not in inspector.get_table_names():
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE user_widgets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username VARCHAR NOT NULL,
+                    widget_key VARCHAR NOT NULL,
+                    visibility VARCHAR NOT NULL DEFAULT 'visible',
+                    order_index INTEGER NOT NULL DEFAULT 0,
+                    size VARCHAR NOT NULL DEFAULT 'medium',
+                    is_pinned BOOLEAN NOT NULL DEFAULT 0,
+                    sort_mode VARCHAR,
+                    pinned_devices VARCHAR NOT NULL DEFAULT '[]',
+                    config VARCHAR NOT NULL DEFAULT '{}',
+                    updated_at INTEGER NOT NULL
+                )
+            """))
             conn.commit()
 
 
@@ -977,6 +998,144 @@ def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depen
 def manual_seed(force: bool = False, session: Session = Depends(get_session)):
     count = seed_from_env(session, force=force)
     return {"status": "SUCCESS", "count": count}
+
+# ─── Widget Settings (Bento Dashboard) ─────────────────────────────────────────
+
+@app.get("/api/widgets/settings", response_model=WidgetSettingsRead)
+def get_widget_settings(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Get all widget settings for the current user."""
+    widgets = session.exec(select(UserWidget).where(UserWidget.username == user.username)).all()
+    
+    # Build settings dict keyed by widget_key
+    settings_map = {}
+    for w in widgets:
+        parsed_pinned = []
+        if w.pinned_devices:
+            try:
+                parsed_pinned = json.loads(w.pinned_devices)
+                if not isinstance(parsed_pinned, list):
+                    parsed_pinned = []
+            except (json.JSONDecodeError, TypeError):
+                parsed_pinned = []
+        
+        parsed_config = {}
+        if w.config:
+            try:
+                parsed_config = json.loads(w.config)
+                if not isinstance(parsed_config, dict):
+                    parsed_config = {}
+            except (json.JSONDecodeError, TypeError):
+                parsed_config = {}
+        
+        settings_map[w.widget_key] = UserWidgetRead(
+            widget_key=w.widget_key,
+            visibility=w.visibility,
+            order_index=w.order_index,
+            size=w.size,
+            is_pinned=w.is_pinned,
+            sort_mode=w.sort_mode,
+            pinned_devices=parsed_pinned,
+            config=parsed_config,
+            updated_at=w.updated_at,
+        )
+    
+    # Return as list, ensure every known widget key has an entry
+    known_keys = [
+        'energy_insights', 'ambient_timer', 'quick_notes', 'active_media',
+        'chores_progress', 'upcoming_events', 'quick_assistant', 'device_control'
+    ]
+    result = []
+    for key in known_keys:
+        if key in settings_map:
+            result.append(settings_map[key])
+        else:
+            result.append(UserWidgetRead(
+                widget_key=key,
+                visibility='visible' if key != 'quick_assistant' else 'hidden',
+                order_index=known_keys.index(key),
+                size='medium',
+                is_pinned=False,
+                sort_mode=None,
+                pinned_devices=[],
+                config={},
+                updated_at=0,
+            ))
+    
+    # Check if quick_assistant is enabled
+    quick_assistant_enabled = any(
+        w.widget_key == 'quick_assistant' and w.visibility == 'visible' for w in widgets
+    )
+    
+    return {"widgets": result, "quick_assistant_enabled": quick_assistant_enabled}
+
+@app.put("/api/widgets/settings/{widget_key}")
+def update_widget_settings(
+    widget_key: str, 
+    body: UserWidgetUpdate, 
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key)
+):
+    """Update widget settings for the current user."""
+    if body.quick_assistant_enabled is not None:
+        setting = session.exec(
+            select(UserWidget).where(
+                UserWidget.username == user.username,
+                UserWidget.widget_key == 'quick_assistant'
+            )
+        ).first()
+        visibility = 'visible' if body.quick_assistant_enabled else 'hidden'
+        if setting:
+            setting.visibility = visibility
+        else:
+            setting = UserWidget(
+                username=user.username,
+                widget_key='quick_assistant',
+                visibility=visibility,
+                order_index=6,
+                size='medium',
+                is_pinned=False,
+                sort_mode=None,
+                pinned_devices='[]',
+                config='{}',
+                updated_at=int(datetime.now().timestamp() * 1000),
+            )
+        session.add(setting)
+        session.commit()
+        return {"status": "SUCCESS"}
+    
+    existing = session.exec(
+        select(UserWidget).where(
+            UserWidget.username == user.username,
+            UserWidget.widget_key == widget_key
+        )
+    ).first()
+    
+    update_data = body.model_dump(exclude_unset=True)
+    
+    if not update_data:
+        return {"status": "SUCCESS"}
+    
+    # Serialize JSON fields
+    if 'pinned_devices' in update_data:
+        update_data['pinned_devices'] = json.dumps(update_data['pinned_devices'])
+    if 'config' in update_data:
+        update_data['config'] = json.dumps(update_data['config'])
+    
+    if existing:
+        for key, value in update_data.items():
+            setattr(existing, key, value)
+        existing.updated_at = int(datetime.now().timestamp() * 1000)
+        session.add(existing)
+    else:
+        new_widget = UserWidget(
+            username=user.username,
+            widget_key=widget_key,
+            **update_data,
+        )
+        session.add(new_widget)
+    
+    session.commit()
+    return {"status": "SUCCESS"}
 
 # ─── Raven Missions (Autonomous Ops & User Tasks) ───────────────────────────────
 try:

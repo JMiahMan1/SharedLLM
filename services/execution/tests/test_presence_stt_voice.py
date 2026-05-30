@@ -12,7 +12,7 @@ class TestPresenceTracker:
 
     @pytest.fixture
     def tracker(self):
-        from presence import PresenceTracker
+        from services.execution.presence import PresenceTracker
         return PresenceTracker(
             mqtt_host="localhost",
             mqtt_port=1883,
@@ -110,7 +110,7 @@ class TestIntercomPresenceRouting:
     @pytest.mark.asyncio
     async def test_resolve_user_room_no_presence(self):
         """Test room resolution when no presence data."""
-        from handlers.intercom import _resolve_user_room
+        from services.execution.handlers.intercom import _resolve_user_room
         result = await _resolve_user_room("nonexistent_user")
         assert result is None
 
@@ -118,7 +118,7 @@ class TestIntercomPresenceRouting:
     async def test_resolve_user_room_with_mock_presence(self):
         """Test room resolution with mocked presence data."""
         from unittest.mock import patch, AsyncMock
-        from handlers.intercom import _resolve_user_room
+        from services.execution.handlers.intercom import _resolve_user_room
 
         mock_tracker = AsyncMock()
         mock_tracker.get_user_presence.return_value = {
@@ -127,6 +127,6 @@ class TestIntercomPresenceRouting:
             "last_seen": 1234567890,
         }
 
-        with patch("presence.get_presence_tracker", return_value=mock_tracker):
+        with patch("services.execution.presence.get_presence_tracker", return_value=mock_tracker):
             result = await _resolve_user_room("user1")
             assert result == "living_room"

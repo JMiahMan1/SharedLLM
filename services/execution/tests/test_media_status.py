@@ -37,8 +37,8 @@ async def test_media_status_returns_active_player():
         _make_state("media_player.speaker", "paused"),
     ]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -60,8 +60,8 @@ async def test_media_status_returns_available_players():
         _make_state("media_player.standby", "standby"),
     ]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -84,8 +84,8 @@ async def test_media_status_non_media_entities_filtered():
         _make_state("switch.outlet", "on", {"friendly_name": "Outlet"}),
     ]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -99,8 +99,8 @@ async def test_media_status_volume_rounding():
     """Test that volume_level is properly rounded to 2 decimal places."""
     states = [_make_state("media_player.tv", "playing", {"volume_level": 0.123456789})]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -115,8 +115,8 @@ async def test_media_status_null_volume():
     """Test that null volume_level is handled gracefully."""
     states = [_make_state("media_player.tv", "playing", {"volume_level": None})]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -137,8 +137,8 @@ async def test_media_status_area_filter():
         ("media_player.bedroom_tv", "Bedroom"),
     )
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value=area_map)),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value=area_map)),
     ):
         result = await handle_media_status(_make_req(area="Living Room"))
 
@@ -157,8 +157,8 @@ async def test_media_status_entity_filter():
         _make_state("media_player.tv_bedroom", "playing"),
     ]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req(entity_id="tv_living"))
 
@@ -174,8 +174,8 @@ async def test_media_status_no_active_players():
     """Test when no media players are active."""
     states = [_make_state("media_player.speaker", "idle")]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -192,7 +192,7 @@ async def test_media_status_no_active_players():
 async def test_media_status_empty_states_returns_failure():
     """Test when HA returns no states."""
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=[])),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=[])),
     ):
         result = await handle_media_status(_make_req())
 
@@ -216,8 +216,8 @@ async def test_media_status_message_includes_player_info():
         )
     ]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -237,8 +237,8 @@ async def test_media_status_muted_volume_captured():
         )
     ]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -252,8 +252,8 @@ async def test_media_status_buffering_is_active():
     """Test that buffering state is treated as active."""
     states = [_make_state("media_player.player", "buffering")]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -267,8 +267,8 @@ async def test_media_status_missing_attributes_handled():
     """Test that missing attributes don't crash."""
     states = [{"entity_id": "media_player.minimal", "state": "playing"}]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -287,8 +287,8 @@ async def test_media_status_all_players_combined():
         _make_state("media_player.idle", "idle"),
     ]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -316,8 +316,8 @@ async def test_media_status_media_attrs_captured():
         )
     ]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req())
 
@@ -335,8 +335,8 @@ async def test_media_status_area_filter_no_matches():
     states = [_make_state("media_player.bedroom_tv", "playing")]
     area_map = _make_areas(("media_player.bedroom_tv", "Bedroom"))
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value=area_map)),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value=area_map)),
     ):
         result = await handle_media_status(_make_req(area="Kitchen"))
 
@@ -350,8 +350,8 @@ async def test_media_status_empty_area_map_for_filter():
     """Test area filter with empty area map."""
     states = [_make_state("media_player.tv", "playing")]
     with (
-        patch("handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
-        patch("handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
     ):
         result = await handle_media_status(_make_req(area="Living Room"))
 
