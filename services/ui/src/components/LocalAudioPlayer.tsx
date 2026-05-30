@@ -162,8 +162,10 @@ export const LocalAudioPlayer = ({
   // Cleanup
   useEffect(() => {
     return () => {
-      audioRef.current?.pause();
-      audioRef.current?.src = '';
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
     };
   }, []);
 
