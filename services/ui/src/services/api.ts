@@ -1140,4 +1140,20 @@ export const api = {
     });
     return resp.data;
   },
+
+  // Mobile-local audio streaming
+  async getAudiobookStreamUrl(bookId: string): Promise<string> {
+    const resp = await apiClient.get(`/api/media/stream/audiobookshelf/${bookId}`, {
+      responseType: 'text',
+    });
+    return resp.request.responseURL || '';
+  },
+
+  async getMusicAssistantStreamUrl(uri: string): Promise<string> {
+    const resp = await apiClient.get('/api/media/stream/music-assistant', {
+      params: { uri },
+      responseType: 'text',
+    });
+    return resp.request.responseURL || '';
+  },
 };

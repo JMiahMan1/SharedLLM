@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { Activity, Zap, TrendingUp } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { UserWidgetSettings } from '../../types/widget';
@@ -14,13 +14,6 @@ interface EnergyDataPoint {
   time: string;
   power: number;
   battery?: number;
-}
-
-interface TelemetryEnrollment {
-  entity_id: string;
-  power_tracking: boolean;
-  availability_tracking: boolean;
-  offline_alert_threshold_minutes: number;
 }
 
 interface TelemetrySummary {
@@ -39,7 +32,6 @@ interface TelemetrySummary {
 }
 
 const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidgetProps) => {
-  const [enrollments, setEnrollments] = React.useState<TelemetryEnrollment[]>([]);
   const [summaries, setSummaries] = React.useState<Record<string, TelemetrySummary>>({});
   const [loading, setLoading] = React.useState(true);
 
@@ -48,7 +40,6 @@ const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidge
       try {
         const enrolled = await api.getTelemetryEnrollments();
         const powerEnrollments = enrolled.filter((e) => e.power_tracking);
-        setEnrollments(powerEnrollments);
 
         const summaryMap: Record<string, TelemetrySummary> = {};
         for (const enrollment of powerEnrollments) {

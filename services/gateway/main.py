@@ -4157,3 +4157,157 @@ async def proxy_audiobookshelf(request: Request):
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for audiobookshelf: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
+
+
+@app.get("/api/media/stream/audiobookshelf/{book_id}")
+async def stream_audiobookshelf(book_id: str, request: Request):
+    """Stream audiobook audio directly from ABS to mobile device."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[stream/abs] identity resolution failed: {e.detail}")
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    abs_url = creds.get("audiobookshelf_url") or os.getenv("AUDIOBOOKSHELF_URL", "")
+    abs_key = creds.get("audiobookshelf_api_key") or os.getenv("ABS_API_KEY")
+
+    if not abs_url or not abs_key:
+        raise HTTPException(status_code=400, detail="Audiobookshelf not configured")
+
+    # Try API key first, then login with username/password
+    if not abs_key and creds.get("audiobookshelf_user") and creds.get("audiobookshelf_pass"):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                login_resp = await client.post(
+                    f"{abs_url.rstrip('/')}/api/login",
+                    json={"username": creds["audiobookshelf_user"], "password": creds["audiobookshelf_pass"]}
+                )
+                if login_resp.status_code == 200:
+                    abs_key = login_resp.json().get("user", {}).get("token")
+        except Exception as e:
+            log.error(f"[stream/abs] Login failed: {e}")
+
+    if not abs_key:
+        raise HTTPException(status_code=400, detail="Audiobookshelf credentials not configured")
+
+    stream_url = f"{abs_url.rstrip('/')}/api/items/{book_id}/stream?format=mp4&token={abs_key}"
+    log.info(f"[stream/abs] Streaming book {book_id} from ABS: {abs_url}")
+
+    async def stream_generator():
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            async with client.stream("GET", stream_url) as resp:
+                for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
+                    yield chunk
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="audio/mpeg",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        }
+    )
+
+
+@app.get("/api/media/stream/music-assistant")
+async def stream_music_assistant(uri: str, request: Request):
+    """Stream music directly from MA to mobile device by resolving the MA URI to a playable URL."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[stream/ma] identity resolution failed: {e.detail}")
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    mass_url = creds.get("mass_url") or os.getenv("MA_URL") or "http://ha.sumemail.com:8095"
+    mass_token = creds.get("mass_token") or os.getenv("MA_TOKEN")
+
+    if not mass_url or not mass_token:
+        raise HTTPException(status_code=400, detail="Music Assistant not configured")
+
+    # MA URIs are typically music_assistant://playlist/xxx or music_assistant://track/xxx
+    # We need to use the MA REST API to get the actual playable URL
+    # First, try to extract the item ID from the URI
+    uri_parts = uri.split("/")
+    item_type = None
+    item_id = None
+    for i, part in enumerate(uri_parts):
+        if part == "playlist" or part == "track" or part == "album" or part == "artist":
+            item_type = part
+            if i + 1 < len(uri_parts):
+                item_id = uri_parts[i + 1]
+            break
+
+    if not item_id:
+        raise HTTPException(status_code=400, detail=f"Could not parse MA URI: {uri}")
+
+    # Use MA REST API to get the playable media URL
+    base = mass_url.rstrip("/")
+    if not base.endswith("/api"):
+        from urllib.parse import urlparse
+        parsed = urlparse(base)
+        base = f"{parsed.scheme}://{parsed.hostname}:8095/api"
+
+    payload = {
+        "command": f"{item_type}/get",
+        "params": {"item_id": item_id}
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                base,
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {mass_token}",
+                }
+            )
+            if resp.status_code != 200:
+                log.warning(f"[stream/ma] MA API returned {resp.status_code}: {resp.text[:200]}")
+                raise HTTPException(status_code=502, detail=f"Music Assistant API error: {resp.status_code}")
+
+            data = resp.json()
+            # Try to find a playable URL in the response
+            playable_url = None
+
+            # Check common locations for stream URLs
+            for key in ("url", "stream_url", "media_url", "path"):
+                if data.get(key):
+                    playable_url = data[key]
+                    break
+
+            # If it's a playlist, get the first track
+            if not playable_url and item_type == "playlist" and "items" in data:
+                for item in data["items"][:1]:
+                    if item.get("url"):
+                        playable_url = item["url"]
+                        break
+
+            if not playable_url:
+                raise HTTPException(status_code=404, detail=f"No playable URL found for {item_type}: {item_id}")
+
+            # Ensure absolute URL
+            if playable_url.startswith("//"):
+                playable_url = f"https:{playable_url}"
+            elif not playable_url.startswith("http"):
+                playable_url = f"{base.replace('/api', '')}/{playable_url.lstrip('/')}"
+
+            log.info(f"[stream/ma] Streaming {item_type} {item_id}: {playable_url}")
+
+            async def stream_generator():
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    async with client.stream("GET", playable_url) as resp:
+                        for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
+                            yield chunk
+
+            return StreamingResponse(
+                stream_generator(),
+                media_type="audio/mpeg",
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-cache",
+                }
+            )
+    except httpx.RequestError as e:
+        log.error(f"[stream/ma] Stream error: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to connect to Music Assistant: {e}")
