@@ -1,5 +1,5 @@
 import { useEffect, useCallback, lazy, Suspense } from 'react';
-import { useWidgetStore } from '../stores/widgetStore';
+import { useWidgetStore } from '../../stores/widgetStore';
 import WidgetContextMenu from '../widgets/WidgetContextMenu';
 import type { WidgetSize } from '../types/widget';
 
