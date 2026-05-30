@@ -19,8 +19,8 @@ def client_fixture(monkeypatch):
     sys.modules["intent_engine"] = mock_engine
     sys.modules["background_worker"] = MagicMock()
     
-    from main import app
-    import main
+    from services.gateway.main import app
+    from services.gateway import main
     main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
     
     return TestClient(app)
@@ -38,7 +38,7 @@ class MockHTTPXResponse:
 @pytest.mark.asyncio
 async def test_proxy_media_status_resolves_identity(monkeypatch, client):
     """Test that media status proxy resolves identity before proxying."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     # Mock identity resolution
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
@@ -63,7 +63,7 @@ async def test_proxy_media_status_resolves_identity(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_status_falls_back_to_first_user(monkeypatch, client):
     """Test that media status proxy falls back to first user when identity resolution fails."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     # Mock identity resolution to raise exception
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(side_effect=Exception("Identity service down"))):
@@ -87,7 +87,7 @@ async def test_proxy_media_status_falls_back_to_first_user(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_transport_resolves_identity(monkeypatch, client):
     """Test that media transport proxy resolves identity."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -108,7 +108,7 @@ async def test_proxy_media_transport_resolves_identity(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_play_resolves_identity(monkeypatch, client):
     """Test that media play proxy resolves identity."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -129,7 +129,7 @@ async def test_proxy_media_play_resolves_identity(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_audiobookshelf_resolves_identity(monkeypatch, client):
     """Test that audiobookshelf proxy resolves identity."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -150,7 +150,7 @@ async def test_proxy_audiobookshelf_resolves_identity(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_status_forwards_correct_payload(monkeypatch, client):
     """Test that media status proxy forwards correct user context to execution."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     captured_payload = {}
     
@@ -177,7 +177,7 @@ async def test_proxy_media_status_forwards_correct_payload(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_status_preserves_request_body(monkeypatch, client):
     """Test that media status proxy preserves request body fields."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     captured_payload = {}
     
@@ -204,7 +204,7 @@ async def test_proxy_media_status_preserves_request_body(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_transport_preserves_command(monkeypatch, client):
     """Test that media transport proxy preserves command fields."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     captured_payload = {}
     
@@ -234,7 +234,7 @@ async def test_proxy_media_transport_preserves_command(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_play_preserves_query(monkeypatch, client):
     """Test that media play proxy preserves query fields."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     captured_payload = {}
     
@@ -266,7 +266,7 @@ async def test_proxy_media_play_preserves_query(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_audiobookshelf_preserves_action(monkeypatch, client):
     """Test that audiobookshelf proxy preserves action field."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     captured_payload = {}
     
@@ -293,7 +293,7 @@ async def test_proxy_audiobookshelf_preserves_action(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_status_empty_body(monkeypatch, client):
     """Test that media status proxy handles empty body gracefully."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -312,7 +312,7 @@ async def test_proxy_media_status_empty_body(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_proxy_media_status_execution_returns_error(monkeypatch, client):
     """Test that media status proxy forwards error status from execution service."""
-    import main as gateway_main
+    from services.gateway import main as gateway_main
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
