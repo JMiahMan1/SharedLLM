@@ -82,6 +82,10 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_user VARCHAR"))
             if "audiobookshelf_pass_enc" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR"))
+            if "mass_url" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN mass_url VARCHAR"))
+            if "mass_token_enc" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR"))
             conn.commit()
     if "apikey" in inspector.get_table_names():
         key_columns = {column["name"] for column in inspector.get_columns("apikey")}
@@ -352,6 +356,8 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         audiobookshelf_url=user.audiobookshelf_url,
         audiobookshelf_user=user.audiobookshelf_user,
         audiobookshelf_pass=decrypt(user.audiobookshelf_pass_enc) if user.audiobookshelf_pass_enc else None,
+        mass_url=user.mass_url,
+        mass_token=decrypt(user.mass_token_enc) if user.mass_token_enc else None,
         git_url=user.git_url,
         git_user=user.git_user,
         git_token=decrypt(user.git_token_enc) if user.git_token_enc else None,
@@ -407,6 +413,7 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
         "github_token": "github_token_enc",
         "gitlab_token": "gitlab_token_enc",
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
+        "mass_token": "mass_token_enc",
         "git_token": "git_token_enc"
     }
     
@@ -447,6 +454,7 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         "github_token": "github_token_enc",
         "gitlab_token": "gitlab_token_enc",
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
+        "mass_token": "mass_token_enc",
         "git_token": "git_token_enc"
     }
     
@@ -520,7 +528,9 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         gitlab_token_enc=encrypt(_coerce(body.gitlab_token)) if _coerce(body.gitlab_token) else None,
         audiobookshelf_url=_coerce(body.audiobookshelf_url),
         audiobookshelf_user=_coerce(body.audiobookshelf_user),
-        audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None
+        audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None,
+        mass_url=_coerce(body.mass_url),
+        mass_token_enc=encrypt(_coerce(body.mass_token)) if _coerce(body.mass_token) else None
     )
     _store_user_api_key(user, body.api_key or os.urandom(24).hex())
     session.add(user)

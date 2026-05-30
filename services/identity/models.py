@@ -29,6 +29,7 @@ class User(SQLModel, table=True):
     gitlab_user: Optional[str] = None
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
+    mass_url: Optional[str] = None
     skylight_url: Optional[str] = None
     skylight_email: Optional[str] = None
     git_url: Optional[str] = None
@@ -40,6 +41,7 @@ class User(SQLModel, table=True):
     github_token_enc: Optional[str] = None
     gitlab_token_enc: Optional[str] = None
     audiobookshelf_pass_enc: Optional[str] = None
+    mass_token_enc: Optional[str] = None
     skylight_pass_enc: Optional[str] = None
     git_token_enc: Optional[str] = None
     
