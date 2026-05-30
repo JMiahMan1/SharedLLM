@@ -29,7 +29,7 @@ def client_fixture(session: Session):
     assert main.engine is not None
     SQLModel.metadata.create_all(main.engine)
     
-    from seed import seed_from_env
+    from services.identity.seed import seed_from_env
     seed_from_env(session, force=True)
     
     # Mock admin user

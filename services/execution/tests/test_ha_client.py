@@ -19,7 +19,7 @@ def test_resolve_exact_friendly_name_match():
             {"entity_id": "media_player.office_tv_3", "attributes": {"friendly_name": "Office TV 3"}},
         ]
 
-        import ha_client
+        from services.execution import ha_client
         original = ha_client.get_states
         ha_client.get_states = mock_get_states
 
@@ -41,7 +41,7 @@ def test_resolve_exact_entity_id_match():
             {"entity_id": "media_player.office_tv_chrome", "attributes": {"friendly_name": "Office TV"}},
         ]
 
-        import ha_client
+        from services.execution import ha_client
         original = ha_client.get_states
         ha_client.get_states = mock_get_states
 
@@ -63,7 +63,7 @@ def test_resolve_starts_with_match():
             {"entity_id": "media_player.living_room_office_tv", "attributes": {"friendly_name": "Living Room Office TV"}},
         ]
 
-        import ha_client
+        from services.execution import ha_client
         original = ha_client.get_states
         ha_client.get_states = mock_get_states
 
@@ -84,7 +84,7 @@ def test_resolve_no_match():
             {"entity_id": "media_player.kitchen_speaker", "attributes": {"friendly_name": "Kitchen Speaker"}},
         ]
 
-        import ha_client
+        from services.execution import ha_client
         original = ha_client.get_states
         ha_client.get_states = mock_get_states
 
