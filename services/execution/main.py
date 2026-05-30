@@ -43,6 +43,7 @@ from services.execution.handlers import volumes as volume_handler
 from services.execution.handlers import media_status as media_status_handler
 from services.execution.handlers import ha_config as ha_config_handler
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
+from services.execution import device_registry
 
 import threading
 
@@ -1409,7 +1410,6 @@ async def discovery_entities(request: Request):
         raise HTTPException(status_code=400, detail="HA credentials not configured in Identity")
     states = await ha_client.get_states(ha_url, ha_token) or []
     areas = await ha_client.get_areas(ha_url, ha_token) or {}
-    import device_registry
     registry = await device_registry.list_devices()
     for s in states:
         eid = s.get("entity_id")
@@ -1442,13 +1442,11 @@ async def discovery_history(entity_id: str, days: int = 1):
 @app.get("/discovery/devices")
 async def discovery_devices():
     """List all registered devices with network info."""
-    import device_registry
     return {"devices": await device_registry.list_devices()}
 
 @app.get("/discovery/devices/{entity_id}")
 async def discovery_device(entity_id: str):
     """Get registered device info for a specific entity."""
-    import device_registry
     device = await device_registry.get_device(entity_id)
     if device:
         return {"device": device}
@@ -1468,7 +1466,6 @@ async def discovery_device_refresh(entity_id: str, request: Request):
     if not ha_url or not ha_token:
         return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
     
-    import device_registry
     await device_registry.invalidate_device(entity_id, reason="manual_refresh")
     result = await device_discovery.discover_device(
         entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
@@ -1496,7 +1493,6 @@ async def discovery_bulk_scan(request: Request):
 @app.delete("/discovery/devices/{entity_id}")
 async def discovery_device_remove(entity_id: str):
     """Remove a device from the registry."""
-    import device_registry
     removed = await device_registry.remove_device(entity_id)
     if removed:
         return {"status": "SUCCESS", "message": f"Removed {entity_id}"}
@@ -1986,5 +1982,174 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
                 volume=None,
             )
             return await media.handle_media_transport(media_req)
+
+
+# ─── Skylight Integration Proxy ────────────────────────────────────────────────
+
+_SKYLIGHT_BASE = os.environ.get("SKYLIGHT_BASE_URL", "https://app.ourskylight.com")
+_skylight_session: Optional[httpx.AsyncClient] = None
+_skylight_token: Optional[str] = None
+
+
+async def _get_skylight_auth() -> tuple[str | None, str | None]:
+    """Resolve Skylight credentials from identity service."""
+    global _skylight_token
+    creds = await resolve_first_user()
+    if not creds:
+        return None, None
+    
+    url = creds.get("skylight_url") or _SKYLIGHT_BASE
+    email = creds.get("skylight_email")
+    pass_enc = creds.get("skylight_pass_enc")
+    
+    if not email or not pass_enc:
+        return None, None
+    
+    try:
+        from services.identity.crypto import decrypt as _decrypt
+        password = _decrypt(pass_enc)
+    except Exception:
+        log.error("[skylight] Failed to decrypt password")
+        return None, None
+    
+    if not password:
+        return None, None
+    
+    # Reuse session/token if already authenticated
+    if _skylight_session and _skylight_token:
+        return url, _skylight_token
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{url}/api/v1/auth/login",
+                json={"email": email, "password": password}
+            )
+            if resp.status_code == 200:
+                token = resp.json().get("token") or resp.json().get("access_token")
+                _skylight_token = token
+                return url, token
+    except Exception as e:
+        log.error(f"[skylight] Auth failed: {e}")
+    
+    return None, None
+
+
+async def _skylight_api(url: str, token: str, method: str, path: str, json_body: Optional[dict] = None) -> Optional[dict]:
+    """Make a Skylight API call."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            resp = await client.request(method, f"{url}{path}", json=json_body, headers=headers)
+            if resp.status_code in (200, 201):
+                return resp.json()
+            log.error(f"[skylight] API error {resp.status_code}: {resp.text[:200]}")
+            return None
+    except Exception as e:
+        log.error(f"[skylight] API exception: {e}")
+        return None
+
+
+@app.get("/api/integrations/skylight/chores")
+async def get_skylight_chores(
+    user: Optional[str] = None,
+    date: Optional[str] = None,
+    x_internal_secret: str = Header(None)
+):
+    """Get chores from Skylight, optionally filtered by user and/or date."""
+    url, token = await _get_skylight_auth()
+    if not url or not token:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    
+    result = await _skylight_api(url, token, "GET", "/api/v1/chores")
+    if not result:
+        return {"status": "FAILURE", "message": "Failed to fetch chores"}
+    
+    chores = result.get("data", []) if result else []
+    
+    # Filter by user if specified
+    if user:
+        chores = [
+            c for c in chores
+            if user.lower() in [a.lower() for a in c.get("assignees", [])]
+        ]
+    
+    # Filter by date if specified
+    if date:
+        chores = [
+            c for c in chores
+            if c.get("due_date", "") == date
+        ]
+    
+    return {
+        "status": "SUCCESS",
+        "chores": chores,
+    }
+
+
+@app.post("/api/integrations/skylight/chores/{chore_id}/complete")
+async def complete_skylight_chore(
+    chore_id: str,
+    x_internal_secret: str = Header(None)
+):
+    """Mark a Skylight chore as complete."""
+    url, token = await _get_skylight_auth()
+    if not url or not token:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    
+    result = await _skylight_api(url, token, "POST", f"/api/v1/chores/{chore_id}/complete")
+    if result:
+        return {"status": "SUCCESS", "message": "Chore completed"}
+    return {"status": "FAILURE", "message": "Failed to complete chore"}
+
+
+@app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete")
+async def uncomplete_skylight_chore(
+    chore_id: str,
+    x_internal_secret: str = Header(None)
+):
+    """Mark a Skylight chore as incomplete."""
+    url, token = await _get_skylight_auth()
+    if not url or not token:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    
+    result = await _skylight_api(url, token, "POST", f"/api/v1/chores/{chore_id}/uncomplete")
+    if result:
+        return {"status": "SUCCESS", "message": "Chore uncompleted"}
+    return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
+
+
+@app.get("/api/integrations/skylight/rewards")
+async def get_skylight_rewards(
+    x_internal_secret: str = Header(None)
+):
+    """Get Skylight rewards."""
+    url, token = await _get_skylight_auth()
+    if not url or not token:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    
+    result = await _skylight_api(url, token, "GET", "/api/v1/rewards")
+    if not result:
+        return {"status": "FAILURE", "message": "Failed to fetch rewards"}
+    
+    rewards = result.get("data", []) if result else []
+    return {"status": "SUCCESS", "rewards": rewards}
+
+
+@app.post("/api/integrations/skylight/rewards/{reward_id}/redeem")
+async def redeem_skylight_reward(
+    reward_id: str,
+    body: dict = {},
+    x_internal_secret: str = Header(None)
+):
+    """Redeem a Skylight reward."""
+    url, token = await _get_skylight_auth()
+    if not url or not token:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    
+    result = await _skylight_api(url, token, "POST", f"/api/v1/rewards/{reward_id}/redeem", body)
+    if result:
+        return {"status": "SUCCESS", "message": "Reward redeemed"}
+    return {"status": "FAILURE", "message": "Failed to redeem reward"}
 
     return {"status": "SUCCESS", "message": f"Voice command received: '{transcript}'", "transcript": transcript}

@@ -210,4 +210,30 @@ class RavenMissionRead(BaseModel):
     created_at: str
     output_log: Optional[str] = None
     result: Optional[str] = None
+
+class UserWidgetRead(BaseModel):
+    widget_key: str
+    visibility: str
+    order_index: int
+    size: str
+    is_pinned: bool
+    sort_mode: Optional[str] = None
+    pinned_devices: list[str] = []
+    config: dict = {}
+    updated_at: int
+
+
+class WidgetSettingsRead(BaseModel):
+    widgets: list[UserWidgetRead]
+    quick_assistant_enabled: bool
+
+class UserWidgetUpdate(BaseModel):
+    visibility: Optional[str] = None
+    order_index: Optional[int] = None
+    size: Optional[str] = None
+    is_pinned: Optional[bool] = None
+    sort_mode: Optional[str] = None
+    pinned_devices: Optional[list[str]] = None
+    config: Optional[dict] = None
+    quick_assistant_enabled: Optional[bool] = None
     user_id: Optional[int] = None

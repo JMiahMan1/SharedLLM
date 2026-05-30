@@ -33,7 +33,7 @@ async def _call_identity(method: str, path: str, json_data: Optional[Dict] = Non
 async def _resolve_user_room(user_id: str) -> Optional[str]:
     """Resolve user's current room via ESPresense presence data."""
     try:
-        from presence import get_presence_tracker
+        from services.execution.presence import get_presence_tracker
         tracker = get_presence_tracker()
         presence = await tracker.get_user_presence(user_id)
         if presence and presence.get("room") and presence.get("room") != "unknown":
