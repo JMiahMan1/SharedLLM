@@ -17,12 +17,12 @@ sys.modules["background_worker"] = MagicMock()
 
 @pytest.fixture(name="client")
 def client_fixture(monkeypatch):
-    from main import app
+    from services.gateway.main import app
     return TestClient(app)
 
 @pytest.mark.asyncio
 async def test_calendar_events_proxy_forwards_calendar_name(monkeypatch):
-    import main
+    from services.gateway import main
     
     captured_payload = {}
     
@@ -43,7 +43,7 @@ async def test_calendar_events_proxy_forwards_calendar_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_calendar_events_proxy_no_calendar_name(monkeypatch):
-    import main
+    from services.gateway import main
     
     captured_payload = {}
     

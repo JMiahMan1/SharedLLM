@@ -23,8 +23,8 @@ def client_fixture(monkeypatch):
     mock_worker = MagicMock()
     sys.modules["background_worker"] = mock_worker
     
-    from main import app
-    import main
+    from services.gateway.main import app
+    from services.gateway import main
     # Disable background tasks for testing
     main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
     
@@ -37,7 +37,7 @@ def test_health_check(client: TestClient):
 
 @pytest.mark.asyncio
 async def test_bulk_settings_proxy_forwards_post(monkeypatch):
-    import main
+    from services.gateway import main
 
     captured = {}
 
@@ -79,7 +79,7 @@ async def test_bulk_settings_proxy_forwards_post(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
-    import main
+    from services.gateway import main
     # Mock dependencies to avoid real network/ML calls
     monkeypatch.setattr(main, "resolve_identity", AsyncMock(return_value={"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"}))
     monkeypatch.setattr(main, "fetch_ha_entities", AsyncMock(return_value=[]))
@@ -135,7 +135,7 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_openai_chat_completions(client: TestClient, monkeypatch):
-    import main
+    from services.gateway import main
     
     # Mock resolve_identity, get_llm_settings, get_assistant_model, update_history
     monkeypatch.setattr(main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
@@ -169,7 +169,7 @@ async def test_openai_chat_completions(client: TestClient, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_openai_models(client: TestClient, monkeypatch):
-    import main
+    from services.gateway import main
     monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={
         "assistant_model": "qwen3.6-35b-a3b:q4_k_m",
         "coding_model": "qwen2.5-coder:7b",
@@ -192,7 +192,7 @@ async def test_list_openai_models(client: TestClient, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_ollama_tags(client: TestClient, monkeypatch):
-    import main
+    from services.gateway import main
     monkeypatch.setattr(main, "get_all_settings", AsyncMock(return_value={
         "llm_local_url": "http://ollama.local"
     }))
@@ -233,7 +233,7 @@ async def test_list_ollama_tags(client: TestClient, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
-    import main
+    from services.gateway import main
     monkeypatch.setattr(main, "get_all_settings", AsyncMock(return_value={
         "llm_local_url": "http://ollama.local"
     }))
