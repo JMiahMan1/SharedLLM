@@ -95,6 +95,20 @@ class RavenMission(SQLModel, table=True):
     result: Optional[str] = None
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
 
+class UserWidget(SQLModel, table=True):
+    """Per-user widget customization settings for the Bento Dashboard."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(index=True, foreign_key="user.username")
+    widget_key: str
+    visibility: str = Field(default="visible")
+    order_index: int = Field(default=0)
+    size: str = Field(default="medium")
+    is_pinned: bool = Field(default=False)
+    sort_mode: Optional[str] = None
+    pinned_devices: str = Field(default="[]")
+    config: str = Field(default="{}")
+    updated_at: int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
+
 DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},

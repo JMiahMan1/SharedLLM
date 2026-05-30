@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { storageGetSync } from '../lib/storage';
 import { Capacitor } from '@capacitor/core';
+import type { DeviceSortMode, WidgetVisibility, WidgetSize } from '../types/widget';
 
 function getBaseUrl(): string {
   if (Capacitor.isNativePlatform()) {
@@ -1009,6 +1010,119 @@ export const api = {
 
   async searchAudiobookshelf(query: string, limit = 20): Promise<{ status: string; books: Array<{ id: string; title: string; author: string; narrator?: string; duration?: number }> }> {
     const resp = await apiClient.get(`/api/media/audiobookshelf/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+    return resp.data;
+  },
+
+  async getWidgetSettings(): Promise<{
+    widgets: Array<{
+      widget_key: string;
+      visibility: WidgetVisibility;
+      order_index: number;
+      size: WidgetSize;
+      is_pinned: boolean;
+      sort_mode: DeviceSortMode | null;
+      pinned_devices: string[];
+      config: Record<string, unknown>;
+      updated_at: number;
+    }>;
+    quick_assistant_enabled: boolean;
+  }> {
+    const resp = await apiClient.get('/api/widgets/settings');
+    return resp.data;
+  },
+
+  async updateWidgetSettings(widgetKey: string, updates: Partial<{
+    visibility: WidgetVisibility;
+    order_index: number;
+    size: WidgetSize;
+    is_pinned: boolean;
+    sort_mode: DeviceSortMode | null;
+    pinned_devices: string[];
+    config: Record<string, unknown>;
+    quick_assistant_enabled: boolean;
+  }>): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.put(`/api/widgets/settings/${encodeURIComponent(widgetKey)}`, updates);
+    return resp.data;
+  },
+
+  async getSkylightChores(username?: string, date?: string): Promise<{
+    status: string;
+    message?: string;
+    chores?: Array<{
+      id: string;
+      title: string;
+      completed: boolean;
+      reward?: number;
+      assignees?: string[];
+      recurrence?: string;
+      stars?: number;
+    }>;
+  }> {
+    const params = new URLSearchParams();
+    if (username) params.set('user', username);
+    if (date) params.set('date', date);
+    const query = params.toString();
+    const resp = await apiClient.get(`/api/integrations/skylight/chores${query ? `?${query}` : ''}`);
+    return resp.data;
+  },
+
+  async completeSkylightChore(choreId: string): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.post(`/api/integrations/skylight/chores/${encodeURIComponent(choreId)}/complete`);
+    return resp.data;
+  },
+
+  async uncompleteSkylightChore(choreId: string): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.post(`/api/integrations/skylight/chores/${encodeURIComponent(choreId)}/uncomplete`);
+    return resp.data;
+  },
+
+  async getSkylightRewards(): Promise<{
+    status: string;
+    message?: string;
+    rewards?: Array<{
+      id: string;
+      name: string;
+      star_cost: number;
+      icon?: string;
+      parent_approval?: boolean;
+    }>;
+  }> {
+    const resp = await apiClient.get('/api/integrations/skylight/rewards');
+    return resp.data;
+  },
+
+  async redeemSkylightReward(rewardId: string, username?: string): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.post(`/api/integrations/skylight/rewards/${encodeURIComponent(rewardId)}/redeem`, {
+      user_id: username,
+    });
+    return resp.data;
+  },
+
+  async getDeviceStates(domains?: string[]): Promise<DeviceEntry[]> {
+    const params = new URLSearchParams();
+    if (domains && domains.length > 0) {
+      params.set('domain', domains.join(','));
+    }
+    const query = params.toString();
+    const resp = await apiClient.post(`/execute/entity/search${query ? `?${query}` : ''}`, { query: '', domain: null, area: null, state: null });
+    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string }) => ({
+      entity_id: e.entity_id,
+      friendly_name: e.friendly_name,
+      state: e.state,
+      domain: e.domain,
+      room: e.area_id || undefined,
+      last_activated: undefined,
+    }));
+  },
+
+  async toggleDevice(entityId: string, action: 'on' | 'off'): Promise<{ status: string; message?: string }> {
+    const domain = entityId.split('.')[0];
+    const resp = await apiClient.post('/execute/ha_service', {
+      domain,
+      service: action === 'on' ? 'turn_on' : 'turn_off',
+      entity_id: entityId,
+      service_data: null,
+    });
     return resp.data;
   },
 };
