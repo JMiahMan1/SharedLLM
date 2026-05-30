@@ -1,7 +1,6 @@
 {
   "extraPaths": [
-    "/home/jeremiah/Summers Drive/Code/SharedLLM",
-    "/home/jeremiah/Summers Drive/Code/SharedLLM/services"
+    "/home/jeremiah/Summers Drive/Code/SharedLLM"
   ],
   "typeCheckingMode": "strict",
   "pythonVersion": "3.11",

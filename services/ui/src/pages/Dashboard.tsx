@@ -21,6 +21,7 @@ import { useHaptics } from '../hooks/useHaptics';
 import HaloBanner from '../components/presence/HaloBanner';
 import VoiceAssistantOverlay from '../components/voice/VoiceAssistantOverlay';
 import Modal from '../components/ui/Modal';
+import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
 
 type SearchResult = {
   answer?: string;
@@ -149,6 +150,10 @@ const Dashboard = () => {
         </button>
       </div>
       </header>
+
+      <section>
+        <BentoBoxDashboard />
+      </section>
 
       {searchResults && (
         <section className="glass-panel space-y-4 border-indigo-500/20 bg-indigo-500/5 p-6">
