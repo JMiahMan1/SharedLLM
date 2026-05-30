@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Note, Plus, Trash2 } from 'lucide-react';
+import { FileText, Plus, Trash2 } from 'lucide-react';
 import type { UserWidgetSettings } from '../../types/widget';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -56,11 +56,11 @@ const QuickNotesWidget = ({ userSettings, onTogglePin }: QuickNotesWidgetProps) 
         className="absolute top-3 right-3 text-slate-500 hover:text-purple-400 transition-colors"
         title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
       >
-        <Note size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
+        <FileText size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
       </button>
 
       <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-        <Note size={18} className="text-blue-400" />
+        <FileText size={18} className="text-blue-400" />
         Quick Notes
       </h3>
 

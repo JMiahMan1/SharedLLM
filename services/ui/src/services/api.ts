@@ -891,6 +891,21 @@ export const api = {
     return resp.data;
   },
 
+  async getTelemetrySummary(entityId: string): Promise<{
+    entity_id: string;
+    summary: {
+      current_power_w: number | null;
+      peak_power_w: number | null;
+      avg_power_w: number | null;
+      availability_pct: number;
+      total_activations: number;
+      data_points: Array<{ recorded_at: number; power_w?: number; is_available?: boolean; state?: string; source?: string }>;
+    } | null;
+  }> {
+    const resp = await apiClient.get(`/api/telemetry/summary/${encodeURIComponent(entityId)}`);
+    return resp.data;
+  },
+
   async getIntercomSessions(): Promise<IntercomSessionData[]> {
     const resp = await apiClient.get('/api/intercom/sessions');
     return resp.data || [];
