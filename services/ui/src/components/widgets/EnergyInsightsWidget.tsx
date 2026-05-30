@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { Activity, Zap, TrendingUp } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { UserWidgetSettings } from '../../types/widget';
+import { api } from '../../services/api';
 
 interface EnergyInsightsWidgetProps {
   userSettings: UserWidgetSettings;
@@ -15,22 +16,126 @@ interface EnergyDataPoint {
   battery?: number;
 }
 
-const mockEnergyData: EnergyDataPoint[] = [
-  { time: '00:00', power: 45, battery: 88 },
-  { time: '04:00', power: 32, battery: 86 },
-  { time: '08:00', power: 120, battery: 92 },
-  { time: '12:00', power: 180, battery: 95 },
-  { time: '16:00', power: 95, battery: 91 },
-  { time: '20:00', power: 150, battery: 89 },
-  { time: '23:59', power: 65, battery: 87 },
-];
+interface TelemetryEnrollment {
+  entity_id: string;
+  power_tracking: boolean;
+  availability_tracking: boolean;
+  offline_alert_threshold_minutes: number;
+}
+
+interface TelemetrySummary {
+  current_power_w: number | null;
+  peak_power_w: number | null;
+  avg_power_w: number | null;
+  availability_pct: number;
+  total_activations: number;
+  data_points: Array<{
+    recorded_at: number;
+    power_w?: number;
+    is_available?: boolean;
+    state?: string;
+    source?: string;
+  }>;
+}
 
 const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidgetProps) => {
-  const data = useMemo(() => mockEnergyData, []);
-  const currentPower = data[data.length - 1]?.power || 0;
-  const avgPower = useMemo(() => Math.round(data.reduce((sum, d) => sum + d.power, 0) / data.length), [data]);
-  const maxPower = useMemo(() => Math.max(...data.map(d => d.power)), [data]);
-  const currentBattery = data[data.length - 1]?.battery;
+  const [enrollments, setEnrollments] = React.useState<TelemetryEnrollment[]>([]);
+  const [summaries, setSummaries] = React.useState<Record<string, TelemetrySummary>>({});
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const fetchEnergyData = async () => {
+      try {
+        const enrolled = await api.getTelemetryEnrollments();
+        const powerEnrollments = enrolled.filter((e) => e.power_tracking);
+        setEnrollments(powerEnrollments);
+
+        const summaryMap: Record<string, TelemetrySummary> = {};
+        for (const enrollment of powerEnrollments) {
+          try {
+            const summary = await api.getTelemetrySummary(enrollment.entity_id);
+            if (summary.summary) {
+              summaryMap[enrollment.entity_id] = summary.summary;
+            }
+          } catch {
+            // Skip entities with no data
+          }
+        }
+        setSummaries(summaryMap);
+      } catch {
+        // Silently fail if telemetry API is unavailable
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchEnergyData();
+  }, []);
+
+  const data = useMemo(() => {
+    const allDataPoints: Array<{ recorded_at: number; power_w?: number; entity_id: string }> = [];
+
+    for (const [entityId, summary] of Object.entries(summaries)) {
+      if (summary.data_points) {
+        for (const dp of summary.data_points) {
+          if (dp.power_w != null) {
+            allDataPoints.push({ recorded_at: dp.recorded_at, power_w: dp.power_w, entity_id: entityId });
+          }
+        }
+      }
+    }
+
+    if (allDataPoints.length === 0) return [];
+
+    allDataPoints.sort((a, b) => a.recorded_at - b.recorded_at);
+
+    const hourlyBuckets: Record<string, number[]> = {};
+    for (const dp of allDataPoints) {
+      const date = new Date(dp.recorded_at * 1000);
+      const key = `${date.getHours().toString().padStart(2, '0')}:00`;
+      if (!hourlyBuckets[key]) hourlyBuckets[key] = [];
+      hourlyBuckets[key].push(dp.power_w!);
+    }
+
+    const result: EnergyDataPoint[] = [];
+    for (const [time, values] of Object.entries(hourlyBuckets).sort()) {
+      const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+      result.push({ time, power: avg });
+    }
+
+    return result;
+  }, [summaries]);
+
+  const metrics = useMemo(() => {
+    let currentPower = 0;
+    let peakPower = 0;
+    let totalPower = 0;
+    let powerCount = 0;
+
+    for (const summary of Object.values(summaries)) {
+      if (summary.current_power_w != null) currentPower += summary.current_power_w;
+      if (summary.peak_power_w != null) peakPower = Math.max(peakPower, summary.peak_power_w);
+      if (summary.avg_power_w != null) {
+        totalPower += summary.avg_power_w;
+        powerCount++;
+      }
+    }
+
+    return {
+      current: Math.round(currentPower),
+      avg: powerCount > 0 ? Math.round(totalPower / powerCount) : 0,
+      peak: Math.round(peakPower),
+    };
+  }, [summaries]);
+
+  if (loading) {
+    return (
+      <div className="glass-card h-full p-5 relative flex items-center justify-center">
+        <p className="text-slate-500 text-sm">Loading energy data...</p>
+      </div>
+    );
+  }
+
+  const hasData = data.length > 0;
 
   return (
     <div className="glass-card h-full p-5 relative">
@@ -47,61 +152,65 @@ const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidge
         Energy Insights
       </h3>
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="glass-card p-3">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Current</p>
-          <p className="text-xl font-bold text-amber-400">{currentPower}<span className="text-xs ml-1 text-slate-500">W</span></p>
-        </div>
-        <div className="glass-card p-3">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Average</p>
-          <p className="text-xl font-bold text-blue-400">{avgPower}<span className="text-xs ml-1 text-slate-500">W</span></p>
-        </div>
-        <div className="glass-card p-3">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Peak</p>
-          <p className="text-xl font-bold text-red-400">{maxPower}<span className="text-xs ml-1 text-slate-500">W</span></p>
-        </div>
-      </div>
+      {hasData ? (
+        <>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="glass-card p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Current</p>
+              <p className="text-xl font-bold text-amber-400">{metrics.current}<span className="text-xs ml-1 text-slate-500">W</span></p>
+            </div>
+            <div className="glass-card p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Average</p>
+              <p className="text-xl font-bold text-blue-400">{metrics.avg}<span className="text-xs ml-1 text-slate-500">W</span></p>
+            </div>
+            <div className="glass-card p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Peak</p>
+              <p className="text-xl font-bold text-red-400">{metrics.peak}<span className="text-xs ml-1 text-slate-500">W</span></p>
+            </div>
+          </div>
 
-      {currentBattery !== undefined && (
-        <div className="glass-card p-3 mb-4">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">System Battery</p>
-            <TrendingUp size={14} className="text-emerald-400" />
+          {summaries && Object.keys(summaries).some(id => summaries[id]) && (
+            <div className="glass-card p-3 mb-4">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Devices Tracked</p>
+                <TrendingUp size={14} className="text-emerald-400" />
+              </div>
+              <p className="text-sm font-bold text-emerald-400">{Object.keys(summaries).length} device{Object.keys(summaries).length !== 1 ? 's' : ''}</p>
+            </div>
+          )}
+
+          <div className="h-32">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={data}>
+                <defs>
+                  <linearGradient id="powerGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{
+                    background: 'rgba(15, 23, 42, 0.9)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                  }}
+                />
+                <Area type="monotone" dataKey="power" stroke="#f59e0b" strokeWidth={2} fill="url(#powerGradient)" />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
-          <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full"
-              style={{ width: `${currentBattery}%` }}
-            />
-          </div>
-          <p className="text-sm font-bold text-emerald-400 mt-1">{currentBattery}%</p>
+        </>
+      ) : (
+        <div className="flex flex-col items-center justify-center h-48 text-center">
+          <Zap size={32} className="text-slate-700 mb-2" />
+          <p className="text-sm text-slate-500">No energy data available</p>
+          <p className="text-xs text-slate-600 mt-1">Enroll power-tracking devices in Admin → Telemetry</p>
         </div>
       )}
-
-      <div className="h-32">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data}>
-            <defs>
-              <linearGradient id="powerGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{
-                background: 'rgba(15, 23, 42, 0.9)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '8px',
-                fontSize: '12px',
-              }}
-            />
-            <Area type="monotone" dataKey="power" stroke="#f59e0b" strokeWidth={2} fill="url(#powerGradient)" />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
     </div>
   );
 };
