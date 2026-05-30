@@ -18,7 +18,7 @@ def session_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session, tmp_path):
-    from main import app
+    from services.workspace_runtime.main import app
     original_engine = main.engine
     main.engine = session.bind
     client = TestClient(app)
@@ -58,8 +58,8 @@ def test_git_revert_logic(client: TestClient, session: Session, tmp_path: Path):
     
     # 3. Call revert
     # We patch resolve_safe_path to return our REAL temp directory path
-    with patch("main.resolve_safe_path", return_value=ws_dir), \
-         patch("main._resolve_identity_context", return_value={"user": "admin", "is_admin": True}):
+    with patch("services.workspace_runtime.main.resolve_safe_path", return_value=ws_dir), \
+         patch("services.workspace_runtime.main._resolve_identity_context", return_value={"user": "admin", "is_admin": True}):
         
         resp = client.post(
             "/git/revert", 
@@ -86,8 +86,8 @@ def test_git_revert_failure_state(client: TestClient, session: Session, tmp_path
     session.add(ws)
     session.commit()
     
-    with patch("main.resolve_safe_path", return_value=ws_dir), \
-         patch("main._resolve_identity_context", return_value={"user": "admin", "is_admin": True}):
+    with patch("services.workspace_runtime.main.resolve_safe_path", return_value=ws_dir), \
+         patch("services.workspace_runtime.main._resolve_identity_context", return_value={"user": "admin", "is_admin": True}):
         
         resp = client.post(
             "/git/revert", 
