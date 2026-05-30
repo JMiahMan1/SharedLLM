@@ -22,7 +22,7 @@ def test_ingest_and_search(mocker):
         "metadatas": [[{"user_id": "alice", "source": "test"}]]
     }
     
-    mocker.patch("main.get_collection", return_value=mock_collection)
+    mocker.patch("services.rag.main.get_collection", return_value=mock_collection)
     
     # Test Ingest
     ingest_resp = client.post("/rag/ingest", 
@@ -58,7 +58,7 @@ def test_hybrid_search_handles_list_metadata_values(mocker):
         "metadatas": [[{"user_id": "alice", "tags": ["ha", "temperature"], "nested": {"rooms": ["upstairs"]}}]],
     }
     mock_collection.query.side_effect = [query_result, query_result]
-    mocker.patch("main.get_collection", return_value=mock_collection)
+    mocker.patch("services.rag.main.get_collection", return_value=mock_collection)
 
     search_resp = client.post(
         "/rag/search",

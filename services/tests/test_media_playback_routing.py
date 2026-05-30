@@ -125,14 +125,14 @@ class TestMediaPlaybackRouting(unittest.TestCase):
             ha_token="test_token",
         )
 
-    @patch("handlers.media.resolve_entity")
-    @patch("handlers.media.detect_tv_type")
-    @patch("handlers.video.download_video")
-    @patch("handlers.video.search_youtube")
-    @patch("handlers.video.extract_video_url")
-    @patch("handlers.roku.is_roku_device")
-    @patch("ha_client.get_state")
-    @patch("ha_client.call_service")
+    @patch("services.execution.handlers.media.resolve_entity")
+    @patch("services.execution.handlers.media.detect_tv_type")
+    @patch("services.execution.handlers.video.download_video")
+    @patch("services.execution.handlers.video.search_youtube")
+    @patch("services.execution.handlers.video.extract_video_url")
+    @patch("services.execution.handlers.roku.is_roku_device")
+    @patch("services.execution.ha_client.get_state")
+    @patch("services.execution.ha_client.call_service")
     async def _test_video_play_non_roku(self, mock_call, mock_state, mock_is_roku, mock_extract, mock_search, mock_download, mock_detect, mock_resolve):
         """Test video playback for non-Roku device uses port 8888."""
         mock_resolve.return_value = "media_player.living_room_tv"
@@ -150,7 +150,7 @@ class TestMediaPlaybackRouting(unittest.TestCase):
             query="test video",
         )
 
-        with patch("handlers.video.EXECUTION_EXTERNAL_HOST", "192.168.2.205"):
+        with patch("services.execution.handlers.video.EXECUTION_EXTERNAL_HOST", "192.168.2.205"):
             await handle_video_play(req)
 
         # Verify the call_service was called with port 8888 URL
@@ -160,12 +160,12 @@ class TestMediaPlaybackRouting(unittest.TestCase):
         media_url = play_media_call[0][0][4]["media_content_id"]
         assert ":8888/media/" in media_url, f"Media URL should use port 8888, got: {media_url}"
 
-    @patch("handlers.video.download_video_for_roku")
-    @patch("handlers.video.search_youtube")
-    @patch("handlers.video.extract_video_url")
-    @patch("handlers.roku.is_roku_device")
-    @patch("handlers.roku.roku_play_video")
-    @patch("ha_client.get_state")
+    @patch("services.execution.handlers.video.download_video_for_roku")
+    @patch("services.execution.handlers.video.search_youtube")
+    @patch("services.execution.handlers.video.extract_video_url")
+    @patch("services.execution.handlers.roku.is_roku_device")
+    @patch("services.execution.handlers.roku.roku_play_video")
+    @patch("services.execution.ha_client.get_state")
     async def _test_video_play_roku(self, mock_state, mock_roku_play, mock_is_roku, mock_extract, mock_search, mock_download):
         """Test video playback for Roku device uses ECP + port 8888."""
         mock_is_roku.return_value = True
@@ -181,7 +181,7 @@ class TestMediaPlaybackRouting(unittest.TestCase):
             query="test video",
         )
 
-        with patch("handlers.video.EXECUTION_EXTERNAL_HOST", "192.168.2.205"):
+        with patch("services.execution.handlers.video.EXECUTION_EXTERNAL_HOST", "192.168.2.205"):
             await handle_video_play(req)
 
         # Verify roku_play_video was called with port 8888 URL

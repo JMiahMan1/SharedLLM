@@ -21,9 +21,9 @@ def user_ctx():
 @pytest.mark.asyncio
 async def test_light_handler_success(user_ctx):
     with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
-         patch("ha_client.call_service", mock_call), \
+         patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
-         patch("ha_client.get_state", mock_get_state):
+         patch("services.execution.ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
         
@@ -40,9 +40,9 @@ async def test_light_handler_success(user_ctx):
 async def test_hyphenated_entity_resolution(user_ctx):
     """Verify that 'piano-lamp' is correctly sanitized to 'light.piano_lamp'."""
     with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
-         patch("ha_client.call_service", mock_call), \
+         patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
-         patch("ha_client.get_state", mock_get_state):
+         patch("services.execution.ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
         
@@ -64,7 +64,7 @@ async def test_hyphenated_entity_resolution(user_ctx):
 @pytest.mark.asyncio
 async def test_security_status_check(user_ctx):
     with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
-         patch("ha_client.get_state", mock_get_state):
+         patch("services.execution.ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "open"}
         
         req = SecurityRequest(user_context=user_ctx, entity_id="cover.garage_door", action="status")
@@ -77,9 +77,9 @@ async def test_security_status_check(user_ctx):
 @pytest.mark.asyncio
 async def test_media_transport_volume(user_ctx):
     with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
-         patch("ha_client.call_service", mock_call), \
+         patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
-         patch("ha_client.get_state", mock_get_state):
+         patch("services.execution.ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
         
@@ -95,9 +95,9 @@ async def test_media_transport_volume(user_ctx):
 @pytest.mark.asyncio
 async def test_climate_handler(user_ctx):
     with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
-         patch("ha_client.call_service", mock_call), \
+         patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.ha_client.authorize_action", return_value=True) as mock_auth, \
-         patch("ha_client.authorize_action", mock_auth):
+         patch("services.execution.ha_client.authorize_action", mock_auth):
         mock_call.return_value = {"ok": True}
         
         # Use the handler's own ClimateRequest which imports UserContext from execution schemas
@@ -113,9 +113,9 @@ async def test_climate_handler(user_ctx):
 @pytest.mark.asyncio
 async def test_tv_cast_macro(user_ctx):
     with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
-         patch("ha_client.get_state", mock_get_state), \
+         patch("services.execution.ha_client.get_state", mock_get_state), \
          patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
-         patch("ha_client.call_service", mock_call), \
+         patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.handlers.video.download_video_progressive", new_callable=AsyncMock) as mock_download, \
          patch("config.EXECUTION_EXTERNAL_HOST", "192.168.2.205"), \
          patch("asyncio.sleep", new_callable=AsyncMock):
