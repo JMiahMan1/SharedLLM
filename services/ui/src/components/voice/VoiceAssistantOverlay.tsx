@@ -34,14 +34,6 @@ const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand, userId }: VoiceAssi
     }
   }, [isOpen, activate, deactivate]);
 
-  useEffect(() => {
-    if (isOpen) {
-      activate();
-    } else {
-      deactivate();
-    }
-  }, [isOpen, activate, deactivate]);
-
   const handleSubmit = useCallback(async () => {
     if (!state.transcript.trim()) return;
     setProcessing(true);
