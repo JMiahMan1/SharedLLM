@@ -22,6 +22,7 @@ services/workspace_runtime/config/
 /data/*
 !/data/phrasebook.json
 !services/gateway/data/
+node_modules/
 
 # AI Agent Configs
 AGENTS.md
