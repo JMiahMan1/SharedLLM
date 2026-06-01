@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
@@ -65,8 +65,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     window.location.href = '/login';
   }, []);
 
+  const tokenRef = useRef(token);
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
   const refreshProfile = useCallback(async () => {
-    if (!token) return;
+    const currentToken = tokenRef.current;
+    if (!currentToken) return;
     try {
       const profile = await api.getMe();
       setUser(profile);
@@ -76,7 +82,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         logout();
       }
     }
-  }, [token, logout]);
+  }, [logout]);
 
   useEffect(() => {
     const loadProfile = async () => {
