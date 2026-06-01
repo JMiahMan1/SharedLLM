@@ -1837,7 +1837,7 @@ async def execute_light_pattern(req):
 async def get_user_presence(user_id: str, x_internal_secret: str = Header(None)):
     """Get current presence data for a user from Redis."""
     await _check_internal_secret(x_internal_secret)
-    from presence import get_presence_tracker
+    from services.execution.presence import get_presence_tracker
     tracker = get_presence_tracker()
     presence = await tracker.get_user_presence(user_id)
     if presence:
@@ -1849,7 +1849,7 @@ async def get_user_presence(user_id: str, x_internal_secret: str = Header(None))
 async def get_all_presence(x_internal_secret: str = Header(None)):
     """Get presence data for all tracked users."""
     await _check_internal_secret(x_internal_secret)
-    from presence import get_presence_tracker
+    from services.execution.presence import get_presence_tracker
     tracker = get_presence_tracker()
     all_presence = await tracker.get_all_presence()
     return {"status": "SUCCESS", "presence": all_presence}
@@ -1859,7 +1859,7 @@ async def get_all_presence(x_internal_secret: str = Header(None)):
 async def get_presence_rooms(x_internal_secret: str = Header(None)):
     """Get list of all known rooms from presence data."""
     await _check_internal_secret(x_internal_secret)
-    from presence import get_presence_tracker
+    from services.execution.presence import get_presence_tracker
     tracker = get_presence_tracker()
     rooms = await tracker.get_rooms()
     return {"status": "SUCCESS", "rooms": rooms}
