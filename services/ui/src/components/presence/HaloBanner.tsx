@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MapPin, ChevronLeft, ChevronRight, Navigation } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useLocation } from '../../context/LocationContext.types';
@@ -28,6 +28,7 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
   const hasLocation = locationCtx?.latitude !== null;
   const [presenceRoom, setPresenceRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(false);
+  const loadingRef = useRef(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -55,7 +56,9 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
   const bestRoomId = sortedRooms[0]?.id;
   const defaultIdx = displayRooms.findIndex((r) => r.id === bestRoomId);
 
-  const [currentIndex, setCurrentIndex] = useState(defaultIdx >= 0 ? defaultIdx : 0);
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    return defaultIdx >= 0 ? defaultIdx : 0;
+  });
 
   const currentRoom = displayRooms[currentIndex];
 
