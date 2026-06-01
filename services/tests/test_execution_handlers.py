@@ -117,7 +117,7 @@ async def test_tv_cast_macro(user_ctx):
          patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.handlers.video.download_video_progressive", new_callable=AsyncMock) as mock_download, \
-         patch("config.EXECUTION_EXTERNAL_HOST", "192.168.2.205"), \
+         patch("services.config.EXECUTION_EXTERNAL_HOST", "192.168.2.205"), \
          patch("asyncio.sleep", new_callable=AsyncMock):
         
         mock_download.return_value = ("mock_media_id", "mock_title")

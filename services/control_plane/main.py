@@ -1,5 +1,6 @@
 import docker
 from docker.errors import NotFound
+import re
 
 from services.config import INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, Header, Depends
@@ -7,6 +8,8 @@ from fastapi import FastAPI, HTTPException, Header, Depends
 import logging
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
+
+TRACEBACK_RE = re.compile(r"^Traceback \(most recent call last\)|^\s+File ", re.MULTILINE)
 
 app = FastAPI(title="Control Plane Service")
 
@@ -104,7 +107,15 @@ def get_container_logs(service_name: str, tail: int = 100):
     try:
         container = client.containers.get(service_name)
         logs = container.logs(tail=tail, stdout=True, stderr=True).decode("utf-8")
-        return {"name": service_name, "logs": logs}
+        tb_matches = TRACEBACK_RE.findall(logs)
+        has_tracebacks = len(tb_matches) > 0
+        log.info(f"[logs] {service_name} tail={tail} tracebacks_found={len(tb_matches)}")
+        return {
+            "name": service_name,
+            "logs": logs,
+            "has_tracebacks": has_tracebacks,
+            "traceback_count": len(tb_matches),
+        }
     except NotFound:
         raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
     except Exception as e:
