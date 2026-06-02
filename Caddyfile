@@ -81,6 +81,9 @@
     handle /api/resolve* {
         reverse_proxy identity:8001
     }
+    handle /api/widgets* {
+        reverse_proxy identity:8001
+    }
     
     # Optional: Route other service APIs if needed
     handle /api/storage* {

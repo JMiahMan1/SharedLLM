@@ -2427,6 +2427,29 @@ async def proxy_delete_device(device_id: str, request: Request):
     return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 
+@app.get("/api/widgets/settings")
+async def proxy_get_widget_settings(request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/widgets/settings",
+            headers={"Authorization": auth_header} if auth_header else {}
+        )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.put("/api/widgets/settings/{widget_key}")
+async def proxy_update_widget_settings(widget_key: str, request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.put(
+            f"{IDENTITY_SVC}/api/widgets/settings/{widget_key}",
+            headers={"Authorization": auth_header} if auth_header else {},
+            json=await request.json(),
+        )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
 @app.get("/api/communication/timers")
 async def proxy_list_timers(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/timers", method="GET")
