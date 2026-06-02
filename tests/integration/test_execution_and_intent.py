@@ -38,9 +38,9 @@ class TestExecutionService:
 
     def test_light_control_endpoint_exists(self, http_client):
         payload = {
+            "user_context": {"user": "test_user"},
             "entity_id": "light.test_light",
             "action": "turn_on",
-            "user_id": "test_user",
         }
         resp = http_client.post(
             f"{EXECUTION_URL}/execute/light",
@@ -50,10 +50,10 @@ class TestExecutionService:
 
     def test_media_play_endpoint_exists(self, http_client):
         payload = {
+            "user_context": {"user": "test_user"},
             "entity_id": "media_player.test_player",
             "media_content_id": "test_content",
             "media_content_type": "music",
-            "user_id": "test_user",
         }
         resp = http_client.post(
             f"{EXECUTION_URL}/execute/media/play",
@@ -63,8 +63,8 @@ class TestExecutionService:
 
     def test_calendar_endpoint_exists(self, http_client):
         payload = {
+            "user_context": {"user": "test_user"},
             "action": "list",
-            "user_id": "test_user",
         }
         resp = http_client.post(
             f"{EXECUTION_URL}/execute/calendar",
@@ -74,10 +74,10 @@ class TestExecutionService:
 
     def test_note_endpoint_exists(self, http_client):
         payload = {
+            "user_context": {"user": "test_user"},
             "action": "create",
             "title": "Test Note",
             "content": "Test content",
-            "user_id": "test_user",
         }
         resp = http_client.post(
             f"{EXECUTION_URL}/execute/note",
@@ -87,10 +87,10 @@ class TestExecutionService:
 
     def test_timer_endpoint_exists(self, http_client):
         payload = {
-            "action": "set",
+            "user_context": {"user": "test_user"},
+            "action": "add",
             "duration_minutes": 5,
             "title": "Test Timer",
-            "user_id": "test_user",
         }
         resp = http_client.post(
             f"{EXECUTION_URL}/execute/timer",
@@ -100,8 +100,8 @@ class TestExecutionService:
 
     def test_tts_endpoint_exists(self, http_client):
         payload = {
+            "user_context": {"user": "test_user"},
             "text": "Hello, this is a test.",
-            "user_id": "test_user",
         }
         resp = http_client.post(
             f"{EXECUTION_URL}/execute/tts",
@@ -112,7 +112,11 @@ class TestExecutionService:
     def test_rejects_missing_internal_secret(self):
         resp = httpx.post(
             f"{EXECUTION_URL}/execute/light",
-            json={"entity_id": "light.test", "action": "on"},
+            json={
+                "user_context": {"user": "test_user"},
+                "entity_id": "light.test",
+                "action": "turn_on",
+            },
             timeout=10.0,
         )
         assert resp.status_code == 403

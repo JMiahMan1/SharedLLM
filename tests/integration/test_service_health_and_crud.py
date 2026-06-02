@@ -49,7 +49,7 @@ class TestIdentityService:
             "is_admin": False,
         }
 
-        resp = http_client.post(f"{IDENTITY_URL}/users", json=payload)
+        resp = http_client.post(f"{IDENTITY_URL}/api/users", json=payload)
         assert resp.status_code == 200
 
         data = resp.json()
@@ -70,13 +70,16 @@ class TestIdentityService:
             "display_name": "Login Test",
             "password": "login_pass_123",
         }
-        http_client.post(f"{IDENTITY_URL}/users", json=create_payload)
+        http_client.post(f"{IDENTITY_URL}/api/users", json=create_payload)
 
         login_payload = {
             "username": "login_test_user",
             "password": "login_pass_123",
         }
-        resp = http_client.post(f"{IDENTITY_URL}/login", json=login_payload)
+        resp = http_client.post(
+            f"{IDENTITY_URL}/api/auth/login",
+            json=login_payload,
+        )
         assert resp.status_code == 200
 
         data = resp.json()
@@ -91,14 +94,14 @@ class TestIdentityService:
             "ha_url": "http://ha.test.local:8123",
             "ha_token": "test-ha-token-value",
         }
-        http_client.post(f"{IDENTITY_URL}/users", json=create_payload)
+        http_client.post(f"{IDENTITY_URL}/api/users", json=create_payload)
 
         resolve_payload = {
             "user_id": "resolve_test_user",
             "resolve_secrets": True,
         }
         resp = http_client.post(
-            f"{IDENTITY_URL}/resolve",
+            f"{IDENTITY_URL}/api/resolve",
             json=resolve_payload,
         )
         assert resp.status_code == 200
@@ -108,7 +111,7 @@ class TestIdentityService:
         assert data["ha_url"] == "http://ha.test.local:8123"
 
     def test_global_settings_crud(self, http_client):
-        resp = http_client.get(f"{IDENTITY_URL}/settings")
+        resp = http_client.get(f"{IDENTITY_URL}/api/settings")
         assert resp.status_code == 200
 
         settings = resp.json()
@@ -120,7 +123,7 @@ class TestIdentityService:
 
         update_payload = {"value": "updated_test_value"}
         resp = http_client.patch(
-            f"{IDENTITY_URL}/settings/{key}",
+            f"{IDENTITY_URL}/api/settings/{key}",
             json=update_payload,
         )
         assert resp.status_code == 200
@@ -135,15 +138,15 @@ class TestIdentityService:
             "display_name": "Device Test",
             "password": "device_pass",
         }
-        user_resp = http_client.post(f"{IDENTITY_URL}/users", json=user_payload)
+        user_resp = http_client.post(f"{IDENTITY_URL}/api/users", json=user_payload)
         user_id = user_resp.json()["id"]
 
         device_payload = {
             "device_id": "media_player.test_speaker",
-            "user_id": user_id,
+            "username": "device_test_user",
         }
         resp = http_client.post(
-            f"{IDENTITY_URL}/devices",
+            f"{IDENTITY_URL}/api/devices",
             json=device_payload,
         )
         assert resp.status_code == 200
@@ -205,3 +208,11 @@ class TestGatewayService:
             timeout=10.0,
         )
         assert resp.status_code in (401, 403, 422)
+
+    def test_chat_endpoint_with_query(self):
+        resp = httpx.post(
+            f"{GATEWAY_URL}/api/chat",
+            json={"query": "Hello"},
+            timeout=10.0,
+        )
+        assert resp.status_code in (200, 401, 503)
