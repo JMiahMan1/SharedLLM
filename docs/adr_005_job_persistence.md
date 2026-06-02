@@ -1,9 +1,11 @@
 # ADR 005: Job Persistence & Resumability Layer
 
 ## Status
+
 Proposed
 
 ## Context
+
 Raven jobs are stored in Redis with a 1-hour TTL. If the worker process crashes or the container restarts mid-job, the Redis entry survives but **in-memory state** (current iteration number, `action_log` history, partial results) is lost. The job is re-queued via lease reclamation, but it restarts from iteration 0 — repeating work already done and potentially causing side-effect duplication (e.g., running pytest twice).
 
 For long-running repair sessions (10+ iterations), this waste is significant and risks idempotency violations.
@@ -16,18 +18,18 @@ Introduce a lightweight **Job Persistence Layer** (JPL) that checkpoints job sta
 
 Key: `raven:job:{job_id}` → hash:
 
-| Field | Type | Description |
+|Field|Type|Description|
 |-------|------|-------------|
-| `job_id` | str | UUID |
-| `user_id` | str | Identity |
-| `status` | str | `queued|processing|completed|failed|timeout` |
-| `iteration` | int | Current loop iteration (0-based) |
-| `action_log` | JSON list | Last 20 action entries (truncated) |
-| `last_exec_data` | JSON dict | Result of last tool execution |
-| `scratchpad` | str | Agent's scratchpad text (if any) |
-| `created_at` | float | epoch seconds |
-| `updated_at` | float | epoch seconds |
-| `completed_at` | float | optional |
+|`job_id`|str|UUID|
+|`user_id`|str|Identity|
+|`status`|str|queued processing completed failed timeout|
+|`iteration`|int|Current loop iteration (0-based)|
+|`action_log`|JSON list|Last 20 action entries (truncated)|
+|`last_exec_data`|JSON dict|Result of last tool execution|
+|`scratchpad`|str|Agent's scratchpad text (if any)|
+|`created_at`|float|epoch seconds|
+|`updated_at`|float|epoch seconds|
+|`completed_at`|float|optional|
 
 TTL: 24 hours (`86400` seconds) for completed/failed jobs; 2 hours for processing.
 
@@ -71,12 +73,14 @@ async def _rehydrate_pending_jobs(self):
 ### Worker Resume Semantics
 
 When `background_worker._process_inference_job` picks up a re-queued job:
+
 1. Read checkpoint from Redis
 2. Reconstruct `action_log` and `exec_data`
 3. Call `AgentLoop(job_id=job_id, resume_from=checkpoint, ...)`
 4. `AgentLoop` starts at `iteration = checkpoint["iteration"]` (not 0)
 
 **Idempotency Safety:** Tool handlers must be **idempotent** by design:
+
 - `git commit` with same message is safe (git prevents duplicate commits)
 - `pytest` re-running is safe
 - `file write` with same content is idempotent

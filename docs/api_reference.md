@@ -81,20 +81,20 @@ Example streamed `/api/chat` chunks:
 
 ## Workspace Runtime Endpoints
 
- - `GET /health`: service health
- - `POST /files/read`: read file content from mounted workspace
- - `POST /files/write`: atomic file write to workspace
- - `POST /files/delete`: remove file from workspace (supports self-cleaning)
- - `GET /git/status`: repo status
- - `POST /git/commit`: commit staged changes
- - `POST /sync/nextcloud`: sync file to Nextcloud provider
+- `GET /health`: service health
+- `POST /files/read`: read file content from mounted workspace
+- `POST /files/write`: atomic file write to workspace
+- `POST /files/delete`: remove file from workspace (supports self-cleaning)
+- `GET /git/status`: repo status
+- `POST /git/commit`: commit staged changes
+- `POST /sync/nextcloud`: sync file to Nextcloud provider
 
 ## RAG Service Endpoints
 
- - `POST /rag/search`: primary vector search (ha_entities, nextcloud_files, system_capabilities)
- - `POST /rag/sync/ha`: refresh HA entity index
- - `POST /rag/sync/capabilities`: refresh the self-awareness capability index
- - `GET /rag/stats`: retrieval performance and index status
+- `POST /rag/search`: primary vector search (ha_entities, nextcloud_files, system_capabilities)
+- `POST /rag/sync/ha`: refresh HA entity index
+- `POST /rag/sync/capabilities`: refresh the self-awareness capability index
+- `GET /rag/stats`: retrieval performance and index status
 
 ## Other Gateway Endpoints
 

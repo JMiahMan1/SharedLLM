@@ -1,10 +1,13 @@
 # ADR 009: Workspace File Quarantine & Automated Guardrails
 
 ## Status
+
 Proposed
 
 ## Context
+
 Raven uses the Workspace Runtime's `write-sync-commit` workflow to edit code. This workflow:
+
 1. Writes file
 2. Lints the file
 3. Runs targeted pytest (if targets provided)
@@ -31,7 +34,7 @@ A file enters quarantine after `N` failures within the window.
 
 ### Tracking Storage
 
-Use Redis hash: `raven:quarantine:<workspace_id>`  
+Use Redis hash: `raven:quarantine:<workspace_id>`
 Fields: `file_path -> {"failures": 3, "last_failed_at": 1712345678}`
 
 TTL: auto-expire after `RAVEN_QUARANTINE_WINDOW_SECONDS + 60` to allow natural decay.
@@ -39,6 +42,7 @@ TTL: auto-expire after `RAVEN_QUARANTINE_WINDOW_SECONDS + 60` to allow natural d
 ### Enforcement Points
 
 1. **At workflow start (`/workflow/write-sync-commit`):**
+
 ```python
 # Check if file is quarantined
 quarantine_key = f"raven:quarantine:{workspace_id}"
@@ -52,7 +56,8 @@ if quarantined:
         )
 ```
 
-2. **After lint/pytest run (if either fails):**
+1. **After lint/pytest run (if either fails):**
+
 ```python
 # Increment failure counter
 current = await redis.hincrby(quarantine_key, f"{relative_path}.failures", 1)
@@ -60,12 +65,13 @@ await redis.hset(quarantine_key, f"{relative_path}.last_failed_at", time.time())
 await redis.expire(quarantine_key, RAVEN_QUARANTINE_WINDOW_SECONDS + 60)
 ```
 
-3. **On lint/pytest success:**  
+1. **On lint/pytest success:**
    Reset counter to 0 (optional — conservative approach keeps failure count forever until window expiry).
 
 ### Admin Override
 
 Admin users can clear quarantine via:
+
 - `DELETE /workflow/quarantine/{workspace_id}/{file_path}` (internal secret required)
 - Direct Redis deletion (emergency)
 
@@ -79,7 +85,8 @@ workspace_quarantine_clear_total{by="admin"} 1
 ### User Experience
 
 When Raven attempts to edit a quarantined file:
-```
+
+```http
 HTTP 409 Conflict
 {
   "detail": "File services/gateway/agent_loop.py is quarantined after 3 failures in the last 10 minutes. Recent errors: flake8: E302 expected 2 blank lines, found 1"

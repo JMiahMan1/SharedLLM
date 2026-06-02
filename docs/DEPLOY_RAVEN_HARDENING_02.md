@@ -3,7 +3,7 @@
 ## Status: Ready for Deployment
 
 **Commit:** `902f69d` feat(raven): implement hard timeout and configurable heartbeat parameters  
-** Branch:** `microservices`  
+**Branch:** `microservices`  
 **Deployment Target:** `ai.local` (ai.local) — SharedLLM production stack
 
 ---
@@ -11,10 +11,12 @@
 ## Changes Summary
 
 ### Modified Files
+
 - `services/gateway/config.py` — Added 4 new environment-configurable constants
 - `services/gateway/agent_loop.py` — Integrated timeout check; switched to config values for heartbeat
 
 ### New Documentation
+
 - `docs/RAVEN_AUDIT_BLUEPRINT.md` — Full architectural audit and 4-sprint roadmap
 - `docs/UI_RAVEN_INTEGRATION_PLAN.md` — UI dashboard plan for Raven operations
 - `docs/adr_003_tiered_inference_lock.md` through `adr_009_quarantine_guardrails.md`
@@ -126,14 +128,17 @@ docker-compose logs -f gateway
 ## Next Hardening Slices
 
 **Immediate (Week 1):**
+
 - Slice 1: Librarian lock decoupling (unblocks standard queries during Raven jobs)
 - Slice 4: Centralized sanitizer module + log filter
 
 **Short-term (Week 2):**
+
 - Slice 2: Job checkpoint/resumability (Redis state per iteration)
 - Slice 5: Circuit breakers on all downstream HTTP calls
 
 **Mid-term (Week 3-4):**
+
 - Slice 6: Structured logging with request IDs
 - Slice 8: Quarantine enforcement
 - UI integration: Raven Operations Dashboard (`/lab/raven`)
@@ -142,12 +147,12 @@ docker-compose logs -f gateway
 
 ## Configuration Reference
 
-| Environment Variable | Default | Purpose |
-|----------------------|---------|---------|
-| `RAVEN_MAX_TOTAL_SECONDS` | `600` | Maximum wall-clock time per Raven job |
-| `RAVEN_ITERATION_TIMEOUT` | `180` | Reserved: future per-iteration timeout |
-| `RAVEN_HEARTBEAT_INTERVAL` | `15` | Log heartbeat every N seconds during iteration |
-| `RAVEN_HUNG_THRESHOLD` | `240` | Warn if Ollama call exceeds this many seconds |
+|Environment Variable|Default|Purpose|
+|--------------------|-------|-------|
+|`RAVEN_MAX_TOTAL_SECONDS`|`600`|Maximum wall-clock time per Raven job|
+|`RAVEN_ITERATION_TIMEOUT`|`180`|Reserved: future per-iteration timeout|
+|`RAVEN_HEARTBEAT_INTERVAL`|`15`|Log heartbeat every N seconds during iteration|
+|`RAVEN_HUNG_THRESHOLD`|`240`|Warn if Ollama call exceeds this many seconds|
 
 **No action required** — defaults are safe and production-tested.
 

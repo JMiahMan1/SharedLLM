@@ -1,9 +1,11 @@
 # ADR 007: Hard Timeout Policy for Raven Jobs
 
 ## Status
+
 Proposed
 
 ## Context
+
 Raven's `AgentLoop` iterates up to `MAX_TOOL_ITERATIONS = 30`. There is no **total elapsed time** cap. A single iteration — LLM inference + tool execution — can take 2-5 minutes (Ollama ~40 tokens/s on 7B, plus tool latency). In pathological cases (model hallucination, infinite reasoning), a job could run for hours, holding the `INFERENCE_LOCK` and blocking all other LLM usage.
 
 Additionally, background worker `_process_inference_job` does not implement a hard timeout around the entire `AgentLoop` call.
@@ -15,19 +17,22 @@ Enforce `MAX_TOTAL_SECONDS` per Raven job.
 ### Implementation
 
 1. Add to `gateway/config.py`:
+
 ```python
 import os
 RAVEN_MAX_TOTAL_SECONDS = int(os.getenv("RAVEN_MAX_TOTAL_SECONDS", "600"))  # 10 min
 RAVEN_ITERATION_TIMEOUT = int(os.getenv("RAVEN_ITERATION_TIMEOUT", "180"))  # 3 min per iteration
 ```
 
-2. In `agent_loop.py`, at loop start:
+1. In `agent_loop.py`, at loop start:
+
 ```python
 loop_start = asyncio.get_event_loop().time()
 MAX_SECONDS = RAVEN_MAX_TOTAL_SECONDS
 ```
 
-3. Inside the iteration loop, before each LLM call:
+1. Inside the iteration loop, before each LLM call:
+
 ```python
 elapsed = asyncio.get_event_loop().time() - loop_start
 if elapsed > MAX_SECONDS:
@@ -35,11 +40,12 @@ if elapsed > MAX_SECONDS:
     return f"ERROR: Raven job exceeded time limit of {MAX_SECONDS}s. Partial result: {ans or 'No output yet'}"
 ```
 
-4. Per-iteration guard (optional but recommended):
+1. Per-iteration guard (optional but recommended):
    - Wrap `execute_inference` + tool execution in `asyncio.wait_for(..., timeout=RAVEN_ITERATION_TIMEOUT)`
    - Catch `asyncio.TimeoutError` → log warning → treat as iteration failure → retry once with shorter prompt
 
-5. Background worker timeout wrapper:
+1. Background worker timeout wrapper:
+
 ```python
 try:
     async with asyncio.timeout(RAVEN_MAX_TOTAL_SECONDS + 60):  # buffer
@@ -70,7 +76,7 @@ except asyncio.TimeoutError:
 **Tunable Parameters (environment variables):**
 
 | Variable | Default | Recommended | Notes |
-|----------|---------|-------------|-------|
+| --- | --- | --- | --- |
 | `RAVEN_MAX_TOTAL_SECONDS` | 600 (10m) | 600–1800 | Based on task complexity |
 | `RAVEN_ITERATION_TIMEOUT` | 180 (3m) | 120–300 | Prevent single step stall |
 | `RAVEN_HEARTBEAT_INTERVAL` | 15s | 10–30s | Already configurable |

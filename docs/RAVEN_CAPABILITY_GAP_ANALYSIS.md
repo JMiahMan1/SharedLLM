@@ -9,8 +9,9 @@
 ## 1. Current Raven Toolset (As-Is)
 
 ### Core Workspace Tools
+
 | Tool | Schema | Status | Gaps |
-|------|--------|--------|------|
+| ------ | -------- | -------- | ------ |
 | `WorkspaceFileReadRequest` | `path`, `offset_lines`, `limit_lines`, `summary_only` | ✅ Works | None |
 | `WorkspaceFileWriteRequest` | `path`, `content`, `expected_sha256`, `create_parents` | ✅ Works | No backup/restore |
 | `WorkspaceFilePatchRequest` | `path`, `chunks` (old_text/new_text) | ✅ Works | No conflict detection |
@@ -20,47 +21,53 @@
 | `WorkspaceBootstrapRequest` | `repo_url`, `branch`, `create_if_missing` | ✅ Works | None |
 
 ### Git Tools
+
 | Tool | Schema | Status | Gaps |
-|------|--------|--------|------|
+| ------ | -------- | -------- | ------ |
 | `GitOperationRequest` | `action` (status/diff/add/commit/push/pull/fetch/reset/branch/checkout/clean/show), `message`, `path`, `branch` | ✅ Works | No `--amend`, no `--no-verify`, no `stash` |
 | **Missing:** `GitBlameRequest` | — | ❌ | Raven can't see who last touched a line (context for edits) |
 | **Missing:** `GitStashRequest` | — | ❌ | Can't save work temporarily |
 
 ### Test & Verification
+
 | Tool | Schema | Status | Gaps |
-|------|--------|--------|------|
+| ------ | -------- | -------- | ------ |
 | `WorkspaceLintRequest` | per-file lint | ✅ | No bulk lint (all files in workspace) |
 | **Missing:** `WorkspaceTestRequest` | `targets: list[str]`, `timeout_seconds`, `coverage` | ❌ | Raven uses shell `pytest` but parses output manually |
 | **Missing:** `TestCoverageRequest` | `paths: list[str]` | ❌ | Can't check coverage gaps |
 | **Missing:** `TypeCheckRequest` | `paths: list[str]` | ❌ | No mypy/pyright integration |
 
 ### Analysis & Understanding
+
 | Tool | Schema | Status | Gaps |
-|------|--------|--------|------|
+| ------ | -------- | -------- | ------ |
 | `CapabilityIndexRequest` | — | ✅ | Returns tool list |
 | **Missing:** `CodeGraphRequest` | `path: str`, `depth: int` | ❌ | No AST/call graph for complex understanding |
 | **Missing:** `SymbolSearchRequest` | `symbol: str`, `kind: str` (class/function) | ❌ | Can't find definition quickly |
 | **Missing:** `FileHistoryRequest` | `path: str`, `limit: int` | ❌ | Can't see recent changes to a file |
 
 ### Health & Diagnostics
+
 | Tool | Schema | Status | Gaps |
-|------|--------|--------|------|
+| ------ | -------- | -------- | ------ |
 | `DockerLogsRequest` | `container_name`, `tail_lines`, `filter_level` | ✅ Works | None |
 | `DockerComposeRequest` | `action`, `services` | ✅ Works | None |
 | **Missing:** `SystemHealthCheckRequest` | — | ❌ | No RAM/VRAM/disk metrics |
-| **Missing:** `DependencyHealthRequest` | `check_type: "imports"|"importlib"|"pip"` | ❌ | Can't verify pip packages installed |
+| **Missing:** `DependencyHealthRequest` | `check_type: "imports"\|"importlib"\|"pip"` | ❌ | Can't verify pip packages installed |
 | **Missing:** `PortCheckRequest` | `host`, `port` | ❌ | Can't verify service is listening |
 
 ### Collaboration & PR Workflow
+
 | Tool | Schema | Status | Gaps |
-|------|--------|--------|------|
+| ------ | -------- | -------- | ------ |
 | `GitOperationRequest` (push) | ✅ | | **Missing:** `CreatePullRequestRequest` — can't open PRs for human review |
 | | | | **Missing:** `PRReviewRequest` — can't add review comments |
 | | | | **Missing:** `CheckRunsRequest` — can't trigger/check CI status |
 
 ### Configuration & Secrets
+
 | Tool | Schema | Status | Gaps |
-|------|--------|--------|------|
+| ------ | -------- | -------- | ------ |
 | `StorageFileRead/Write` | Nextcloud access | ✅ | **Missing:** `ConfigValidateRequest` — can't check .env completeness |
 | | | | **Missing:** `SecretScanRequest` — can't scan for leaked keys |
 
@@ -75,6 +82,7 @@ These are blockers for Raven to truly self-heal without human intervention.
 **Why Raven needs it:** Current approach: `WorkspaceShellRequest` with `pytest …`. Raven must parse human-readable output to determine pass/fail. Fragile, language-dependent, no structured data.
 
 **Schema:**
+
 ```python
 class WorkspaceTestRequest(WorkspaceRef):
     targets: list[str] = Field(default_factory=list, description="Test file paths or node IDs (e.g., ['tests/test_gateway.py', '-k test_health'])")
@@ -85,6 +93,7 @@ class WorkspaceTestRequest(WorkspaceRef):
 ```
 
 **Response:**
+
 ```python
 {
   "status": "SUCCESS",
@@ -106,6 +115,7 @@ class WorkspaceTestRequest(WorkspaceRef):
 ```
 
 **Handler:** `handle_workspace_test()` in `workspace.py`
+
 - Runs `pytest -q --tb=short --maxfail=1` with JSON output (`--json-report` if plugin installed)
 - Parses `pytest` exit code + JSON report
 - Extracts failures, durations, coverage if requested
@@ -117,18 +127,21 @@ class WorkspaceTestRequest(WorkspaceRef):
 **Why needed:** Raven needs to see what it's about to commit and fix commit messages.
 
 **New actions:**
+
 - `diff_cached` — show staged diff
 - `amend` — amend last commit (used when tests fail after push)
 - `blame` — show line-by-line authorship (helps understand legacy code)
 - `stash_push` / `stash_pop` — temporary shelving
 
 **Example:** Raven workflow:
+
 1. `GitOperationRequest(action="add", paths=["services/foo.py"])`
 2. `GitOperationRequest(action="diff_cached")` → verify changes
 3. `GitOperationRequest(action="commit", message="feat: …")`
 4. Tests run → if fail → `GitOperationRequest(action="amend", ...)`
 
 **Blame response:**
+
 ```json
 {
   "status": "SUCCESS",
@@ -149,6 +162,7 @@ class WorkspaceTestRequest(WorkspaceRef):
 **Why needed:** Before Raven commits a `requirements.txt` change, it must check if dependencies install cleanly.
 
 **Schema:**
+
 ```python
 class DependencyCheckRequest(WorkspaceRef):
     check_type: Literal["imports", "pip", "all"] = "all"
@@ -157,6 +171,7 @@ class DependencyCheckRequest(WorkspaceRef):
 ```
 
 **Response:**
+
 ```json
 {
   "status": "SUCCESS",
@@ -178,6 +193,7 @@ class DependencyCheckRequest(WorkspaceRef):
 **Why needed:** Lint is syntax-only; Raven needs deeper static analysis.
 
 **Schema:**
+
 ```python
 class StaticAnalysisRequest(WorkspaceRef):
     tools: list[Literal["mypy", "bandit", "pylint", "vulture"]] = Field(default_factory=list)
@@ -186,6 +202,7 @@ class StaticAnalysisRequest(WorkspaceRef):
 ```
 
 **Response:**
+
 ```json
 {
   "status": "SUCCESS",
@@ -206,6 +223,7 @@ class StaticAnalysisRequest(WorkspaceRef):
 **Why needed:** Raven should never push directly to protected branches. It must create PRs for human review.
 
 **Schema:**
+
 ```python
 class CreatePullRequestRequest(WorkspaceRef):
     title: str
@@ -218,6 +236,7 @@ class CreatePullRequestRequest(WorkspaceRef):
 ```
 
 **Response:**
+
 ```json
 {
   "status": "SUCCESS",
@@ -241,6 +260,7 @@ class CreatePullRequestRequest(WorkspaceRef):
 **Purpose:** Before committing, Raven scans changed files for secret-like patterns to prevent accidental leakage.
 
 **Schema:**
+
 ```python
 class SecretScanRequest(WorkspaceRef):
     paths: list[str] = Field(default_factory=list, description="Files to scan; defaults to all staged files")
@@ -248,6 +268,7 @@ class SecretScanRequest(WorkspaceRef):
 ```
 
 **Response:**
+
 ```json
 {
   "status": "SUCCESS",
@@ -271,6 +292,7 @@ Add `dry_run: bool` to let Raven see what tests *would* run without executing.
 **Purpose:** Before starting a large job, Raven checks if system can handle it.
 
 **Schema:**
+
 ```python
 class SystemHealthCheckRequest(BaseRequest):
     user_context: UserContext
@@ -280,6 +302,7 @@ class SystemHealthCheckRequest(BaseRequest):
 ```
 
 **Response:**
+
 ```json
 {
   "status": "SUCCESS",
@@ -323,6 +346,7 @@ class CodeGraphRequest(WorkspaceRef):
 ```
 
 Returns:
+
 ```json
 {
   "imports": ["os", "sys", "fastapi"],
@@ -350,21 +374,25 @@ All new tools must be:
 ## 6. Implementation Phasing
 
 ### Phase 1 (Next Commit — Raven Can Run Tests)
+
 - Add `WorkspaceTestRequest` schema + handler
 - Add to ALLOWED_TOOLS
 - Update RAVEN_AUTONOMOUS_PROTOCOL prompt with test guidance
 - Tests: unit + integration
 
 ### Phase 2 (Safer Commits)
+
 - Enhanced GitOperation (diff_cached, amend)
 - `SecretScanRequest`
 - `DependencyCheckRequest`
 
 ### Phase 3 (Deep Understanding)
+
 - `GitBlameRequest`
 - `StaticAnalysisRequest` (mypy/bandit)
 
 ### Phase 4 (PR Workflow)
+
 - `CreatePullRequestRequest`
 - `SystemHealthCheckRequest`
 
@@ -414,6 +442,7 @@ All without human intervention.
 ---
 
 **Next Actions:**
+
 1. Implement `WorkspaceTestRequest` schema + handler
 2. Add to ALLOWED_TOOLS
 3. Write unit tests

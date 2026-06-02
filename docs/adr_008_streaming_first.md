@@ -1,10 +1,13 @@
 # ADR 008: Streaming-First Inference
 
 ## Status
+
 Proposed
 
 ## Context
+
 The `OllamaProvider.generate()` method already supports streaming (`stream=True`) and delivers chunks via `chunk_callback`. However, `AgentLoop` explicitly sets `"stream": False` in its payload (line 254), forcing Ollama to buffer the entire response before returning. For a 1000-token output, this means:
+
 - VRAM holds full KV cache + full output
 - Memory peak = input tokens + output tokens + KV cache
 - No intermediate tokens available for early user feedback
@@ -23,7 +26,7 @@ Switch `AgentLoop` to streaming mode by default.
 4. **Orchestrator** — When `chunk_callback` provided, forward chunks to caller via Server-Sent Events (SSE) or just accumulate for final result (current behavior).
 5. **Gateway main.py `/api/chat` endpoint** — If request came from UI with `stream=true`, return `StreamingResponse` that yields chunks as they arrive from worker queue.
 
-**Why not stream all the way to user?**  
+**Why not stream all the way to user?**
 Current UI (`/services/ui`) buffers; but enabling streaming in gateway is forward-compatible. Keep existing non-stream path for backward compatibility.
 
 ### Additional Benefits
