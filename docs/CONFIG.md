@@ -14,7 +14,7 @@ SharedLLM uses a **two-phase configuration model**:
 ### Bootstrap Variables (from `.env`)
 
 | Variable | Description |
-|----------|-------------|
+| ----------- | ------------- |
 | `INTERNAL_SECRET` | Service-to-service authentication token (required) |
 | `IDENTITY_SVC_URL` | Identity service URL (defaults to `http://identity:8001`) |
 
@@ -23,7 +23,7 @@ SharedLLM uses a **two-phase configuration model**:
 All other configuration is stored in the Identity service's database and fetched at startup:
 
 | Setting Key | Config Variable | Description |
-|-------------|----------------|-------------|
+| ------------- | --------------- | ------------- |
 | `fernet_key` | `FERNET_KEY` | Encryption key for stored credentials |
 | `llm_local_url` | `OLLAMA_URL` | Ollama inference server URL |
 | `execution_svc_url` | `EXECUTION_SVC_URL` | Execution bridge URL |
@@ -58,7 +58,7 @@ All other configuration is stored in the Identity service's database and fetched
 These are not configurable via Identity; they are container/install paths:
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ----------- | --------- | ------------- |
 | `MODELS_DIR` | `/app/models` | Kokoro TTS models directory |
 | `TEMP_MEDIA_DIR` | `/tmp/sharedllm_media` | Temp media directory |
 | `WORKSPACE_ROOT` | `/workspaces` | Workspace root |
@@ -84,6 +84,7 @@ Only `INTERNAL_SECRET` is required at bootstrap. If missing, the service refuses
 ### Runtime Resolution
 
 `resolve_runtime_config()` is called at service startup. It:
+
 1. Fetches all settings from `GET {IDENTITY_SVC_URL}/api/settings`
 2. Maps each setting key to the corresponding module-level variable
 3. Performs type coercion for numeric values (int, float)
@@ -102,11 +103,13 @@ If Identity is unavailable at startup, variables retain their empty-string or de
 ## .env File Purpose
 
 The `.env` file exists **only for bootstrapping**:
+
 - Seeding the initial `INTERNAL_SECRET`
 - Providing `IDENTITY_SVC_URL` so the service can contact Identity
 - Docker Compose uses it to inject these two values into containers
 
 **Never add new variables to `.env` for runtime configuration.** If a service needs a new setting, add it to:
+
 1. `services/config.py` (with a default value)
 2. `resolve_runtime_config()` settings map
 3. The Identity settings UI or API

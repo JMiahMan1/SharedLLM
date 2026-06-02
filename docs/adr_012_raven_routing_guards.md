@@ -17,9 +17,10 @@ The chat handler (`main.py:1694`) performs fast-path routing for quick responses
 When a Raven query (e.g., "Raven: audit services/gateway/ and fix bugs") triggered these detectors, it was routed directly to `orchestrate_code_change()` via the **Librarian** fast-path instead of being enqueued for the **Raven** background worker and `AgentLoop`.
 
 **Impact:**
-- Raven lost access to its autonomous multi-iteration loop and tool streaming
-- The coding model was called in a single-shot mode with strict JSON grammar, causing "Invalid JSON plan" errors
-- Self-repair and audit workloads failed immediately
+
+* Raven lost access to its autonomous multi-iteration loop and tool streaming
+* The coding model was called in a single-shot mode with strict JSON grammar, causing "Invalid JSON plan" errors
+* Self-repair and audit workloads failed immediately
 
 ---
 
@@ -48,20 +49,22 @@ def wants_workspace_readme_generation(query: str) -> bool:
 ## Consequences
 
 **Positive:**
-- Raven queries now consistently enqueue via the background worker (`job_queue.enqueue_job()`)
-- Full `AgentLoop` control flow restored: multi-iteration, tool call/execute cycles, heartbeat, hard timeout
-- Self-repair and audit workflows operational again
+
+* Raven queries now consistently enqueue via the background worker (`job_queue.enqueue_job()`)
+* Full `AgentLoop` control flow restored: multi-iteration, tool call/execute cycles, heartbeat, hard timeout
+* Self-repair and audit workflows operational again
 
 **Negative:**
-- Adds a small conditional branch to fast-path detectors
-- Requires maintainers to remember to add `"raven" in q` guard to any future fast-path shortcuts
+
+* Adds a small conditional branch to fast-path detectors
+* Requires maintainers to remember to add `"raven" in q` guard to any future fast-path shortcuts
 
 ---
 
 ## Alternatives Considered
 
 | Alternative | Reason Rejected |
-|-------------|----------------|
+| ------------- | --------------- |
 | Route all code edits through Raven by default | Would break existing UI quick-edit UX; Librarian fast-path needs to stay for simple edits |
 | Detect autonomous signals instead of string match | More robust but complex for guards; string check is sufficient and explicit |
 | Remove fast-path code orchestration entirely | Too disruptive; Librarian's single-turn code edits are valuable |
@@ -70,5 +73,5 @@ def wants_workspace_readme_generation(query: str) -> bool:
 
 ## Implementation Notes
 
-- The guard should be placed **before** any other detection logic to short-circuit early.
-- Consider extracting a helper `is_raven_query(query)` that checks both `"raven"` keyword and potential `user_id == "raven_admin"` if routing ever moves to a separate decision point.
+* The guard should be placed **before** any other detection logic to short-circuit early.
+* Consider extracting a helper `is_raven_query(query)` that checks both `"raven"` keyword and potential `user_id == "raven_admin"` if routing ever moves to a separate decision point.
