@@ -3,7 +3,7 @@ services:
     image: redis:7-alpine
     container_name: sharedllm_test_redis
     ports:
-      - "6399:6379"
+      - "6397:6379"
     command: redis-server --appendonly no
 
   identity:
