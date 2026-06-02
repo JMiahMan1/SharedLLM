@@ -171,6 +171,15 @@ class IntentEngine:
 
         # 2. Semantic Routing (if active)
         if not self.is_active or not self.model or len(self.intent_embeddings) == 0 or np is None:
+            # Keyword fallback when semantic router is not available
+            turn_on_patterns = [r"turn\s+on", r"power\s+on", r"switch\s+on"]
+            turn_off_patterns = [r"turn\s+off", r"power\s+off", r"switch\s+off"]
+            for p in turn_on_patterns:
+                if re.search(p, q):
+                    return "light", 0.8
+            for p in turn_off_patterns:
+                if re.search(p, q):
+                    return "light", 0.8
             log.debug(f"[FastPath] Semantic router not active, returning unknown (is_active={self.is_active}, model={self.model is not None}, embeddings={len(self.intent_embeddings) if np is not None else 0}, np={np is not None})")
             return "unknown", 0.0
             

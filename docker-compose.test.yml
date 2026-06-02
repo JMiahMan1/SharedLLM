@@ -15,7 +15,7 @@ services:
       - "8011:8001"
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////tmp/identity_test.db
-      - INTERNAL_SECRET=test-secret
+      - INTERNAL_SECRET=test-secret-ci
       - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
       - INIT_DB=true
       - TEST_MODE=true
@@ -28,7 +28,7 @@ services:
     ports:
       - "8012:8003"
     environment:
-      - INTERNAL_SECRET=test-secret
+      - INTERNAL_SECRET=test-secret-ci
       - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
@@ -53,7 +53,7 @@ services:
     ports:
       - "8013:8004"
     environment:
-      - INTERNAL_SECRET=test-secret
+      - INTERNAL_SECRET=test-secret-ci
       - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
       - OLLAMA_URL=http://ollama_mock:11434
       - IDENTITY_SVC_URL=http://identity:8001
@@ -75,7 +75,7 @@ services:
     ports:
       - "8014:8005"
     environment:
-      - INTERNAL_SECRET=test-secret
+      - INTERNAL_SECRET=test-secret-ci
       - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
       - IDENTITY_SVC_URL=http://identity:8001
       - TEST_MODE=true
@@ -88,7 +88,7 @@ services:
     ports:
       - "8015:8006"
     environment:
-      - INTERNAL_SECRET=test-secret
+      - INTERNAL_SECRET=test-secret-ci
       - REDIS_URL=redis://redis:6379/0
       - TEST_MODE=true
     depends_on:
@@ -100,9 +100,9 @@ services:
       dockerfile: services/gateway/Dockerfile
     container_name: sharedllm_test_gateway
     ports:
-      - "8016:8000"
+      - "8016:11435"
     environment:
-      - INTERNAL_SECRET=test-secret
+      - INTERNAL_SECRET=test-secret-ci
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
