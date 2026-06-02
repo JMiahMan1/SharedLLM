@@ -89,6 +89,7 @@ services:
       - "8015:8006"
     environment:
       - INTERNAL_SECRET=test-secret-ci
+      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
       - REDIS_URL=redis://redis:6379/0
       - TEST_MODE=true
     depends_on:
@@ -103,6 +104,7 @@ services:
       - "8016:11435"
     environment:
       - INTERNAL_SECRET=test-secret-ci
+      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
