@@ -1,13 +1,16 @@
 # ADR 004: Structured Request Tracing & Centralized Secret Sanitization
 
 ## Status
+
 Proposed
 
 ## Context
+
 Current logging is free-form string-based. Requests flowing through Gateway → Execution → WorkspaceRuntime generate logs that cannot be correlated across services. Additionally, secret redaction is ad-hoc:
-- `agent_loop.py` manually redacts before logging tool payloads
-- `workspace_runtime` redacts in some handlers but not all
-- New code often forgets to sanitize
+
+* `agent_loop.py` manually redacts before logging tool payloads
+* `workspace_runtime` redacts in some handlers but not all
+* New code often forgets to sanitize
 
 A single leaked log line containing `nextcloud_pass` or `github_token` is a critical security incident.
 
@@ -18,24 +21,25 @@ A single leaked log line containing `nextcloud_pass` or `github_token` is a crit
 All services must emit JSON-formatted logs with mandatory fields:
 
 | Field | Description |
-|-------|-------------|
+| --- | --- |
 | `timestamp` | ISO 8601 UTC |
 | `level` | `DEBUG/INFO/WARNING/ERROR` |
-| `service` | `gateway|execution|workspace_runtime|...` |
+| `service` | `gateway&#124;execution&#124;workspace_runtime&#124;...` |
 | `request_id` | UUID from Gateway entrypoint (propagated via header) |
 | `job_id` | UUID for Raven jobs (else omitted) |
 | `iteration` | AgentLoop iteration number (Raven only) |
 | `user_id` | Resolved identity |
 | `action` | Tool name or route handler |
 | `duration_ms` | Time from request start to log emission |
-| `status` | `success|failure|timeout|blocked` |
+| `status` | `success&#124;failure&#124;timeout&#124;blocked` |
 | `error_code` | Optional machine-readable error tag |
 
 **Implementation:**
-- Create `services/common/logging_config.py` (shared module via volume mount)
-- Configure `logging.config.dictConfig` with `python-json-logger` or custom formatter
-- FastAPI middleware sets context vars: `current_request_id`, `current_job_id`, `current_user`
-- Custom `logging.Filter` reads these and injects into every `LogRecord`
+
+* Create `services/common/logging_config.py` (shared module via volume mount)
+* Configure `logging.config.dictConfig` with `python-json-logger` or custom formatter
+* FastAPI middleware sets context vars: `current_request_id`, `current_job_id`, `current_user`
+* Custom `logging.Filter` reads these and injects into every `LogRecord`
 
 ### 2. Centralized Sanitizer Module
 
@@ -89,7 +93,7 @@ def sanitize_dict(data: dict) -> dict:
 ### 3. Enforced Sanitization Points
 
 | Entry Point | Action |
-|-------------|--------|
+| --- | --- |
 | FastAPI response JSON serialization | Apply `sanitize_dict` to all response bodies (except for admin endpoints) |
 | Incoming request body logs | Sanitize before any `log.info()` |
 | Outbound HTTP calls to downstream services | Sanitize payload (except for known trusted recipients) |
@@ -103,16 +107,16 @@ If header absent, Gateway generates it.
 
 ## Consequences
 
-- ✅ Zero secret leakage from structured logs (assuming sanitizer coverage complete)
-- ✅ End-to-end request tracing across service mesh
-- ✅ Debugging complex Raven loops: all iterations share same `request_id`
-- ⚠️ Minor CPU overhead (~0.5ms per dict sanitization)
-- ⚠️ Need to audit all `log.info()` calls to ensure they use structured logging, not f-strings with dicts
+* ✅ Zero secret leakage from structured logs (assuming sanitizer coverage complete)
+* ✅ End-to-end request tracing across service mesh
+* ✅ Debugging complex Raven loops: all iterations share same `request_id`
+* ⚠️ Minor CPU overhead (~0.5ms per dict sanitization)
+* ⚠️ Need to audit all `log.info()` calls to ensure they use structured logging, not f-strings with dicts
 
 ## Validation
 
-- Pen test: send request with `{"github_token":"ghp_FAKE123"}` in payload → grep all service logs → verify `[REDACTED]`
-- Load test: 100 req/s → measure formatter overhead
+* Pen test: send request with `{"github_token":"ghp_FAKE123"}` in payload → grep all service logs → verify `[REDACTED]`
+* Load test: 100 req/s → measure formatter overhead
 
 ---
 

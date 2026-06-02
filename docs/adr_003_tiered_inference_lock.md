@@ -1,16 +1,20 @@
 # ADR 003: Tiered Inference Locking
 
 ## Status
+
 Proposed
 
 ## Context
+
 Raven's `AgentLoop` currently holds a global `INFERENCE_LOCK` (asyncio.Lock) for its entire multi-turn execution, which can last 5-30 minutes. Librarian queries (standard chat) also indirectly acquire this lock via `call_ollama`. This creates a single point of contention: **while Raven is debugging, no one can turn on a light or ask a simple question**.
 
 The lock exists to protect 8GB VRAM from concurrent Ollama requests. However, we can differentiate between:
+
 - **Autonomous (Raven):** long-running, needs exclusive GPU
 - **Interactive (Librarian):** short single-turn, can share a pool
 
 ## Decision
+
 Replace the single `INFERENCE_LOCK` with two distinct synchronization primitives:
 
 1. **`INFERENCE_LOCK_RAVEN`** = `asyncio.Lock()` — exclusive, one Raven job at a time
@@ -33,6 +37,7 @@ async with lock:
 ```
 
 **Rationale:**
+
 - Raven tasks remain isolated (GPU contention avoided)
 - Librarian queries get 4× parallelism, improving UI responsiveness
 - Semaphore allows controlled oversubscription; 4 is safe for 8GB VRAM with 7B/9B models (each ~5-8GB peak)

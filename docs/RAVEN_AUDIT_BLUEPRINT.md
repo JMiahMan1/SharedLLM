@@ -11,6 +11,7 @@
 Raven is the autonomous repair agent within the Jarvis microservices ecosystem. It operates via a long-running multi-turn LLM loop (`AgentLoop`) that can execute tools, run tests, and self-modify code. While functional, several fragility points risk silent failures, resource exhaustion, and secret leakage under production load.
 
 **Primary Risk Vectors:**
+
 - Single-threaded inference lock blocks all other requests during multi-turn loops (up to 30 iterations × 2-3 min each)
 - No hard timeout on total loop execution → runaway jobs
 - Memory growth via unbounded `action_log` accumulation
@@ -26,7 +27,7 @@ Raven is the autonomous repair agent within the Jarvis microservices ecosystem. 
 ### Core Components
 
 | Component | File | Role |
-|-----------|------|------|
+| ----------- | ------ | ------ |
 | `AgentLoop` | `services/gateway/agent_loop.py` | Multi-turn autonomous reasoning engine |
 | `Orchestrator` | `services/gateway/orchestrator.py` | Routes to Raven vs Librarian paths |
 | `BackgroundWorker` | `services/gateway/background_worker.py` | Singleton FIFO job processor with health monitoring |
@@ -42,7 +43,7 @@ Raven is the autonomous repair agent within the Jarvis microservices ecosystem. 
 
 ### Deployed Services (docker-compose)
 
-```
+```text
 Gateway (8002) → Orchestrator → [Librarian | Raven(AgentLoop)]
 Execution (8003) → HA, Docker, Git handlers
 WorkspaceRuntime (8007) → File ops, lint, pytest, git workflows
@@ -59,7 +60,7 @@ Redis (6379) → Job queue, state, pubsub
 
 ### 3.1 Critical Path Analysis
 
-```
+```text
 User Request → Gateway /api/chat
   ↓
 Orchestrator.process_full_orchestration()
@@ -77,7 +78,7 @@ Learning persistence → Execution /execute/learning
 ### 3.2 Specific Failure Modes
 
 | # | Failure Mode | Location | Impact |
-|---|--------------|----------|--------|
+| - | -------------- | ---------- | -------- |
 | 1 | **Stalled loop** — LLM hangs or enters infinite generation | `agent_loop.py:268-346` | Blocks inference indefinitely |
 | 2 | **Memory creep** — `action_log` list grows without bound | `agent_loop.py:266` | OOM after many long tasks |
 | 3 | **Lost job on restart** — Worker dies mid-job, Redis TTL expires, job may be re-queued but local state lost | `background_worker.py:85-122` | No progress continuity |
@@ -110,7 +111,7 @@ Learning persistence → Execution /execute/learning
 
 ### 4.2 Target Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                             REQUEST INGEST                                  │
 │  Gateway /api/chat  →  Intent Engine  →  Route: [Librarian | Raven]        │
@@ -202,6 +203,7 @@ CREATE TABLE raven_job_runs (
 ```
 
 **Integration:**
+
 - At start of each AgentLoop iteration: `UPDATE raven_job_runs SET iteration=$1, action_log_json=$2 WHERE job_id=$3`
 - On worker restart: Look up in-progress jobs from past 1 hour → re-queue.
 
@@ -216,6 +218,7 @@ CREATE TABLE raven_job_runs (
 **Problem:** Loop can theoretically run 30 iterations × 3 min = 90 min; no hard stop.
 
 **Solution:**  
+
 1. Add `MAX_TOTAL_SECONDS = int(os.getenv("RAVEN_MAX_TOTAL_SECONDS", "600"))` (10 min default)
 2. Track `loop_start = asyncio.get_event_loop().time()` at `agent_loop.py:263`
 3. Check on each iteration: if `elapsed > MAX_TOTAL_SECONDS` → `return "ERROR: Timeout after {elapsed}s"`
@@ -234,6 +237,7 @@ CREATE TABLE raven_job_runs (
 **Implementation:**
 
 1. `services/execution/sanitize.py` — new module
+
 ```python
 SECRET_KEYS = {"api_key","ha_token","nextcloud_pass","github_token","gitlab_token","git_token","fernet_key"}
 
@@ -245,9 +249,9 @@ def sanitize_dict(d: dict) -> dict:
     }
 ```
 
-2. Apply to all response models via Pydantic `@validator` pre=True, or FastAPI `BaseResponse` middleware.
+1. Apply to all response models via Pydantic `@validator` pre=True, or FastAPI `BaseResponse` middleware.
 
-3. Add log filter: `logging.Filter` that redacts JSON strings before emission.
+2. Add log filter: `logging.Filter` that redacts JSON strings before emission.
 
 **Test:** Send request with `nextcloud_pass="secret"` in `user_context` → verify logs show `[REDACTED]`, response payload also redacted for non-admin roles.
 
@@ -260,12 +264,14 @@ def sanitize_dict(d: dict) -> dict:
 **Solution:** Integrate `aiobreaker` (already in requirements.txt) around all inter-service HTTP calls.
 
 **Scope:**  
+
 - `AgentLoop` tool dispatch (line 499)  
 - `BackgroundWorker._get_errors` (line 170)  
 - `Orchestrator._fetch_rag_context` (line 184)  
 - `WorkspaceRuntime` storage calls (line 1291)
 
 **Config:**  
+
 - `failure_threshold = 5`  
 - `recovery_timeout = 30s`  
 - `expected_exception = (httpx.RequestError, httpx.HTTPStatusError)`
@@ -307,6 +313,7 @@ def sanitize_dict(d: dict) -> dict:
 ### Slice 8 — Sandboxed Self-Editing Pipeline (Critical, 6-8 hrs)
 
 **Current State:** `WorkspaceRuntime /workflow/write-sync-commit` already implements:
+
 - Write file
 - Lint on that file
 - Run targeted pytest (if targets provided)
@@ -315,6 +322,7 @@ def sanitize_dict(d: dict) -> dict:
 - Provider sync
 
 **Gaps:**
+
 - If lint fails but pytest is not run → job marked as success anyway (bug)
 - No rate-limit on retries
 - No quarantine for repeatedly failing files
@@ -361,6 +369,7 @@ def sanitize_dict(data: dict) -> dict:
 ```
 
 **Integration Points:**
+
 - All FastAPI route handlers → call `sanitize_dict(payload)` before logging
 - `logging.config.dictConfig` with custom `Filter` that redacts `record.msg` if it looks like JSON with secrets
 - Pydantic serialization hook: `model_dump(mode="json")` → sanitize → log
@@ -386,6 +395,7 @@ Every structured log line must include:
 ```
 
 **Implementation:**  
+
 - Custom `logging.Filter` attaches `request_id` from asyncio context var `current_request_id`
 - Worker loop sets `job_id` in context var
 - FastAPI middleware sets/clears request-scoped vars
@@ -397,6 +407,7 @@ Every structured log line must include:
 ### 7.1 Current State
 
 `WorkspaceRuntime /workflow/write-sync-commit` does:
+
 1. `files.write`
 2. `lint` (single file)
 3. `pytest` (if targets specified)
@@ -405,6 +416,7 @@ Every structured log line must include:
 6. `provider sync`
 
 **Issues:**
+
 - Lint and pytest results are returned but workflow continues even if lint fails and `push=True`
 - No protection against pushing failing code to protected branches (relies on workspace runtime branch check, which is correct but should be validated)
 
@@ -413,6 +425,7 @@ Every structured log line must include:
 **Endpoint:** `POST /workflow/write-sync-commit`
 
 **Invariant:** `push=True` requires **ALL** of:
+
 - `lint_passed == True` for every file in `lint_paths` + auto-detected related files
 - `pytest_passed == True` if `pytest_targets` non-empty
 - `branch_name` NOT in `protected_branch_patterns(identity)` → if on protected, auto-create review branch
@@ -437,6 +450,7 @@ if push and (not lint_results_all_passed or (pytest_run and not pytest_passed)):
 ```
 
 **Quarantine Logic:**
+
 ```python
 QUARANTINE_THRESHOLD = int(os.getenv("RAVEN_QUARANTINE_THRESHOLD", "3"))
 
@@ -475,6 +489,7 @@ if file_path in quarantine_db:
    *Decision:* Files failing lint/pytest >3 times in 10 window are flagged `quarantined` until admin review.
 
 **Existing ADRs to Update:**
+
 - ADR 001 (Hardening Slice) — append note: "Job persistence layer added"
 - ADR 002 (Branch Push Guardrails) — append: "Push now blocked if lint/pytest fail regardless of branch protection level"
 
@@ -485,7 +500,7 @@ if file_path in quarantine_db:
 ### Unit Tests (pytest)
 
 | Module | Coverage Target | Key Tests |
-|--------|----------------|-----------|
+| -------- | ---------------- | ----------- |
 | `agent_loop.py` | 80% | Timeout cutoffs, iteration state checkpoint/restore, secret redaction on tool results |
 | `background_worker.py` | 75% | Job reclaim logic, heartbeat TTL expiry, DLQ moves |
 | `workspace_runtime/main.py` | Already high — add: | Quarantine enforcement, branch auto-creation from protected base |
@@ -507,6 +522,7 @@ if file_path in quarantine_db:
 
 **Pre-commit Hook Recommendation:**  
 Add `.pre-commit-config.yaml`:
+
 ```yaml
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -528,7 +544,7 @@ repos:
 ## 10. Risk Mitigation Matrix
 
 | Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
+| ------ | ------------ | -------- | ------------ |
 | Raven self-edit corrupts critical code | Medium | Critical | Workspace runtime → lint+pytest mandatory; review branch workflow; auto-quarantine |
 | Inference lock starvation | High | High | Librarian decoupled; Raven jobs time-boxed |
 | Secret leakage via logs | Medium | Critical | Sanitizer module enforced at all service boundaries |
@@ -543,7 +559,7 @@ repos:
 
 **Prometheus-style metrics (expose via `/metrics` on each service):**
 
-```
+```text
 # Gateway
 gateway_requests_total{endpoint="/api/chat",intent="raven"} 152
 gateway_request_duration_seconds{endpoint="/api/chat",intent="raven"} 0.87
@@ -567,6 +583,7 @@ workspace_quarantined_files_current 2
 ```
 
 **Grafana Dashboard Panels:**
+
 - Raven job queue depth over time
 - Inference lock hold time histogram
 - Top failing files (pytest)
@@ -577,24 +594,28 @@ workspace_quarantined_files_current 2
 ## 12. Implementation Timeline (2-Week Sprints)
 
 **Sprint 1 (Days 1-4):**  
+
 - Slice 1 (Librarian lock decoupling)  
 - Slice 3 (Hard timeout)  
 - Structured logging + Request ID propagation  
 - Unit tests for timeout & tracing  
 
 **Sprint 2 (Days 5-8):**  
+
 - Slice 2 (Job persistence/resumability)  
 - Slice 4 (Sanitizer module + log filter)  
 - Slice 5 (Circuit breakers)  
 - Integration tests for crash recovery  
 
 **Sprint 3 (Days 9-10):**  
+
 - Slice 6 (Streaming-first inference, if VRAM allows)  
 - Slice 8 (Quarantine logic)  
 - ADR authoring + documentation  
 - Full pytests + flake8 compliance  
 
 **Sprint 4 (Days 11-14):**  
+
 - End-to-end validation on staging  
 - Load test: 100 concurrent librarian + 1 Raven job  
 - Prepare production rollout with feature flag (`RAVEN_HARDENING_SLICE_02_ENABLED`)
@@ -663,9 +684,10 @@ async def sanitize_response_middleware(request: Request, call_next):
 
 ---
 
-**END OF BLUEPRINT DOCUMENT**
+## END OF BLUEPRINT DOCUMENT
 
-Next steps:  
+Next steps:
+
 1. Review this blueprint with human lead  
 2. Prioritize slices  
 3. Begin implementation in isolated branch `raven/hardening-slice-02`  
