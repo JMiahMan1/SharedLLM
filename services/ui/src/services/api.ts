@@ -315,12 +315,15 @@ apiClient.interceptors.response.use(
 
     console.error('[API] Response error:', error.message, error.config?.baseURL, error.config?.url);
     if (error.response?.status === 401 && !isLoggingOut) {
-      isLoggingOut = true;
-      import('../lib/storage').then(({ storageRemove }) => {
-        storageRemove('jarvis_api_key');
-        storageRemove('jarvis_user');
-      });
-      window.location.href = '/login';
+      const isLoginRequest = error.config?.url?.includes('/api/auth/login');
+      if (!isLoginRequest) {
+        isLoggingOut = true;
+        import('../lib/storage').then(({ storageRemove }) => {
+          storageRemove('jarvis_api_key');
+          storageRemove('jarvis_user');
+        });
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   },
