@@ -366,7 +366,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "identity"}
+    return {"status": "OK", "service": "identity"}
 
 # ─── Public/Admin API ──────────────────────────────────────────────────────────
 
