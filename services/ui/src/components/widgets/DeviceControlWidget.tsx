@@ -125,11 +125,11 @@ const DeviceControlWidget = () => {
   const groupedDevices = useMemo(() => {
     const list = [...devices];
 
-    if (sort_mode === 'favorites' || sortMode === 'favorites') {
+    if (sort_mode === 'favorites') {
       list.sort((a, b) => (b.isFavorite ? 1 : 0) - (a.isFavorite ? 1 : 0));
-    } else if (sort_mode === 'off' || sortMode === 'off') {
+    } else if (sort_mode === 'off') {
       list.sort((a, b) => (isActive(a.state) ? 1 : 0) - (isActive(b.state) ? 1 : 0));
-    } else if (sort_mode === 'by_time' || sortMode === 'by_time') {
+    } else if (sort_mode === 'by_time') {
       list.sort((a, b) => (b.last_activated || 0) - (a.last_activated || 0));
     }
 
