@@ -1,4 +1,4 @@
-import { useEffect, useCallback, lazy, Suspense } from 'react';
+import { useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useWidgetStore } from '../../stores/widgetStore';
 import WidgetContextMenu from '../widgets/WidgetContextMenu';
 import type { WidgetSize } from '../types/widget';
@@ -28,7 +28,10 @@ const WidgetSkeleton = () => (
 );
 
 const BentoBoxDashboard = () => {
-  const widgets = useWidgetStore((s) => s.getVisibleWidgets());
+  const userWidgets = useWidgetStore((s) => s.userWidgets);
+  const widgets = useMemo(() => {
+    return useWidgetStore.getState().getVisibleWidgets();
+  }, [userWidgets]);
 
   useEffect(() => {
     useWidgetStore.getState().syncWithServer();
