@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useWidgetStore } from '../../stores/widgetStore';
 import WidgetContextMenu from '../widgets/WidgetContextMenu';
-import type { WidgetSize } from '../types/widget';
+import type { WidgetSize, UserWidgetSettings } from '../types/widget';
 
 const SIZE_CLASSES: Record<WidgetSize, { gridCol: string; gridRow: string }> = {
   small: { gridCol: 'col-span-1', gridRow: 'row-span-1' },
@@ -78,6 +78,32 @@ const BentoBoxDashboard = () => {
             const LazyWidget = LazyWidgets[widget.def.key];
             const sizeClass = SIZE_CLASSES[widget.userSettings.size] || SIZE_CLASSES.medium;
 
+            const renderWidget = () => {
+              if (!LazyWidget) return null;
+              const WidgetComponent = LazyWidget as React.ComponentType<any>;
+              switch (widget.def.key) {
+                case 'energy_insights':
+                case 'ambient_timer':
+                case 'quick_notes':
+                  return (
+                    <WidgetComponent
+                      userSettings={widget.userSettings as UserWidgetSettings}
+                      onTogglePin={() => handleTogglePin(widget.def.key)}
+                    />
+                  );
+                case 'active_media':
+                  return (
+                    <WidgetComponent
+                      userSettings={widget.userSettings as UserWidgetSettings}
+                      onTogglePin={() => handleTogglePin(widget.def.key)}
+                      onMediaStop={() => {}}
+                    />
+                  );
+                default:
+                  return <WidgetComponent />;
+              }
+            };
+
             return (
               <div
                 key={widget.def.key}
@@ -96,7 +122,7 @@ const BentoBoxDashboard = () => {
                     onRemove={handleRemove}
                   />
                   <Suspense fallback={<WidgetSkeleton />}>
-                    {LazyWidget && <LazyWidget />}
+                    {renderWidget()}
                   </Suspense>
                 </div>
               </div>
