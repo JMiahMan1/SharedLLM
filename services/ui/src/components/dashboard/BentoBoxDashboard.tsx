@@ -29,7 +29,10 @@ const WidgetSkeleton = () => (
 
 const BentoBoxDashboard = () => {
   const widgets = useWidgetStore((s) => s.getVisibleWidgets());
-  const syncWithServer = useWidgetStore((s) => s.syncWithServer);
+
+  useEffect(() => {
+    useWidgetStore.getState().syncWithServer();
+  }, []);
 
   const handleToggleVisibility = useCallback((widgetKey: string, visible: boolean) => {
     if (visible) {
@@ -54,10 +57,6 @@ const BentoBoxDashboard = () => {
   const handleRemove = useCallback((widgetKey: string) => {
     useWidgetStore.getState().removeWidget(widgetKey as never);
   }, []);
-
-  useEffect(() => {
-    syncWithServer();
-  }, [syncWithServer]);
 
   const totalWidgets = widgets.length;
 
