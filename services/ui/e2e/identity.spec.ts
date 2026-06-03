@@ -17,7 +17,7 @@ test.describe('Identity Page - Integration Gallery', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('integration gallery section is visible', async ({ page }) => {
@@ -66,7 +66,7 @@ test.describe('Identity Page - Integration Configuration Modal', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('Manage Integration opens configuration modal', async ({ page }) => {
@@ -138,7 +138,7 @@ test.describe('Identity Page - Vocal Signature', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('vocal signature section is visible', async ({ page }) => {
@@ -169,7 +169,7 @@ test.describe('Identity Page - API Keys', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('API keys section header is visible', async ({ page }) => {
@@ -200,7 +200,7 @@ test.describe('Identity Page - Digital Persona', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('digital persona section is visible', async ({ page }) => {
@@ -233,7 +233,7 @@ test.describe('Identity Page - System Hierarchy', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('system hierarchy section is visible for admins', async ({ page }) => {

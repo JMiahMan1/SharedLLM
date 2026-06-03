@@ -17,12 +17,12 @@ test.describe('Workspaces Page - Admin CRUD', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/workspaces`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('shows empty state with get started button', async ({ page }) => {
     await page.goto(`${UI_URL}/workspaces?empty=true`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
     await expect(page.getByText('No Workspaces Found')).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole('button', { name: /get started/i })).toBeVisible();
   });
@@ -93,7 +93,7 @@ test.describe('Workspaces Page - List Actions', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/workspaces`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('sync all button is visible for admins', async ({ page }) => {
