@@ -73,7 +73,12 @@ const Login = () => {
       navigate('/');
     } catch (err: unknown) {
       if (err instanceof Error) {
-        setError(err.message || 'Authentication failed');
+        const axiosError = err as import('axios').AxiosError & { response?: { data?: { detail?: string } } };
+        setError(
+          axiosError.response?.data?.detail || 
+          err.message || 
+          'Authentication failed'
+        );
       } else {
         setError('Authentication failed');
       }
