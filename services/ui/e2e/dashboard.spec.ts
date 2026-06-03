@@ -17,7 +17,7 @@ test.describe('Dashboard - Halo Banner', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('halo banner is visible', async ({ page }) => {
@@ -30,7 +30,7 @@ test.describe('Dashboard - Header and Search', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('dashboard title is visible', async ({ page }) => {
@@ -86,7 +86,7 @@ test.describe('Dashboard - Service Status Cards', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('live service status section is visible', async ({ page }) => {
@@ -141,7 +141,7 @@ test.describe('Dashboard - Recent Logs', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('recent logs section is visible', async ({ page }) => {
@@ -163,7 +163,7 @@ test.describe('Dashboard - Workspace Summary', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('workspace summary section is visible', async ({ page }) => {
@@ -180,7 +180,7 @@ test.describe('Dashboard - Settings Management', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('settings section is visible', async ({ page }) => {
@@ -205,7 +205,7 @@ test.describe('Dashboard - Voice Assistant', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('voice assistant overlay opens', async ({ page }) => {

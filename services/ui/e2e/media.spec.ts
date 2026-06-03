@@ -15,7 +15,7 @@ test.describe('Media Page - Structure & Loading', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('media page title is visible', async ({ page }) => {
@@ -82,7 +82,7 @@ test.describe('Media Page - Device Selector', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('device selector dropdown opens on click', async ({ page }) => {
@@ -116,7 +116,7 @@ test.describe('Media Page - Media Explorer Modal', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('media explorer modal opens when browse button clicked', async ({ page }) => {
@@ -392,7 +392,7 @@ test.describe('Media Page - Navigation from Dashboard', () => {
 
   test('can navigate to media page from sidebar', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
     await page.waitForTimeout(1000);
 
     const mediaLink = page.getByRole('link', { name: /media/i }).or(
@@ -401,7 +401,7 @@ test.describe('Media Page - Navigation from Dashboard', () => {
     if (await mediaLink.isVisible({ timeout: 3000 }).catch(() => false)) {
       await mediaLink.click();
       await page.waitForURL('**/media', { timeout: 10000 }).catch(() => {});
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
       await expect(page.getByRole('heading', { name: 'Media', level: 1 })).toBeVisible({ timeout: 10000 });
     }
   });
@@ -413,7 +413,7 @@ test.describe('Media Page - Mobile Viewport', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('media page renders on mobile', async ({ page }) => {

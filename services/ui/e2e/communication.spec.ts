@@ -17,7 +17,7 @@ test.describe('Communication Page - Timer CRUD', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('creates a new timer with title and duration', async ({ page }) => {
@@ -65,7 +65,7 @@ test.describe('Communication Page - Announcements', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('announcement volume slider updates value', async ({ page }) => {
@@ -119,7 +119,7 @@ test.describe('Communication Page - Notes CRUD', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('notes section with Monaco editor is visible', async ({ page }) => {
@@ -188,7 +188,7 @@ test.describe('Communication Page - Talk Chat', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('talk section shows conversation feed', async ({ page }) => {
@@ -216,7 +216,7 @@ test.describe('Communication Page - Calendar', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('calendar event title input is editable', async ({ page }) => {
@@ -242,7 +242,7 @@ test.describe('Communication Page - Voice Recording', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('record voice button is visible', async ({ page }) => {
@@ -271,7 +271,7 @@ test.describe('Communication Page - Markdown Formatting', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('markdown toolbar appears in fullscreen notes', async ({ page }) => {
