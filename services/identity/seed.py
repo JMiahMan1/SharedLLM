@@ -11,7 +11,7 @@ import logging
 from sqlmodel import Session, select, text
 from dotenv import load_dotenv
 
-from services.identity.models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
+from services.identity.models import User, DeviceAssignment, APIKey, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
 from services.identity.crypto import encrypt
 
 from passlib.context import CryptContext
@@ -133,9 +133,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     else:
         log.info("[seed] Forced re-seed: Clearing existing users/assignments.")
         # Clear using SQLModel to avoid table name mismatches
+        from services.identity.models import DeviceAssignment, APIKey
         for table in ["deviceassignment", "user", "apikey", "globalsetting"]:
             try:
-                session.connection().execute(text(f"DELETE FROM {table}"))
+                session.exec(text(f"DELETE FROM {table}"))
             except Exception:
                 pass 
         session.commit()
