@@ -17,7 +17,7 @@ test.describe('Knowledge Hub - Stats Display', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/knowledge-hub`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('RAG status indicator is visible', async ({ page }) => {
@@ -43,7 +43,7 @@ test.describe('Knowledge Hub - Stats Display', () => {
 
   test('stats cards show loading state initially', async ({ page }) => {
     await page.goto(`${UI_URL}/knowledge-hub`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
     const loadingState = page.getByText('...');
     await expect(loadingState).toBeVisible({ timeout: 3000 }).catch(() => {});
   });
@@ -53,7 +53,7 @@ test.describe('Knowledge Hub - Manual Ingestion', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/knowledge-hub`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('direct ingestion form is visible', async ({ page }) => {
@@ -95,7 +95,7 @@ test.describe('Knowledge Hub - File Explorer', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/knowledge-hub`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('file explorer section is visible', async ({ page }) => {
@@ -157,7 +157,7 @@ test.describe('Knowledge Hub - System Maintenance', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/knowledge-hub`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('system maintenance section is visible', async ({ page }) => {

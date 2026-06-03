@@ -24,14 +24,16 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
 
   test('mobile viewport renders bottom navigation bar', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const bottomNav = page.locator('nav').filter({ hasText: /home|dashboard|communication|workspace|identity/i });
     await expect(bottomNav.or(page.locator('[class*="bottom-nav"]'))).toBeVisible({ timeout: 10000 });
   });
 
   test('bottom nav has all core routes', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const navItems = page.locator('nav a, nav button');
     const count = await navItems.count();
     expect(count).toBeGreaterThanOrEqual(4);
@@ -39,7 +41,8 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
 
   test('tapping bottom nav items navigates correctly', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
 
     const navLinks = [
       { name: /home|dashboard/i, expectedUrl: /dashboard|\/$/ },
@@ -61,7 +64,8 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
 
   test('hamburger menu is hidden on mobile (replaced by bottom nav)', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const sidebar = page.locator('[class*="sidebar"]').or(page.locator('aside'));
     const isVisible = await sidebar.isVisible({ timeout: 3000 }).catch(() => false);
     expect(isVisible).toBe(false);
@@ -69,7 +73,8 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
 
   test('mobile header shows app title and user menu', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const header = page.locator('header').or(page.locator('[class*="header"]'));
     await expect(header).toBeVisible({ timeout: 10000 });
   });
@@ -95,7 +100,8 @@ test.describe('Android App - Authentication & Biometrics', () => {
   test('session persists across page reloads', async ({ page }) => {
     await loginAsAdmin(page);
     await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     await expect(page).not.toHaveURL(/\/login/);
   });
 });
@@ -106,7 +112,8 @@ test.describe('Android App - Wake Word & Voice Assistant', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
   });
 
   test('mic icon is visible for voice input', async ({ page }) => {
@@ -133,7 +140,8 @@ test.describe('Android App - Intercom (Mobile Hold-to-Talk)', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
   });
 
   test('intercom section loads on mobile', async ({ page }) => {
@@ -157,7 +165,8 @@ test.describe('Android App - NFC Tag Macros', () => {
 
   test('NFC settings section exists in admin', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     await page.getByRole('button', { name: 'Raven Ops' }).click();
     const nfcSection = page.getByText(/nfc|tag|macro/i);
     if (await nfcSection.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -175,7 +184,8 @@ test.describe('Android App - Location Tracking', () => {
 
   test('location permission prompt handling', async ({ page }) => {
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const locationSection = page.getByText(/location|gps|tracking/i);
     if (await locationSection.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(locationSection).toBeVisible();
@@ -189,7 +199,8 @@ test.describe('Android App - Entity Dropdowns (Mobile)', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/admin`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
   });
 
   test('entity search dropdown opens on mobile tap', async ({ page }) => {
@@ -247,7 +258,8 @@ test.describe('Android App - Responsive Design', () => {
 
   test('dashboard adapts to mobile layout', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     const viewportWidth = await page.evaluate(() => window.innerWidth);
     expect(scrollWidth).toBeLessThanOrEqual(viewportWidth);
@@ -255,14 +267,16 @@ test.describe('Android App - Responsive Design', () => {
 
   test('admin tabs scroll horizontally on mobile', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const tabContainer = page.locator('[class*="overflow-x"]').or(page.locator('div').filter({ has: page.getByRole('button', { name: 'Users & Devices' }) }).first());
     await expect(tabContainer).toBeVisible({ timeout: 10000 });
   });
 
   test('glass panels stack vertically on mobile', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     await page.getByRole('button', { name: 'Users & Devices' }).click();
     const panels = page.locator('[class*="glass-panel"]');
     const count = await panels.count();
@@ -271,7 +285,8 @@ test.describe('Android App - Responsive Design', () => {
 
   test('touch targets are at least 44px on mobile', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const buttons = page.locator('button');
     const count = await buttons.count();
     for (let i = 0; i < Math.min(count, 5); i++) {
@@ -293,14 +308,16 @@ test.describe('Android App - Performance', () => {
   test('initial page load under 5 seconds', async ({ page }) => {
     const start = Date.now();
     await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(10000);
   });
 
   test('entity dropdown renders within 2 seconds', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
     await page.getByRole('button', { name: 'Users & Devices' }).click();
     const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
     await searchInput.click();
