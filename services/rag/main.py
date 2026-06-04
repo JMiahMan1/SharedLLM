@@ -17,9 +17,10 @@ from fastapi import FastAPI, Depends, HTTPException, Header, Request, status
 from fastapi.responses import JSONResponse
 import chromadb  # pyright: ignore[reportMissingTypeStubs]
 from chromadb.config import Settings  # pyright: ignore[reportMissingTypeStubs]
+from chromadb.api.types import EmbeddingFunction
 
 
-class FastembedEmbeddingFunction:
+class FastembedEmbeddingFunction(EmbeddingFunction):
     """Wraps fastembed's TextEmbedding for use with ChromaDB."""
 
     def __init__(self, model_name: str, **kwargs: Any) -> None:
@@ -94,7 +95,7 @@ def get_collection(name: str):
         )
     except Exception as e:
         log.error(f"Failed to get collection {name}: {e}")
-        raise HTTPException(status_code=500, detail="Database error")
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 
 def _freeze_for_hash(value):
