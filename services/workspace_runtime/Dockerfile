@@ -1,5 +1,6 @@
 FROM python:3.11-slim
 WORKDIR /app
+RUN mkdir -p /home/sharedllm && chown 1000:1000 /home/sharedllm
 RUN apt-get update && apt-get install -y \
     git \
     curl \
