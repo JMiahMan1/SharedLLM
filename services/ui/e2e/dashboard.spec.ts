@@ -95,7 +95,7 @@ test.describe('Dashboard - Service Status Cards', () => {
 
   test('service status cards are displayed', async ({ page }) => {
     const serviceCards = page.locator('button.glass-card.flex.flex-col.gap-4.p-6');
-    await expect(serviceCards).toHaveCountGreaterThanOrEqual(1);
+    expect(await serviceCards.count()).toBeGreaterThanOrEqual(1);
   });
 
   test('service cards show status indicator', async ({ page }) => {
