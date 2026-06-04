@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useRef, useEffect, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
@@ -29,7 +30,7 @@ interface MonacoEditorProps {
   minimap?: boolean;
   wordWrap?: 'on' | 'off';
   fontSize?: number;
-  onEditorMount?: (editor: unknown) => void;
+  onEditorMount?: (editor: any) => void;
 }
 
 export const MonacoEditor = ({
@@ -44,9 +45,9 @@ export const MonacoEditor = ({
   fontSize = 14,
   onEditorMount,
 }: MonacoEditorProps) => {
-  const editorRef = useRef<unknown>(null);
+  const editorRef = useRef<any>(null);
 
-  const handleEditorDidMount = useCallback((editor: unknown) => {
+  const handleEditorDidMount = useCallback((editor: any) => {
     editorRef.current = editor;
     onEditorMount?.(editor);
   }, [onEditorMount]);

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { storageGetSync } from '../lib/storage';
 import { Capacitor } from '@capacitor/core';
-import type { DeviceSortMode, WidgetVisibility, WidgetSize } from '../types/widget';
+import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry } from '../types/widget';
 
 function getBaseUrl(): string {
   if (Capacitor.isNativePlatform()) {
@@ -188,6 +188,8 @@ export interface RagStats {
   last_indexed?: string;
   providers?: string[];
   breakdown?: Record<string, { chunks: number; documents: number }>;
+  status?: string;
+  message?: string;
 }
 
 export interface RavenMission {
@@ -214,6 +216,7 @@ export interface RavenConfig {
   active_coding_model: string | null;
   system_default_tts_voice: string;
   system_default_tts_engine: string;
+  cleanup_interval_seconds?: number;
 }
 
 export interface MediaGroup { name: string; member_entity_ids?: string[] }
@@ -566,6 +569,11 @@ export const api = {
     return resp.data;
   },
 
+  async revertWorkspace(id: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/workspaces/git/revert', { workspace_id: id });
+    return resp.data;
+  },
+
   async getAPIKeys(): Promise<APIKey[]> {
     const resp = await apiClient.get('/api/users/me/keys');
     return resp.data;
@@ -737,7 +745,8 @@ export const api = {
     return resp.data;
   },
 
-  async getCollectionDocs(collectionName: string, limit: number = 100): Promise<Record<string, unknown>[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async getCollectionDocs(collectionName: string, limit: number = 100): Promise<any> {
     const resp = await apiClient.get(`/api/storage/collection/${collectionName}?limit=${limit}`);
     return resp.data;
   },
@@ -917,7 +926,7 @@ export const api = {
     return resp.data || [];
   },
 
-  async startIntercomSession(data: { target_user_id?: string; target_room?: string; target_entity_ids?: string[] }): Promise<{ session_id: string; status: string }> {
+  async startIntercomSession(data: { target_user_id?: string; target_room?: string; target_entity_ids?: string[]; session_type?: string }): Promise<{ session_id: string; status: string }> {
     const resp = await apiClient.post('/api/intercom/sessions', {
       caller_user_id: 'admin',
       ...data,

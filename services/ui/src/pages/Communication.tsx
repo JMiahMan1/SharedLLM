@@ -40,7 +40,8 @@ import type {
 } from '../services/api';
 import { MonacoEditor } from '../components/editor';
 
-const EMPTY_ARRAY: unknown[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const EMPTY_ARRAY: any[] = [];
 
 const detailList = <T,>(response: ExecutionResponse | undefined, key: string): T[] => {
   const detail = response?.detail as Record<string, unknown> | null | undefined;
@@ -101,7 +102,8 @@ const Communication = () => {
     end: '',
   });
 
-  const editorRef = useRef<{ editor: Record<string, unknown> } | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editorRef = useRef<{ editor: any } | null>(null);
 
   const insertMd = (before: string, after: string) => {
     const editor = editorRef.current?.editor;

@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react-refresh/only-export-components */
 import type { ComponentType } from 'react';
 
 const Editor: ComponentType<any> = (props: Record<string, any>) => (
