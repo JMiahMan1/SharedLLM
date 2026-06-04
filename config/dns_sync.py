@@ -26,6 +26,7 @@ DEFAULT_HEALTH_PORTS = {
     "ollama-server": 11434,
     "llama-server": 11434,
     "ai": 8080,
+    "execution": 8003,
 }
 
 POLL_INTERVAL = DNS_POLL_INTERVAL
