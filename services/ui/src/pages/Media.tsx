@@ -173,8 +173,8 @@ const NowPlayingCard = ({
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
 
   return (
-    <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 overflow-hidden relative">
-      <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-purple-500/5 pointer-events-none" />
+    <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 relative">
+      <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-purple-500/5 pointer-events-none rounded-2xl" />
 
       <div className="relative flex flex-col sm:flex-row sm:items-center gap-4">
         {/* icon */}
