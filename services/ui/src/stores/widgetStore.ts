@@ -210,14 +210,18 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
       .filter((def) => {
         if (def.mountConditions && !def.mountConditions(capabilities)) return false;
         const settings = userWidgets[def.key];
-        if (!settings || settings.visibility === 'removed') return false;
+        if (settings) {
+          if (settings.visibility === 'removed' || settings.visibility === 'hidden') return false;
+        } else {
+          const defaultSettings = createDefaultSettings(def.key, 0);
+          if (defaultSettings.visibility === 'hidden' || defaultSettings.visibility === 'removed') return false;
+        }
         if (def.requiresQuickAssistantEnabled && !quickAssistantEnabled) return false;
-        if (settings.visibility === 'hidden') return false;
         return true;
       })
-      .map((def) => ({
+      .map((def, index) => ({
         def,
-        userSettings: userWidgets[def.key] ?? createDefaultSettings(def.key, 0),
+        userSettings: userWidgets[def.key] ?? createDefaultSettings(def.key, index),
         isActive: true,
       }))
       .sort((a, b) => a.userSettings.order_index - b.userSettings.order_index);

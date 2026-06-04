@@ -110,12 +110,16 @@ def _freeze_for_hash(value):
 async def search(req: SearchRequest):
     collection = get_collection(req.collection_name)
     
-    where_filter = {
-        "$or": [
-            {"user_id": req.user_id},
-            {"user_id": "default"}
-        ]
-    }
+    user_id = req.user_id.lower()
+    if user_id == "default":
+        where_filter = {"user_id": {"$eq": "default"}}
+    else:
+        where_filter = {
+            "$or": [
+                {"user_id": {"$eq": user_id}},
+                {"user_id": {"$eq": "default"}}
+            ]
+        }
     
     try:
         vector_results = collection.query(
@@ -393,9 +397,9 @@ async def purge_collection_endpoint(collection_name: str, payload: dict):
     user_id = payload.get("user_id", "default").lower()
     filter_meta = payload.get("filter", {})
     collection = get_collection(collection_name)
-    where_filter = {"user_id": user_id}
+    where_filter = {"user_id": {"$eq": user_id}}
     if filter_meta:
-        where_filter = {"$and": [{"user_id": user_id}, filter_meta]}
+        where_filter = {"$and": [{"user_id": {"$eq": user_id}}, filter_meta]}
     try:
         collection.delete(where=where_filter)
         log.info(f"Purged entries from {collection_name} for user {user_id}")
@@ -527,7 +531,7 @@ async def get_new_devices(user_id: str = "default", limit: int = 10):
     try:
         last_24h = int(time.time()) - 86400
         res = collection.get(
-            where={"$and": [{"user_id": user_id}, {"created_at": {"$gt": last_24h}}]},
+            where={"$and": [{"user_id": {"$eq": user_id}}, {"created_at": {"$gt": last_24h}}]},
             limit=limit
         )
         return {"status": "SUCCESS", "devices": res["metadatas"] if res else []}

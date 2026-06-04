@@ -136,7 +136,7 @@ const Dashboard = () => {
             placeholder="Search live RAG context and indexed files"
             className="glass-input w-full py-3 pl-12 pr-12"
           />
-          <button type="submit" disabled={isSearching} className="absolute right-2 top-1.5 glass-button px-4 py-1.5 text-xs font-bold">
+          <button type="submit" aria-label="Submit search" disabled={isSearching} className="absolute right-2 top-1.5 glass-button px-4 py-1.5 text-xs font-bold">
             {isSearching ? '...' : <ArrowUpRight size={16} />}
           </button>
         </form>
@@ -159,7 +159,7 @@ const Dashboard = () => {
         <section className="glass-panel space-y-4 border-indigo-500/20 bg-indigo-500/5 p-6">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-indigo-300">Live Search Result</h3>
-            <button onClick={() => setSearchResults(null)} className="text-slate-500 hover:text-white">
+            <button onClick={() => setSearchResults(null)} aria-label="Close search" className="text-slate-500 hover:text-white">
               <X size={16} />
             </button>
           </div>

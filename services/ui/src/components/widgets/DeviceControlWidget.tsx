@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useWidgetStore } from '../../stores/widgetStore';
 import { api } from '../../services/api';
 import type { DeviceEntry, DeviceSortMode } from '../../types/widget';
@@ -80,6 +80,10 @@ const DeviceControlWidget = () => {
       setLoading(false);
     }
   }, [favorites]);
+
+  useEffect(() => {
+    loadDevices();
+  }, [loadDevices]);
 
   const toggleDevice = useCallback(
     async (entityId: string, currentState: string) => {

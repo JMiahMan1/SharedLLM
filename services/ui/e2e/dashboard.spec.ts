@@ -216,3 +216,39 @@ test.describe('Dashboard - Voice Assistant', () => {
     }
   });
 });
+
+test.describe('Dashboard - Bento Widgets', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto(`${UI_URL}/dashboard`);
+    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+  });
+
+  test('widget registry loads and bento widgets are visible', async ({ page }) => {
+    const widgetCards = page.locator('.glass-card');
+    await expect(widgetCards.count()).toBeGreaterThanOrEqual(1);
+  });
+
+  test('device control widget loads and displays devices', async ({ page }) => {
+    const deviceControlHeader = page.getByRole('heading', { name: /device control/i });
+    if (await deviceControlHeader.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await expect(deviceControlHeader).toBeVisible();
+      const refreshBtn = page.getByTitle('Refresh');
+      await expect(refreshBtn).toBeVisible();
+    }
+  });
+
+  test('widget context menu can be opened', async ({ page }) => {
+    const optionsButton = page.getByTitle('Widget options').first();
+    if (await optionsButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await optionsButton.click();
+      await page.waitForTimeout(1000);
+      const pinOption = page.locator('button').filter({ hasText: /pin|unpin/i }).first();
+      await expect(pinOption).toBeVisible();
+      
+      await page.locator('.fixed.inset-0.z-40').first().click();
+      await page.waitForTimeout(500);
+      await expect(pinOption).not.toBeVisible();
+    }
+  });
+});

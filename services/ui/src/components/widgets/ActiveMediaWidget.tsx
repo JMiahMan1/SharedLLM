@@ -36,8 +36,6 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop }: ActiveMed
     return () => clearInterval(interval);
   }, [onMediaStop, userSettings.is_pinned]);
 
-  if (!media && !isLoading) return null;
-
   const playPause = async () => {
     try {
       await api.mediaTransport({
