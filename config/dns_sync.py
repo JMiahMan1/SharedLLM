@@ -29,6 +29,11 @@ DEFAULT_HEALTH_PORTS = {
     "execution": 8003,
 }
 
+# Host-networked services that can't use Docker DNS
+HOST_NETWORKED_SERVICES = {
+    "execution.local": 8003,
+}
+
 POLL_INTERVAL = DNS_POLL_INTERVAL
 running = True
 dns_records = {}        # hostname -> list of all configured IPs
@@ -268,6 +273,16 @@ def update_dns_records(mappings):
             elif ip:
                 clean_ips.append(ip)
         new_records[hostname.lower()] = clean_ips
+    
+    # Auto-discover host-networked services via the bridge gateway (host IP)
+    host_ip = get_host_gateway_ip()
+    if host_ip:
+        for service_name, port in HOST_NETWORKED_SERVICES.items():
+            hostname = service_name if service_name.endswith('.local') else f"{service_name}.local"
+            if hostname not in new_records:
+                new_records[hostname.lower()] = [host_ip]
+                print(f"[dns-sync] Auto-added host-networked service: {hostname} -> {host_ip}:{port}", flush=True)
+    
     with dns_lock:
         dns_records = new_records
     print(f"[dns-sync] Updated DNS records: {len(new_records)} hostnames", flush=True)
