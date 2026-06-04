@@ -20,6 +20,24 @@ def _required(key: str) -> str:
 def _optional(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
+def _safe_int(key: str, default: int) -> int:
+    val = os.getenv(key)
+    if val is None or val.strip() == "":
+        return default
+    try:
+        return int(float(val))
+    except ValueError:
+        return default
+
+def _safe_float(key: str, default: float) -> float:
+    val = os.getenv(key)
+    if val is None or val.strip() == "":
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        return default
+
 # --- Required secrets (only these come from .env for bootstrapping) ---
 INTERNAL_SECRET = _required("INTERNAL_SECRET")
 FERNET_KEY = _required("FERNET_KEY")
@@ -62,22 +80,22 @@ DEFAULT_TTS_VOICE = "af_heart"
 WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "/workspaces")
 WORKSPACE_REGISTRY_PATH = os.getenv("WORKSPACE_REGISTRY_PATH", "/data/workspaces.json")
 WORKSPACE_DATABASE_URL = os.getenv("WORKSPACE_DATABASE_URL", "sqlite:////data/workspace.db")
-WORKSPACE_RUNTIME_FILE_READ_LIMIT = int(os.getenv("WORKSPACE_RUNTIME_FILE_READ_LIMIT", "5000"))
-WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS = int(os.getenv("WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "90"))
+WORKSPACE_RUNTIME_FILE_READ_LIMIT = _safe_int("WORKSPACE_RUNTIME_FILE_READ_LIMIT", 5000)
+WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS = _safe_int("WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", 90)
 VOLUME_MANIFEST_PATH = os.getenv("VOLUME_MANIFEST_PATH", "/data/volumes.json")
 MASS_CONFIG_ENTRY_ID = os.getenv("MASS_CONFIG_ENTRY_ID", "")
 VOLUME_BACKUP_ROOT = os.getenv("VOLUME_BACKUP_ROOT", "/data/backups")
 ABS_URL = ""
 ABS_API_KEY = ""
 DNS_CONF_PATH = os.getenv("DNS_CONF_PATH", "/etc/dnsmasq.conf")
-DNS_POLL_INTERVAL = int(os.getenv("DNS_POLL_INTERVAL", "30"))
+DNS_POLL_INTERVAL = _safe_int("DNS_POLL_INTERVAL", 30)
 UPSTREAM_DNS = os.getenv("UPSTREAM_DNS", "8.8.8.8,1.1.1.1")
 TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
 GIT_WEBHOOK_SECRET = ""
 ANNOUNCEMENT_BLACKLIST = ""
 LOCAL_NOTES_ROOT = ""
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
-FAST_PATH_THRESHOLD = float(os.getenv("FAST_PATH_THRESHOLD", "0.85"))
+FAST_PATH_THRESHOLD = _safe_float("FAST_PATH_THRESHOLD", 0.85)
 MODELS_DIR = os.getenv("MODELS_DIR", "/app/models")
 TEMP_MEDIA_DIR = os.getenv("TEMP_MEDIA_DIR", "/tmp/sharedllm_media")
 SCRIPTS_DIR = os.getenv("SCRIPTS_DIR", "/app/scripts")
