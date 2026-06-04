@@ -212,6 +212,39 @@ def get_alive_ips(hostname):
     # Only return alive IPs. If all dead, return all as last resort.
     return alive if alive else all_ips
 
+_cached_gateway_ip = None
+
+def get_host_gateway_ip():
+    global _cached_gateway_ip
+    if _cached_gateway_ip is not None:
+        return _cached_gateway_ip
+    
+    # Method 1: Read from /proc/net/route (standard Linux)
+    try:
+        with open("/proc/net/route") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3 and parts[1] == "00000000":
+                    ip = socket.inet_ntoa(struct.pack("<L", int(parts[2], 16)))
+                    _cached_gateway_ip = ip
+                    print(f"[dns-sync] Resolved host-gateway IP dynamically from routing table: {ip}", flush=True)
+                    return ip
+    except Exception:
+        pass
+
+    # Method 2: Fallback to socket resolution of host.docker.internal
+    try:
+        ip = socket.gethostbyname("host.docker.internal")
+        _cached_gateway_ip = ip
+        print(f"[dns-sync] Resolved host-gateway IP dynamically via host.docker.internal DNS: {ip}", flush=True)
+        return ip
+    except Exception:
+        pass
+
+    # Method 3: Hardcoded Docker default bridge gateway
+    print(f"[dns-sync] Fallback to default Docker bridge gateway: 172.17.0.1", flush=True)
+    return "172.17.0.1"
+
 def update_dns_records(mappings):
     """Update in-memory DNS records from mappings."""
     global dns_records
@@ -225,7 +258,15 @@ def update_dns_records(mappings):
             continue
         if not hostname.endswith('.local'):
             hostname = f"{hostname}.local"
-        clean_ips = [ip for ip in ips if ip]
+        
+        clean_ips = []
+        for ip in ips:
+            if ip == "host-gateway":
+                resolved_ip = get_host_gateway_ip()
+                if resolved_ip:
+                    clean_ips.append(resolved_ip)
+            elif ip:
+                clean_ips.append(ip)
         new_records[hostname.lower()] = clean_ips
     with dns_lock:
         dns_records = new_records
