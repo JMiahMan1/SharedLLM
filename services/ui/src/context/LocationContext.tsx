@@ -38,7 +38,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   });
 
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
-  const watchIdRef = useRef<string | null>(null);
+  const watchIdRef = useRef<string | number | null>(null);
 
   const calculateDistance = useCallback((lat1: number, lng1: number, lat2: number, lng2: number) => {
     const R = 6371e3;
@@ -93,8 +93,29 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   }, [calculateDistance, syncToGateway]);
 
   const startTracking = useCallback(async () => {
+    setState((s) => ({ ...s, isTracking: true, error: null }));
+
     if (!Capacitor.isNativePlatform()) {
-      setState((s) => ({ ...s, error: 'Location tracking requires native platform' }));
+      if (!navigator.geolocation) {
+        setState((s) => ({ ...s, error: 'Geolocation is not supported by this browser', isTracking: false }));
+        return;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const success = (pos: any) => {
+        handleLocationUpdate(pos);
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const error = (err: any) => {
+        setState((s) => ({ ...s, error: err.message, isTracking: false }));
+      };
+
+      const options = { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 };
+
+      navigator.geolocation.getCurrentPosition(success, error, options);
+      const watchId = navigator.geolocation.watchPosition(success, error, options);
+      watchIdRef.current = watchId;
       return;
     }
 
@@ -103,13 +124,14 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       if (permission.location === 'denied') {
         const request = await Geolocation.requestPermissions();
         if (request.location === 'denied') {
-          setState((s) => ({ ...s, error: 'Location permission denied' }));
+          setState((s) => ({ ...s, error: 'Location permission denied', isTracking: false }));
           return;
         }
       }
 
       const position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-      await handleLocationUpdate(position);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await handleLocationUpdate(position as any);
 
       watchIdRef.current = await Geolocation.watchPosition(
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
@@ -119,13 +141,17 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         }
       );
     } catch (err) {
-      setState((s) => ({ ...s, error: err instanceof Error ? err.message : 'Failed to start location tracking' }));
+      setState((s) => ({ ...s, error: err instanceof Error ? err.message : 'Failed to start location tracking', isTracking: false }));
     }
   }, [handleLocationUpdate]);
 
   const stopTracking = useCallback(() => {
     if (watchIdRef.current !== null) {
-      Geolocation.clearWatch({ id: watchIdRef.current });
+      if (typeof watchIdRef.current === 'number') {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      } else {
+        Geolocation.clearWatch({ id: watchIdRef.current });
+      }
       watchIdRef.current = null;
     }
     setState((s) => ({ ...s, isTracking: false }));
@@ -134,7 +160,11 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     return () => {
       if (watchIdRef.current !== null) {
-        Geolocation.clearWatch({ id: watchIdRef.current });
+        if (typeof watchIdRef.current === 'number') {
+          navigator.geolocation.clearWatch(watchIdRef.current);
+        } else {
+          Geolocation.clearWatch({ id: watchIdRef.current });
+        }
       }
     };
   }, []);
