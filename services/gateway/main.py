@@ -3204,6 +3204,72 @@ async def proxy_sync_notes_rag(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
 
 
+@app.get("/api/integrations/skylight/chores")
+async def proxy_get_skylight_chores(request: Request, user: Optional[str] = None, date: Optional[str] = None):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+    
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", ""), "date": date or ""}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/chores", headers=headers, params=params)
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.post("/api/integrations/skylight/chores/{chore_id}/complete")
+async def proxy_complete_skylight_chore(chore_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+    
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", "")}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params)
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete")
+async def proxy_uncomplete_skylight_chore(chore_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+    
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", "")}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/uncomplete", headers=headers, params=params)
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.get("/api/integrations/skylight/rewards")
+async def proxy_get_skylight_rewards(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+    
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", "")}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/rewards", headers=headers, params=params)
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@app.post("/api/integrations/skylight/rewards/{reward_id}/redeem")
+async def proxy_redeem_skylight_reward(reward_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+    
+    body = await request.json() if await request.body() else {}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", "")}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/rewards/{reward_id}/redeem", json=body, headers=headers, params=params)
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
 @app.post("/api/communication/announcements")
 async def proxy_send_announcement(request: Request):
     body = await request.json()

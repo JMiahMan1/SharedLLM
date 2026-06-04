@@ -19,7 +19,9 @@ import {
   LockKeyhole,
   Smartphone,
   User,
-  Zap
+  Zap,
+  Calendar,
+  Shield
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -127,6 +129,9 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
     Object.values(configKeys).forEach((key) => {
       initialForm[key] = (userData as Record<string, string | boolean>)?.[key] || '';
     });
+    if (name === 'Skylight') {
+      initialForm.skylight_enabled = userData?.skylight_enabled !== false;
+    }
     setForm(initialForm);
     // Initialise list fields
     const initialListForm: Record<string, string[]> = {};
@@ -173,11 +178,22 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
              </div>
           </div>
 
+          {name === 'Skylight' && !userData?.is_system_default && (
+            <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl flex gap-4">
+               <Shield className="text-purple-400 shrink-0" size={24} />
+               <div className="text-xs text-slate-300 leading-relaxed">
+                 <p className="font-bold text-white mb-1">System Integration</p>
+                 This is a system-wide integration configured by the administrator. You cannot edit these settings, but you can enable or disable Skylight chores and rewards for your account below.
+               </div>
+            </div>
+          )}
+
           <div className="grid gap-4">
             {Object.entries(configKeys).map(([label, key]) => {
               const isSecret = label.toLowerCase().includes('pass') || label.toLowerCase().includes('token') || label.toLowerCase().includes('secret');
               const hasValue = !!(userData as Record<string, unknown>)?.[key];
               const displayValue = form[key] === undefined && hasValue ? 'Saved ••••••••' : (form[key] as string) || '';
+              const isReadOnly = name === 'Skylight' && !userData?.is_system_default;
               
               return (
                 <div key={key}>
@@ -189,18 +205,37 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                     type={isSecret ? 'password' : 'text'}
                     value={displayValue}
                     onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                    disabled={isReadOnly}
                     onFocus={(e) => {
-                      if (e.target.value === 'Saved ••••••••') {
+                      if (e.target.value === 'Saved ••••••••' && !isReadOnly) {
                         setForm({ ...form, [key]: '' });
                       }
                     }}
-                    className="glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40"
-                    placeholder={`Enter ${label}...`}
+                    className={`glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}
                   />
                 </div>
               );
             })}
           </div>
+
+          {name === 'Skylight' && (
+            <div className="p-4 glass-card border-white/5 bg-white/5 rounded-xl flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-white">Enable Skylight for my Account</p>
+                <p className="text-[10px] text-slate-500 mt-1">Toggle whether Skylight chores and rewards are active for your profile.</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={form.skylight_enabled !== false}
+                  onChange={(e) => setForm({...form, skylight_enabled: e.target.checked})}
+                  className="sr-only peer" 
+                />
+                <div className="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+              </label>
+            </div>
+          )}
 
           {/* ── List / Chip fields ─────────────────────────────────── */}
           {listKeys && Object.entries(listKeys).map(([label, key]) => {
@@ -283,16 +318,26 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
           )}
 
           <div className="flex gap-3 pt-4">
+            {!(name === 'Skylight' && !userData?.is_system_default) && (
+              <button 
+                onClick={handleTest}
+                disabled={isTesting}
+                className="glass-button px-6 py-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+              >
+                <RefreshCcw size={16} className={isTesting ? 'animate-spin' : ''} />
+                {isTesting ? 'Verifying...' : 'Test Sync'}
+              </button>
+            )}
             <button 
-              onClick={handleTest}
-              disabled={isTesting}
-              className="glass-button px-6 py-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
-            >
-              <RefreshCcw size={16} className={isTesting ? 'animate-spin' : ''} />
-              {isTesting ? 'Verifying...' : 'Test Sync'}
-            </button>
-            <button 
-              onClick={() => updateMutation.mutate({ ...form, ...listForm } as Partial<UserProfile>)}
+              onClick={() => {
+                const finalForm = { ...form, ...listForm };
+                if (name === 'Skylight' && !userData?.is_system_default) {
+                  delete finalForm.skylight_url;
+                  delete finalForm.skylight_email;
+                  delete finalForm.skylight_pass;
+                }
+                updateMutation.mutate(finalForm as Partial<UserProfile>);
+              }}
               disabled={updateMutation.isPending}
               className="glass-button flex-1 py-3 bg-purple-600/40 border-purple-500/30 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
@@ -576,6 +621,17 @@ const Identity = () => {
                   "GitLab URL": "gitlab_url",
                   "GitLab Username": "gitlab_user",
                   "Access Token": "gitlab_token"
+                }}
+              />
+              <IntegrationTile 
+                name="Skylight" 
+                icon={Calendar} 
+                color="purple" 
+                userData={fullUser}
+                configKeys={{
+                  "Skylight Base URL": "skylight_url",
+                  "Login Username/Email": "skylight_email",
+                  "Password": "skylight_pass"
                 }}
               />
               {!fullUser?.is_system_default && (
