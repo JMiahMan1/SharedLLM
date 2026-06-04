@@ -8,12 +8,14 @@ interface Room {
   id: string;
   name: string;
   confidence: number;
+  source?: string;
 }
 
 interface PresenceData {
   presence?: {
     room: string;
     confidence: number;
+    source?: string;
   } | null;
 }
 
@@ -41,6 +43,7 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
             id: data.presence.room,
             name: data.presence.room.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
             confidence: data.presence.confidence,
+            source: data.presence.source,
           });
         }
       })
@@ -94,14 +97,28 @@ const HaloBanner = ({ rooms, userId }: HaloBannerProps) => {
           <>
             <MapPin size={16} className="text-purple-400 shrink-0" />
             <p className="text-sm text-slate-300">
-              You are in the{' '}
-              <span className="font-semibold text-white">{currentRoom.name}</span>
+              {currentRoom.id === 'not_home' ? (
+                <>You are <span className="font-semibold text-white">Not Home</span></>
+              ) : currentRoom.id === 'away' ? (
+                <>You are <span className="font-semibold text-white">Away</span></>
+              ) : currentRoom.id === 'home' ? (
+                <>You are <span className="font-semibold text-white">Home</span></>
+              ) : (
+                <>
+                  You are in the{' '}
+                  <span className="font-semibold text-white">{currentRoom.name}</span>
+                </>
+              )}
             </p>
-            {currentRoom.confidence > 0.8 && (
+            {currentRoom.source === 'gps' ? (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                GPS
+              </span>
+            ) : currentRoom.confidence > 0.8 ? (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
                 BLE
               </span>
-            )}
+            ) : null}
           </>
         ) : hasLocation ? (
           <>

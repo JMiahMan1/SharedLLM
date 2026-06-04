@@ -63,6 +63,7 @@ class PresenceTracker:
         self._running = False
         self._user_mac_map: Dict[str, str] = {}  # user_id -> mac_address
         self._callbacks: list[Callable] = []
+        self._home_coordinates = None  # Tuple[float, float]
 
     async def start(self):
         """Start MQTT subscriber and Redis connection."""
@@ -198,30 +199,134 @@ class PresenceTracker:
         except Exception as e:
             log.warning(f"[presence] Redis update failed: {e}")
 
+    def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        import math
+        R = 6371000.0  # Radius of Earth in meters
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+        
+        a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
+        c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+        return R * c
+
+    async def _get_home_coordinates(self) -> Optional[tuple[float, float]]:
+        if self._home_coordinates:
+            return self._home_coordinates
+        
+        try:
+            from services.execution import ha_client
+            import services.config as config
+            if config.HA_URL and config.HA_TOKEN:
+                ha_cfg = await ha_client.get_config(config.HA_URL, config.HA_TOKEN)
+                lat = ha_cfg.get("latitude")
+                lon = ha_cfg.get("longitude")
+                if lat is not None and lon is not None:
+                    self._home_coordinates = (float(lat), float(lon))
+                    return self._home_coordinates
+        except Exception as e:
+            log.warning(f"[presence] Failed to fetch home coordinates from HA: {e}")
+        return None
+
+    async def _get_user_gps_location(self, user_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            import httpx
+            import services.config as config
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(
+                    f"{config.IDENTITY_SVC_URL}/api/users/{user_id}/location",
+                    headers={"X-Internal-Secret": config.INTERNAL_SECRET}
+                )
+                if resp.status_code == 200:
+                    return resp.json()
+        except Exception as e:
+            log.warning(f"[presence] Failed to fetch GPS location for {user_id} from Identity: {e}")
+        return None
+
     async def get_user_presence(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get current presence data for a user."""
-        if not self._redis:
-            return None
+        if self._redis:
+            try:
+                key = f"{self.redis_key_prefix}{user_id}"
+                data = await self._redis.get(key)
+                if data:
+                    return json.loads(data)
+            except Exception as e:
+                log.warning(f"[presence] Redis get failed: {e}")
 
-        try:
-            key = f"{self.redis_key_prefix}{user_id}"
-            data = await self._redis.get(key)
-            return json.loads(data) if data else None
-        except Exception as e:
-            log.warning(f"[presence] Redis get failed: {e}")
-            return None
+        # Fallback to GPS location if BLE presence is not found
+        gps_loc = await self._get_user_gps_location(user_id)
+        if gps_loc:
+            home_coords = await self._get_home_coordinates()
+            if home_coords:
+                home_lat, home_lon = home_coords
+                user_lat = gps_loc.get("latitude")
+                user_lon = gps_loc.get("longitude")
+                if user_lat is not None and user_lon is not None:
+                    dist = self._calculate_distance(user_lat, user_lon, home_lat, home_lon)
+                    is_home = dist <= 200.0
+                    room = "home" if is_home else "not_home"
+                    
+                    return {
+                        "room": room,
+                        "confidence": 1.0,
+                        "last_seen": int(gps_loc.get("updated_at", time.time())),
+                        "source": "gps",
+                        "latitude": user_lat,
+                        "longitude": user_lon,
+                        "accuracy": gps_loc.get("accuracy"),
+                        "speed": gps_loc.get("speed"),
+                    }
+        return None
 
     async def get_all_presence(self) -> Dict[str, Dict[str, Any]]:
         """Get presence data for all tracked users."""
-        if not self._redis:
-            return {}
+        presence_dict = {}
+        if self._redis:
+            try:
+                data = await self._redis.hgetall(f"{self.redis_key_prefix}all")
+                presence_dict = {k: json.loads(v) for k, v in data.items()}
+            except Exception as e:
+                log.warning(f"[presence] Redis hgetall failed: {e}")
 
+        # Integrate GPS fallback for users not in the BLE presence list
         try:
-            data = await self._redis.hgetall(f"{self.redis_key_prefix}all")
-            return {k: json.loads(v) for k, v in data.items()}
+            import httpx
+            import services.config as config
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(
+                    f"{config.IDENTITY_SVC_URL}/api/users/location/all",
+                    headers={"X-Internal-Secret": config.INTERNAL_SECRET}
+                )
+                if resp.status_code == 200:
+                    gps_locations = resp.json()
+                    home_coords = await self._get_home_coordinates()
+                    if home_coords:
+                        home_lat, home_lon = home_coords
+                        for user_id, gps_loc in gps_locations.items():
+                            if user_id not in presence_dict:
+                                user_lat = gps_loc.get("latitude")
+                                user_lon = gps_loc.get("longitude")
+                                if user_lat is not None and user_lon is not None:
+                                    dist = self._calculate_distance(user_lat, user_lon, home_lat, home_lon)
+                                    is_home = dist <= 200.0
+                                    room = "home" if is_home else "not_home"
+                                    
+                                    presence_dict[user_id] = {
+                                        "room": room,
+                                        "confidence": 1.0,
+                                        "last_seen": int(gps_loc.get("updated_at", time.time())),
+                                        "source": "gps",
+                                        "latitude": user_lat,
+                                        "longitude": user_lon,
+                                        "accuracy": gps_loc.get("accuracy"),
+                                        "speed": gps_loc.get("speed"),
+                                    }
         except Exception as e:
-            log.warning(f"[presence] Redis hgetall failed: {e}")
-            return {}
+            log.warning(f"[presence] Failed to fetch all GPS locations: {e}")
+
+        return presence_dict
 
     async def get_rooms(self) -> list[str]:
         """Get list of all known rooms."""
@@ -233,7 +338,7 @@ class PresenceTracker:
             rooms = set()
             for data in all_presence.values():
                 room = data.get("room")
-                if room and room != "unknown":
+                if room and room not in ("unknown", "home", "not_home", "away"):
                     rooms.add(room)
             return sorted(rooms)
         except Exception:

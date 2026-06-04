@@ -18,10 +18,10 @@
 - [x] TypeScript: 0 diagnostics
 - [x] Production build: clean
 
-## In Progress
-
-- [ ] Run `npx cap sync android` to verify Capacitor sync
-- [ ] Check and fix GHA android-build.yml if needed
+- [x] Run `npx cap sync android` to verify Capacitor sync
+- [x] Verify and test local Android APK build settings
+- [x] Implement fallback to user's phone/browser coordinates to create "Not Home" or "Home" presence modes when BLE localization is not found
+- [x] Add dynamic GPS/BLE badges to HaloBanner UI component based on active presence source
 - [ ] Monitor GHA pipelines after push
 
 ## Remaining
