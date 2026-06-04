@@ -166,7 +166,7 @@ DEFAULT_GLOBAL_SETTINGS = [
 
     # --- SERVICE ENDPOINTS (overridable, Docker DNS defaults) ---
     {"key": "identity_svc_url", "value": "http://identity:8001", "description": "Identity service URL"},
-    {"key": "execution_svc_url", "value": "http://execution:8003", "description": "Execution service URL"},
+    {"key": "execution_svc_url", "value": "http://execution.local:8003", "description": "Execution service URL"},
     {"key": "rag_svc_url", "value": "http://rag:8004", "description": "RAG service URL"},
     {"key": "storage_svc_url", "value": "http://storage:8005", "description": "Storage service URL"},
     {"key": "logging_svc_url", "value": "http://logging:8006", "description": "Logging service URL"},
@@ -184,10 +184,10 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "timezone", "value": "America/Phoenix", "description": "System timezone"},
     {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5", "description": "Embedding model for RAG"},
     {"key": "phrasebook_path", "value": "", "description": "Path to phrasebook file"},
-
+ 
     # --- DNS MAPPINGS (multi-IP fallback support) ---
     # Format: {"hostname": ["primary_ip", "fallback_ip", ...]}
     # dnsmasq generates multiple A records; clients try in order
-    {"key": "dns_mappings", "value": "{\"ai.local\": [\"192.168.2.205\"], \"ollama-server.local\": [\"192.168.2.114\", \"192.168.4.179\", \"192.168.1.204\"]}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object)"}
+    {"key": "dns_mappings", "value": "{\"ai.local\": [\"192.168.2.205\"], \"execution.local\": [\"192.168.2.205\"], \"ollama-server.local\": [\"192.168.2.114\", \"192.168.4.179\", \"192.168.1.204\"]}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object)"}
 ]
 

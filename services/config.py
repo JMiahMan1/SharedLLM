@@ -30,11 +30,11 @@ IDENTITY_SVC_URL = _optional("IDENTITY_SVC_URL", "http://identity:8001")
 # --- Runtime config: fetched from Identity service at startup ---
 # These are module-level placeholders; populated by resolve_runtime_config()
 OLLAMA_URL = ""
-EXECUTION_SVC_URL = "http://execution:8003"
-RAG_SVC_URL = "http://rag:8004"
-STORAGE_SVC_URL = "http://storage:8005"
-LOGGING_SVC_URL = "http://logging:8006"
-WORKSPACE_RUNTIME_SVC_URL = "http://workspace_runtime:8007"
+EXECUTION_SVC_URL = os.getenv("EXECUTION_SVC_URL", "http://execution.local:8003")
+RAG_SVC_URL = os.getenv("RAG_SVC_URL", "http://rag:8004")
+STORAGE_SVC_URL = os.getenv("STORAGE_SVC_URL", "http://storage:8005")
+LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL", "http://logging:8006")
+WORKSPACE_RUNTIME_SVC_URL = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime:8007")
 CONTROL_PLANE_URL = ""
 SEARXNG_URL = ""
 HA_URL = ""
@@ -191,6 +191,11 @@ async def resolve_runtime_config():
                             value = int(float(value))
                         elif var_name == "FAST_PATH_THRESHOLD":
                             value = float(value)
+                        
+                        # Rewrite legacy execution hostname to use .local DNS container resolution
+                        if var_name == "EXECUTION_SVC_URL" and "://execution:" in value:
+                            value = value.replace("://execution:", "://execution.local:")
+                            
                         globals()[var_name] = value
                 
                 log.info("Runtime configuration loaded from Identity service")
