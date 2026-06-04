@@ -27,6 +27,8 @@ let apiKeys: Array<Record<string, unknown>> = [];
 let logs: Array<Record<string, unknown>> = [];
 let talkConversations: Array<Record<string, unknown>> = [];
 let talkMessages: Record<string, Array<Record<string, unknown>>> = {};
+let widgetSettings: Array<Record<string, unknown>> = [];
+let quickAssistantEnabled = false;
 
 const resetMockState = () => {
   users = [structuredClone(defaultUser)];
@@ -104,6 +106,86 @@ const resetMockState = () => {
       },
     ],
   };
+  widgetSettings = [
+    {
+      widget_key: 'energy_insights',
+      visibility: 'visible',
+      order_index: 0,
+      size: 'medium',
+      is_pinned: false,
+      sort_mode: null,
+      pinned_devices: [],
+      config: {},
+      updated_at: Date.now(),
+    },
+    {
+      widget_key: 'ambient_timer',
+      visibility: 'visible',
+      order_index: 1,
+      size: 'small',
+      is_pinned: false,
+      sort_mode: null,
+      pinned_devices: [],
+      config: {},
+      updated_at: Date.now(),
+    },
+    {
+      widget_key: 'quick_notes',
+      visibility: 'visible',
+      order_index: 2,
+      size: 'medium',
+      is_pinned: false,
+      sort_mode: null,
+      pinned_devices: [],
+      config: {},
+      updated_at: Date.now(),
+    },
+    {
+      widget_key: 'active_media',
+      visibility: 'visible',
+      order_index: 3,
+      size: 'wide',
+      is_pinned: false,
+      sort_mode: null,
+      pinned_devices: [],
+      config: {},
+      updated_at: Date.now(),
+    },
+    {
+      widget_key: 'chores_progress',
+      visibility: 'visible',
+      order_index: 4,
+      size: 'tall',
+      is_pinned: false,
+      sort_mode: null,
+      pinned_devices: [],
+      config: {},
+      updated_at: Date.now(),
+    },
+    {
+      widget_key: 'upcoming_events',
+      visibility: 'visible',
+      order_index: 5,
+      size: 'wide',
+      is_pinned: false,
+      sort_mode: null,
+      pinned_devices: [],
+      config: {},
+      updated_at: Date.now(),
+    },
+    {
+      widget_key: 'device_control',
+      visibility: 'visible',
+      order_index: 6,
+      size: 'tall',
+      is_pinned: false,
+      sort_mode: 'most_used',
+      pinned_devices: [],
+      config: {},
+      updated_at: Date.now(),
+    }
+  ];
+  quickAssistantEnabled = false;
 };
 
 export const server = setupServer(
@@ -459,6 +541,123 @@ export const server = setupServer(
   http.get('/api/config', () => HttpResponse.json({ config: { assistant_model: 'qwen3:8b', coding_model: 'qwen2.5-coder:7b', librarian_model: 'qwen3:8b' } })),
   http.post('/api/config', () => HttpResponse.json({ config: { assistant_model: 'qwen3:8b', coding_model: 'qwen2.5-coder:7b', librarian_model: 'qwen3:8b' } })),
   http.get('/api/config/models', () => HttpResponse.json({ models: ['qwen3:8b', 'qwen2.5-coder:7b'] })),
+
+  // Widgets Settings
+  http.get('/api/widgets/settings', () => HttpResponse.json({
+    widgets: widgetSettings,
+    quick_assistant_enabled: quickAssistantEnabled,
+  })),
+  http.patch('/api/widgets/settings/:widgetKey', async ({ params, request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    const widgetKey = String(params.widgetKey);
+    widgetSettings = widgetSettings.map((w) =>
+      w.widget_key === widgetKey ? { ...w, ...body } : w
+    );
+    return HttpResponse.json({ status: 'SUCCESS' });
+  }),
+
+  // Global search (RAG)
+  http.get('/api/search', () => HttpResponse.json({
+    answer: 'Mocked RAG search result answer',
+    files: [
+      { name: 'document.txt', path: '/docs/document.txt' },
+      { name: 'notes.md', path: '/Notes/notes.md' }
+    ]
+  })),
+
+  // HA Entities and services
+  http.post('/execute/entity/search', () => HttpResponse.json({
+    status: 'SUCCESS',
+    result: [
+      { entity_id: 'light.living_room', friendly_name: 'Living Room Light', state: 'off', domain: 'light', area_id: 'living_room' },
+      { entity_id: 'switch.coffee_maker', friendly_name: 'Coffee Maker', state: 'on', domain: 'switch', area_id: 'kitchen' },
+      { entity_id: 'media_player.office_speaker', friendly_name: 'Office Speaker', state: 'playing', domain: 'media_player', area_id: 'office' }
+    ]
+  })),
+  http.post('/execute/ha_service', () => HttpResponse.json({
+    status: 'SUCCESS',
+    message: 'Service called successfully'
+  })),
+
+  // Media controls
+  http.post('/execute/media/status', () => HttpResponse.json({
+    status: 'SUCCESS',
+    data: {
+      title: 'Mock Song Title',
+      artist: 'Mock Artist',
+      device_name: 'Office Speaker',
+      state: 'playing',
+      volume_level: 0.5,
+    }
+  })),
+  http.post('/execute/media/transport', () => HttpResponse.json({
+    status: 'SUCCESS',
+    message: 'Transport command executed'
+  })),
+
+  // Telemetry summaries
+  http.get('/api/telemetry/summary/:entityId', ({ params }) => HttpResponse.json({
+    entity_id: String(params.entityId),
+    summary: {
+      current_power_w: 120,
+      peak_power_w: 350,
+      avg_power_w: 150,
+      availability_pct: 100,
+      total_activations: 15,
+      data_points: [
+        { recorded_at: Math.floor(Date.now() / 1000) - 3600, power_w: 100 },
+        { recorded_at: Math.floor(Date.now() / 1000), power_w: 120 }
+      ]
+    }
+  })),
+
+  // Media Playlists and Audiobookshelf mocks for Media.tsx page
+  http.get('/api/media/music-assistant/playlists', () => HttpResponse.json({
+    status: 'SUCCESS',
+    playlists: [
+      { name: 'Rock Classics', items: 25, uri: 'ma://playlist/rock' },
+      { name: 'Chill Vibes', items: 10, uri: 'ma://playlist/chill' }
+    ]
+  })),
+  http.get('/api/media/music-assistant/recent', () => HttpResponse.json({
+    status: 'SUCCESS',
+    recent: [
+      { name: 'Recent Rock Song', artist: 'Recent Rock Artist', uri: 'ma://track/recent1', last_played: '2026-05-06T11:00:00Z' }
+    ]
+  })),
+  http.get('/api/media/audiobookshelf/libraries', () => HttpResponse.json({
+    status: 'SUCCESS',
+    libraries: [
+      { id: 'lib-1', name: 'Audiobooks', media_type: 'audiobook' }
+    ]
+  })),
+  http.get('/api/media/audiobookshelf/library/:libraryId', () => HttpResponse.json({
+    status: 'SUCCESS',
+    books: [
+      { id: 'book-1', title: 'The Great Gatsby', author: 'F. Scott Fitzgerald' },
+      { id: 'book-2', title: '1984', author: 'George Orwell' }
+    ]
+  })),
+  http.get('/api/media/audiobookshelf/search', () => HttpResponse.json({
+    status: 'SUCCESS',
+    books: [
+      { id: 'book-1', title: 'The Great Gatsby', author: 'F. Scott Fitzgerald' }
+    ]
+  })),
+  http.get('/api/media/audiobookshelf/last-played', () => HttpResponse.json({
+    status: 'SUCCESS',
+    books: [
+      { id: 'book-1', title: 'The Great Gatsby', author: 'F. Scott Fitzgerald', progress: 0.45, last_played: '2026-05-06T12:00:00Z', library_id: 'lib-1' }
+    ]
+  })),
+  http.post('/execute/audiobookshelf', () => HttpResponse.json({
+    status: 'SUCCESS',
+    message: 'Audiobook play started'
+  })),
+  http.post('/execute/media/play', () => HttpResponse.json({
+    status: 'SUCCESS',
+    message: 'Media play started'
+  })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));

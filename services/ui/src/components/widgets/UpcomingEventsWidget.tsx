@@ -30,6 +30,42 @@ const parseEvent = (event: CalendarEvent): ParsedEvent => {
   };
 };
 
+const parseStringEvent = (line: string): ParsedEvent | null => {
+  const match = line.match(/^-\s+\[([^\]]+)\]\s+(.*?)(?:\s+\(([^)]+)\))?$/);
+  if (!match) return null;
+  const [, dateTimeStr, summary, location] = match;
+
+  let start = new Date(dateTimeStr);
+  if (isNaN(start.getTime())) {
+    const parts = dateTimeStr.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})\s+(AM|PM)$/i);
+    if (parts) {
+      const [, y, m, d, hh, mm, period] = parts;
+      let hour = parseInt(hh, 10);
+      if (period.toUpperCase() === 'PM' && hour < 12) hour += 12;
+      if (period.toUpperCase() === 'AM' && hour === 12) hour = 0;
+      start = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), hour, parseInt(mm, 10));
+    }
+  }
+
+  if (isNaN(start.getTime())) {
+    return null;
+  }
+
+  const now = new Date();
+  const isToday = start.toDateString() === now.toDateString();
+  const isVerySoon = isToday && start.getTime() - now.getTime() < 3600000 && start.getTime() > now.getTime();
+
+  return {
+    summary,
+    start_time: start.toISOString(),
+    location: location || undefined,
+    startHour: start.getHours(),
+    startMinute: start.getMinutes(),
+    isToday,
+    isVerySoon,
+  };
+};
+
 const formatTime = (hour: number, minute: number): string => {
   const period = hour >= 12 ? 'PM' : 'AM';
   const displayHour = hour % 12 || 12;
@@ -64,13 +100,23 @@ const UpcomingEventsWidget = () => {
       const result = await api.getCalendarEvents() as { status: string; message?: string; events?: CalendarEvent[] };
       if (cancelled) return;
 
-      if (result.status === 'SUCCESS' && result.events) {
-        const parsed = result.events
-          .map(parseEvent)
+      if (result.status === 'SUCCESS') {
+        let parsed: ParsedEvent[] = [];
+        if (result.events) {
+          parsed = result.events.map(parseEvent);
+        } else if (typeof result.message === 'string') {
+          const lines = result.message.split('\n');
+          parsed = lines
+            .map(parseStringEvent)
+            .filter((e): e is ParsedEvent => e !== null);
+        }
+
+        const filteredAndSorted = parsed
           .filter((e) => new Date(e.start_time).getTime() > Date.now() - 3600000)
           .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
           .slice(0, 8);
-        setEvents(parsed);
+
+        setEvents(filteredAndSorted);
         setLoading(false);
         setError(null);
       } else {
