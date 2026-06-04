@@ -1987,24 +1987,35 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
 # ─── Skylight Integration Proxy ────────────────────────────────────────────────
 
 _SKYLIGHT_BASE = os.environ.get("SKYLIGHT_BASE_URL", "https://app.ourskylight.com")
-_skylight_session: Optional[httpx.AsyncClient] = None
-_skylight_token: Optional[str] = None
+_skylight_tokens: dict[str, str] = {}
 
 
-async def _get_skylight_auth() -> tuple[str | None, str | None]:
+async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None, str | None]:
     """Resolve Skylight credentials from identity service."""
-    global _skylight_token
     creds = await resolve_first_user()
     if not creds:
         return None, None
     
     url = creds.get("skylight_url") or _SKYLIGHT_BASE
-    email = creds.get("skylight_email")
     pass_enc = creds.get("skylight_pass_enc")
+    
+    # Determine the email/login name to use
+    email = username if username else creds.get("skylight_email")
     
     if not email or not pass_enc:
         return None, None
-    
+        
+    # Check if the user has disabled the integration
+    if username:
+        user_creds = await resolve_internal_user(rag_user=username)
+        if user_creds and not user_creds.get("skylight_enabled", True):
+            log.info(f"[skylight] Integration disabled for user {username}")
+            return None, None
+
+    # Reuse cached token if available
+    if email in _skylight_tokens:
+        return url, _skylight_tokens[email]
+
     try:
         from services.identity.crypto import decrypt as _decrypt
         password = _decrypt(pass_enc)
@@ -2015,10 +2026,6 @@ async def _get_skylight_auth() -> tuple[str | None, str | None]:
     if not password:
         return None, None
     
-    # Reuse session/token if already authenticated
-    if _skylight_session and _skylight_token:
-        return url, _skylight_token
-    
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -2027,10 +2034,11 @@ async def _get_skylight_auth() -> tuple[str | None, str | None]:
             )
             if resp.status_code == 200:
                 token = resp.json().get("token") or resp.json().get("access_token")
-                _skylight_token = token
-                return url, token
+                if token:
+                    _skylight_tokens[email] = token
+                    return url, token
     except Exception as e:
-        log.error(f"[skylight] Auth failed: {e}")
+        log.error(f"[skylight] Auth failed for {email}: {e}")
     
     return None, None
 
@@ -2057,7 +2065,7 @@ async def get_skylight_chores(
     x_internal_secret: str = Header(None)
 ):
     """Get chores from Skylight, optionally filtered by user and/or date."""
-    url, token = await _get_skylight_auth()
+    url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
     
@@ -2090,10 +2098,11 @@ async def get_skylight_chores(
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete")
 async def complete_skylight_chore(
     chore_id: str,
+    user: Optional[str] = None,
     x_internal_secret: str = Header(None)
 ):
     """Mark a Skylight chore as complete."""
-    url, token = await _get_skylight_auth()
+    url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
     
@@ -2106,10 +2115,11 @@ async def complete_skylight_chore(
 @app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete")
 async def uncomplete_skylight_chore(
     chore_id: str,
+    user: Optional[str] = None,
     x_internal_secret: str = Header(None)
 ):
     """Mark a Skylight chore as incomplete."""
-    url, token = await _get_skylight_auth()
+    url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
     
@@ -2121,10 +2131,11 @@ async def uncomplete_skylight_chore(
 
 @app.get("/api/integrations/skylight/rewards")
 async def get_skylight_rewards(
+    user: Optional[str] = None,
     x_internal_secret: str = Header(None)
 ):
     """Get Skylight rewards."""
-    url, token = await _get_skylight_auth()
+    url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
     
@@ -2140,10 +2151,11 @@ async def get_skylight_rewards(
 async def redeem_skylight_reward(
     reward_id: str,
     body: dict = {},
+    user: Optional[str] = None,
     x_internal_secret: str = Header(None)
 ):
     """Redeem a Skylight reward."""
-    url, token = await _get_skylight_auth()
+    url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
     
