@@ -7,9 +7,24 @@ interface ModalProps {
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  size?: string;
 }
 
-const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
+const SIZE_MAP: Record<string, string> = {
+  'sm': 'max-w-sm',
+  'md': 'max-w-md',
+  'lg': 'max-w-lg',
+  'xl': 'max-w-xl',
+  '2xl': 'max-w-2xl',
+  '3xl': 'max-w-3xl',
+  '4xl': 'max-w-4xl',
+  '5xl': 'max-w-5xl',
+  '6xl': 'max-w-6xl',
+  '7xl': 'max-w-7xl',
+};
+
+const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size }) => {
+  const maxWClass = SIZE_MAP[size || ''] || 'max-w-2xl';
   return (
     <AnimatePresence>
       {isOpen && (
@@ -25,7 +40,7 @@ const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
             initial={{ scale: 0.9, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.9, opacity: 0, y: 20 }}
-            className="glass-panel w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col relative z-10 shadow-2xl shadow-black/50"
+            className={`glass-panel w-full ${maxWClass} max-h-[90vh] overflow-hidden flex flex-col relative z-10 shadow-2xl shadow-black/50`}
           >
             <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
               <h3 className="text-xl font-bold text-white tracking-tight">{title}</h3>

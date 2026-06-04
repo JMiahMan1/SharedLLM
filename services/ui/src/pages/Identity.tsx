@@ -112,7 +112,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
       let message = 'Connection failed';
       if (err && typeof err === 'object' && 'response' in err) {
          const resp = (err as { response: { data: { detail?: string } } }).response;
-         message = resp?.data?.detail || (err as Error).message || message;
+         message = resp?.data?.detail || (err as unknown as Error).message || message;
       }
       setTestResult({ 
         status: 'ERROR', 
@@ -462,7 +462,7 @@ const APIKeyRows = () => {
   });
 
   const revokeMutation = useMutation({
-    mutationFn: (id: string) => api.revokeAPIKey(id),
+    mutationFn: (id: string | number) => api.revokeAPIKey(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] });
       toast.success('Key access revoked');
@@ -694,10 +694,10 @@ const Identity = () => {
                         try {
                           const res = await api.generateAPIKey(label);
                           try {
-                            await navigator.clipboard.writeText(res.key);
+                            await navigator.clipboard.writeText(res.key || '');
                             toast.success('Key copied to clipboard! Save it now, it will not be shown again.', { duration: 8000 });
                           } catch {
-                            prompt('Key generated! COPY IT NOW, it will not be shown again:', res.key);
+                            prompt('Key generated! COPY IT NOW, it will not be shown again:', res.key || '');
                           }
                           queryClient.invalidateQueries({ queryKey: ['api-keys'] });
                         } catch {

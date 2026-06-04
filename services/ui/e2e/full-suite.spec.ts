@@ -51,7 +51,6 @@ test.describe('Authentication', () => {
 
   test('logout clears session', async ({ page }) => {
     // Use a fresh browser context to avoid cookie interference
-    const context = await page.context();
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/`);
     await page.waitForLoadState('domcontentloaded');

@@ -38,7 +38,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   });
 
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
-  const watchIdRef = useRef<number | null>(null);
+  const watchIdRef = useRef<string | null>(null);
 
   const calculateDistance = useCallback((lat1: number, lng1: number, lat2: number, lng2: number) => {
     const R = 6371e3;
@@ -65,7 +65,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const handleLocationUpdate = useCallback(async (position: GeolocationPosition) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleLocationUpdate = useCallback(async (position: any) => {
     const { latitude, longitude, accuracy, speed } = position.coords;
     const speedMph = speed ? speed * 2.237 : 0;
     const newInterval = speedMph > SPEED_THRESHOLD_MPH ? 'transit' : 'stationary';

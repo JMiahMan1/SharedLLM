@@ -416,7 +416,8 @@ const MissionsPane = () => {
             No missions match the current filter.
           </div>
         ) : (
-          filteredMissions.map((mission: { id: number; status: string; mission_type: string; progress?: number; created_at: string; error_summary?: string; proposed_mission?: string; target_container?: string }) => (
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          filteredMissions.map((mission: any) => (
             <div key={mission.id} className="glass-card p-4 border-l-4 border-l-indigo-500/50 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0 flex-1">
@@ -482,14 +483,14 @@ const MissionsPane = () => {
                 </div>
               </div>
 
-              {(mission.status === 'executing' || mission.progress > 0) && (
+              {(mission.status === 'executing' || (mission.progress !== undefined && mission.progress > 0)) && (
                 <div className="w-full bg-black/40 rounded-full h-1.5 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${
                       mission.status === 'failed' ? 'bg-red-500' :
                       mission.status === 'completed' ? 'bg-emerald-500' : 'bg-indigo-500'
                     }`}
-                    style={{ width: `${Math.max(5, mission.progress)}%` }}
+                    style={{ width: `${Math.max(5, mission.progress || 0)}%` }}
                   />
                 </div>
               )}

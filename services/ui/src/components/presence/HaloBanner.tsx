@@ -14,7 +14,7 @@ interface PresenceData {
   presence?: {
     room: string;
     confidence: number;
-  };
+  } | null;
 }
 
 interface HaloBannerProps {

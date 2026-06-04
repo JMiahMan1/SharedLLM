@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useWidgetStore } from '../../stores/widgetStore';
 import WidgetContextMenu from '../widgets/WidgetContextMenu';
-import type { WidgetSize, UserWidgetSettings } from '../types/widget';
+import type { WidgetSize, UserWidgetSettings } from '../../types/widget';
 
 const SIZE_CLASSES: Record<WidgetSize, { gridCol: string; gridRow: string }> = {
   small: { gridCol: 'col-span-1', gridRow: 'row-span-1' },
@@ -10,7 +10,8 @@ const SIZE_CLASSES: Record<WidgetSize, { gridCol: string; gridRow: string }> = {
   tall: { gridCol: 'col-span-1', gridRow: 'row-span-3' },
 };
 
-const LazyWidgets: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const LazyWidgets: Record<string, React.LazyExoticComponent<React.ComponentType<any>>> = {
   energy_insights: lazy(() => import('../widgets/EnergyInsightsWidget')),
   ambient_timer: lazy(() => import('../widgets/AmbientTimerWidget')),
   quick_notes: lazy(() => import('../widgets/QuickNotesWidget')),
@@ -31,6 +32,7 @@ const BentoBoxDashboard = () => {
   const userWidgets = useWidgetStore((s) => s.userWidgets);
   const widgets = useMemo(() => {
     return useWidgetStore.getState().getVisibleWidgets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userWidgets]);
 
   useEffect(() => {
@@ -80,6 +82,7 @@ const BentoBoxDashboard = () => {
 
             const renderWidget = () => {
               if (!LazyWidget) return null;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const WidgetComponent = LazyWidget as React.ComponentType<any>;
               switch (widget.def.key) {
                 case 'energy_insights':

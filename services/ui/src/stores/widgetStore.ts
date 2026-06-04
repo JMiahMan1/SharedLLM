@@ -150,7 +150,7 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   hideWidget: async (widgetKey: WidgetKey) => {
     const current = get().userWidgets[widgetKey];
     if (!current) return;
-    const updated = { ...current, visibility: 'hidden', is_pinned: false, updated_at: Date.now() };
+    const updated = { ...current, visibility: 'hidden' as const, is_pinned: false, updated_at: Date.now() };
     set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
     try {
       await api.updateWidgetSettings(widgetKey, { visibility: 'hidden' });
@@ -162,7 +162,7 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   showWidget: async (widgetKey: WidgetKey) => {
     const current = get().userWidgets[widgetKey];
     if (!current) return;
-    const updated = { ...current, visibility: 'visible', updated_at: Date.now() };
+    const updated = { ...current, visibility: 'visible' as const, updated_at: Date.now() };
     set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
     try {
       await api.updateWidgetSettings(widgetKey, { visibility: 'visible' });
@@ -174,7 +174,7 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   removeWidget: async (widgetKey: WidgetKey) => {
     const current = get().userWidgets[widgetKey];
     if (!current) return;
-    const updated = { ...current, visibility: 'removed', updated_at: Date.now() };
+    const updated = { ...current, visibility: 'removed' as const, updated_at: Date.now() };
     set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
     try {
       await api.updateWidgetSettings(widgetKey, { visibility: 'removed' });
