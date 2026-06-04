@@ -26,7 +26,7 @@ test.describe('Identity Page - Integration Gallery', () => {
 
   test('all integration tiles are displayed', async ({ page }) => {
     const tiles = page.locator('.glass-panel').filter({ hasText: /Home Assistant|Nextcloud|Audiobookshelf|Private Git|GitHub|GitLab/ });
-    await expect(tiles).toHaveCountGreaterThanOrEqual(5);
+    expect(await tiles.count()).toBeGreaterThanOrEqual(5);
   });
 
   test('integration tile shows connection status', async ({ page }) => {
@@ -242,6 +242,6 @@ test.describe('Identity Page - System Hierarchy', () => {
 
   test('system hierarchy shows user list', async ({ page }) => {
     const userItems = page.locator('div.flex.items-center.justify-between.p-3');
-    await expect(userItems).toHaveCountGreaterThanOrEqual(1);
+    expect(await userItems.count()).toBeGreaterThanOrEqual(1);
   });
 });
