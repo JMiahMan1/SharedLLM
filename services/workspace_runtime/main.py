@@ -74,8 +74,17 @@ DEFAULT_PROTECTED_BRANCH_PATTERNS = [
 app = FastAPI(title="SharedLLM Workspace Runtime")
 
 # --- Auto-Quarantine Configuration ---
-RAVEN_QUARANTINE_THRESHOLD = int(os.getenv("RAVEN_QUARANTINE_THRESHOLD", "3"))
-RAVEN_QUARANTINE_WINDOW_SECONDS = int(os.getenv("RAVEN_QUARANTINE_WINDOW", "600"))
+def _safe_int_env(key: str, default: int) -> int:
+    val = os.getenv(key)
+    if val is None or val.strip() == "":
+        return default
+    try:
+        return int(float(val))
+    except ValueError:
+        return default
+
+RAVEN_QUARANTINE_THRESHOLD = _safe_int_env("RAVEN_QUARANTINE_THRESHOLD", 3)
+RAVEN_QUARANTINE_WINDOW_SECONDS = _safe_int_env("RAVEN_QUARANTINE_WINDOW", 600)
 
 _redis_client: Optional[redis.Redis] = None
 
