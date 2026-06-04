@@ -7,9 +7,8 @@ export async function startBackgroundTask(onExpiry?: () => void): Promise<string
   if (!Capacitor.isNativePlatform()) return null;
 
   try {
-    taskId = await BackgroundTask.beforeAppTerminates((task) => {
+    taskId = await BackgroundTask.beforeExit(() => {
       if (onExpiry) onExpiry();
-      task.finish();
     });
     return taskId;
   } catch {

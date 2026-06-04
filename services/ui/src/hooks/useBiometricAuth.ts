@@ -18,7 +18,7 @@ export function useBiometricAuth() {
 
     try {
       const result = await BiometricAuth.checkBiometry();
-      const available = result.available;
+      const available = result.isAvailable;
       setIsAvailable(available);
       return available;
     } catch {

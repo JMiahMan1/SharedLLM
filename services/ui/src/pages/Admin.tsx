@@ -146,6 +146,8 @@ const Admin = () => {
   const [intercomTab, setIntercomTab] = useState<'sessions' | 'broadcast' | 'announce' | 'config'>('sessions');
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastTargets, setBroadcastTargets] = useState('');
+  const [announceMessage, setAnnounceMessage] = useState('');
+  const [announceTargets, setAnnounceTargets] = useState('');
   const [intercomSessionTarget, setIntercomSessionTarget] = useState('');
   const [intercomSessionType, setIntercomSessionType] = useState<'twoway' | 'broadcast' | 'announcement'>('twoway');
 
@@ -440,7 +442,7 @@ const Admin = () => {
   });
 
   const startIntercomMutation = useMutation({
-    mutationFn: (data: { target_user_id?: string; target_room?: string; target_entity_ids?: string[] }) =>
+    mutationFn: (data: { target_user_id?: string; target_room?: string; target_entity_ids?: string[]; session_type?: string }) =>
       api.startIntercomSession(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['intercom-sessions'] });
@@ -1712,7 +1714,7 @@ const Admin = () => {
                 <div key={item.id} className="rounded-2xl border border-white/5 bg-black/40 p-4 font-mono text-[11px]">
                   <div className="mb-2 flex items-center justify-between border-b border-white/5 pb-2">
                     <span className="text-indigo-300">ID: {item.id}</span>
-                    <span className="text-slate-500 uppercase tracking-widest">{item.metadata?.type || 'Record'}</span>
+                    <span className="text-slate-500 uppercase tracking-widest">{String(item.metadata?.type || 'Record')}</span>
                   </div>
                   <p className="mb-3 text-slate-200 whitespace-pre-wrap leading-relaxed">
                     {item.document}

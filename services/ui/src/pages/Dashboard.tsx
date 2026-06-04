@@ -266,7 +266,7 @@ const Dashboard = () => {
                 workspaces.map((workspace) => (
                   <div key={workspace.id} className="glass-card p-4 transition-all hover:border-emerald-500/20">
                     <div className="flex items-center justify-between gap-4 overflow-hidden">
-                      <p className="font-semibold text-white truncate">{workspace.display_name || workspace.name || workspace.id}</p>
+                      <p className="font-semibold text-white truncate">{workspace.display_name || workspace.id}</p>
                       <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 px-2 py-1 rounded-md ${workspace.available ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
                         {workspace.available ? 'Online' : 'Unavailable'}
                       </span>

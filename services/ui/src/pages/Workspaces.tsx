@@ -466,7 +466,7 @@ const Workspaces = () => {
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Git Remote</span>
               <input 
                 type="text" 
-                value={form.git_remote}
+                value={form.git_remote || ''}
                 onChange={(e) => setForm({ ...form, git_remote: e.target.value })}
                 placeholder="origin"
                 className="glass-input w-full"
@@ -476,7 +476,7 @@ const Workspaces = () => {
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Default Branch</span>
               <input 
                 type="text" 
-                value={form.default_branch}
+                value={form.default_branch || ''}
                 onChange={(e) => setForm({ ...form, default_branch: e.target.value })}
                 placeholder="main"
                 className="glass-input w-full"
