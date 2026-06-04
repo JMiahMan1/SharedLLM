@@ -86,6 +86,24 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE user ADD COLUMN mass_url VARCHAR"))
             if "mass_token_enc" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR"))
+            if "skylight_enabled" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1"))
+            if "skylight_url" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN skylight_url VARCHAR"))
+            if "skylight_email" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN skylight_email VARCHAR"))
+            if "skylight_pass_enc" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN skylight_pass_enc VARCHAR"))
+            if "git_url" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN git_url VARCHAR"))
+            if "git_user" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN git_user VARCHAR"))
+            if "git_token_enc" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN git_token_enc VARCHAR"))
+            if "voice_fingerprint" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR"))
+            if "preferred_tts_voice" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR DEFAULT 'af_heart'"))
             conn.commit()
     if "apikey" in inspector.get_table_names():
         key_columns = {column["name"] for column in inspector.get_columns("apikey")}
