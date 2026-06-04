@@ -337,6 +337,11 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             if not user:
                 raise HTTPException(status_code=404, detail="No valid identity found")
 
+    # Fetch system user for shared skylight credentials
+    sys_user = session.exec(select(User).where(User.id == 1)).first()
+    if not sys_user:
+        sys_user = session.exec(select(User).where(User.username == "default")).first()
+
     # Decrypt sensitive fields
     return ResolvedCredentials(
         user=user.username,
@@ -361,6 +366,10 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         git_url=user.git_url,
         git_user=user.git_user,
         git_token=decrypt(user.git_token_enc) if user.git_token_enc else None,
+        skylight_url=sys_user.skylight_url if sys_user else None,
+        skylight_email=user.username,
+        skylight_pass=decrypt(sys_user.skylight_pass_enc) if (sys_user and sys_user.skylight_pass_enc) else None,
+        skylight_enabled=user.skylight_enabled,
         preferred_tts_voice=user.preferred_tts_voice or "af_heart"
     )
 
@@ -406,6 +415,11 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
     log.info(f"[update_me] Received update for {user.username}: {body.model_dump(exclude_unset=True)}")
     update_data = body.model_dump(exclude_unset=True)
     
+    # Prevent non-default users from changing system skylight integration credentials
+    if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]):
+        if user.id != 1 and user.username != "default":
+            raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
+
     # Handle encrypted fields
     crypto_map = {
         "nextcloud_pass": "nextcloud_pass_enc",
@@ -414,7 +428,8 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
         "gitlab_token": "gitlab_token_enc",
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
         "mass_token": "mass_token_enc",
-        "git_token": "git_token_enc"
+        "git_token": "git_token_enc",
+        "skylight_pass": "skylight_pass_enc"
     }
     
     for plain, enc in crypto_map.items():
@@ -447,6 +462,11 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         
     update_data = body.model_dump(exclude_unset=True)
     
+    # Prevent non-default users from changing system skylight integration credentials
+    if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]):
+        if admin.id != 1 and admin.username != "default":
+            raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
+
     # Handle encrypted fields
     crypto_map = {
         "nextcloud_pass": "nextcloud_pass_enc",
@@ -455,7 +475,8 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         "gitlab_token": "gitlab_token_enc",
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
         "mass_token": "mass_token_enc",
-        "git_token": "git_token_enc"
+        "git_token": "git_token_enc",
+        "skylight_pass": "skylight_pass_enc"
     }
     
     for plain, enc in crypto_map.items():
@@ -509,6 +530,10 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
             val = val.strip()
         return val if val else None
 
+    if any(_coerce(k) for k in [body.skylight_url, body.skylight_email, body.skylight_pass]):
+        if admin.id != 1 and admin.username != "default":
+            raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
+
     user = User(
         username=body.username.lower(),
         display_name=body.display_name,
@@ -530,7 +555,11 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         audiobookshelf_user=_coerce(body.audiobookshelf_user),
         audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None,
         mass_url=_coerce(body.mass_url),
-        mass_token_enc=encrypt(_coerce(body.mass_token)) if _coerce(body.mass_token) else None
+        mass_token_enc=encrypt(_coerce(body.mass_token)) if _coerce(body.mass_token) else None,
+        skylight_url=_coerce(body.skylight_url),
+        skylight_email=_coerce(body.skylight_email),
+        skylight_pass_enc=encrypt(_coerce(body.skylight_pass)) if _coerce(body.skylight_pass) else None,
+        skylight_enabled=body.skylight_enabled
     )
     _store_user_api_key(user, body.api_key or os.urandom(24).hex())
     session.add(user)

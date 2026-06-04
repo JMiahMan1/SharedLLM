@@ -45,6 +45,10 @@ class ResolvedCredentials(BaseModel):
     git_url: Optional[str] = None
     git_user: Optional[str] = None
     git_token: Optional[str] = None
+    skylight_url: Optional[str] = None
+    skylight_email: Optional[str] = None
+    skylight_pass: Optional[str] = None
+    skylight_enabled: bool = True
     preferred_tts_voice: Optional[str] = "af_heart"
 
 
@@ -71,8 +75,11 @@ class UserCreate(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None
-    mass_url: Optional[str] = None
     mass_token: Optional[str] = None
+    skylight_url: Optional[str] = None
+    skylight_email: Optional[str] = None
+    skylight_pass: Optional[str] = None
+    skylight_enabled: bool = True
     preferred_tts_voice: Optional[str] = "af_heart"
 
 
@@ -97,6 +104,10 @@ class UserUpdate(BaseModel):
     git_url: Optional[str] = None
     git_user: Optional[str] = None
     git_token: Optional[str] = None
+    skylight_url: Optional[str] = None
+    skylight_email: Optional[str] = None
+    skylight_pass: Optional[str] = None
+    skylight_enabled: Optional[bool] = None
     preferred_tts_voice: Optional[str] = None
     voice_fingerprint: Optional[str] = None
     is_admin: Optional[bool] = None
@@ -121,6 +132,9 @@ class UserRead(BaseModel):
     mass_url: Optional[str] = None
     git_url: Optional[str] = None
     git_user: Optional[str] = None
+    skylight_url: Optional[str] = None
+    skylight_email: Optional[str] = None
+    skylight_enabled: bool = True
     voice_fingerprint: Optional[str] = None
     preferred_tts_voice: Optional[str] = "af_heart"
     # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses

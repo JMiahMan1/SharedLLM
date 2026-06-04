@@ -75,6 +75,9 @@ interface UserProfileRaw {
   git_user?: string | null;
   audiobookshelf_url?: string | null;
   audiobookshelf_user?: string | null;
+  skylight_url?: string | null;
+  skylight_email?: string | null;
+  skylight_enabled?: boolean;
   voice_fingerprint?: string | null;
   voice_id?: string | null;
   avatar_url?: string | null;

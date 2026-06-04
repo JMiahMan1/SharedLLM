@@ -32,6 +32,7 @@ class User(SQLModel, table=True):
     mass_url: Optional[str] = None
     skylight_url: Optional[str] = None
     skylight_email: Optional[str] = None
+    skylight_enabled: bool = Field(default=True)
     git_url: Optional[str] = None
     git_user: Optional[str] = None
 
