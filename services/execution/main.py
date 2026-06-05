@@ -1767,7 +1767,7 @@ async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = 
                 )
         
         req = AudiobookshelfRequest(
-            action=action if action in ("search", "play", "resume", "progress", "libraries", "list", "get_book") else "list",
+            action=action if action in ("search", "play", "resume", "progress", "libraries", "list", "get_book", "last_played") else "list",
             user_context=user_ctx,
             library_id=library_id or None,
             query=query or None,
