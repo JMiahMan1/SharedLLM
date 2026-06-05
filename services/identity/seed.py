@@ -169,7 +169,9 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             audiobookshelf_url=udata.get("audiobookshelf_url"),
             audiobookshelf_user=udata.get("audiobookshelf_user"),
             mass_url=udata.get("mass_url"),
-            # Encrypt sensitive fields
+             skylight_url=udata.get("skylight_url"),
+             skylight_email=udata.get("skylight_email"),
+             # Encrypt sensitive fields
             nextcloud_pass_enc=encrypt(udata.get("nextcloud_pass")),
             ha_token_enc=encrypt(udata.get("ha_token")),
             github_token_enc=encrypt(udata.get("github_token")),
