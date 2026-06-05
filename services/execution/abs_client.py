@@ -63,7 +63,7 @@ async def abs_get(
 ) -> dict:
     """GET request to ABS API."""
     url = f"{abs_url.rstrip('/')}/api{path}"
-    headers = {"Authorization": abs_api_key}
+    headers = {"Authorization": f"Bearer {abs_api_key}"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             resp = await client.get(url, headers=headers, params=params)
@@ -82,7 +82,7 @@ async def abs_post(
 ) -> dict:
     """POST request to ABS API."""
     url = f"{abs_url.rstrip('/')}/api{path}"
-    headers = {"Authorization": abs_api_key, "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {abs_api_key}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             resp = await client.post(url, headers=headers, json=json)
