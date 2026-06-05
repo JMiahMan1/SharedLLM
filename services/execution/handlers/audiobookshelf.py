@@ -161,23 +161,18 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if not req.entity_id:
         return ExecutionResult(status="FAILURE", message="entity_id is required to resume.", service="audiobookshelf")
 
-    progress = await abs_client.get_progress(abs_url, abs_key)
+    progress = await abs_client.get_items_in_progress(abs_url, abs_key)
     if "error" in progress:
         return ExecutionResult(status="FAILURE", message=progress["error"], service="audiobookshelf")
 
-    items = progress.get("mediaProgress", [])
-    in_progress = [i for i in items if not i.get("isComplete") and i.get("currentTime", 0) > 0]
-    if not in_progress:
+    items = progress.get("libraryItems", [])
+    if not items:
         return ExecutionResult(status="SUCCESS", message="No audiobooks in progress.", service="audiobookshelf")
 
-    latest = sorted(in_progress, key=lambda x: x.get("lastUpdate", 0), reverse=True)[0]
-    item_id = latest.get("itemId") or latest.get("libraryItemId")
-    duration = latest.get("duration", 0)
-    current = latest.get("currentTime", 0)
-    pct = int((current / duration) * 100) if duration else 0
+    latest = sorted(items, key=lambda x: x.get("progressLastUpdate", 0), reverse=True)[0]
+    item_id = latest.get("id", "")
 
-    book_detail = await abs_client.get_book(abs_url, abs_key, item_id)
-    title = book_detail.get("media", {}).get("metadata", {}).get("title", "Unknown")
+    title = latest.get("media", {}).get("metadata", {}).get("title", "Unknown")
 
     stream_url = await abs_client.get_stream_url(abs_url, abs_key, item_id)
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
@@ -201,40 +196,39 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if result.get("ok"):
         return ExecutionResult(
             status="SUCCESS",
-            message=f"Resuming '{title}' at {pct}% ({_format_time(current)} / {_format_time(duration)})",
+            message=f"Resuming '{title}'",
             service="audiobookshelf",
         )
     return ExecutionResult(status="FAILURE", message=f"Resume failed: {result.get('error')}", service="audiobookshelf")
 
 
 async def _handle_progress(abs_url: str, abs_key: str, req) -> ExecutionResult:
-    progress = await abs_client.get_progress(abs_url, abs_key)
+    progress = await abs_client.get_items_in_progress(abs_url, abs_key)
     if "error" in progress:
         return ExecutionResult(status="FAILURE", message=progress["error"], service="audiobookshelf")
 
-    items = progress.get("mediaProgress", progress.get("mediaItems", []))
-    in_progress = [i for i in items if not i.get("isComplete") and i.get("currentTime", 0) > 0]
-    if not in_progress:
+    items = progress.get("libraryItems", [])
+    if not items:
         return ExecutionResult(status="SUCCESS", message="No audiobooks currently in progress.", service="audiobookshelf")
 
     summaries = []
-    for i in sorted(in_progress, key=lambda x: x.get("lastUpdate", 0), reverse=True)[:10]:
-        # Newer ABS versions: item.item.libraryItem, older: item.libraryItem
-        book_obj = i.get("item", {}).get("libraryItem", i.get("libraryItem", {}))
-        item_id = book_obj.get("id", i.get("itemId", i.get("libraryItemId", "")))
-        meta = book_obj.get("media", {}).get("metadata", {})
+    for i in sorted(items, key=lambda x: x.get("progressLastUpdate", 0), reverse=True)[:10]:
+        media = i.get("media", {})
+        meta = media.get("metadata", {})
         if not meta.get("title"):
-            # Fallback: fetch full book details
-            book = await abs_client.get_book(abs_url, abs_key, item_id)
-            meta = book.get("media", {}).get("metadata", {})
-        duration = i.get("duration", 0)
-        current = i.get("currentTime", 0)
-        pct = int((current / duration) * 100) if duration else 0
+            summaries.append({
+                "title": i.get("title", "Unknown"),
+                "author": meta.get("authorName", ""),
+                "progress": "0%",
+                "time": f"{_format_time(media.get('duration', 0))}",
+            })
+            continue
+        duration = media.get("duration", i.get("duration", 0))
         summaries.append({
             "title": meta.get("title", "Unknown"),
             "author": meta.get("authorName", ""),
-            "progress": f"{pct}%",
-            "time": f"{_format_time(current)} / {_format_time(duration)}",
+            "progress": "0%",
+            "time": f"{_format_time(duration)}",
         })
 
     return ExecutionResult(
@@ -312,16 +306,13 @@ async def _handle_get_book(abs_url: str, abs_key: str, req) -> ExecutionResult:
 async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
     """Get recently played audiobooks from Audiobookshelf."""
     try:
-        progress = await abs_client.get_progress(abs_url, abs_key)
-        # ABS /me/progress returns { "mediaProgress": [...] }
-        items = progress.get("mediaProgress", progress.get("mediaItems", []))
+        progress = await abs_client.get_items_in_progress(abs_url, abs_key)
+        # ABS /me/items-in-progress returns { "libraryItems": [...] }
+        items = progress.get("libraryItems", [])
         books = []
         for item in items:
-            # Newer ABS versions: item.item.libraryItem, older: item directly has libraryItem
-            book = item.get("item", {}).get("libraryItem", item.get("libraryItem", {}))
-            media = book.get("media", {})
+            media = item.get("media", {})
             meta = media.get("metadata", {})
-            # Handle both author formats
             author_name = meta.get("authorName", "") or meta.get("author", "")
             authors = meta.get("authors", [])
             if authors and isinstance(authors, list):
@@ -329,17 +320,20 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
             if not author_name:
                 author_name = meta.get("name", "Unknown")
 
-            duration = item.get("duration", 0)
-            current = item.get("currentTime", 0)
-            pct = int((current / duration) * 100) if duration else 0
+            duration = media.get("duration", item.get("duration", 0))
+            # Progress data not available in items-in-progress endpoint
+            pct = 0
+            # Use progressLastUpdate as the sort key (epoch ms)
+            last_update = item.get("progressLastUpdate", 0)
 
             books.append({
-                "id": book.get("id", ""),
-                "title": meta.get("title", book.get("title", "Unknown")),
+                "id": item.get("id", ""),
+                "title": meta.get("title", item.get("title", "Unknown")),
                 "author": author_name or "Unknown",
                 "progress": pct,
-                "last_played": item.get("lastUpdate", 0) or 0,
-                "library_id": book.get("libraryId", ""),
+                "last_played": last_update,
+                "duration": duration,
+                "library_id": item.get("libraryId", ""),
             })
         books.sort(key=lambda b: b["last_played"], reverse=True)
         return ExecutionResult(
