@@ -4,7 +4,7 @@ import logging
 import asyncio
 import httpx
 import warnings
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from uuid import uuid4
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Request, File, UploadFile
