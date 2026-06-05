@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Play, Pause, Volume2, Volume1, VolumeX, Cast,
   Music, BookOpen, List, Loader2, ChevronDown, X, Library, Search,
@@ -144,12 +144,9 @@ const DeviceSelector = ({
 const NowPlayingCard = ({
   mediaStatus,
   selectedTarget,
-  selectedTargetInfo,
   volume,
   muted,
   loading,
-  entities,
-  onDeviceSelect,
   onPrevious,
   onTogglePlay,
   onNext,
@@ -158,12 +155,9 @@ const NowPlayingCard = ({
 }: {
   mediaStatus: MediaStatus | null;
   selectedTarget: string;
-  selectedTargetInfo?: { name: string; room: string };
   volume: number;
   muted: boolean;
   loading: string | null;
-  entities: MediaEntity[];
-  onDeviceSelect?: (entityId: string) => void;
   onPrevious: () => void;
   onTogglePlay: () => void;
   onNext: () => void;
@@ -173,7 +167,7 @@ const NowPlayingCard = ({
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
 
   return (
-    <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 relative">
+    <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 relative overflow-visible">
       <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-purple-500/5 pointer-events-none rounded-2xl" />
 
       <div className="relative flex flex-col sm:flex-row sm:items-center gap-4">
@@ -214,7 +208,7 @@ const NowPlayingCard = ({
           </div>
         </div>
 
-        {/* volume + device */}
+        {/* volume only — device selector moved outside card for z-index */}
         <div className="flex sm:flex-col items-center sm:items-end gap-3 shrink-0">
           <div className="flex items-center gap-2">
             <button onClick={onMuteToggle}
@@ -227,7 +221,6 @@ const NowPlayingCard = ({
               className="w-20 sm:w-24 accent-cyan-400" aria-label="Volume" />
             <span className="text-xs text-slate-500 w-8 text-right tabular-nums">{muted ? 'M' : `${volume}`}</span>
           </div>
-          <DeviceSelector selectedTarget={selectedTarget} selectedTargetInfo={selectedTargetInfo} entities={entities} onDeviceSelect={onDeviceSelect} />
         </div>
       </div>
 
@@ -615,6 +608,7 @@ const MediaExplorerModal = ({
 
 const Media = () => {
   const { trigger } = useHaptics();
+  const queryClient = useQueryClient();
   const [selectedTarget, setSelectedTarget] = useState<string>('');
   const [volume, setVolume] = useState(70);
   const [muted, setMuted] = useState(false);
@@ -804,21 +798,29 @@ const Media = () => {
       )}
 
       {/* 1. Active Player Header */}
-      <NowPlayingCard
-         mediaStatus={mediaStatus}
-         selectedTarget={selectedTarget}
-         selectedTargetInfo={selectedTargetInfo}
-         volume={volume}
-         muted={muted}
-         loading={loading}
-         entities={entities}
-         onDeviceSelect={handleDeviceSelect}
-         onPrevious={() => sendTransport('previous')}
-         onTogglePlay={() => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'play')}
-         onNext={() => sendTransport('next')}
-         onVolumeChange={handleVolume}
-         onMuteToggle={toggleMute}
-       />
+      <div className="relative z-10">
+        <NowPlayingCard
+          mediaStatus={mediaStatus}
+          selectedTarget={selectedTarget}
+          volume={volume}
+          muted={muted}
+          loading={loading}
+          onPrevious={() => sendTransport('previous')}
+          onTogglePlay={() => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'play')}
+          onNext={() => sendTransport('next')}
+          onVolumeChange={handleVolume}
+          onMuteToggle={toggleMute}
+        />
+        {/* DeviceSelector rendered outside NowPlayingCard to avoid z-index clipping */}
+        <div className="flex justify-end -mt-1">
+          <DeviceSelector
+            selectedTarget={selectedTarget}
+            selectedTargetInfo={selectedTargetInfo}
+            entities={entities}
+            onDeviceSelect={handleDeviceSelect}
+          />
+        </div>
+      </div>
 
       {/* Local Audio Player */}
       {localTrack && (
@@ -827,11 +829,21 @@ const Media = () => {
 
       {/* 2. Jump Back In */}
       <section>
-        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Jump Back In</h2>
-        {(maRecentLoading || absLoading) && quickResumeItems.length === 0 ? (
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Jump Back In</h2>
+          {(maRecentLoading || absLoading) && quickResumeItems.length === 0 && (
+            <button onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ['ma-recent'] });
+              queryClient.invalidateQueries({ queryKey: ['abs-last-played'] });
+            }} className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
+              <Loader2 size={12} className="animate-spin" /> Refresh
+            </button>
+          )}
+        </div>
+        {maRecentLoading || absLoading ? (
           loadingSection()
         ) : quickResumeItems.length === 0 ? (
-          emptySection('No recently played content')
+          <div className="glass-panel rounded-2xl p-8 text-center"><p className="text-sm text-slate-400 mb-2">No recently played content</p><p className="text-xs text-slate-600">Requires Music Assistant or Audiobookshelf credentials to be configured in the Identity service.</p></div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {quickResumeItems.map((item) => {
@@ -865,25 +877,37 @@ const Media = () => {
 
       {/* 3. Playlists */}
       <section>
-        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Playlists</h2>
-        {!maPlaylists?.playlists?.length ? (
-          emptySection('No playlists available')
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {maPlaylists.playlists.map((pl) => (
-              <PlaylistItem
-                key={pl.uri} name={pl.name} trackCount={pl.items}
-                onPlay={() => {
-                  if (!selectedTarget) {
-                    playLocal(pl.uri, pl.name, `${pl.items} tracks`, 'music', 'ma');
-                    return;
-                  }
-                  playPlaylist(pl.uri);
-                }}
-                isDisabled={false} isLoading={loading !== null}
-              />
-            ))}
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Playlists</h2>
+          {!maPlaylists && !maPlaylistsLoading && (
+            <button onClick={() => queryClient.invalidateQueries({ queryKey: ['ma-playlists'] })}
+              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
+              <Loader2 size={12} className="animate-spin" /> Refresh
+            </button>
+          )}
+        </div>
+        {maPlaylistsLoading ? loadingSection() : (
+          !maPlaylists?.playlists?.length ? (
+            quickResumeItems.length === 0
+              ? <div className="glass-panel rounded-2xl p-8 text-center"><p className="text-sm text-slate-400 mb-2">No playlists available</p><p className="text-xs text-slate-600">Requires Music Assistant credentials to be configured in the Identity service.</p></div>
+              : emptySection('No playlists available')
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {maPlaylists.playlists.map((pl) => (
+                <PlaylistItem
+                  key={pl.uri} name={pl.name} trackCount={pl.items}
+                  onPlay={() => {
+                    if (!selectedTarget) {
+                      playLocal(pl.uri, pl.name, `${pl.items} tracks`, 'music', 'ma');
+                      return;
+                    }
+                    playPlaylist(pl.uri);
+                  }}
+                  isDisabled={false} isLoading={loading !== null}
+                />
+              ))}
+            </div>
+          )
         )}
       </section>
 
