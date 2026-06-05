@@ -90,6 +90,7 @@ export interface UserProfile extends UserProfileRaw {
   role: 'admin' | 'user';
   is_admin: boolean;
   voice_id?: string | null;
+  api_key?: string | null;
 }
 
 export interface APIKey {

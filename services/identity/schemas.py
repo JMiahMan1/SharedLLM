@@ -137,6 +137,7 @@ class UserRead(BaseModel):
     skylight_enabled: bool = True
     voice_fingerprint: Optional[str] = None
     preferred_tts_voice: Optional[str] = "af_heart"
+    api_key: Optional[str] = None
     # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses
 
 
