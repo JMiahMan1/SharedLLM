@@ -1532,7 +1532,7 @@ async def discovery_network_scan(req: NetworkDeviceScanRequest):
     Comprehensive network scan for smart TVs and media devices.
     Auto-detects local subnet if not specified.
     """
-    from handlers.network_scan import scan_network
+    from services.execution.handlers.network_scan import scan_network
     ctx = req.user_context
     log.info(f"[network_scan] user={ctx.user} subnet={req.subnet} type={req.device_type}")
     
@@ -1605,7 +1605,7 @@ async def get_ma_playlists(user_id: str = ""):
         if not mass_url or not mass_token:
             log.error(f"[ma/playlists] No MA credentials for user {user_id}")
             return {"status": "SUCCESS", "playlists": []}
-        from handlers.mass_client import get_playlists
+        from services.execution.handlers.mass_client import get_playlists
         playlists = await get_playlists(mass_url, mass_token)
         return {"status": "SUCCESS", "playlists": playlists}
     except Exception as e:
@@ -1623,7 +1623,7 @@ async def get_ma_recent(user_id: str = ""):
         if not mass_url or not mass_token:
             log.error(f"[ma/recent] No MA credentials for user {user_id}")
             return {"status": "SUCCESS", "recent": []}
-        from handlers.mass_client import get_recent
+        from services.execution.handlers.mass_client import get_recent
         recent = await get_recent(mass_url, mass_token)
         return {"status": "SUCCESS", "recent": recent}
     except Exception as e:
@@ -1635,8 +1635,8 @@ async def get_ma_recent(user_id: str = ""):
 async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = "", library_id: str = "", query: str = "", limit: int = 25):
     """Handle Audiobookshelf GET requests (per-user credentials)."""
     try:
-        from handlers.audiobookshelf import handle_audiobookshelf
-        from schemas import AudiobookshelfRequest, UserContext
+        from services.execution.handlers.audiobookshelf import handle_audiobookshelf
+        from services.execution.schemas import AudiobookshelfRequest, UserContext
         
         # Resolve per-user credentials from Identity service
         user_ctx = UserContext(user=user_id)
