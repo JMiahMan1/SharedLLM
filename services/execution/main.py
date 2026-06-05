@@ -1633,11 +1633,14 @@ async def _get_ma_playlists_via_ha(ha_url: str, ha_token: str, mass_entry_id: st
     )
     
     if not result.get("ok") or not result.get("service_response"):
+        log.warning(f"[ma/playlists] HA call failed or no response: {result}")
         return []
     
     raw = result["service_response"]
     resp = raw.get("service_response", raw)
+    log.info(f"[ma/playlists] HA response keys: {list(resp.keys()) if isinstance(resp, dict) else type(resp).__name__}, raw keys: {list(raw.keys())}")
     items = resp.get("playlists", resp.get("items", []))
+    log.info(f"[ma/playlists] Found {len(items)} items in key 'playlists' or 'items'")
     
     return [
         {
@@ -1672,11 +1675,14 @@ async def _get_ma_recent_via_ha(ha_url: str, ha_token: str, mass_entry_id: str =
     )
     
     if not result.get("ok") or not result.get("service_response"):
+        log.warning(f"[ma/recent] HA call failed or no response: {result}")
         return []
     
     raw = result["service_response"]
     resp = raw.get("service_response", raw)
+    log.info(f"[ma/recent] HA response keys: {list(resp.keys()) if isinstance(resp, dict) else type(resp).__name__}, raw keys: {list(raw.keys())}")
     items = resp.get("tracks", resp.get("items", []))
+    log.info(f"[ma/recent] Found {len(items)} items in key 'tracks' or 'items'")
     
     return [
         {
