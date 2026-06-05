@@ -1620,11 +1620,11 @@ async def _get_ma_playlists_via_ha(ha_url: str, ha_token: str, mass_entry_id: st
         return []
     
     service_data = {
-        "media_type": "PLAYLIST",
+        "media_type": "playlist",
         "limit": limit,
     }
     if mass_entry_id:
-        service_data["mass_config_entry_id"] = mass_entry_id
+        service_data["config_entry_id"] = mass_entry_id
     
     result = await ha_client.call_service(
         ha_url, ha_token, "music_assistant", "get_library", entity_id="",
@@ -1661,12 +1661,12 @@ async def _get_ma_recent_via_ha(ha_url: str, ha_token: str, mass_entry_id: str =
         return []
     
     service_data = {
-        "media_type": "TRACK",
+        "media_type": "track",
         "limit": limit,
         "order_by": "recently_played_rank",
     }
     if mass_entry_id:
-        service_data["mass_config_entry_id"] = mass_entry_id
+        service_data["config_entry_id"] = mass_entry_id
     
     result = await ha_client.call_service(
         ha_url, ha_token, "music_assistant", "get_library", entity_id="",
