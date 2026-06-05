@@ -618,7 +618,7 @@ const Media = () => {
   const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
 
-  const { data: maPlaylists } = useQuery({
+  const { data: maPlaylists, isLoading: maPlaylistsLoading } = useQuery({
     queryKey: ['ma-playlists'],
     queryFn: () => api.getMusicAssistantPlaylists(),
   });
