@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Play, Pause, Volume2, Volume1, VolumeX, Cast,
-  Music, BookOpen, List, Loader2, ChevronDown, X, Library, Search,
+  Music, BookOpen, List, Loader2, X, Library, Search,
   SkipBack as SkipBackIcon, SkipForward as SkipForwardIcon,
   ChevronRight, Grid3X3, Clock, Headphones,
 } from 'lucide-react';
@@ -42,23 +42,18 @@ const loadingSection = () => (
   </div>
 );
 
-/* ── device selector (stand-alone) ──────────────────────────────────── */
+/* ── device selector (horizontal card list) ────────────────────────── */
 
 const DeviceSelector = ({
   selectedTarget,
-  selectedTargetInfo,
   entities,
   onDeviceSelect,
 }: {
   selectedTarget: string;
-  selectedTargetInfo?: { name: string; room: string };
   entities: MediaEntity[];
   onDeviceSelect?: (entityId: string) => void;
 }) => {
   const { trigger } = useHaptics();
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const closeRef = useRef<(() => void) | null>(null);
 
   const targets = useMemo(
     () =>
@@ -71,68 +66,53 @@ const DeviceSelector = ({
     [entities],
   );
 
-  // Close when clicking outside — use mousedown for fast response on web,
-  // touchstart for mobile (touch events don't bubble mousedown on native platforms)
-  useEffect(() => {
-    if (!open) return;
-    closeRef.current = () => setOpen(false);
-    const handler = (e: Event) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('touchstart', handler, { passive: true });
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('touchstart', handler);
-    };
-  }, [open]);
-
   const handleSelect = useCallback(
     (id: string) => {
       trigger('light');
       onDeviceSelect?.(id);
-      setOpen(false);
     },
     [onDeviceSelect, trigger],
   );
 
   return (
-    <div ref={wrapperRef} className="relative z-[101]">
-      <button
-        onClick={() => setOpen(!open)}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
-          selectedTarget
-            ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
-            : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-white'
-        }`}
-      >
-        <Cast size={12} />
-        <span className="max-w-28 truncate">{selectedTargetInfo?.name || 'Cast To'}</span>
-        <ChevronDown size={12} className={`opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="absolute top-full right-0 mt-1.5 glass-panel rounded-xl border border-white/10 shadow-2xl z-[100] overflow-hidden" style={{ width: '280px' }}>
-          <div className="p-1.5 max-h-64 overflow-y-auto custom-scrollbar">
-            {targets.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => handleSelect(t.id)}
-                className={`w-full flex items-center gap-2.5 p-2 rounded-lg transition-colors text-left ${
-                  selectedTarget === t.id ? 'bg-cyan-500/20 border border-cyan-500/30' : 'hover:bg-white/10'
-                } ${!t.online ? 'opacity-40' : ''}`}
-              >
-                <Cast size={14} className="text-slate-400 shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-white text-sm font-medium truncate">{t.name}</p>
-                  <p className="text-xs text-slate-500 truncate">{t.room}</p>
-                </div>
-                <div className={`w-2 h-2 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
-              </button>
-            ))}
-            {targets.length === 0 && <p className="text-xs text-slate-500 text-center py-4">No media players found</p>}
-          </div>
+    <div className="glass-panel rounded-2xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+          <Cast size={12} />Select Device
+        </h2>
+        <span className="text-[10px] text-slate-600">{targets.filter((t) => t.online).length} online</span>
+      </div>
+      {targets.length === 0 ? (
+        <p className="text-xs text-slate-500 text-center py-4">No media players found</p>
+      ) : (
+        <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+          {targets.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => handleSelect(t.id)}
+              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] ${
+                selectedTarget === t.id
+                  ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
+                  : t.online
+                    ? 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                    : 'bg-white/3 border-white/5 opacity-40'
+              }`}
+            >
+              <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-sm font-medium truncate">{t.name}</p>
+                <p className="text-[10px] text-slate-500 truncate">{t.room}</p>
+              </div>
+              {selectedTarget === t.id && (
+                <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
+              )}
+            </button>
+          ))}
+          {!selectedTarget && (
+            <div className="flex items-center justify-center px-4 py-2.5 rounded-xl border border-dashed border-white/5 text-slate-600 text-xs shrink-0">
+              Tap a device to start
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -208,7 +188,7 @@ const NowPlayingCard = ({
           </div>
         </div>
 
-        {/* volume only — device selector moved outside card for z-index */}
+        {/* volume control */}
         <div className="flex sm:flex-col items-center sm:items-end gap-3 shrink-0">
           <div className="flex items-center gap-2">
             <button onClick={onMuteToggle}
@@ -637,13 +617,6 @@ const Media = () => {
     select: (data: MediaEntity[]) => data.filter((e) => e.domain === 'media_player'),
   });
 
-  const selectedTargetInfo = useMemo(
-    () => entities.find((e) => e.entity_id === selectedTarget)
-      ? { name: entities.find((e) => e.entity_id === selectedTarget)!.friendly_name, room: entities.find((e) => e.entity_id === selectedTarget)!.entity_id.split('.')[1]?.replace(/_/g, ' ') || 'Unknown' }
-      : undefined,
-    [entities, selectedTarget],
-  );
-
   const quickResumeItems = useMemo(() => {
     const items: Array<{
       id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; progress?: number;
@@ -797,37 +770,33 @@ const Media = () => {
         </div>
       )}
 
-      {/* 1. Active Player Header */}
-      <div className="relative z-10">
-        <NowPlayingCard
-          mediaStatus={mediaStatus}
-          selectedTarget={selectedTarget}
-          volume={volume}
-          muted={muted}
-          loading={loading}
-          onPrevious={() => sendTransport('previous')}
-          onTogglePlay={() => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'play')}
-          onNext={() => sendTransport('next')}
-          onVolumeChange={handleVolume}
-          onMuteToggle={toggleMute}
-        />
-        {/* DeviceSelector rendered outside NowPlayingCard to avoid z-index clipping */}
-        <div className="flex justify-end -mt-1">
-          <DeviceSelector
-            selectedTarget={selectedTarget}
-            selectedTargetInfo={selectedTargetInfo}
-            entities={entities}
-            onDeviceSelect={handleDeviceSelect}
-          />
-        </div>
-      </div>
+      {/* 1. Device Selector */}
+      <DeviceSelector
+        selectedTarget={selectedTarget}
+        entities={entities}
+        onDeviceSelect={handleDeviceSelect}
+      />
+
+      {/* 2. Active Player Header */}
+      <NowPlayingCard
+        mediaStatus={mediaStatus}
+        selectedTarget={selectedTarget}
+        volume={volume}
+        muted={muted}
+        loading={loading}
+        onPrevious={() => sendTransport('previous')}
+        onTogglePlay={() => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'play')}
+        onNext={() => sendTransport('next')}
+        onVolumeChange={handleVolume}
+        onMuteToggle={toggleMute}
+      />
 
       {/* Local Audio Player */}
       {localTrack && (
         <LocalAudioPlayer initialTrack={localTrack} />
       )}
 
-      {/* 2. Jump Back In */}
+      {/* 3. Jump Back In */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Jump Back In</h2>
@@ -875,7 +844,7 @@ const Media = () => {
         )}
       </section>
 
-      {/* 3. Playlists */}
+      {/* 4. Playlists */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Playlists</h2>
