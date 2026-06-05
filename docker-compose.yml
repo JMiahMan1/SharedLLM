@@ -54,10 +54,13 @@ services:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - LEGACY_ENV_PATH=/app/.env
+      - FORCE_RESEED=${FORCE_RESEED:-false}
       - TZ=America/Phoenix
     volumes:
       - identity_db:/data
       - /etc/localtime:/etc/localtime:ro
+      - ./.env:/app/.env:ro
     networks:
       - sharedllm
     healthcheck:
