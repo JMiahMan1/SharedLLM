@@ -21,7 +21,8 @@ import {
   User,
   Zap,
   Calendar,
-  Shield
+  Shield,
+  Key
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -456,6 +457,7 @@ const VoiceEnrollmentCard: FC<{ enrolled: boolean }> = ({ enrolled }) => {
 
 const APIKeyRows = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { data: keys, isLoading } = useQuery<APIKey[]>({
     queryKey: ['api-keys'],
     queryFn: () => api.getAPIKeys(),
@@ -470,12 +472,30 @@ const APIKeyRows = () => {
     onError: () => toast.error('Revocation failed')
   });
 
+  const userApiKey = user?.api_key || null;
+  const hasKeys = keys?.length || userApiKey;
+
   if (isLoading) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 animate-pulse">Scanning Vault...</td></tr>;
-  if (!keys?.length) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 italic">No active external keys found.</td></tr>;
+  if (!hasKeys) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 italic">No active external keys found.</td></tr>;
 
   return (
     <>
-      {keys.map((k) => (
+      {userApiKey && (
+        <tr className="group hover:bg-white/5 transition-colors">
+           <td className="px-6 py-4">
+              <div className="flex items-center gap-3">
+                 <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400"><Key size={14} /></div>
+                 <span className="font-bold text-white tracking-tight">Default API Key</span>
+              </div>
+           </td>
+           <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">sk-jarvis-••••{userApiKey.slice(-4)}</td>
+           <td className="px-6 py-4">
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[8px] font-black uppercase tracking-widest">Default</span>
+           </td>
+           <td className="px-6 py-4 text-right text-slate-600 text-[9px] italic">System-generated</td>
+        </tr>
+      )}
+      {keys?.map((k) => (
         <tr key={k.id} className="group hover:bg-white/5 transition-colors">
            <td className="px-6 py-4">
               <div className="flex items-center gap-3">
